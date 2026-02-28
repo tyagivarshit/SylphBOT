@@ -4,6 +4,7 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "../services/ai.service";
+import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
 
 const router = Router();
 
@@ -69,16 +70,16 @@ router.post("/", async (req: any, res: Response) => {
     if (!messaging) return res.sendStatus(200);
 
     const senderId = messaging.sender?.id;
-    const pageId = entry?.id; // 🔥 Page ID
+    const pageId = entry?.id; // 🔥 critical for multi-client
     const text = messaging.message?.text;
 
-    // 🔥 IMPORTANT FIX — ignore self messages
-    if (senderId === pageId) {
-      console.log("⚠️ Ignoring self message");
+    if (!senderId || !text || !pageId) {
       return res.sendStatus(200);
     }
 
-    if (!senderId || !text) {
+    // Ignore self messages
+    if (senderId === pageId) {
+      console.log("⚠️ Ignoring self message");
       return res.sendStatus(200);
     }
 
@@ -87,18 +88,19 @@ router.post("/", async (req: any, res: Response) => {
 
     /*
     ---------------------------------------------------
-    🏢 IDENTIFY CLIENT (INSTAGRAM)
+    🏢 IDENTIFY CLIENT (MULTI-TENANT SAFE)
     ---------------------------------------------------
     */
     const client = await prisma.client.findFirst({
       where: {
         platform: "INSTAGRAM",
+        pageId: pageId,
         isActive: true,
       },
     });
 
     if (!client) {
-      console.log("⚠️ No active Instagram client");
+      console.log("⚠️ No active Instagram client found for page:", pageId);
       return res.sendStatus(200);
     }
 
@@ -110,7 +112,7 @@ router.post("/", async (req: any, res: Response) => {
     let lead = await prisma.lead.findFirst({
       where: {
         businessId: client.businessId,
-        phone: senderId,
+        instagramId: senderId,
       },
     });
 
@@ -118,10 +120,14 @@ router.post("/", async (req: any, res: Response) => {
       lead = await prisma.lead.create({
         data: {
           businessId: client.businessId,
-          phone: senderId,
+          clientId: client.id,
+          instagramId: senderId,
+          platform: "INSTAGRAM",
           stage: "NEW",
         },
       });
+
+      console.log("🆕 New Instagram lead created:", lead.id);
     }
 
     /*
@@ -137,10 +143,24 @@ router.post("/", async (req: any, res: Response) => {
 
     console.log("🤖 IG AI REPLY:", aiReply);
 
+    /*
+    ---------------------------------------------------
+    ⏱ UPDATE ACTIVITY + RESET FOLLOWUP
+    ---------------------------------------------------
+    */
     await prisma.lead.update({
       where: { id: lead.id },
-      data: { lastMessageAt: new Date() },
+      data: {
+        lastMessageAt: new Date(),
+        followupCount: 0,
+      },
     });
+
+    // Cancel old followups
+    await cancelFollowups(lead.id);
+
+    // Schedule new followups (2hr / 12hr / 24hr)
+    await scheduleFollowups(lead.id);
 
     /*
     ---------------------------------------------------

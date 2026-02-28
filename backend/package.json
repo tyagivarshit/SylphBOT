@@ -6,6 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev:worker": "ts-node-dev --respawn --transpile-only src/workers/followup.worker.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
@@ -15,9 +16,11 @@
   "dependencies": {
     "@prisma/client": "^6.19.2",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.70.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
     "openai": "^6.25.0",
     "prisma": "^6.19.2"

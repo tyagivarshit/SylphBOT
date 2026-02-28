@@ -35,10 +35,13 @@ model Client {
   businessId  String   @db.ObjectId  // ✅ YE IMPORTANT HAI
   business    Business @relation(fields: [businessId], references: [id])
   platform    String
+  phoneNumberId String? @unique
+  pageId        String?  @unique 
   accessToken String
   aiTone      String?
   businessInfo String?
   pricingInfo String?
+  leads        Lead[]  
   isActive    Boolean  @default(true)
   deletedAt   DateTime?
   createdAt   DateTime @default(now())
@@ -56,16 +59,27 @@ model Subscription {
 }
 
 model Lead {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  businessId  String   @db.ObjectId
-  business    Business @relation(fields: [businessId], references: [id])
-  name        String?
-  phone       String?
-  email       String?
-  stage       String   @default("NEW")
-  messages    Message[]
-  lastMessageAt DateTime?
-  createdAt   DateTime @default(now())
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  businessId     String   @db.ObjectId
+  business       Business @relation(fields: [businessId], references: [id])
+
+  clientId       String?  @db.ObjectId
+  client         Client?  @relation(fields: [clientId], references: [id])
+
+  name           String?
+  phone          String?
+  instagramId     String?  
+  email          String?
+
+  platform       String
+  stage          String   @default("NEW")
+
+  followupCount  Int      @default(0)
+  lastFollowupAt DateTime?
+
+  messages       Message[]
+  lastMessageAt  DateTime?
+  createdAt      DateTime @default(now())
 }
 
 model Message {

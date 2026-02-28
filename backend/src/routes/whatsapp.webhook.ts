@@ -4,6 +4,7 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "../services/ai.service";
+import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
 
 const router = Router();
 
@@ -84,12 +85,13 @@ router.post("/", async (req: any, res: Response) => {
 
     /*
     ---------------------------------------------------
-    🏢 IDENTIFY CLIENT
+    🏢 IDENTIFY CLIENT (MULTI-TENANT SAFE)
     ---------------------------------------------------
     */
     const client = await prisma.client.findFirst({
       where: {
         platform: "WHATSAPP",
+        phoneNumberId: phoneNumberId,
         isActive: true,
       },
     });
@@ -115,15 +117,18 @@ router.post("/", async (req: any, res: Response) => {
       lead = await prisma.lead.create({
         data: {
           businessId: client.businessId,
+          clientId: client.id,
           phone: from,
+          platform: "WHATSAPP",
           stage: "NEW",
+          followupCount: 0,
         },
       });
     }
 
     /*
     ---------------------------------------------------
-    🤖 AI CALL
+    🤖 GENERATE AI REPLY
     ---------------------------------------------------
     */
     const aiReply = await generateAIReply({
@@ -133,16 +138,6 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     console.log("🤖 AI REPLY:", aiReply);
-
-    /*
-    ---------------------------------------------------
-    ⏱ UPDATE lastMessageAt
-    ---------------------------------------------------
-    */
-    await prisma.lead.update({
-      where: { id: lead.id },
-      data: { lastMessageAt: new Date() },
-    });
 
     /*
     ---------------------------------------------------
@@ -174,7 +169,55 @@ router.post("/", async (req: any, res: Response) => {
         "❌ META ERROR:",
         err.response?.data || err.message
       );
+      return res.sendStatus(200);
     }
+
+    /*
+    ---------------------------------------------------
+    📝 STORE USER MESSAGE
+    ---------------------------------------------------
+    */
+    await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        content: text,
+        sender: "USER",
+      },
+    });
+
+    /*
+    ---------------------------------------------------
+    📝 STORE AI MESSAGE
+    ---------------------------------------------------
+    */
+    await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        content: aiReply,
+        sender: "AI",
+      },
+    });
+
+    /*
+    ---------------------------------------------------
+    ⏱ UPDATE LEAD STATE
+    ---------------------------------------------------
+    */
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        lastMessageAt: new Date(),
+        followupCount: 0,
+      },
+    });
+
+    /*
+    ---------------------------------------------------
+    🔄 RESET FOLLOWUPS
+    ---------------------------------------------------
+    */
+    await cancelFollowups(lead.id);
+    await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);
   } catch (error) {

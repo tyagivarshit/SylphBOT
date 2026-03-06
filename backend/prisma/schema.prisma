@@ -13,7 +13,13 @@ model User {
   email         String   @unique
   password      String
   role          String   @default("OWNER")
+
+  isVerified    Boolean  @default(false)   
+  verifyToken   String?            
+  verifyTokenExpiry DateTime?
+
   businesses    Business[]
+  refreshTokens RefreshToken[] 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -23,39 +29,63 @@ model Business {
   name          String
   ownerId       String   @db.ObjectId
   owner         User     @relation(fields: [ownerId], references: [id])
+
   clients       Client[]
   subscription  Subscription?
   leads         Lead[]
-  usage         Usage?
+  usage         Usage[]   // ✅ changed to array for monthly tracking
+
   createdAt     DateTime @default(now())
 }
 
 model Client {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  businessId  String   @db.ObjectId  // ✅ YE IMPORTANT HAI
-  business    Business @relation(fields: [businessId], references: [id])
-  platform    String
-  phoneNumberId String? @unique
-  pageId        String?  @unique 
-  accessToken String
-  aiTone      String?
-  businessInfo String?
-  pricingInfo String?
-  leads        Lead[]  
-  isActive    Boolean  @default(true)
-  deletedAt   DateTime?
-  createdAt   DateTime @default(now())
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  platform      String
+  phoneNumberId String?  @unique
+  pageId        String?  @unique
+  accessToken   String
+
+  aiTone        String?
+  businessInfo  String?
+  pricingInfo   String?
+
+  leads         Lead[]
+  isActive      Boolean  @default(true)
+  deletedAt     DateTime?
+  createdAt     DateTime @default(now())
+
   @@unique([businessId, platform])
 }
 
+model Plan {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  name          String   @unique
+  priceId       String?  @unique   // Stripe price id
+  maxAiCalls    Int
+  maxMessages   Int
+  maxFollowups  Int
+
+  subscriptions Subscription[]
+}
+
 model Subscription {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  businessId  String   @unique @db.ObjectId
-  business    Business @relation(fields: [businessId], references: [id])
-  plan        String   @default("FREE")
-  status      String   @default("ACTIVE")
-  currentPeriodEnd DateTime?
-  createdAt   DateTime @default(now())
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  businessId           String   @unique @db.ObjectId
+  business             Business @relation(fields: [businessId], references: [id])
+
+  planId               String   @db.ObjectId
+  plan                 Plan     @relation(fields: [planId], references: [id])
+
+  status String @default("INACTIVE") // ACTIVE, CANCELLED, PAST_DUE
+  stripeCustomerId String?
+  stripeSubscriptionId String? 
+  currentPeriodEnd     DateTime?
+
+  createdAt            DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Lead {
@@ -68,7 +98,7 @@ model Lead {
 
   name           String?
   phone          String?
-  instagramId     String?  
+  instagramId    String?
   email          String?
 
   platform       String
@@ -80,23 +110,43 @@ model Lead {
   messages       Message[]
   lastMessageAt  DateTime?
   createdAt      DateTime @default(now())
+  deletedAt DateTime?
 }
 
 model Message {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   leadId    String   @db.ObjectId
   lead      Lead     @relation(fields: [leadId], references: [id])
+
   content   String
   sender    String
   createdAt DateTime @default(now())
 }
 
 model Usage {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  businessId  String   @unique @db.ObjectId
-  business    Business @relation(fields: [businessId], references: [id])
-  messagesUsed Int     @default(0)
-  leadsUsed    Int     @default(0)
-  month        Int
-  year         Int
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  month         Int
+  year          Int
+
+  aiCallsUsed   Int      @default(0)
+  messagesUsed  Int      @default(0)
+  followupsUsed Int      @default(0)
+
+  @@unique([businessId, month, year])  // ✅ monthly tracking
+}
+model RefreshToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  token      String   @unique
+  userId     String   @db.ObjectId
+  user       User     @relation(fields: [userId], references: [id])
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+}
+model StripeEvent {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  eventId   String   @unique
+  createdAt DateTime @default(now())
 }

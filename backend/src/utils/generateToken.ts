@@ -1,11 +1,28 @@
 import jwt from "jsonwebtoken";
+import { env } from "../config/env";
 
-const generateToken = (userId: string, role: string) => {
+/* 🔑 Access Token (Short Life) */
+export const generateAccessToken = (
+  userId: string,
+  role: string,
+  businessId: string
+) => {
   return jwt.sign(
-    { userId, role },
-    process.env.JWT_SECRET as string,
-    { expiresIn: "7d" }
+    {
+      id: userId,
+      role,
+      businessId, // ✅ added
+    },
+    env.JWT_SECRET,
+    { expiresIn: "15m" }
   );
 };
 
-export default generateToken;
+/* 🔄 Refresh Token (Long Life) */
+export const generateRefreshToken = (userId: string) => {
+  return jwt.sign(
+    { id: userId },
+    env.JWT_REFRESH_SECRET,
+    { expiresIn: "7d" }
+  );
+};

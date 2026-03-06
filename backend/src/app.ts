@@ -1,54 +1,128 @@
-
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import compression from "compression";
 import prisma from "./config/prisma";
+
 import authRoutes from "./routes/auth.routes";
-import { protect } from "./middleware/auth.middleware";
 import clientRoutes from "./routes/client.routes";
 import aiRoutes from "./routes/ai.routes";
-import whatsappWebhook from "./routes/whatsapp.webhook"
+import whatsappWebhook from "./routes/whatsapp.webhook";
 import instagramWebhook from "./routes/instagram.webhook";
+import billingRoutes from "./routes/billing.routes";
+import { stripeWebhook } from "./routes/stripe.webhook";
+import dashboardRoutes from "./routes/dashboard.routes";
 
+import {
+  authLimiter,
+  aiLimiter,
+  globalLimiter,
+} from "./middleware/rateLimit.middleware";
+
+import { startTrialExpiryCron } from "./cron/trial.cron";
+import { env } from "./config/env";
 
 const app = express();
 
-app.get("/", (req, res) => {
-  console.log("ROOT HIT");
-  res.send("ROOT WORKING");
-});
-// Middlewares
-app.use(cors());
+/* ============================= */
+/* 🚀 PRODUCTION HARDENING */
+/* ============================= */
+
+// Trust proxy (for rate limit + real IP in production)
+app.set("trust proxy", 1);
+
+// Security headers
+app.use(helmet());
+
+// Gzip compression
+app.use(compression());
+
+// Global rate limit
+app.use(globalLimiter);
+
+// Strict CORS
 app.use(
-  express.json({
-    verify: (req: any, res, buf) => {
-      req.rawBody = buf;
-    },
+  cors({
+    origin: env.FRONTEND_URL,
+    credentials: true,
   })
 );
-app.use("/api/auth", authRoutes);
+
+/* ============================= */
+/* STRIPE WEBHOOK (RAW BODY) */
+/* ============================= */
+
+app.post(
+  "/api/webhook/stripe",
+  express.raw({ type: "application/json" }),
+  stripeWebhook
+);
+
+// JSON parser
+app.use(express.json());
+
+/* ============================= */
+/* ROUTES */
+/* ============================= */
+
+app.get("/", (req, res) => {
+  res.send("API Running 🚀");
+});
+
+app.use("/api/auth", authLimiter, authRoutes);
+
 app.use("/api/clients", clientRoutes);
-app.use("/api/ai", aiRoutes);
+
+app.use("/api/ai", aiLimiter, aiRoutes);
+
+app.use("/api/billing", billingRoutes);
+
 app.use("/api/webhook/whatsapp", whatsappWebhook);
+
 app.use("/api/webhook/instagram", instagramWebhook);
 
+app.use("/api/dashboard", dashboardRoutes);
 
-// Health Route
+/* ============================= */
+/* HEALTH */
+/* ============================= */
+
 app.get("/health", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Server is running 🚀"
+    message: "Server is healthy 🚀",
   });
 });
-app.get("/db-test", async (req, res) => {
-  try {
-    await prisma.$connect();
-    res.json({ success: true, message: "DB Connected Successfully ✅" });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
+
+/* ============================= */
+/* 404 HANDLER */
+/* ============================= */
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+  });
 });
-app.get("/protected", protect, (req, res) => {
-  res.json({ message: "Protected route accessed" });
+
+/* ============================= */
+/* GLOBAL ERROR HANDLER */
+/* ============================= */
+
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("Global Error:", err);
+
+  res.status(err.status || 500).json({
+    success: false,
+    message:
+      process.env.NODE_ENV === "production"
+        ? "Internal server error"
+        : err.message,
+  });
 });
+
+/* ============================= */
+
+startTrialExpiryCron();
 
 export default app;

@@ -1,12 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-
-interface CustomRequest extends Request {
-  user?: any;
-}
+import { env } from "../config/env";
 
 export const protect = (
-  req: CustomRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {
@@ -21,10 +18,21 @@ export const protect = (
   try {
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET as string
-    );
+      env.JWT_SECRET
+    ) as {
+      id: string;
+      role: string;
+      email: string;
+      businessId: string; 
+    };
 
-    req.user = decoded;
+    req.user = {
+      id: decoded.id,
+      role: decoded.role,
+      email: decoded.email,
+      businessId: decoded.businessId,
+    };
+
     next();
   } catch {
     return res.status(401).json({ message: "Invalid token" });
@@ -32,7 +40,11 @@ export const protect = (
 };
 
 export const authorize = (...roles: string[]) => {
-  return (req: CustomRequest, res: Response, next: NextFunction) => {
+  return (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
     if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({ message: "Access denied" });
     }

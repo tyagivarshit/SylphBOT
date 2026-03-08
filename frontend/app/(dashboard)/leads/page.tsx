@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getLeads } from "@/lib/leads"
+import { getRecentLeads } from "@/lib/dashboard"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import LeadsFilters from "@/components/leads/LeadsFilters"
@@ -17,10 +17,10 @@ export default function LeadsPage(){
 
       try{
 
-        const data = await getLeads()
+        const data = await getRecentLeads()
 
-        // IMPORTANT FIX
-        setLeads(data?.data || [])
+        // FIX
+        setLeads(data || [])
 
       }catch(err){
 

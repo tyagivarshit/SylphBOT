@@ -5,109 +5,184 @@ import { createCheckout } from "@/lib/billing"
 
 export default function BillingPage(){
 
-  const [loading,setLoading] = useState(false)
+const [loading,setLoading] = useState(false)
 
-  const handleUpgrade = async(plan:string)=>{
+const handleUpgrade = async(plan:string)=>{
 
-    try{
+try{
 
-      setLoading(true)
+setLoading(true)
 
-      const res = await createCheckout(plan)
+const res = await createCheckout(plan)
 
-      if(res?.url){
-        window.location.href = res.url
-      }
+if(res?.url){
+window.location.href = res.url
+}
 
-    }catch(err){
+}catch(err){
 
-      console.error("Checkout error",err)
+console.error("Checkout error",err)
 
-    }finally{
+}finally{
 
-      setLoading(false)
+setLoading(false)
 
-    }
+}
 
-  }
+}
 
-  return(
+return(
 
-    <div className="space-y-8">
+<div className="space-y-10">
 
-      <h1 className="text-2xl font-semibold">
-        Billing
-      </h1>
+<h1 className="text-2xl font-semibold text-gray-900">
+Billing
+</h1>
 
-      <div className="grid grid-cols-3 gap-6">
 
-        {/* BASIC PLAN */}
+{/* PLANS */}
 
-        <div className="bg-white border rounded-xl p-6">
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
-          <h2 className="text-lg font-medium mb-2">
-            Basic
-          </h2>
 
-          <p className="text-gray-500 mb-4">
-            1,000 AI replies / month
-          </p>
+{/* RESPONDER PLAN */}
 
-          <button
-            onClick={()=>handleUpgrade("BASIC")}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg"
-          >
-            Upgrade
-          </button>
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
 
-        </div>
+<div className="space-y-4">
 
-        {/* PRO PLAN */}
+<div>
 
-        <div className="bg-white border rounded-xl p-6">
+<h2 className="text-lg font-semibold text-gray-900">
+Responder
+</h2>
 
-          <h2 className="text-lg font-medium mb-2">
-            Pro
-          </h2>
+<p className="text-sm text-gray-500">
+₹999 / month
+</p>
 
-          <p className="text-gray-500 mb-4">
-            10,000 AI replies / month
-          </p>
+</div>
 
-          <button
-            onClick={()=>handleUpgrade("PRO")}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg"
-          >
-            Upgrade
-          </button>
+<ul className="text-sm text-gray-600 space-y-2">
 
-        </div>
+<li>✔ Reply to WhatsApp messages</li>
+<li>✔ Reply to Instagram DMs</li>
+<li>✔ Reply to Instagram comments</li>
+<li>✔ Basic automation</li>
 
-        {/* ENTERPRISE */}
+</ul>
 
-        <div className="bg-white border rounded-xl p-6">
+</div>
 
-          <h2 className="text-lg font-medium mb-2">
-            Enterprise
-          </h2>
+<button
+onClick={()=>handleUpgrade("RESPONDER")}
+disabled={loading}
+className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition"
+>
 
-          <p className="text-gray-500 mb-4">
-            Unlimited automation
-          </p>
+{loading ? "Processing..." : "Choose Plan"}
 
-          <button
-            onClick={()=>handleUpgrade("ENTERPRISE")}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg"
-          >
-            Contact Sales
-          </button>
+</button>
 
-        </div>
+</div>
 
-      </div>
 
-    </div>
 
-  )
+{/* LEADS PLAN */}
+
+<div className="bg-white border-2 border-blue-600 rounded-xl p-6 shadow-md flex flex-col justify-between relative">
+
+<span className="absolute top-4 right-4 bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
+POPULAR
+</span>
+
+<div className="space-y-4">
+
+<div>
+
+<h2 className="text-lg font-semibold text-gray-900">
+Leads
+</h2>
+
+<p className="text-sm text-gray-500">
+₹1999 / month
+</p>
+
+</div>
+
+<ul className="text-sm text-gray-600 space-y-2">
+
+<li>✔ Everything in Responder</li>
+<li>✔ Lead capture system</li>
+<li>✔ Leads dashboard</li>
+<li>✔ Lead stage tracking</li>
+<li>✔ Conversation history</li>
+
+</ul>
+
+</div>
+
+<button
+onClick={()=>handleUpgrade("LEADS")}
+disabled={loading}
+className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition"
+>
+
+{loading ? "Processing..." : "Choose Plan"}
+
+</button>
+
+</div>
+
+
+
+{/* AUTOMATION PLAN */}
+
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
+
+<div className="space-y-4">
+
+<div>
+
+<h2 className="text-lg font-semibold text-gray-900">
+Automation
+</h2>
+
+<p className="text-sm text-gray-500">
+₹3999 / month
+</p>
+
+</div>
+
+<ul className="text-sm text-gray-600 space-y-2">
+
+<li>✔ Everything in Leads</li>
+<li>✔ Meeting booking automation</li>
+<li>✔ Calendar scheduling</li>
+<li>✔ Follow-up automation</li>
+<li>✔ Advanced AI workflows</li>
+
+</ul>
+
+</div>
+
+<button
+onClick={()=>handleUpgrade("AUTOMATION")}
+disabled={loading}
+className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition"
+>
+
+{loading ? "Processing..." : "Choose Plan"}
+
+</button>
+
+</div>
+
+
+</div>
+
+</div>
+
+)
 
 }

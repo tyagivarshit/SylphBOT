@@ -6,7 +6,9 @@ import { apiFetch } from "./apiClient"
 
 export async function getDashboardStats() {
 
-  return apiFetch("/api/dashboard/stats")
+  const res = await apiFetch("/api/dashboard/stats")
+
+  return res.data
 
 }
 
@@ -17,7 +19,9 @@ export async function getDashboardStats() {
 
 export async function getRecentLeads() {
 
-  return apiFetch("/api/dashboard/leads")
+  const res = await apiFetch("/api/dashboard/leads")
+
+  return res.data
 
 }
 
@@ -28,6 +32,8 @@ export async function getRecentLeads() {
 
 export async function getLeadDetail(id: string) {
 
-  return apiFetch(`/api/dashboard/leads/${id}`)
+  const res = await apiFetch(`/api/dashboard/leads/${id}`)
+
+  return res.data
 
 }

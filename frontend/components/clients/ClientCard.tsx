@@ -4,39 +4,78 @@ import { useState } from "react"
 
 export default function ClientCard({ platform }: any) {
 
-  const [active, setActive] = useState(true)
+const [active, setActive] = useState(true)
 
-  return (
-    <div className="bg-white border rounded-xl p-6 space-y-4">
+return(
 
-      <div className="flex items-center justify-between">
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition flex flex-col gap-5">
 
-        <h3 className="text-lg font-semibold">
-          {platform}
-        </h3>
+{/* HEADER */}
 
-        <label className="flex items-center gap-2 text-sm">
+<div className="flex items-center justify-between">
 
-          Active
+<div className="flex items-center gap-3">
 
-          <input
-            type="checkbox"
-            checked={active}
-            onChange={() => setActive(!active)}
-          />
+<div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 font-semibold text-sm">
+{platform?.charAt(0)}
+</div>
 
-        </label>
+<div>
 
-      </div>
+<h3 className="text-sm font-semibold text-gray-900 capitalize">
+{platform}
+</h3>
 
-      <p className="text-sm text-gray-500">
-        Connected automation for {platform}
-      </p>
+<p className="text-xs text-gray-500">
+Messaging platform
+</p>
 
-      <button className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">
-        Manage
-      </button>
+</div>
 
-    </div>
-  )
+</div>
+
+
+<label className="flex items-center gap-2 text-xs text-gray-600">
+
+<span>
+Active
+</span>
+
+<input
+type="checkbox"
+checked={active}
+onChange={() => setActive(!active)}
+className="accent-blue-600 cursor-pointer"
+/>
+
+</label>
+
+</div>
+
+
+{/* DESCRIPTION */}
+
+<p className="text-sm text-gray-600">
+Connected automation for {platform}
+</p>
+
+
+{/* ACTION */}
+
+<div className="flex items-center justify-between">
+
+<span className={`text-xs font-medium ${active ? "text-green-600" : "text-gray-400"}`}>
+{active ? "Connected" : "Inactive"}
+</span>
+
+<button className="text-sm font-medium text-blue-600 hover:text-blue-700">
+Manage
+</button>
+
+</div>
+
+</div>
+
+)
+
 }

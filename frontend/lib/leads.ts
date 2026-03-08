@@ -6,32 +6,22 @@ export async function getLeads(){
 
   const token = getToken()
 
-  const res = await fetch(`${API}/api/dashboard/leads`,{
-    headers:{
-      Authorization:`Bearer ${token}`
-    }
-  })
-
-  if(!res.ok){
-    throw new Error("Failed to fetch leads")
+  if(!token){
+    throw new Error("No token found")
   }
 
-  return res.json()
-
-}
-
-export async function getLeadDetail(id:string){
-
-  const token = getToken()
-
-  const res = await fetch(`${API}/api/dashboard/leads/${id}`,{
+  const res = await fetch(`${API}/api/dashboard/leads`,{
+    method:"GET",
     headers:{
+      "Content-Type":"application/json",
       Authorization:`Bearer ${token}`
     }
   })
 
   if(!res.ok){
-    throw new Error("Failed to fetch lead")
+    const err = await res.text()
+    console.error("Leads fetch error:",err)
+    throw new Error("Failed to fetch leads")
   }
 
   return res.json()

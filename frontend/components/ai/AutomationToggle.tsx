@@ -1,43 +1,113 @@
 "use client"
 
 import { useState } from "react"
+import { Bot, Send } from "lucide-react"
 
 export default function AutomationToggle() {
 
-  const [autoReply, setAutoReply] = useState(true)
-  const [followup, setFollowup] = useState(true)
+const [autoReply, setAutoReply] = useState(true)
+const [followup, setFollowup] = useState(true)
 
-  return (
-    <div className="bg-white border rounded-xl p-6 space-y-4">
+return(
 
-      <h3 className="font-semibold">
-        Automation
-      </h3>
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-6">
 
-      <div className="flex justify-between">
+{/* Header */}
 
-        <p className="text-sm">Auto Reply</p>
+<div>
 
-        <input
-          type="checkbox"
-          checked={autoReply}
-          onChange={() => setAutoReply(!autoReply)}
-        />
+<h3 className="text-lg font-semibold text-gray-900">
+Automation
+</h3>
 
-      </div>
+<p className="text-sm text-gray-500">
+Control how AI automation responds to your leads
+</p>
 
-      <div className="flex justify-between">
+</div>
 
-        <p className="text-sm">Follow-up Messages</p>
 
-        <input
-          type="checkbox"
-          checked={followup}
-          onChange={() => setFollowup(!followup)}
-        />
+{/* Auto Reply */}
 
-      </div>
+<div className="flex items-center justify-between">
 
-    </div>
-  )
+<div className="flex items-start gap-3">
+
+<Bot size={18} className="text-blue-600 mt-0.5"/>
+
+<div>
+
+<p className="text-sm font-medium text-gray-900">
+Auto Reply
+</p>
+
+<p className="text-xs text-gray-500">
+Automatically reply to incoming messages
+</p>
+
+</div>
+
+</div>
+
+<button
+onClick={()=>setAutoReply(!autoReply)}
+className={`relative w-11 h-6 rounded-full transition
+${autoReply ? "bg-blue-600" : "bg-gray-300"}
+`}
+>
+
+<span
+className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition
+${autoReply ? "translate-x-5" : ""}
+`}
+></span>
+
+</button>
+
+</div>
+
+
+{/* Follow-up */}
+
+<div className="flex items-center justify-between">
+
+<div className="flex items-start gap-3">
+
+<Send size={18} className="text-blue-600 mt-0.5"/>
+
+<div>
+
+<p className="text-sm font-medium text-gray-900">
+Follow-up Messages
+</p>
+
+<p className="text-xs text-gray-500">
+Send automatic follow-ups to inactive leads
+</p>
+
+</div>
+
+</div>
+
+<button
+onClick={()=>setFollowup(!followup)}
+className={`relative w-11 h-6 rounded-full transition
+${followup ? "bg-blue-600" : "bg-gray-300"}
+`}
+>
+
+<span
+className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition
+${followup ? "translate-x-5" : ""}
+`}
+></span>
+
+</button>
+
+</div>
+
+</div>
+
+)
+
 }

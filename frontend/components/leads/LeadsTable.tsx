@@ -6,67 +6,152 @@ import LeadDrawer from "./LeadDrawer"
 
 export default function LeadsTable({ leads }: any) {
 
-  const [selectedLead, setSelectedLead] = useState<any>(null)
+const [selectedLead, setSelectedLead] = useState<any>(null)
 
-  return (
-    <div className="relative">
+return(
 
-      <div className="bg-white border rounded-xl overflow-hidden">
+<div className="relative overflow-hidden border border-gray-200 rounded-xl">
 
-        <table className="w-full">
+<div className="overflow-x-auto">
 
-          <thead className="bg-gray-50 text-left text-sm">
-            <tr>
-              <th className="p-4">Name</th>
-              <th>Platform</th>
-              <th>Stage</th>
-              <th>Last Message</th>
-            </tr>
-          </thead>
+<table className="w-full text-sm">
 
-          <tbody>
+{/* HEADER */}
 
-            {Array.isArray(leads) && leads.map((lead:any)=> (
-              <tr
-                key={lead.id}
-                className="border-t hover:bg-gray-50 cursor-pointer"
-                onClick={() => setSelectedLead(lead)}
-              >
+<thead className="bg-gray-50 border-b text-gray-700 sticky top-0">
 
-                <td className="p-4 font-medium">
-                  {lead.name}
-                </td>
+<tr>
 
-                <td className="text-sm text-gray-600">
-                  {lead.platform}
-                </td>
+<th className="p-4 text-left font-semibold">
+Lead
+</th>
 
-                <td>
-                  <StageBadge stage={lead.stage} />
-                </td>
+<th className="text-left font-semibold">
+Platform
+</th>
 
-                <td className="text-sm text-gray-500">
-                  {lead.lastMessage}
-                </td>
+<th className="text-left font-semibold">
+Stage
+</th>
 
-              </tr>
-            ))}
+<th className="text-left font-semibold">
+Last Message
+</th>
 
-          </tbody>
+</tr>
 
-        </table>
+</thead>
 
-      </div>
 
-      {/* Lead Drawer */}
+{/* BODY */}
 
-      {selectedLead && (
-        <LeadDrawer
-          lead={selectedLead}
-          onClose={() => setSelectedLead(null)}
-        />
-      )}
+<tbody className="divide-y bg-white">
 
-    </div>
-  )
+{Array.isArray(leads) && leads.length > 0 ? (
+
+leads.map((lead:any)=> (
+
+<tr
+key={lead.id}
+className="hover:bg-gray-50 cursor-pointer transition"
+onClick={() => setSelectedLead(lead)}
+>
+
+{/* LEAD */}
+
+<td className="p-4">
+
+<div className="flex items-center gap-3">
+
+<div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-xs font-semibold text-blue-600">
+{lead.name?.charAt(0) || "?"}
+</div>
+
+<div className="flex flex-col">
+
+<span className="font-medium text-gray-900">
+{lead.name}
+</span>
+
+<span className="text-xs text-gray-500">
+ID: {lead.id}
+</span>
+
+</div>
+
+</div>
+
+</td>
+
+
+{/* PLATFORM */}
+
+<td>
+
+<span className="px-2 py-1 rounded-md text-xs bg-gray-100 text-gray-700 capitalize">
+{lead.platform}
+</span>
+
+</td>
+
+
+{/* STAGE */}
+
+<td>
+
+<StageBadge stage={lead.stage} />
+
+</td>
+
+
+{/* LAST MESSAGE */}
+
+<td className="text-gray-600 max-w-xs truncate">
+
+{lead.lastMessage || "No messages yet"}
+
+</td>
+
+</tr>
+
+))
+
+) : (
+
+<tr>
+
+<td colSpan={4} className="text-center py-12 text-gray-500 text-sm">
+
+No leads found  
+<br/>
+Connect WhatsApp or Instagram to start receiving leads
+
+</td>
+
+</tr>
+
+)}
+
+</tbody>
+
+</table>
+
+</div>
+
+
+{/* DRAWER */}
+
+{selectedLead && (
+
+<LeadDrawer
+lead={selectedLead}
+onClose={() => setSelectedLead(null)}
+/>
+
+)}
+
+</div>
+
+)
+
 }

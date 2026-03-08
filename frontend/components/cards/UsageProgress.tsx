@@ -1,20 +1,71 @@
-export default function UsageProgress({ label, used, limit }: any) {
-  const percent = (used / limit) * 100
+export default function UsageProgress({ label, used, limit, icon }: any) {
 
-  return (
-    <div className="bg-white p-6 rounded-xl border">
-      <p className="text-sm mb-2">{label}</p>
+const percent = limit ? Math.min((used / limit) * 100, 100) : 0
 
-      <div className="w-full bg-gray-200 rounded h-2">
-        <div
-          className="bg-blue-500 h-2 rounded"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+let color = "bg-blue-600"
 
-      <p className="text-xs mt-2 text-gray-500">
-        {used} / {limit}
-      </p>
-    </div>
-  )
+if(percent > 80) color = "bg-red-500"
+else if(percent > 60) color = "bg-yellow-500"
+
+return(
+
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
+
+{/* Header */}
+
+<div className="flex items-center justify-between">
+
+<div className="flex items-center gap-2">
+
+{icon && (
+<div className="text-blue-600">
+{icon}
+</div>
+)}
+
+<p className="text-sm font-medium text-gray-800">
+{label}
+</p>
+
+</div>
+
+<span className="text-xs text-gray-500">
+{used} / {limit}
+</span>
+
+</div>
+
+
+{/* Progress */}
+
+<div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+
+<div
+className={`h-2 rounded-full transition-all ${color}`}
+style={{ width: `${percent}%` }}
+/>
+
+</div>
+
+
+{/* Footer */}
+
+<div className="flex items-center justify-between text-xs text-gray-500">
+
+<span>
+{Math.round(percent)}% used
+</span>
+
+{percent > 80 && (
+<span className="text-red-500 font-medium">
+Limit almost reached
+</span>
+)}
+
+</div>
+
+</div>
+
+)
+
 }

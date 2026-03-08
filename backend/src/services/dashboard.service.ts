@@ -4,47 +4,57 @@ import { Prisma } from "@prisma/client";
 
 export class DashboardService {
 
-  // ===============================
-  // STATS
-  // ===============================
+  // ======================================
+  // DASHBOARD STATS
+  // ======================================
   static async getStats(businessId: string) {
+
     const todayStart = startOfDay(new Date());
     const monthStart = startOfMonth(new Date());
 
     const baseFilter: Prisma.LeadWhereInput = {
-      businessId,
-      deletedAt: null,
+      businessId: businessId
     };
 
     const [totalLeads, leadsToday, leadsThisMonth] =
       await Promise.all([
-        prisma.lead.count({ where: baseFilter }),
 
         prisma.lead.count({
-          where: {
-            ...baseFilter,
-            createdAt: { gte: todayStart },
-          },
+          where: baseFilter
         }),
 
         prisma.lead.count({
           where: {
             ...baseFilter,
-            createdAt: { gte: monthStart },
-          },
+            createdAt: {
+              gte: todayStart
+            }
+          }
         }),
+
+        prisma.lead.count({
+          where: {
+            ...baseFilter,
+            createdAt: {
+              gte: monthStart
+            }
+          }
+        })
+
       ]);
 
     return {
       totalLeads,
       leadsToday,
-      leadsThisMonth,
+      leadsThisMonth
     };
+
   }
 
-  // ===============================
-  // LEADS LIST (WITH PAGINATION)
-  // ===============================
+
+  // ======================================
+  // LEADS LIST (WITH PAGINATION + FILTER)
+  // ======================================
   static async getLeadsList(
     businessId: string,
     page: number,
@@ -52,34 +62,59 @@ export class DashboardService {
     stage?: string,
     search?: string
   ) {
+
     const skip = (page - 1) * limit;
 
     const where: Prisma.LeadWhereInput = {
-      businessId,
-      deletedAt: null,
+      businessId: businessId
     };
 
-    // 🔥 Optional Stage Filter
+    // Stage Filter
     if (stage) {
       where.stage = stage;
     }
 
-    // 🔥 Optional Search
+    // Search Filter
     if (search) {
+
       where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { phone: { contains: search, mode: "insensitive" } },
-        { email: { contains: search, mode: "insensitive" } },
+        {
+          name: {
+            contains: search,
+            mode: "insensitive"
+          }
+        },
+        {
+          phone: {
+            contains: search
+          }
+        },
+        {
+          email: {
+            contains: search,
+            mode: "insensitive"
+          }
+        }
       ];
+
     }
 
     const [leads, total] = await Promise.all([
+
       prisma.lead.findMany({
+
         where,
-        orderBy: { createdAt: "desc" },
+
+        orderBy: {
+          createdAt: "desc"
+        },
+
         skip,
+
         take: limit,
+
         select: {
+
           id: true,
           name: true,
           phone: true,
@@ -87,42 +122,57 @@ export class DashboardService {
           stage: true,
           platform: true,
           createdAt: true,
-          lastMessageAt: true,
-        },
+          lastMessageAt: true
+
+        }
+
       }),
 
-      prisma.lead.count({ where }),
+      prisma.lead.count({
+        where
+      })
+
     ]);
 
     return {
+
       leads,
+
       pagination: {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
-      },
+        totalPages: Math.ceil(total / limit)
+      }
+
     };
+
   }
 
-  // ===============================
+
+  // ======================================
   // LEAD DETAIL
-  // ===============================
+  // ======================================
   static async getLeadDetail(
     businessId: string,
     leadId: string
   ) {
+
     const lead = await prisma.lead.findFirst({
+
       where: {
         id: leadId,
-        businessId,
-        deletedAt: null,
+        businessId: businessId
       },
+
       include: {
         messages: {
-          orderBy: { createdAt: "asc" },
-        },
-      },
+          orderBy: {
+            createdAt: "asc"
+          }
+        }
+      }
+
     });
 
     if (!lead) {
@@ -130,5 +180,7 @@ export class DashboardService {
     }
 
     return lead;
+
   }
+
 }

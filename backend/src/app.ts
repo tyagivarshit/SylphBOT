@@ -28,19 +28,14 @@ const app = express();
 /* 🚀 PRODUCTION HARDENING */
 /* ============================= */
 
-// Trust proxy (for rate limit + real IP in production)
 app.set("trust proxy", 1);
 
-// Security headers
 app.use(helmet());
 
-// Gzip compression
 app.use(compression());
 
-// Global rate limit
 app.use(globalLimiter);
 
-// Strict CORS
 app.use(
   cors({
     origin: env.FRONTEND_URL,
@@ -58,7 +53,30 @@ app.post(
   stripeWebhook
 );
 
-// JSON parser
+/* ============================= */
+/* WHATSAPP WEBHOOK (RAW BODY) */
+/* ============================= */
+
+app.use(
+  "/api/webhook/whatsapp",
+  express.raw({ type: "application/json" }),
+  whatsappWebhook
+);
+
+/* ============================= */
+/* INSTAGRAM WEBHOOK (RAW BODY) */
+/* ============================= */
+
+app.use(
+  "/api/webhook/instagram",
+  express.raw({ type: "application/json" }),
+  instagramWebhook
+);
+
+/* ============================= */
+/* JSON PARSER */
+/* ============================= */
+
 app.use(express.json());
 
 /* ============================= */
@@ -76,10 +94,6 @@ app.use("/api/clients", clientRoutes);
 app.use("/api/ai", aiLimiter, aiRoutes);
 
 app.use("/api/billing", billingRoutes);
-
-app.use("/api/webhook/whatsapp", whatsappWebhook);
-
-app.use("/api/webhook/instagram", instagramWebhook);
 
 app.use("/api/dashboard", dashboardRoutes);
 

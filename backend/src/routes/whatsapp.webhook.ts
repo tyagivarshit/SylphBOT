@@ -57,12 +57,15 @@ router.post("/", async (req: any, res: Response) => {
   try {
     console.log("🔥 WEBHOOK HIT");
 
-    if (!verifySignature(req)) {
-      console.log("❌ Signature verification failed");
-      return res.sendStatus(403);
+    // Skip signature verification in development
+    if (process.env.NODE_ENV === "production") {
+      if (!verifySignature(req)) {
+        console.log("❌ Signature verification failed");
+        return res.sendStatus(403);
+      }
     }
 
-    const body = req.body;
+    const body = JSON.parse(req.body.toString());
 
     const message =
       body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];

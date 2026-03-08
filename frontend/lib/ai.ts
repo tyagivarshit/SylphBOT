@@ -2,41 +2,51 @@ import { getToken } from "./token"
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
-export async function getAISettings(clientId:string){
+export async function getAISettings(clientId: string) {
+  if (!clientId || clientId === "default") {
+    throw new Error("Client not connected")
+  }
 
   const token = getToken()
 
-  const res = await fetch(`${API}/api/clients/${clientId}`,{
-    headers:{
-      Authorization:`Bearer ${token}`
+  const res = await fetch(`${API}/api/clients/${clientId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
     }
   })
 
-  if(!res.ok){
-    throw new Error("Failed to fetch AI settings")
+  if (!res.ok) {
+    let errorMsg = "Failed to fetch AI settings"
+    try {
+      const err = await res.json()
+      errorMsg = err.message || errorMsg
+    } catch {}
+    throw new Error(errorMsg)
   }
 
   return res.json()
-
 }
 
-export async function updateAISettings(clientId:string,data:any){
-
+export async function updateAISettings(clientId: string, data: any) {
   const token = getToken()
 
-  const res = await fetch(`${API}/api/clients/${clientId}`,{
-    method:"PUT",
-    headers:{
-      "Content-Type":"application/json",
-      Authorization:`Bearer ${token}`
+  const res = await fetch(`${API}/api/clients/${clientId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
     },
-    body:JSON.stringify(data)
+    body: JSON.stringify(data)
   })
 
-  if(!res.ok){
-    throw new Error("Failed to update AI settings")
+  if (!res.ok) {
+    let errorMsg = "Failed to update AI settings"
+    try {
+      const err = await res.json()
+      errorMsg = err.message || errorMsg
+    } catch {}
+    throw new Error(errorMsg)
   }
 
   return res.json()
-
 }

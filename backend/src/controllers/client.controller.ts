@@ -2,69 +2,82 @@ import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { encrypt } from "../utils/encrypt";
 
-interface CustomRequest extends Request {
-  user?: {
-    id?: string;
-    userId?: string;
-    role?: string;
-  };
-  params: {
-    id: string;
-  };
-}
+/*
+---------------------------------------------------
+HELPER FUNCTIONS
+---------------------------------------------------
+*/
+
+const getBusinessByOwner = async (userId: string) => {
+  return prisma.business.findFirst({
+    where: { ownerId: userId },
+    select: { id: true },
+  });
+};
+
+const getSubscription = async (businessId: string) => {
+  return prisma.subscription.findUnique({
+    where: { businessId },
+    include: { plan: true },
+  });
+};
 
 /*
 ---------------------------------------------------
-3️⃣1️⃣ CREATE CLIENT
+CREATE CLIENT
 ---------------------------------------------------
 */
-export const createClient = async (req: CustomRequest, res: Response) => {
+
+export const createClient = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId || req.user?.id;
+    const userId = (req as any).user?.id;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { platform, accessToken, aiTone, businessInfo, pricingInfo } =
-      req.body;
+    let {
+      platform,
+      phoneNumberId,
+      pageId,
+      accessToken,
+      aiTone,
+      businessInfo,
+      pricingInfo,
+    } = req.body;
 
     if (!platform || !accessToken) {
-      return res
-        .status(400)
-        .json({ message: "Platform and accessToken required" });
+      return res.status(400).json({
+        message: "platform and accessToken required",
+      });
     }
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId: userId },
-    });
+    platform = platform.toUpperCase();
+
+    const business = await getBusinessByOwner(userId);
 
     if (!business) {
       return res.status(404).json({ message: "Business not found" });
     }
 
-    // 🔐 SUBSCRIPTION FETCH
-    const subscription = await prisma.subscription.findUnique({
-      where: { businessId: business.id },
-    });
+    const subscription = await getSubscription(business.id);
 
     if (!subscription) {
-      return res
-        .status(400)
-        .json({ message: "No active subscription found" });
+      return res.status(403).json({
+        message: "No active subscription found",
+      });
     }
+
+    const planName = subscription.plan.name;
+    const now = new Date();
 
     let allowedPlatforms: string[] = [];
 
-    // 🟢 FREE PLAN (7-Day BOTH Trial)
-    if (subscription.plan === "FREE") {
-      const now = new Date();
-
+    if (planName === "FREE_TRIAL") {
       if (
         subscription.currentPeriodEnd &&
         now < subscription.currentPeriodEnd
       ) {
-        // Trial active → allow both
         allowedPlatforms = ["WHATSAPP", "INSTAGRAM"];
       } else {
         return res.status(403).json({
@@ -72,25 +85,9 @@ export const createClient = async (req: CustomRequest, res: Response) => {
             "Your 7-day trial has expired. Please upgrade your plan.",
         });
       }
-    }
-
-    // 🟢 WHATSAPP ONLY
-    else if (subscription.plan === "WHATSAPP_ONLY") {
-      allowedPlatforms = ["WHATSAPP"];
-    }
-
-    // 🟢 INSTAGRAM ONLY
-    else if (subscription.plan === "INSTAGRAM_ONLY") {
-      allowedPlatforms = ["INSTAGRAM"];
-    }
-
-    // 🟢 BOTH
-    else if (subscription.plan === "BOTH") {
+    } else if (planName === "PRO_1999") {
       allowedPlatforms = ["WHATSAPP", "INSTAGRAM"];
-    }
-
-    // ❌ Unknown plan safety
-    else {
+    } else {
       return res.status(403).json({
         message: "Invalid subscription plan",
       });
@@ -98,7 +95,7 @@ export const createClient = async (req: CustomRequest, res: Response) => {
 
     if (!allowedPlatforms.includes(platform)) {
       return res.status(403).json({
-        message: `Your current plan does not allow ${platform} integration`,
+        message: `${platform} integration not allowed in your plan`,
       });
     }
 
@@ -108,6 +105,8 @@ export const createClient = async (req: CustomRequest, res: Response) => {
       data: {
         businessId: business.id,
         platform,
+        phoneNumberId: phoneNumberId || null,
+        pageId: pageId || null,
         accessToken: encryptedToken,
         aiTone,
         businessInfo,
@@ -127,30 +126,29 @@ export const createClient = async (req: CustomRequest, res: Response) => {
       });
     }
 
+    console.error("Create client error:", error);
+
     return res.status(500).json({
       message: "Client creation failed",
-      error: error.message,
     });
   }
 };
+
 /*
 ---------------------------------------------------
-3️⃣3️⃣ FETCH CLIENTS
+FETCH CLIENTS
 ---------------------------------------------------
 */
-export const getClients = async (req: CustomRequest, res: Response) => {
+
+export const getClients = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId || req.user?.id;
-    console.log("USER ID:", userId);
+    const userId = (req as any).user?.id;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId: userId },
-    });
-    console.log("BUSINESS:", business);
+    const business = await getBusinessByOwner(userId);
 
     if (!business) {
       return res.status(404).json({ message: "Business not found" });
@@ -166,36 +164,38 @@ export const getClients = async (req: CustomRequest, res: Response) => {
 
     return res.json(clients);
   } catch (error: any) {
+    console.error("Fetch clients error:", error);
+
     return res.status(500).json({
       message: "Fetch failed",
-      error: error.message,
     });
   }
 };
 
 /*
 ---------------------------------------------------
-3️⃣2️⃣ UPDATE CLIENT
+UPDATE CLIENT
 ---------------------------------------------------
 */
-export const updateClient = async (req: CustomRequest, res: Response) => {
+
+export const updateClient = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId || req.user?.id;
+    const userId = (req as any).user?.id;
+    const id = req.params.id as string;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { id } = req.params;
     const { accessToken } = req.body;
 
     if (!accessToken) {
-      return res.status(400).json({ message: "Access token required" });
+      return res.status(400).json({
+        message: "Access token required",
+      });
     }
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId: userId },
-    });
+    const business = await getBusinessByOwner(userId);
 
     if (!business) {
       return res.status(404).json({ message: "Business not found" });
@@ -207,50 +207,50 @@ export const updateClient = async (req: CustomRequest, res: Response) => {
         businessId: business.id,
         isActive: true,
       },
+      select: { id: true },
     });
 
     if (!client) {
-      return res.status(404).json({ message: "Client not found" });
+      return res.status(404).json({
+        message: "Client not found",
+      });
     }
 
     const encryptedToken = encrypt(accessToken);
 
-    const updated = await prisma.client.update({
-      where: { id: client.id },
+    await prisma.client.update({
+      where: { id },
       data: { accessToken: encryptedToken },
     });
 
     return res.json({
       message: "Client updated successfully",
-      updated,
     });
   } catch (error: any) {
-    console.error("Update error:", error);
+    console.error("Update client error:", error);
+
     return res.status(500).json({
       message: "Update failed",
-      error: error.message,
     });
   }
 };
 
 /*
 ---------------------------------------------------
-3️⃣4️⃣ SOFT DELETE
+DELETE CLIENT
 ---------------------------------------------------
 */
-export const deleteClient = async (req: CustomRequest, res: Response) => {
+
+export const deleteClient = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId || req.user?.id;
+    const userId = (req as any).user?.id;
+    const id = req.params.id as string;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { id } = req.params;
-
-    const business = await prisma.business.findFirst({
-      where: { ownerId: userId },
-    });
+    const business = await getBusinessByOwner(userId);
 
     if (!business) {
       return res.status(404).json({ message: "Business not found" });
@@ -262,41 +262,51 @@ export const deleteClient = async (req: CustomRequest, res: Response) => {
         businessId: business.id,
         isActive: true,
       },
+      select: { id: true },
     });
 
     if (!client) {
-      return res.status(404).json({ message: "Client not found" });
+      return res.status(404).json({
+        message: "Client not found",
+      });
     }
 
     await prisma.client.update({
-      where: { id: client.id },
+      where: { id },
       data: {
         isActive: false,
         deletedAt: new Date(),
       },
     });
 
-    return res.json({ message: "Client deleted successfully" });
+    return res.json({
+      message: "Client deleted successfully",
+    });
   } catch (error: any) {
-    console.error("Delete error:", error);
+    console.error("Delete client error:", error);
+
     return res.status(500).json({
       message: "Delete failed",
-      error: error.message,
     });
   }
 };
-export const getSingleClient = async (req: CustomRequest, res: Response) => {
+
+/*
+---------------------------------------------------
+GET SINGLE CLIENT
+---------------------------------------------------
+*/
+
+export const getSingleClient = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId || req.user?.id;
+    const userId = (req as any).user?.id;
+    const id = req.params.id as string;
+
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { id } = req.params;
-
-    const business = await prisma.business.findFirst({
-      where: { ownerId: userId },
-    });
+    const business = await getBusinessByOwner(userId);
 
     if (!business) {
       return res.status(404).json({ message: "Business not found" });
@@ -311,14 +321,17 @@ export const getSingleClient = async (req: CustomRequest, res: Response) => {
     });
 
     if (!client) {
-      return res.status(404).json({ message: "Client not found" });
+      return res.status(404).json({
+        message: "Client not found",
+      });
     }
 
     return res.json(client);
   } catch (error: any) {
+    console.error("Fetch client error:", error);
+
     return res.status(500).json({
       message: "Fetch failed",
-      error: error.message,
     });
   }
 };

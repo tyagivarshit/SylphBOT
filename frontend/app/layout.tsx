@@ -20,7 +20,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${roboto.className} bg-slate-100 text-gray-900 h-screen overflow-hidden`}>
+      <body className={`${roboto.className} bg-slate-100 text-gray-900 h-screen`}>
 
         <Toaster
           position="top-right"

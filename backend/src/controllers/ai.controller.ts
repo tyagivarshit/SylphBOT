@@ -8,43 +8,62 @@ interface CustomRequest extends Request {
 
 export const testAI = async (req: CustomRequest, res: Response) => {
   try {
+
     const { message } = req.body;
 
+    // Message validation
     if (!message) {
       return res.status(400).json({ message: "Message required" });
     }
 
+    // Get logged user id safely
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
     // Get business of logged user
     const business = await prisma.business.findFirst({
-      where: { ownerId: req.user.userId },
+      where: {
+        ownerId: userId
+      }
     });
 
     if (!business) {
       return res.status(404).json({ message: "Business not found" });
     }
 
-    // Create dummy lead (for testing)
+    // Create dummy lead (schema requires platform)
     const lead = await prisma.lead.create({
       data: {
         businessId: business.id,
         name: "Test Lead",
-      },
+        platform: "TEST"
+      }
     });
 
+    // Generate AI reply
     const reply = await generateAIReply({
       businessId: business.id,
       leadId: lead.id,
-      message,
+      message
     });
 
-    res.json({
+    // Return response
+    return res.json({
       aiReply: reply,
-      leadId: lead.id,
+      leadId: lead.id
     });
+
   } catch (error: any) {
-    res.status(500).json({
+
+    console.error("AI Test Error:", error);
+
+    return res.status(500).json({
       message: "AI test failed",
-      error: error.message,
+      error: error.message
     });
+
   }
 };

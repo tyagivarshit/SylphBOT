@@ -8,107 +8,129 @@ import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
 
 const router = Router();
 
-/*
----------------------------------------------------
-🔐 SIGNATURE VERIFICATION
----------------------------------------------------
-*/
-function verifySignature(req: any): boolean {
-  const signature = req.headers["x-hub-signature-256"] as string;
-  const appSecret = process.env.META_APP_SECRET as string;
+/* ---------------------------------------------------
+UTILS
+--------------------------------------------------- */
 
-  if (!signature || !appSecret) return false;
+const log = (...args: any[]) => {
+  console.log("[INSTAGRAM WEBHOOK]", ...args);
+};
 
-  const expected =
-    "sha256=" +
-    crypto
-      .createHmac("sha256", appSecret)
-      .update(req.rawBody)
-      .digest("hex");
+const parseBody = (req: any) => {
+  try {
+    return JSON.parse(req.body.toString());
+  } catch {
+    return null;
+  }
+};
 
-  return signature === expected;
-}
+/* ---------------------------------------------------
+SIGNATURE VERIFY
+--------------------------------------------------- */
 
-/*
----------------------------------------------------
-📌 WEBHOOK VERIFY
----------------------------------------------------
-*/
-router.get("/", (req, res) => {
+const verifySignature = (req: any): boolean => {
+  try {
+    const signature = req.headers["x-hub-signature-256"] as string;
+    const appSecret = process.env.META_APP_SECRET;
+
+    if (!signature || !appSecret) return false;
+
+    const expected =
+      "sha256=" +
+      crypto
+        .createHmac("sha256", appSecret)
+        .update(req.body)
+        .digest("hex");
+
+    return signature === expected;
+  } catch {
+    return false;
+  }
+};
+
+/* ---------------------------------------------------
+WEBHOOK VERIFY (META SETUP)
+--------------------------------------------------- */
+
+router.get("/", (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (
-    mode === "subscribe" &&
-    token === process.env.INSTAGRAM_VERIFY_TOKEN
-  ) {
+  if (mode === "subscribe" && token === process.env.INSTAGRAM_VERIFY_TOKEN) {
+    log("Webhook verified");
     return res.status(200).send(challenge);
   }
+
+  log("Webhook verification failed");
 
   return res.sendStatus(403);
 });
 
-/*
----------------------------------------------------
-📩 INSTAGRAM MESSAGE HANDLER
----------------------------------------------------
-*/
+/* ---------------------------------------------------
+INSTAGRAM MESSAGE HANDLER
+--------------------------------------------------- */
+
 router.post("/", async (req: any, res: Response) => {
   try {
-    console.log("📸 INSTAGRAM WEBHOOK HIT");
+    log("Webhook hit");
 
-    if (!verifySignature(req)) {
-      console.log("❌ IG Signature failed");
+    const body = parseBody(req);
+
+    if (!body) {
+      log("Invalid body");
+      return res.sendStatus(400);
+    }
+
+    if (process.env.NODE_ENV === "production" && !verifySignature(req)) {
+      log("Invalid signature");
       return res.sendStatus(403);
     }
 
-    const body = req.body;
     const entry = body.entry?.[0];
     const messaging = entry?.messaging?.[0];
 
-    if (!messaging) return res.sendStatus(200);
+    if (!entry || !messaging) {
+      return res.sendStatus(200);
+    }
+
+    if (!messaging.message) {
+      log("Non-message event ignored");
+      return res.sendStatus(200);
+    }
 
     const senderId = messaging.sender?.id;
-    const pageId = entry?.id; // 🔥 critical for multi-client
+    const pageId = String(entry.id);
     const text = messaging.message?.text;
 
-    if (!senderId || !text || !pageId) {
+    if (!senderId || !text) {
       return res.sendStatus(200);
     }
 
-    // Ignore self messages
     if (senderId === pageId) {
-      console.log("⚠️ Ignoring self message");
+      log("Echo message ignored");
       return res.sendStatus(200);
     }
 
-    console.log("📩 IG From:", senderId);
-    console.log("💬 IG Text:", text);
+    log("Incoming message:", text);
 
-    /*
-    ---------------------------------------------------
-    🏢 IDENTIFY CLIENT (MULTI-TENANT SAFE)
-    ---------------------------------------------------
-    */
+    /* ---------- CLIENT ---------- */
+
     const client = await prisma.client.findFirst({
       where: {
         platform: "INSTAGRAM",
-        pageId: pageId,
+        pageId,
         isActive: true,
       },
     });
 
     if (!client) {
-      console.log("⚠️ No active Instagram client found for page:", pageId);
+      log("Client not found:", pageId);
       return res.sendStatus(200);
     }
 
-    /*
-    ---------------------------------------------------
-    👤 FIND OR CREATE LEAD
-    ---------------------------------------------------
-    */
+    /* ---------- LEAD ---------- */
+
     let lead = await prisma.lead.findFirst({
       where: {
         businessId: client.businessId,
@@ -127,27 +149,21 @@ router.post("/", async (req: any, res: Response) => {
         },
       });
 
-      console.log("🆕 New Instagram lead created:", lead.id);
+      log("Lead created:", lead.id);
     }
 
-    /*
-    ---------------------------------------------------
-    🤖 AI CALL
-    ---------------------------------------------------
-    */
+    /* ---------- AI ---------- */
+
     const aiReply = await generateAIReply({
       businessId: client.businessId,
       leadId: lead.id,
       message: text,
     });
 
-    console.log("🤖 IG AI REPLY:", aiReply);
+    log("AI reply generated");
 
-    /*
-    ---------------------------------------------------
-    ⏱ UPDATE ACTIVITY + RESET FOLLOWUP
-    ---------------------------------------------------
-    */
+    /* ---------- LEAD UPDATE ---------- */
+
     await prisma.lead.update({
       where: { id: lead.id },
       data: {
@@ -156,22 +172,16 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
-    // Cancel old followups
     await cancelFollowups(lead.id);
-
-    // Schedule new followups (2hr / 12hr / 24hr)
     await scheduleFollowups(lead.id);
 
-    /*
-    ---------------------------------------------------
-    📤 SEND REPLY TO INSTAGRAM
-    ---------------------------------------------------
-    */
+    /* ---------- SEND MESSAGE ---------- */
+
     const accessToken = decrypt(client.accessToken);
 
     try {
-      const response = await axios.post(
-        `https://graph.facebook.com/v19.0/me/messages`,
+      await axios.post(
+        "https://graph.facebook.com/v19.0/me/messages",
         {
           recipient: { id: senderId },
           message: { text: aiReply },
@@ -184,17 +194,14 @@ router.post("/", async (req: any, res: Response) => {
         }
       );
 
-      console.log("✅ IG META RESPONSE:", response.data);
+      log("Message sent to Instagram");
     } catch (err: any) {
-      console.log(
-        "❌ IG META ERROR:",
-        err.response?.data || err.message
-      );
+      log("Instagram send error:", err.response?.data || err.message);
     }
 
     return res.sendStatus(200);
   } catch (error) {
-    console.error("🚨 INSTAGRAM WEBHOOK ERROR:", error);
+    log("Webhook error:", error);
     return res.sendStatus(500);
   }
 });

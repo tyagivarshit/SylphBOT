@@ -5,6 +5,7 @@ import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "../services/ai.service";
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
+import { getIO } from "../sockets/socket.server";
 
 const router = Router();
 
@@ -152,6 +153,22 @@ router.post("/", async (req: any, res: Response) => {
       log("Lead created:", lead.id);
     }
 
+    /* ---------- SAVE CLIENT MESSAGE ---------- */
+
+    const clientMessage = await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        sender: "USER",
+        content: text,
+      },
+    });
+
+    /* ---------- SOCKET EMIT (CLIENT MESSAGE) ---------- */
+
+    const io = getIO();
+
+    io.to(`lead_${lead.id}`).emit("new_message", clientMessage);
+
     /* ---------- AI ---------- */
 
     const aiReply = await generateAIReply({
@@ -161,6 +178,20 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     log("AI reply generated");
+
+    /* ---------- SAVE AI MESSAGE ---------- */
+
+    const aiMessage = await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        sender: "AI",
+        content: aiReply,
+      },
+    });
+
+    /* ---------- SOCKET EMIT (AI MESSAGE) ---------- */
+
+    io.to(`lead_${lead.id}`).emit("new_message", aiMessage);
 
     /* ---------- LEAD UPDATE ---------- */
 
@@ -200,9 +231,13 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     return res.sendStatus(200);
+
   } catch (error) {
+
     log("Webhook error:", error);
+
     return res.sendStatus(500);
+
   }
 });
 

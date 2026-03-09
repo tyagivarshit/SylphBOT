@@ -72,14 +72,14 @@ toast("Google login coming soon")
 
 return(
 
-<div className="min-h-screen flex items-center justify-center bg-gray-50 px-6 overflow-hidden">
+<div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 sm:px-6">
 
-<div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-6">
+<div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-6">
 
 {/* Logo */}
 
 <div className="text-center mb-4">
-<h1 className="text-xl font-bold text-gray-900">
+<h1 className="text-lg sm:text-xl font-bold text-gray-900">
 Sylph AI
 </h1>
 </div>
@@ -88,7 +88,7 @@ Sylph AI
 
 <div className="text-center mb-5">
 
-<h2 className="text-lg font-semibold text-gray-900">
+<h2 className="text-base sm:text-lg font-semibold text-gray-900">
 Welcome back
 </h2>
 
@@ -102,7 +102,7 @@ Sign in to continue to your dashboard
 
 <button
 onClick={handleGoogleLogin}
-className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2 hover:bg-gray-50 transition"
+className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
 >
 
 <FcGoogle size={18}/>
@@ -225,7 +225,7 @@ Remember me
 <button
 onClick={handleLogin}
 disabled={loading}
-className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg transition"
+className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition"
 >
 
 {loading ? "Signing in..." : "Sign in"}

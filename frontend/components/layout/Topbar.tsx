@@ -1,16 +1,29 @@
 "use client"
 
-import { Bell, Search } from "lucide-react"
+import { Bell, Search, Menu } from "lucide-react"
 
-export default function Topbar() {
+export default function Topbar({ setOpen }: any) {
 
 return(
 
-<div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
+<div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6">
+
+{/* LEFT SECTION */}
+
+<div className="flex items-center gap-3">
+
+{/* Sidebar Toggle (mobile) */}
+
+<button
+onClick={()=>setOpen?.(true)}
+className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
+>
+<Menu size={20}/>
+</button>
 
 {/* Search */}
 
-<div className="relative w-80">
+<div className="relative w-40 sm:w-64 lg:w-80">
 
 <Search
 size={16}
@@ -24,10 +37,12 @@ className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm text-
 
 </div>
 
+</div>
 
-{/* Right Section */}
 
-<div className="flex items-center gap-5">
+{/* RIGHT SECTION */}
+
+<div className="flex items-center gap-4 sm:gap-5">
 
 {/* Notifications */}
 
@@ -42,13 +57,13 @@ className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm text-
 
 {/* User */}
 
-<div className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 cursor-pointer transition">
+<div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2 rounded-lg hover:bg-gray-100 cursor-pointer transition">
 
 <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-xs font-semibold text-blue-600">
 U
 </div>
 
-<div className="flex flex-col leading-tight">
+<div className="hidden sm:flex flex-col leading-tight">
 
 <span className="text-sm font-medium text-gray-800">
 User

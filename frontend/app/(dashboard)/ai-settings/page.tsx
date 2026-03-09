@@ -11,6 +11,7 @@ export default function AISettingsPage(){
 
 const [settings,setSettings] = useState<any>(null)
 const [saving,setSaving] = useState(false)
+const [loading,setLoading] = useState(true)
 
 const clientId = "default"
 
@@ -18,15 +19,28 @@ useEffect(()=>{
 
 const loadSettings = async()=>{
 
+try{
+
 const data = await getAISettings(clientId)
 
 setSettings(data)
+
+}catch(err){
+
+console.error("Failed to load AI settings",err)
+
+}finally{
+
+setLoading(false)
+
+}
 
 }
 
 loadSettings()
 
 },[])
+
 
 const handleSave = async()=>{
 
@@ -38,6 +52,11 @@ await updateAISettings(clientId,settings)
 
 alert("Settings saved")
 
+}catch(err){
+
+console.error("Failed to save settings",err)
+alert("Failed to save settings")
+
 }finally{
 
 setSaving(false)
@@ -46,11 +65,12 @@ setSaving(false)
 
 }
 
-if(!settings){
+
+if(loading){
 
 return(
 
-<div className="p-6 text-sm text-gray-500">
+<div className="p-4 sm:p-6 text-sm text-gray-500">
 Loading AI settings...
 </div>
 
@@ -60,13 +80,13 @@ Loading AI settings...
 
 return(
 
-<div className="max-w-3xl space-y-8">
+<div className="max-w-3xl mx-auto space-y-8 p-4 sm:p-6">
 
 {/* Header */}
 
 <div>
 
-<h1 className="text-2xl font-semibold text-gray-900">
+<h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
 AI Settings
 </h1>
 
@@ -82,12 +102,12 @@ Configure how AI responds to your leads and customers
 <div className="space-y-6">
 
 <AIToneSelector
-value={settings.aiTone}
+value={settings?.aiTone}
 onChange={(v:any)=>setSettings({...settings,aiTone:v})}
 />
 
 <BusinessInfo
-value={settings.businessInfo}
+value={settings?.businessInfo}
 onChange={(v:any)=>setSettings({...settings,businessInfo:v})}
 />
 
@@ -101,7 +121,13 @@ onChange={(v:any)=>setSettings({...settings,businessInfo:v})}
 <button
 onClick={handleSave}
 disabled={saving}
-className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition"
+className={`px-6 py-2 text-sm font-medium rounded-lg transition
+
+${saving
+? "bg-gray-300 text-gray-600"
+: "bg-blue-600 hover:bg-blue-700 text-white"
+}
+`}
 >
 
 {saving ? "Saving..." : "Save Settings"}

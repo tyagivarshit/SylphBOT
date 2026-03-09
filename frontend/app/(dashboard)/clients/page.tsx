@@ -13,6 +13,7 @@ export default function ClientsPage(){
 const [clients,setClients] = useState<any[]>([])
 const [open,setOpen] = useState(false)
 const [loading,setLoading] = useState(true)
+const [search,setSearch] = useState("")
 
 useEffect(()=>{
 
@@ -39,9 +40,14 @@ loadClients()
 
 },[])
 
+
+const filtered = clients.filter((c)=>
+c.platform?.toLowerCase().includes(search.toLowerCase())
+)
+
 return(
 
-<div className="space-y-8">
+<div className="space-y-8 p-4 sm:p-6">
 
 {/* HEADER */}
 
@@ -49,7 +55,7 @@ return(
 
 <div>
 
-<h1 className="text-2xl font-semibold text-gray-900">
+<h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
 Connected Platforms
 </h1>
 
@@ -83,6 +89,8 @@ className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
 />
 
 <input
+value={search}
+onChange={(e)=>setSearch(e.target.value)}
 placeholder="Search platforms..."
 className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
 />
@@ -94,7 +102,7 @@ className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus
 
 {loading ? (
 
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-pulse">
+<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6 animate-pulse">
 
 <div className="h-32 bg-gray-200 rounded-xl"/>
 <div className="h-32 bg-gray-200 rounded-xl"/>
@@ -102,7 +110,7 @@ className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus
 
 </div>
 
-) : clients.length===0 ? (
+) : filtered.length===0 ? (
 
 <div className="text-center py-16 text-gray-500 text-sm">
 
@@ -116,9 +124,9 @@ Click "Add Platform" to connect WhatsApp or Instagram
 
 ) : (
 
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
 
-{clients.map((client)=>(
+{filtered.map((client)=>(
 
 <ClientCard
 key={client.id}
@@ -141,5 +149,4 @@ client={client}
 </div>
 
 )
-
 }

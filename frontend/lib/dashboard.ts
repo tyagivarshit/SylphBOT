@@ -17,9 +17,24 @@ export async function getDashboardStats() {
    RECENT LEADS
 ================================ */
 
-export async function getRecentLeads() {
+export async function getRecentLeads(search?: string, stage?: string) {
 
-  const res = await apiFetch("/api/dashboard/leads")
+  let url = "/api/dashboard/leads"
+  const params = new URLSearchParams()
+
+  if (search) {
+    params.append("search", search)
+  }
+
+  if (stage) {
+    params.append("stage", stage)
+  }
+
+  if (params.toString()) {
+    url += `?${params.toString()}`
+  }
+
+  const res = await apiFetch(url)
 
   return res.data
 

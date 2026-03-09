@@ -8,21 +8,21 @@ const [active, setActive] = useState(true)
 
 return(
 
-<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition flex flex-col gap-5">
+<div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm hover:shadow-md transition flex flex-col gap-4 sm:gap-5">
 
 {/* HEADER */}
 
 <div className="flex items-center justify-between">
 
-<div className="flex items-center gap-3">
+<div className="flex items-center gap-3 min-w-0">
 
-<div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 font-semibold text-sm">
+<div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 font-semibold text-sm shrink-0">
 {platform?.charAt(0)}
 </div>
 
-<div>
+<div className="min-w-0">
 
-<h3 className="text-sm font-semibold text-gray-900 capitalize">
+<h3 className="text-sm font-semibold text-gray-900 capitalize truncate">
 {platform}
 </h3>
 
@@ -35,11 +35,9 @@ Messaging platform
 </div>
 
 
-<label className="flex items-center gap-2 text-xs text-gray-600">
+<label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
 
-<span>
-Active
-</span>
+<span>Active</span>
 
 <input
 type="checkbox"
@@ -68,7 +66,7 @@ Connected automation for {platform}
 {active ? "Connected" : "Inactive"}
 </span>
 
-<button className="text-sm font-medium text-blue-600 hover:text-blue-700">
+<button className="text-sm font-medium text-blue-600 hover:text-blue-700 transition">
 Manage
 </button>
 

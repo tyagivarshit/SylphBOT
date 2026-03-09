@@ -1,116 +1,124 @@
-export default function PlanCard() {
+"use client"
 
-  return (
+const plans = [
 
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+{
+name:"RESPONDER",
+price:"₹999 / month",
+features:[
+"AI replies to WhatsApp messages",
+"AI replies to Instagram DMs",
+"AI replies to Instagram comments",
+"Basic automation"
+],
+popular:false
+},
 
-      {/* PLAN 1 */}
+{
+name:"LEADS",
+price:"₹1999 / month",
+features:[
+"Everything in Responder",
+"Lead capture system",
+"Leads dashboard",
+"Lead stage tracking",
+"Conversation history"
+],
+popular:true
+},
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-5">
+{
+name:"AUTOMATION",
+price:"₹3999 / month",
+features:[
+"Everything in Leads",
+"Meeting booking automation",
+"Calendar scheduling",
+"Follow-up automation",
+"Advanced AI workflows"
+],
+popular:false
+}
 
-        <div>
+]
 
-          <h3 className="text-lg font-semibold text-gray-900">
-            RESPONDER
-          </h3>
+export default function PlanCard(){
 
-          <p className="text-sm text-gray-500 mt-1">
-            ₹999 / month
-          </p>
+return(
 
-        </div>
+<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
 
-        <ul className="text-sm text-gray-600 space-y-2">
+{plans.map((plan)=>{
 
-          <li>✔ AI replies to WhatsApp messages</li>
-          <li>✔ AI replies to Instagram DMs</li>
-          <li>✔ AI replies to Instagram comments</li>
-          <li>✔ Basic automation</li>
+return(
 
-        </ul>
+<div
+key={plan.name}
+className={`bg-white rounded-xl p-5 sm:p-6 shadow-sm space-y-5 transition hover:shadow-md
 
-        <button className="w-full bg-blue-600 hover:bg-blue-700 transition text-white text-sm font-medium px-4 py-2 rounded-lg">
-          Choose Plan
-        </button>
+${plan.popular
+? "border-2 border-blue-600 shadow-md"
+: "border border-gray-200"
+}
+`}
+>
 
-      </div>
+{/* HEADER */}
 
+<div className="flex items-center justify-between">
 
-      {/* PLAN 2 */}
+<div>
 
-      <div className="bg-white border-2 border-blue-600 rounded-xl p-6 shadow-md space-y-5">
+<h3 className="text-base sm:text-lg font-semibold text-gray-900">
+{plan.name}
+</h3>
 
-        <div className="flex items-center justify-between">
+<p className="text-sm text-gray-500 mt-1">
+{plan.price}
+</p>
 
-          <div>
+</div>
 
-            <h3 className="text-lg font-semibold text-gray-900">
-              LEADS
-            </h3>
+{plan.popular && (
 
-            <p className="text-sm text-gray-500 mt-1">
-              ₹1999 / month
-            </p>
+<span className="bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
+POPULAR
+</span>
 
-          </div>
+)}
 
-          <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
-            POPULAR
-          </span>
-
-        </div>
-
-        <ul className="text-sm text-gray-600 space-y-2">
-
-          <li>✔ Everything in Responder</li>
-          <li>✔ Lead capture system</li>
-          <li>✔ Leads dashboard</li>
-          <li>✔ Lead stage tracking</li>
-          <li>✔ Conversation history</li>
-
-        </ul>
-
-        <button className="w-full bg-blue-600 hover:bg-blue-700 transition text-white text-sm font-medium px-4 py-2 rounded-lg">
-          Choose Plan
-        </button>
-
-      </div>
+</div>
 
 
-      {/* PLAN 3 */}
+{/* FEATURES */}
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-5">
+<ul className="text-sm text-gray-600 space-y-2">
 
-        <div>
+{plan.features.map((f,index)=>(
 
-          <h3 className="text-lg font-semibold text-gray-900">
-            AUTOMATION
-          </h3>
+<li key={index}>
+✔ {f}
+</li>
 
-          <p className="text-sm text-gray-500 mt-1">
-            ₹3999 / month
-          </p>
+))}
 
-        </div>
+</ul>
 
-        <ul className="text-sm text-gray-600 space-y-2">
 
-          <li>✔ Everything in Leads</li>
-          <li>✔ Meeting booking automation</li>
-          <li>✔ Calendar scheduling</li>
-          <li>✔ Follow-up automation</li>
-          <li>✔ Advanced AI workflows</li>
+{/* ACTION */}
 
-        </ul>
+<button className="w-full bg-blue-600 hover:bg-blue-700 transition text-white text-sm font-medium px-4 py-2 rounded-lg">
+Choose Plan
+</button>
 
-        <button className="w-full bg-blue-600 hover:bg-blue-700 transition text-white text-sm font-medium px-4 py-2 rounded-lg">
-          Choose Plan
-        </button>
+</div>
 
-      </div>
+)
 
-    </div>
+})}
 
-  )
+</div>
+
+)
 
 }

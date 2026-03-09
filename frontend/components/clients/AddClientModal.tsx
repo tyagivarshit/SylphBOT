@@ -6,17 +6,17 @@ export default function AddClientModal({ onClose }: any) {
 
 return(
 
-<div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+<div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
 
 {/* Modal */}
 
-<div className="bg-white rounded-xl shadow-2xl w-[460px] border border-gray-200">
+<div className="bg-white rounded-xl shadow-2xl w-full max-w-md border border-gray-200">
 
 {/* HEADER */}
 
-<div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+<div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-gray-200">
 
-<h2 className="text-lg font-semibold text-gray-900">
+<h2 className="text-base sm:text-lg font-semibold text-gray-900">
 Connect Platform
 </h2>
 
@@ -32,7 +32,7 @@ className="p-1.5 rounded-md hover:bg-gray-100 transition"
 
 {/* BODY */}
 
-<div className="p-6 space-y-5">
+<div className="p-4 sm:p-6 space-y-5">
 
 <p className="text-sm text-gray-600">
 Connect your messaging platforms to enable AI automation.
@@ -45,7 +45,7 @@ Connect your messaging platforms to enable AI automation.
 
 {/* WhatsApp */}
 
-<button className="w-full border border-gray-200 hover:border-green-400 hover:bg-green-50 transition p-4 rounded-lg flex items-center justify-between group">
+<button className="w-full border border-gray-200 hover:border-green-400 hover:bg-green-50 transition p-3 sm:p-4 rounded-lg flex items-center justify-between group">
 
 <div className="flex items-center gap-3">
 
@@ -55,7 +55,7 @@ W
 
 <div className="flex flex-col items-start">
 
-<span className="font-medium text-gray-900">
+<span className="font-medium text-gray-900 text-sm sm:text-base">
 WhatsApp
 </span>
 
@@ -76,7 +76,7 @@ Connect
 
 {/* Instagram */}
 
-<button className="w-full border border-gray-200 hover:border-pink-400 hover:bg-pink-50 transition p-4 rounded-lg flex items-center justify-between group">
+<button className="w-full border border-gray-200 hover:border-pink-400 hover:bg-pink-50 transition p-3 sm:p-4 rounded-lg flex items-center justify-between group">
 
 <div className="flex items-center gap-3">
 
@@ -86,7 +86,7 @@ I
 
 <div className="flex flex-col items-start">
 
-<span className="font-medium text-gray-900">
+<span className="font-medium text-gray-900 text-sm sm:text-base">
 Instagram
 </span>
 
@@ -111,7 +111,7 @@ Connect
 
 {/* FOOTER */}
 
-<div className="flex justify-end px-6 py-4 border-t border-gray-200">
+<div className="flex justify-end px-4 sm:px-6 py-4 border-t border-gray-200">
 
 <button
 onClick={onClose}

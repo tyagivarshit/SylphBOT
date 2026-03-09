@@ -13,17 +13,17 @@ const maxChars = 500
 
 return(
 
-<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-5">
+<div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm space-y-5">
 
 {/* Header */}
 
-<div className="flex items-center gap-2">
+<div className="flex items-start gap-2">
 
-<Building size={18} className="text-blue-600"/>
+<Building size={18} className="text-blue-600 mt-0.5"/>
 
-<div>
+<div className="min-w-0">
 
-<h3 className="text-lg font-semibold text-gray-900">
+<h3 className="text-base sm:text-lg font-semibold text-gray-900">
 Business Info
 </h3>
 
@@ -51,11 +51,11 @@ className="border border-gray-300 rounded-lg px-3 py-2 w-full text-sm text-gray-
 
 <div className="flex justify-between text-xs text-gray-500">
 
-<span>
+<span className="truncate">
 Used by AI to understand your services
 </span>
 
-<span>
+<span className="whitespace-nowrap">
 {value.length}/{maxChars}
 </span>
 

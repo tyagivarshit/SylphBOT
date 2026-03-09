@@ -61,6 +61,41 @@ export class DashboardController {
   }
 
   /* ======================================
+     LEADS GROWTH (NEW - FOR CHART)
+  ====================================== */
+  static async getLeadsGrowth(req: Request, res: Response) {
+
+    try {
+
+      const businessId = await getBusinessId(req);
+
+      if (!businessId) {
+        return res.status(401).json({
+          success: false,
+          message: "Unauthorized",
+        });
+      }
+
+      const growth = await DashboardService.getLeadsGrowth(businessId);
+
+      return res.status(200).json({
+        success: true,
+        data: growth,
+      });
+
+    } catch (error) {
+
+      console.error("Leads Growth Error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch leads growth",
+      });
+
+    }
+  }
+
+  /* ======================================
      LEADS LIST
   ====================================== */
   static async getLeadsList(req: Request, res: Response) {
@@ -161,6 +196,55 @@ export class DashboardController {
       return res.status(500).json({
         success: false,
         message: "Failed to fetch lead detail",
+      });
+
+    }
+  }
+
+  /* ======================================
+     UPDATE LEAD STAGE
+  ====================================== */
+  static async updateLeadStage(req: Request, res: Response) {
+
+    try {
+
+      const businessId = await getBusinessId(req);
+
+      if (!businessId) {
+        return res.status(401).json({
+          success: false,
+          message: "Unauthorized",
+        });
+      }
+
+      const id = req.params.id as string;
+      const { stage } = req.body;
+
+      if (!id || !stage) {
+        return res.status(400).json({
+          success: false,
+          message: "Lead ID and stage are required",
+        });
+      }
+
+      const lead = await DashboardService.updateLeadStage(
+        businessId,
+        id,
+        stage
+      );
+
+      return res.status(200).json({
+        success: true,
+        data: lead,
+      });
+
+    } catch (error) {
+
+      console.error("Lead Stage Update Error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update lead stage",
       });
 
     }

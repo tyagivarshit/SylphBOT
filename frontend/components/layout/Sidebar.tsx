@@ -8,7 +8,8 @@ Users,
 MessageSquare,
 CreditCard,
 Settings,
-Brain
+Brain,
+X
 } from "lucide-react"
 
 const menu = [
@@ -20,17 +21,42 @@ const menu = [
 { name: "Settings", href: "/settings", icon: Settings },
 ]
 
-export default function Sidebar(){
+export default function Sidebar({
+open,
+setOpen
+}:any){
 
 const pathname = usePathname()
 
 return(
 
-<aside className="w-64 bg-white border-r border-gray-200 min-h-screen flex flex-col">
+<>
+
+{/* Overlay (mobile) */}
+
+{open && (
+
+<div
+onClick={()=>setOpen?.(false)}
+className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+/>
+
+)}
+
+<aside
+className={`fixed lg:static z-50 top-0 left-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col transform transition-transform duration-300
+
+${open ? "translate-x-0" : "-translate-x-full"}
+
+lg:translate-x-0
+`}
+>
 
 {/* Logo */}
 
-<div className="px-6 py-6 border-b border-gray-100">
+<div className="px-6 py-6 border-b border-gray-100 flex items-center justify-between">
+
+<div>
 
 <h1 className="text-xl font-bold text-gray-900">
 Sylph AI
@@ -39,6 +65,17 @@ Sylph AI
 <p className="text-xs text-gray-500 mt-1">
 AI Automation Platform
 </p>
+
+</div>
+
+{/* Close button mobile */}
+
+<button
+onClick={()=>setOpen(false)}
+className="lg:hidden"
+>
+<X size={20}/>
+</button>
 
 </div>
 
@@ -106,6 +143,8 @@ Sylph AI v1.0
 </div>
 
 </aside>
+
+</>
 
 )
 

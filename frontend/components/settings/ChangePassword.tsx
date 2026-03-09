@@ -7,15 +7,27 @@ export default function ChangePassword() {
 
 const [show,setShow] = useState(false)
 
+const [form,setForm] = useState({
+current:"",
+password:"",
+confirm:""
+})
+
+const handleChange=(key:string,value:string)=>{
+setForm(prev=>({...prev,[key]:value}))
+}
+
+const passwordMatch = form.password && form.confirm && form.password===form.confirm
+
 return(
 
-<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-6 max-w-lg">
+<div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm space-y-6 max-w-lg">
 
 {/* Header */}
 
 <div>
 
-<h3 className="text-lg font-semibold text-gray-900">
+<h3 className="text-base sm:text-lg font-semibold text-gray-900">
 Change Password
 </h3>
 
@@ -41,6 +53,8 @@ className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
 
 <input
 type={show ? "text" : "password"}
+value={form.current}
+onChange={(e)=>handleChange("current",e.target.value)}
 placeholder="Current Password"
 className="border border-gray-300 rounded-lg pl-9 pr-10 py-2 w-full text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
 />
@@ -69,6 +83,8 @@ className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
 
 <input
 type="password"
+value={form.password}
+onChange={(e)=>handleChange("password",e.target.value)}
 placeholder="New Password"
 className="border border-gray-300 rounded-lg pl-9 py-2 w-full text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
 />
@@ -87,11 +103,23 @@ className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
 
 <input
 type="password"
+value={form.confirm}
+onChange={(e)=>handleChange("confirm",e.target.value)}
 placeholder="Confirm New Password"
 className="border border-gray-300 rounded-lg pl-9 py-2 w-full text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
 />
 
 </div>
+
+{/* Match Warning */}
+
+{form.confirm && !passwordMatch && (
+
+<p className="text-xs text-red-500">
+Passwords do not match
+</p>
+
+)}
 
 </div>
 
@@ -105,10 +133,11 @@ Use at least 8 characters including letters and numbers.
 
 {/* Button */}
 
-<button className="bg-blue-600 hover:bg-blue-700 transition text-white text-sm font-medium px-5 py-2 rounded-lg">
-
+<button
+disabled={!passwordMatch}
+className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 transition text-white text-sm font-medium px-5 py-2 rounded-lg"
+>
 Update Password
-
 </button>
 
 </div>

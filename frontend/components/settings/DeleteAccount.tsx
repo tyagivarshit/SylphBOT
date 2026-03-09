@@ -12,13 +12,13 @@ const canDelete = confirm && text === "DELETE"
 
 return(
 
-<div className="bg-white border border-red-200 rounded-xl p-6 shadow-sm space-y-6 max-w-lg">
+<div className="bg-white border border-red-200 rounded-xl p-4 sm:p-6 shadow-sm space-y-6 max-w-lg">
 
 {/* Header */}
 
 <div className="flex items-center gap-3">
 
-<div className="w-9 h-9 rounded-lg bg-red-100 flex items-center justify-center">
+<div className="w-9 h-9 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
 
 <AlertTriangle size={18} className="text-red-600"/>
 
@@ -26,7 +26,7 @@ return(
 
 <div>
 
-<h3 className="text-lg font-semibold text-red-600">
+<h3 className="text-base sm:text-lg font-semibold text-red-600">
 Delete Account
 </h3>
 
@@ -49,7 +49,7 @@ and automation settings will be permanently deleted.
 
 {/* Checkbox confirm */}
 
-<label className="flex items-center gap-2 text-sm text-gray-600">
+<label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
 
 <input
 type="checkbox"
@@ -73,7 +73,7 @@ Type <span className="font-semibold text-gray-700">DELETE</span> to confirm
 
 <input
 value={text}
-onChange={(e)=>setText(e.target.value)}
+onChange={(e)=>setText(e.target.value.toUpperCase())}
 placeholder="DELETE"
 className="border border-gray-300 rounded-lg px-3 py-2 w-full text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
 />
@@ -86,10 +86,12 @@ className="border border-gray-300 rounded-lg px-3 py-2 w-full text-sm focus:outl
 <button
 disabled={!canDelete}
 className={`px-4 py-2 rounded-lg text-sm font-medium transition
+
 ${canDelete
 ? "bg-red-600 hover:bg-red-700 text-white"
 : "bg-gray-200 text-gray-500 cursor-not-allowed"
-}`}
+}
+`}
 >
 
 Delete My Account

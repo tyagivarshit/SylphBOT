@@ -8,15 +8,34 @@ export default function AutomationToggle() {
 const [autoReply, setAutoReply] = useState(true)
 const [followup, setFollowup] = useState(true)
 
+const Toggle = ({value,onToggle}:any)=>(
+<button
+role="switch"
+aria-checked={value}
+onClick={onToggle}
+className={`relative w-11 h-6 rounded-full transition ${
+value ? "bg-blue-600" : "bg-gray-300"
+}`}
+>
+
+<span
+className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition ${
+value ? "translate-x-5" : ""
+}`}
+></span>
+
+</button>
+)
+
 return(
 
-<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-6">
+<div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm space-y-6">
 
 {/* Header */}
 
 <div>
 
-<h3 className="text-lg font-semibold text-gray-900">
+<h3 className="text-base sm:text-lg font-semibold text-gray-900">
 Automation
 </h3>
 
@@ -29,9 +48,9 @@ Control how AI automation responds to your leads
 
 {/* Auto Reply */}
 
-<div className="flex items-center justify-between">
+<div className="flex items-center justify-between gap-4">
 
-<div className="flex items-start gap-3">
+<div className="flex items-start gap-3 min-w-0">
 
 <Bot size={18} className="text-blue-600 mt-0.5"/>
 
@@ -49,29 +68,19 @@ Automatically reply to incoming messages
 
 </div>
 
-<button
-onClick={()=>setAutoReply(!autoReply)}
-className={`relative w-11 h-6 rounded-full transition
-${autoReply ? "bg-blue-600" : "bg-gray-300"}
-`}
->
-
-<span
-className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition
-${autoReply ? "translate-x-5" : ""}
-`}
-></span>
-
-</button>
+<Toggle
+value={autoReply}
+onToggle={()=>setAutoReply(!autoReply)}
+/>
 
 </div>
 
 
 {/* Follow-up */}
 
-<div className="flex items-center justify-between">
+<div className="flex items-center justify-between gap-4">
 
-<div className="flex items-start gap-3">
+<div className="flex items-start gap-3 min-w-0">
 
 <Send size={18} className="text-blue-600 mt-0.5"/>
 
@@ -89,20 +98,10 @@ Send automatic follow-ups to inactive leads
 
 </div>
 
-<button
-onClick={()=>setFollowup(!followup)}
-className={`relative w-11 h-6 rounded-full transition
-${followup ? "bg-blue-600" : "bg-gray-300"}
-`}
->
-
-<span
-className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition
-${followup ? "translate-x-5" : ""}
-`}
-></span>
-
-</button>
+<Toggle
+value={followup}
+onToggle={()=>setFollowup(!followup)}
+/>
 
 </div>
 

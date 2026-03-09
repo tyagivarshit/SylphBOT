@@ -5,13 +5,58 @@ import { createCheckout } from "@/lib/billing"
 
 export default function BillingPage(){
 
-const [loading,setLoading] = useState(false)
+const [loading,setLoading] = useState<string | null>(null)
+
+const plans = [
+
+{
+id:"RESPONDER",
+name:"Responder",
+price:"₹999 / month",
+features:[
+"Reply to WhatsApp messages",
+"Reply to Instagram DMs",
+"Reply to Instagram comments",
+"Basic automation"
+],
+popular:false
+},
+
+{
+id:"LEADS",
+name:"Leads",
+price:"₹1999 / month",
+features:[
+"Everything in Responder",
+"Lead capture system",
+"Leads dashboard",
+"Lead stage tracking",
+"Conversation history"
+],
+popular:true
+},
+
+{
+id:"AUTOMATION",
+name:"Automation",
+price:"₹3999 / month",
+features:[
+"Everything in Leads",
+"Meeting booking automation",
+"Calendar scheduling",
+"Follow-up automation",
+"Advanced AI workflows"
+],
+popular:false
+}
+
+]
 
 const handleUpgrade = async(plan:string)=>{
 
 try{
 
-setLoading(true)
+setLoading(plan)
 
 const res = await createCheckout(plan)
 
@@ -25,7 +70,7 @@ console.error("Checkout error",err)
 
 }finally{
 
-setLoading(false)
+setLoading(null)
 
 }
 
@@ -33,156 +78,83 @@ setLoading(false)
 
 return(
 
-<div className="space-y-10">
+<div className="space-y-10 p-4 sm:p-6">
 
-<h1 className="text-2xl font-semibold text-gray-900">
+<h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
 Billing
 </h1>
 
 
 {/* PLANS */}
 
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
 
+{plans.map((plan)=>{
 
-{/* RESPONDER PLAN */}
+return(
 
-<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
+<div
+key={plan.id}
+className={`bg-white rounded-xl p-5 sm:p-6 flex flex-col justify-between relative transition hover:shadow-md
 
-<div className="space-y-4">
-
-<div>
-
-<h2 className="text-lg font-semibold text-gray-900">
-Responder
-</h2>
-
-<p className="text-sm text-gray-500">
-₹999 / month
-</p>
-
-</div>
-
-<ul className="text-sm text-gray-600 space-y-2">
-
-<li>✔ Reply to WhatsApp messages</li>
-<li>✔ Reply to Instagram DMs</li>
-<li>✔ Reply to Instagram comments</li>
-<li>✔ Basic automation</li>
-
-</ul>
-
-</div>
-
-<button
-onClick={()=>handleUpgrade("RESPONDER")}
-disabled={loading}
-className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition"
+${plan.popular
+? "border-2 border-blue-600 shadow-md"
+: "border border-gray-200 shadow-sm"
+}
+`}
 >
 
-{loading ? "Processing..." : "Choose Plan"}
-
-</button>
-
-</div>
-
-
-
-{/* LEADS PLAN */}
-
-<div className="bg-white border-2 border-blue-600 rounded-xl p-6 shadow-md flex flex-col justify-between relative">
+{plan.popular && (
 
 <span className="absolute top-4 right-4 bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
 POPULAR
 </span>
 
+)}
+
 <div className="space-y-4">
 
 <div>
 
-<h2 className="text-lg font-semibold text-gray-900">
-Leads
+<h2 className="text-base sm:text-lg font-semibold text-gray-900">
+{plan.name}
 </h2>
 
 <p className="text-sm text-gray-500">
-₹1999 / month
+{plan.price}
 </p>
 
 </div>
 
 <ul className="text-sm text-gray-600 space-y-2">
 
-<li>✔ Everything in Responder</li>
-<li>✔ Lead capture system</li>
-<li>✔ Leads dashboard</li>
-<li>✔ Lead stage tracking</li>
-<li>✔ Conversation history</li>
+{plan.features.map((f,index)=>(
+<li key={index}>✔ {f}</li>
+))}
 
 </ul>
 
 </div>
 
 <button
-onClick={()=>handleUpgrade("LEADS")}
-disabled={loading}
+onClick={()=>handleUpgrade(plan.id)}
+disabled={loading===plan.id}
 className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition"
 >
 
-{loading ? "Processing..." : "Choose Plan"}
+{loading===plan.id ? "Processing..." : "Choose Plan"}
 
 </button>
 
 </div>
 
+)
 
-
-{/* AUTOMATION PLAN */}
-
-<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm flex flex-col justify-between">
-
-<div className="space-y-4">
-
-<div>
-
-<h2 className="text-lg font-semibold text-gray-900">
-Automation
-</h2>
-
-<p className="text-sm text-gray-500">
-₹3999 / month
-</p>
-
-</div>
-
-<ul className="text-sm text-gray-600 space-y-2">
-
-<li>✔ Everything in Leads</li>
-<li>✔ Meeting booking automation</li>
-<li>✔ Calendar scheduling</li>
-<li>✔ Follow-up automation</li>
-<li>✔ Advanced AI workflows</li>
-
-</ul>
-
-</div>
-
-<button
-onClick={()=>handleUpgrade("AUTOMATION")}
-disabled={loading}
-className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition"
->
-
-{loading ? "Processing..." : "Choose Plan"}
-
-</button>
-
-</div>
-
+})}
 
 </div>
 
 </div>
 
 )
-
 }

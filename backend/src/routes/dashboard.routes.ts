@@ -10,4 +10,7 @@ router.get("/stats", DashboardController.getStats);
 router.get("/leads", DashboardController.getLeadsList);
 router.get("/leads/:id", DashboardController.getLeadDetail);
 
+// NEW
+router.patch("/leads/:id/stage", DashboardController.updateLeadStage);
+
 export default router;

@@ -1,10 +1,153 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import { X, User } from "lucide-react"
+import { getLeadDetail } from "@/lib/dashboard"
+import { apiFetch } from "@/lib/apiClient"
+import { socket } from "@/lib/socket"
 
-export default function LeadDrawer({ lead, onClose }: any) {
+export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
 
-  return (
+  const [messages,setMessages] = useState<any[]>([])
+  const [stage,setStage] = useState(lead?.stage)
+  const [typing,setTyping] = useState(false)
+
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  /* ==============================
+     AUTO SCROLL
+  ============================== */
+
+  useEffect(()=>{
+
+    bottomRef.current?.scrollIntoView({
+      behavior:"smooth"
+    })
+
+  },[messages])
+
+  /* ==============================
+     LOAD LEAD DETAIL
+  ============================== */
+
+  useEffect(()=>{
+
+    const loadLead = async()=>{
+
+      try{
+
+        const res = await getLeadDetail(lead.id)
+
+        setMessages(res?.data?.messages || [])
+
+      }catch(err){
+
+        console.error("Lead detail load error",err)
+
+      }
+
+    }
+
+    if(lead?.id){
+
+      loadLead()
+
+      setStage(lead.stage)
+
+    }
+
+  },[lead])
+
+  /* ==============================
+     SOCKET REALTIME
+  ============================== */
+
+  useEffect(()=>{
+
+    if(!lead?.id) return
+
+    socket.emit("join_conversation",lead.id)
+
+    socket.on("new_message",(msg:any)=>{
+
+      if(msg.leadId === lead.id){
+
+        setMessages((prev)=>[...prev,msg])
+
+      }
+
+    })
+
+    socket.on("typing",(leadId:string)=>{
+
+      if(leadId === lead.id){
+
+        setTyping(true)
+
+      }
+
+    })
+
+    socket.on("stop_typing",(leadId:string)=>{
+
+      if(leadId === lead.id){
+
+        setTyping(false)
+
+      }
+
+    })
+
+    return ()=>{
+
+      socket.off("new_message")
+      socket.off("typing")
+      socket.off("stop_typing")
+
+    }
+
+  },[lead])
+
+
+  /* ==============================
+     UPDATE STAGE
+  ============================== */
+
+  const updateStage = async(newStage:string)=>{
+
+    try{
+
+      setStage(newStage)
+
+      await apiFetch(`/api/dashboard/leads/${lead.id}/stage`,{
+        method:"PATCH",
+        body:JSON.stringify({
+          stage:newStage
+        }),
+        headers:{
+          "Content-Type":"application/json"
+        }
+      })
+
+      if(onStageUpdate){
+        onStageUpdate(lead.id,newStage)
+      }
+
+    }catch(err){
+
+      console.error("Stage update error",err)
+
+    }
+
+  }
+
+  /* ==============================
+     MESSAGE RENDER
+  ============================== */
+
+  let lastDate = ""
+
+  return(
 
     <div className="fixed inset-0 z-50 flex justify-end">
 
@@ -17,21 +160,21 @@ export default function LeadDrawer({ lead, onClose }: any) {
 
       {/* Drawer */}
 
-      <div className="relative w-96 max-w-full h-full bg-white border-l border-gray-200 shadow-2xl flex flex-col animate-slideIn">
+      <div className="relative w-full sm:w-[420px] h-full bg-white border-l border-gray-200 shadow-2xl flex flex-col">
 
         {/* Header */}
 
-        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-200">
 
           <div className="flex items-center gap-3">
 
-            <div className="w-10 h-10 flex items-center justify-center rounded-full bg-blue-100 text-blue-600">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-blue-100 text-blue-600">
               <User size={18}/>
             </div>
 
             <div>
 
-              <h2 className="text-base font-semibold text-gray-900">
+              <h2 className="text-sm sm:text-base font-semibold text-gray-900">
                 {lead?.name || "Lead"}
               </h2>
 
@@ -55,58 +198,105 @@ export default function LeadDrawer({ lead, onClose }: any) {
 
         {/* Messages */}
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
 
-          {/* Lead message */}
+          {messages.length > 0 ? (
 
-          <div className="flex">
+            messages.map((msg:any)=>{
 
-            <div className="bg-gray-100 text-gray-800 px-4 py-2 rounded-xl text-sm max-w-[75%]">
+              const isUser = msg.sender === "USER"
 
-              Hi, I want pricing details
+              const date = new Date(msg.createdAt).toDateString()
 
-              <div className="text-[10px] text-gray-400 mt-1">
-                10:21 AM
-              </div>
+              const showDate = date !== lastDate
 
+              lastDate = date
+
+              return(
+
+                <div key={msg.id}>
+
+                  {showDate && (
+
+                    <div className="text-center text-xs text-gray-400 my-2">
+                      {date}
+                    </div>
+
+                  )}
+
+                  <div
+                    className={`flex ${isUser ? "" : "justify-end"}`}
+                  >
+
+                    <div
+                      className={`px-4 py-2 rounded-xl text-sm max-w-[85%] sm:max-w-[75%] break-words ${
+                        isUser
+                          ? "bg-gray-100 text-gray-800"
+                          : "bg-blue-600 text-white"
+                      }`}
+                    >
+
+                      {msg.content}
+
+                      <div
+                        className={`text-[10px] mt-1 ${
+                          isUser
+                            ? "text-gray-400"
+                            : "text-blue-200 text-right"
+                        }`}
+                      >
+                        {new Date(msg.createdAt).toLocaleTimeString()}
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              )
+
+            })
+
+          ) : (
+
+            <div className="text-sm text-gray-500">
+              No conversation yet
             </div>
 
-          </div>
+          )}
 
+          {typing && (
 
-          {/* AI reply */}
-
-          <div className="flex justify-end">
-
-            <div className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm max-w-[75%]">
-
-              Sure! I'll send it.
-
-              <div className="text-[10px] text-blue-200 mt-1 text-right">
-                10:22 AM
-              </div>
-
+            <div className="text-xs text-gray-500">
+              typing...
             </div>
 
-          </div>
+          )}
+
+          <div ref={bottomRef}/>
 
         </div>
 
 
         {/* Stage Section */}
 
-        <div className="border-t border-gray-200 p-6">
+        <div className="border-t border-gray-200 p-4 sm:p-6">
 
-          <label className="text-sm font-medium text-gray-800">
+          <label className="text-sm font-semibold text-gray-800">
             Lead Stage
           </label>
 
-          <select className="border border-gray-300 w-full rounded-lg px-3 py-2 mt-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <select
+            value={stage}
+            onChange={(e)=>updateStage(e.target.value)}
+            className="border-2 border-gray-500 bg-white text-gray-900 w-full rounded-lg px-3 py-2 mt-2 text-sm font-medium shadow-sm hover:border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
 
-            <option>NEW</option>
-            <option>QUALIFIED</option>
-            <option>WON</option>
-            <option>LOST</option>
+            <option value="NEW">NEW</option>
+            <option value="QUALIFIED">QUALIFIED</option>
+            <option value="WON">WON</option>
+            <option value="LOST">LOST</option>
 
           </select>
 

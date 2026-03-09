@@ -10,17 +10,17 @@ const maxChars = 800
 
 return(
 
-<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-5">
+<div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm space-y-5">
 
 {/* Header */}
 
-<div className="flex items-center gap-2">
+<div className="flex items-start gap-2">
 
-<Sparkles size={18} className="text-blue-600"/>
+<Sparkles size={18} className="text-blue-600 mt-0.5"/>
 
-<div>
+<div className="min-w-0">
 
-<h3 className="text-lg font-semibold text-gray-900">
+<h3 className="text-base sm:text-lg font-semibold text-gray-900">
 Prompt Templates
 </h3>
 
@@ -64,11 +64,11 @@ className="border border-gray-300 rounded-lg px-3 py-3 w-full h-32 text-sm text-
 
 <div className="flex justify-between text-xs text-gray-500">
 
-<span>
+<span className="truncate">
 Used to guide AI behavior
 </span>
 
-<span>
+<span className="whitespace-nowrap">
 {prompt.length}/{maxChars}
 </span>
 
@@ -82,9 +82,7 @@ Used to guide AI behavior
 <div className="flex justify-end">
 
 <button className="bg-blue-600 hover:bg-blue-700 transition text-white text-sm font-medium px-4 py-2 rounded-lg">
-
 Save Prompt
-
 </button>
 
 </div>

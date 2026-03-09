@@ -5,6 +5,7 @@ import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "../services/ai.service";
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
+import { getIO } from "../sockets/socket.server";
 
 const router = Router();
 
@@ -57,7 +58,6 @@ router.post("/", async (req: any, res: Response) => {
   try {
     console.log("🔥 WEBHOOK HIT");
 
-    // Skip signature verification in development
     if (process.env.NODE_ENV === "production") {
       if (!verifySignature(req)) {
         console.log("❌ Signature verification failed");
@@ -88,7 +88,7 @@ router.post("/", async (req: any, res: Response) => {
 
     /*
     ---------------------------------------------------
-    🏢 IDENTIFY CLIENT (MULTI-TENANT SAFE)
+    🏢 IDENTIFY CLIENT
     ---------------------------------------------------
     */
     const client = await prisma.client.findFirst({
@@ -131,6 +131,28 @@ router.post("/", async (req: any, res: Response) => {
 
     /*
     ---------------------------------------------------
+    📝 STORE USER MESSAGE
+    ---------------------------------------------------
+    */
+    const userMessage = await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        content: text,
+        sender: "USER",
+      },
+    });
+
+    /*
+    ---------------------------------------------------
+    ⚡ REALTIME EMIT (USER MESSAGE)
+    ---------------------------------------------------
+    */
+    const io = getIO();
+
+    io.to(`lead_${lead.id}`).emit("new_message", userMessage);
+
+    /*
+    ---------------------------------------------------
     🤖 GENERATE AI REPLY
     ---------------------------------------------------
     */
@@ -141,6 +163,26 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     console.log("🤖 AI REPLY:", aiReply);
+
+    /*
+    ---------------------------------------------------
+    📝 STORE AI MESSAGE
+    ---------------------------------------------------
+    */
+    const aiMessage = await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        content: aiReply,
+        sender: "AI",
+      },
+    });
+
+    /*
+    ---------------------------------------------------
+    ⚡ REALTIME EMIT (AI MESSAGE)
+    ---------------------------------------------------
+    */
+    io.to(`lead_${lead.id}`).emit("new_message", aiMessage);
 
     /*
     ---------------------------------------------------
@@ -177,32 +219,6 @@ router.post("/", async (req: any, res: Response) => {
 
     /*
     ---------------------------------------------------
-    📝 STORE USER MESSAGE
-    ---------------------------------------------------
-    */
-    await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        content: text,
-        sender: "USER",
-      },
-    });
-
-    /*
-    ---------------------------------------------------
-    📝 STORE AI MESSAGE
-    ---------------------------------------------------
-    */
-    await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        content: aiReply,
-        sender: "AI",
-      },
-    });
-
-    /*
-    ---------------------------------------------------
     ⏱ UPDATE LEAD STATE
     ---------------------------------------------------
     */
@@ -223,6 +239,7 @@ router.post("/", async (req: any, res: Response) => {
     await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);
+
   } catch (error) {
     console.error("🚨 WHATSAPP WEBHOOK ERROR:", error);
     return res.sendStatus(500);

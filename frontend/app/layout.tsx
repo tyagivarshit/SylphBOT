@@ -22,6 +22,14 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${roboto.className} bg-slate-100 text-gray-900 h-screen`}>
 
+        {/* 🔵 FACEBOOK SDK SCRIPT (WHATSAPP CONNECT) */}
+        <script
+          async
+          defer
+          crossOrigin="anonymous"
+          src="https://connect.facebook.net/en_US/sdk.js"
+        />
+
         <Toaster
           position="top-right"
           toastOptions={{

@@ -27,7 +27,6 @@ const checkAndIncrementUsage = async (businessId: string) => {
     throw new Error("Inactive subscription");
   }
 
-  /* 🔥 TRIAL EXPIRY CHECK */
   if (
     subscription.plan.name === "FREE_TRIAL" &&
     subscription.currentPeriodEnd &&
@@ -62,11 +61,11 @@ const checkAndIncrementUsage = async (businessId: string) => {
   if (!subscription.plan) {
     throw new Error("Subscription plan not found");
   }
+
   if (usage.aiCallsUsed >= subscription.plan.maxAiCalls) {
     throw new Error("Plan limit reached");
   }
 
-  /* 🔥 Atomic increment */
   await prisma.usage.update({
     where: {
       businessId_month_year: {
@@ -103,6 +102,7 @@ const extractLeadData = async (leadId: string, message: string) => {
   const emailMatch = message.match(
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i
   );
+
   const phoneMatch = message.match(/\b\d{10,15}\b/);
 
   await prisma.lead.update({
@@ -138,8 +138,33 @@ export const generateAIReply = async ({
   leadId,
   message,
 }: AIInput) => {
+
+  console.log("AI SERVICE START", { businessId, leadId, message });
+
   try {
-    // ✅ Plan + usage enforcement
+
+    /* -------- SAVE USER MESSAGE -------- */
+
+    try {
+
+      const savedUser = await prisma.message.create({
+        data: {
+          leadId,
+          content: message,
+          sender: "USER",
+        },
+      });
+
+      console.log("USER MESSAGE SAVED:", savedUser.id);
+
+    } catch (err) {
+
+      console.error("USER MESSAGE SAVE FAILED:", err);
+
+    }
+
+    /* -------- PLAN CHECK -------- */
+
     await checkAndIncrementUsage(businessId);
 
     const client = await prisma.client.findFirst({
@@ -180,6 +205,8 @@ Rules:
       { role: "user", content: message },
     ];
 
+    console.log("CALLING GROQ AI");
+
     const response = await openai.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: prompt as any,
@@ -189,30 +216,36 @@ Rules:
       response.choices?.[0]?.message?.content?.trim() ||
       "Thanks for reaching out!";
 
-    /* 🔥 Save messages safely */
-    await prisma.$transaction([
-      prisma.message.create({
-        data: {
-          leadId,
-          content: message,
-          sender: "USER",
-        },
-      }),
-      prisma.message.create({
+    console.log("AI REPLY:", reply);
+
+    /* -------- SAVE AI MESSAGE -------- */
+
+    try {
+
+      const savedAI = await prisma.message.create({
         data: {
           leadId,
           content: reply,
           sender: "AI",
         },
-      }),
-    ]);
+      });
+
+      console.log("AI MESSAGE SAVED:", savedAI.id);
+
+    } catch (err) {
+
+      console.error("AI MESSAGE SAVE FAILED:", err);
+
+    }
 
     await extractLeadData(leadId, message);
     await updateStage(leadId, message);
 
     return reply;
+
   } catch (error: any) {
-    console.error("AI Error:", error.message);
+
+    console.error("AI SERVICE ERROR:", error);
 
     if (error.message === "Trial expired. Please upgrade to continue.") {
       return "Your 7-day trial has expired. Please upgrade to continue using our AI services.";
@@ -220,6 +253,10 @@ Rules:
 
     if (error.message === "Plan limit reached") {
       return "You have reached your monthly usage limit. Please upgrade your plan.";
+    }
+
+    if (error.message === "Inactive subscription") {
+      return "Your subscription is inactive. Please upgrade your plan.";
     }
 
     return "Thanks for your message. Our team will respond shortly.";

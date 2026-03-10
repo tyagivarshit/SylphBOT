@@ -50,10 +50,11 @@ const verifySignature = (req: any): boolean => {
 };
 
 /* ---------------------------------------------------
-WEBHOOK VERIFY (META SETUP)
+WEBHOOK VERIFY
 --------------------------------------------------- */
 
 router.get("/", (req: Request, res: Response) => {
+
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
@@ -66,6 +67,7 @@ router.get("/", (req: Request, res: Response) => {
   log("Webhook verification failed");
 
   return res.sendStatus(403);
+
 });
 
 /* ---------------------------------------------------
@@ -73,7 +75,9 @@ INSTAGRAM MESSAGE HANDLER
 --------------------------------------------------- */
 
 router.post("/", async (req: any, res: Response) => {
+
   try {
+
     log("Webhook hit");
 
     const body = parseBody(req);
@@ -100,7 +104,7 @@ router.post("/", async (req: any, res: Response) => {
       return res.sendStatus(200);
     }
 
-    const senderId = messaging.sender?.id;
+    const senderId = String(messaging.sender?.id);
     const pageId = String(entry.id);
     const text = messaging.message?.text;
 
@@ -120,7 +124,7 @@ router.post("/", async (req: any, res: Response) => {
     const client = await prisma.client.findFirst({
       where: {
         platform: "INSTAGRAM",
-        pageId,
+        pageId: pageId,
         isActive: true,
       },
     });
@@ -140,6 +144,7 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     if (!lead) {
+
       lead = await prisma.lead.create({
         data: {
           businessId: client.businessId,
@@ -151,26 +156,13 @@ router.post("/", async (req: any, res: Response) => {
       });
 
       log("Lead created:", lead.id);
+
     }
-
-    /* ---------- SAVE CLIENT MESSAGE ---------- */
-
-    const clientMessage = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        sender: "USER",
-        content: text,
-      },
-    });
-
-    /* ---------- SOCKET EMIT (CLIENT MESSAGE) ---------- */
 
     const io = getIO();
 
-    io.to(`lead_${lead.id}`).emit("new_message", clientMessage);
-
     /* ---------- AI ---------- */
-
+    log("Calling AI with lead:", lead.id);
     const aiReply = await generateAIReply({
       businessId: client.businessId,
       leadId: lead.id,
@@ -179,19 +171,17 @@ router.post("/", async (req: any, res: Response) => {
 
     log("AI reply generated");
 
-    /* ---------- SAVE AI MESSAGE ---------- */
+    /* ---------- SOCKET EMIT ---------- */
 
-    const aiMessage = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        sender: "AI",
-        content: aiReply,
-      },
+    io.to(`lead_${lead.id}`).emit("new_message", {
+      sender: "USER",
+      content: text
     });
 
-    /* ---------- SOCKET EMIT (AI MESSAGE) ---------- */
-
-    io.to(`lead_${lead.id}`).emit("new_message", aiMessage);
+    io.to(`lead_${lead.id}`).emit("new_message", {
+      sender: "AI",
+      content: aiReply
+    });
 
     /* ---------- LEAD UPDATE ---------- */
 
@@ -211,6 +201,7 @@ router.post("/", async (req: any, res: Response) => {
     const accessToken = decrypt(client.accessToken);
 
     try {
+
       await axios.post(
         "https://graph.facebook.com/v19.0/me/messages",
         {
@@ -226,8 +217,11 @@ router.post("/", async (req: any, res: Response) => {
       );
 
       log("Message sent to Instagram");
+
     } catch (err: any) {
+
       log("Instagram send error:", err.response?.data || err.message);
+
     }
 
     return res.sendStatus(200);
@@ -239,6 +233,7 @@ router.post("/", async (req: any, res: Response) => {
     return res.sendStatus(500);
 
   }
+
 });
 
 export default router;

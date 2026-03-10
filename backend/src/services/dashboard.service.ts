@@ -16,16 +16,23 @@ export class DashboardService {
       businessId
     };
 
+    const subscription = await prisma.subscription.findUnique({
+      where: { businessId },
+      include: { plan: true }
+    });
+
     const [
       totalLeads,
       leadsToday,
       leadsThisMonth,
-      newLeads,
-      qualifiedLeads,
-      wonLeads
+      messagesToday,
+      aiCallsUsed,
+      qualifiedLeads
     ] = await Promise.all([
 
-      prisma.lead.count({ where: baseFilter }),
+      prisma.lead.count({
+        where: baseFilter
+      }),
 
       prisma.lead.count({
         where: {
@@ -41,10 +48,18 @@ export class DashboardService {
         }
       }),
 
-      prisma.lead.count({
+      prisma.message.count({
         where: {
-          ...baseFilter,
-          stage: "NEW"
+          lead: { businessId },
+          sender: "USER", // CHANGED
+          createdAt: { gte: todayStart }
+        }
+      }),
+
+      prisma.message.count({
+        where: {
+          lead: { businessId },
+          sender: "USER" // CHANGED
         }
       }),
 
@@ -53,36 +68,28 @@ export class DashboardService {
           ...baseFilter,
           stage: "QUALIFIED"
         }
-      }),
-
-      prisma.lead.count({
-        where: {
-          ...baseFilter,
-          stage: "WON"
-        }
       })
 
     ]);
 
-    const [chartData, activity] = await Promise.all([
+    const [chartData, messagesChart, activity] = await Promise.all([
       this.getLeadsGrowth(businessId),
+      this.getMessagesGrowth(businessId),
       this.getRecentActivity(businessId)
     ]);
 
     return {
       totalLeads,
       leadsToday,
-      leadsThisMonth,
-      newLeads,
+      messagesToday,
+      aiCallsUsed,
+      aiCallsLimit: subscription?.plan?.maxAiCalls || 0,
       qualifiedLeads,
-      wonLeads,
-      aiCallsUsed: 0,
-      aiCallsLimit: 1000,
       chartData,
+      messagesChart,
       recentActivity: activity
     };
   }
-
 
   // ======================================
   // LEADS LIST
@@ -155,7 +162,6 @@ export class DashboardService {
     };
   }
 
-
   // ======================================
   // LEAD DETAIL
   // ======================================
@@ -174,7 +180,6 @@ export class DashboardService {
 
     return lead;
   }
-
 
   // ======================================
   // UPDATE LEAD STAGE
@@ -197,9 +202,8 @@ export class DashboardService {
     });
   }
 
-
   // ======================================
-  // LEADS GROWTH (CHART)
+  // LEADS GROWTH
   // ======================================
   static async getLeadsGrowth(businessId: string) {
 
@@ -237,6 +241,44 @@ export class DashboardService {
       }));
   }
 
+  // ======================================
+  // MESSAGES GROWTH
+  // ======================================
+  static async getMessagesGrowth(businessId: string) {
+
+    const today = new Date();
+    const startDate = subDays(today, 6);
+
+    const messages = await prisma.message.findMany({
+      where: {
+        lead: { businessId },
+        createdAt: { gte: startDate }
+      },
+      select: { createdAt: true }
+    });
+
+    const map: Record<string, number> = {};
+
+    for (let i = 0; i < 7; i++) {
+      const day = format(subDays(today, i), "EEE");
+      map[day] = 0;
+    }
+
+    messages.forEach((msg) => {
+
+      const day = format(msg.createdAt, "EEE");
+
+      if (map[day] !== undefined) map[day]++;
+
+    });
+
+    return Object.keys(map)
+      .reverse()
+      .map((day) => ({
+        date: day,
+        messages: map[day]
+      }));
+  }
 
   // ======================================
   // RECENT ACTIVITY
@@ -263,9 +305,7 @@ export class DashboardService {
     return leads.map((lead) => ({
 
       id: lead.id,
-
       text: `New lead from ${lead.platform} (${lead.name || "Unknown"})`,
-
       time: lead.createdAt
 
     }));

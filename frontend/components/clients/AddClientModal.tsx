@@ -1,14 +1,117 @@
 "use client"
 
+import { useEffect } from "react"
 import { X } from "lucide-react"
+import { apiFetch } from "@/lib/apiClient"
+
+declare global {
+  interface Window {
+    FB:any
+    fbAsyncInit:any
+  }
+}
 
 export default function AddClientModal({ onClose }: any) {
+
+const APP_ID = process.env.NEXT_PUBLIC_META_APP_ID
+const CONFIG_ID = process.env.NEXT_PUBLIC_WHATSAPP_CONFIG_ID
+
+/* -------------------------------
+LOAD FACEBOOK SDK
+-------------------------------- */
+
+useEffect(()=>{
+
+  window.fbAsyncInit = function () {
+
+    window.FB.init({
+      appId: APP_ID,
+      cookie: true,
+      xfbml: true,
+      version: "v19.0",
+    })
+
+  }
+
+},[])
+
+/* -------------------------------
+WHATSAPP CONNECT
+-------------------------------- */
+
+const connectWhatsApp = () => {
+
+  window.FB.login(
+
+    async function(response:any){
+
+      if(!response.authResponse){
+        return
+      }
+
+      try{
+
+        const accessToken = response.authResponse.accessToken
+
+        /* SEND TOKEN TO BACKEND */
+
+        await apiFetch("/api/clients",{
+          method:"POST",
+          body:JSON.stringify({
+            platform:"WHATSAPP",
+            accessToken
+          })
+        })
+
+        alert("WhatsApp connected successfully")
+
+        onClose()
+
+      }catch(err){
+
+        console.error("WhatsApp connect error",err)
+
+      }
+
+    },
+
+    {
+      config_id: CONFIG_ID,
+      response_type: "code",
+      override_default_response_type: true,
+      extras:{
+        setup:{
+          channel:"WHATSAPP"
+        }
+      }
+    }
+
+  )
+
+}
+
+/* -------------------------------
+INSTAGRAM CONNECT
+-------------------------------- */
+
+const connectInstagram = () => {
+
+  const url = `https://www.facebook.com/v19.0/dialog/oauth?
+client_id=${APP_ID}
+&redirect_uri=${window.location.origin}/integrations/meta/callback
+&scope=pages_show_list,pages_messaging,instagram_basic,instagram_manage_messages`
+
+  window.location.href = url
+
+}
+
+/* -------------------------------
+UI
+-------------------------------- */
 
 return(
 
 <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-
-{/* Modal */}
 
 <div className="bg-white rounded-xl shadow-2xl w-full max-w-md border border-gray-200">
 
@@ -29,7 +132,6 @@ className="p-1.5 rounded-md hover:bg-gray-100 transition"
 
 </div>
 
-
 {/* BODY */}
 
 <div className="p-4 sm:p-6 space-y-5">
@@ -38,14 +140,14 @@ className="p-1.5 rounded-md hover:bg-gray-100 transition"
 Connect your messaging platforms to enable AI automation.
 </p>
 
-
-{/* PLATFORMS */}
-
 <div className="space-y-3">
 
-{/* WhatsApp */}
+{/* WHATSAPP */}
 
-<button className="w-full border border-gray-200 hover:border-green-400 hover:bg-green-50 transition p-3 sm:p-4 rounded-lg flex items-center justify-between group">
+<button
+onClick={connectWhatsApp}
+className="w-full border border-gray-200 hover:border-green-400 hover:bg-green-50 transition p-3 sm:p-4 rounded-lg flex items-center justify-between group"
+>
 
 <div className="flex items-center gap-3">
 
@@ -73,10 +175,12 @@ Connect
 
 </button>
 
+{/* INSTAGRAM */}
 
-{/* Instagram */}
-
-<button className="w-full border border-gray-200 hover:border-pink-400 hover:bg-pink-50 transition p-3 sm:p-4 rounded-lg flex items-center justify-between group">
+<button
+onClick={connectInstagram}
+className="w-full border border-gray-200 hover:border-pink-400 hover:bg-pink-50 transition p-3 sm:p-4 rounded-lg flex items-center justify-between group"
+>
 
 <div className="flex items-center gap-3">
 
@@ -107,7 +211,6 @@ Connect
 </div>
 
 </div>
-
 
 {/* FOOTER */}
 

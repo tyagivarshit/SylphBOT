@@ -20,6 +20,10 @@ import {
 } from "./middleware/rateLimit.middleware";
 
 import { startTrialExpiryCron } from "./cron/trial.cron";
+
+/* 🟢 NEW IMPORT */
+import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
+
 import { env } from "./config/env";
 
 const app = express();
@@ -138,5 +142,8 @@ app.use((err: any, req: any, res: any, next: any) => {
 /* ============================= */
 
 startTrialExpiryCron();
+
+/* 🟢 NEW CRON START */
+startMetaTokenRefreshCron();
 
 export default app;

@@ -7,7 +7,6 @@ import StatCard from "@/components/cards/StatCard"
 import UsageProgress from "@/components/cards/UsageProgress"
 import LeadsTable from "@/components/leads/LeadsTable"
 import LeadsChart from "@/components/charts/LeadsCharts"
-import RecentActivity from "@/components/dashboard/RecentActivity"
 
 import {
 Users,
@@ -21,7 +20,7 @@ export default function DashboardPage(){
 const [stats,setStats] = useState<any>({})
 const [leads,setLeads] = useState<any[]>([])
 const [chart,setChart] = useState<any[]>([])
-const [activity,setActivity] = useState<any[]>([])
+const [messagesChart,setMessagesChart] = useState<any[]>([])
 const [loading,setLoading] = useState(true)
 
 const loadData = async()=>{
@@ -35,7 +34,7 @@ const data = statsData?.data || statsData || {}
 
 setStats(data)
 setChart(data.chartData || [])
-setActivity(data.recentActivity || [])
+setMessagesChart(data.messagesChart || [])
 setLeads(leadsData?.data || leadsData || [])
 
 }catch(err){
@@ -70,6 +69,8 @@ return(
 
 <div className="space-y-8 p-4 md:p-6">
 
+{/* ===== STATS ===== */}
+
 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
 
 <StatCard
@@ -85,20 +86,23 @@ icon={<BarChart3 size={18}/>}
 />
 
 <StatCard
-title="Qualified Leads"
-value={stats?.qualifiedLeads || 0}
+title="Messages Today"
+value={stats?.messagesToday || 0}
 icon={<TrendingUp size={18}/>}
 />
 
 <StatCard
-title="AI Calls Used"
+title="AI Messages Sent"
 value={stats?.aiCallsUsed || 0}
 icon={<Zap size={18}/>}
 />
 
 </div>
 
-<div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+
+{/* ===== CHARTS ===== */}
+
+<div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
 
 <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-md">
 
@@ -109,6 +113,23 @@ Leads Growth
 <LeadsChart data={chart}/>
 
 </div>
+
+
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-md">
+
+<h3 className="text-sm font-semibold text-gray-900 mb-4">
+Messages Growth
+</h3>
+
+<LeadsChart
+data={messagesChart.map((d:any)=>({
+date:d.date,
+leads:d.messages
+}))}
+/>
+
+</div>
+
 
 <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-md">
 
@@ -125,6 +146,9 @@ limit={stats?.aiCallsLimit || 1}
 
 </div>
 
+
+{/* ===== RECENT LEADS ===== */}
+
 <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-md">
 
 <h3 className="text-sm font-semibold text-gray-900 mb-4">
@@ -134,8 +158,6 @@ Recent Leads
 <LeadsTable leads={leads}/>
 
 </div>
-
-<RecentActivity activity={activity}/>
 
 </div>
 

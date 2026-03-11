@@ -13,6 +13,12 @@ import billingRoutes from "./routes/billing.routes";
 import { stripeWebhook } from "./routes/stripe.webhook";
 import dashboardRoutes from "./routes/dashboard.routes";
 
+/* 🟢 NEW IMPORT */
+import commentTriggerRoutes from "./routes/commentTrigger.routes";
+
+/* 🟢 NEW IMPORT */
+import messageRoutes from "./routes/message.routes";
+
 import {
   authLimiter,
   aiLimiter,
@@ -100,6 +106,12 @@ app.use("/api/ai", aiLimiter, aiRoutes);
 app.use("/api/billing", billingRoutes);
 
 app.use("/api/dashboard", dashboardRoutes);
+
+/* 🟢 NEW ROUTE */
+app.use("/api/comment-triggers", commentTriggerRoutes);
+
+/* 🟢 NEW ROUTE */
+app.use("/api/messages", messageRoutes);
 
 /* ============================= */
 /* HEALTH */

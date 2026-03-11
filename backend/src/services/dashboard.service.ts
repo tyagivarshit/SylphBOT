@@ -51,7 +51,7 @@ export class DashboardService {
       prisma.message.count({
         where: {
           lead: { businessId },
-          sender: "USER", // CHANGED
+          sender: "USER",
           createdAt: { gte: todayStart }
         }
       }),
@@ -59,7 +59,7 @@ export class DashboardService {
       prisma.message.count({
         where: {
           lead: { businessId },
-          sender: "USER" // CHANGED
+          sender: "USER"
         }
       }),
 
@@ -309,6 +309,41 @@ export class DashboardService {
       time: lead.createdAt
 
     }));
+  }
+
+  // ======================================
+  // ACTIVE CONVERSATIONS (NEW)
+  // ======================================
+  static async getActiveConversations(businessId: string) {
+
+    const leads = await prisma.lead.findMany({
+      where: {
+        businessId,
+        lastMessageAt: {
+          not: null
+        }
+      },
+      select: {
+        unreadCount: true
+      }
+    });
+
+    const active = leads.length;
+
+    const waitingReplies = leads.filter(
+      (l) => l.unreadCount > 0
+    ).length;
+
+    const resolved = leads.filter(
+      (l) => l.unreadCount === 0
+    ).length;
+
+    return {
+      active,
+      waitingReplies,
+      resolved
+    };
+
   }
 
 }

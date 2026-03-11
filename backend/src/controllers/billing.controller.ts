@@ -5,7 +5,9 @@ import { createCheckoutSession } from "../services/stripe.service";
 export class BillingController {
 
   static async checkout(req: Request, res: Response) {
+
     try {
+
       const businessId = req.user?.businessId;
       const email = req.user?.email;
       const { plan } = req.body;
@@ -17,7 +19,10 @@ export class BillingController {
         });
       }
 
-      // ✅ Strict plan validation
+      /* ---------------------------
+      PLAN VALIDATION
+      --------------------------- */
+
       const allowedPlans = ["BASIC", "PRO", "ENTERPRISE"];
 
       if (!allowedPlans.includes(plan)) {
@@ -27,7 +32,6 @@ export class BillingController {
         });
       }
 
-      // ✅ Check if plan exists in DB
       const dbPlan = await prisma.plan.findFirst({
         where: { name: plan },
       });
@@ -39,7 +43,6 @@ export class BillingController {
         });
       }
 
-      // ✅ Check existing subscription
       const existingSubscription =
         await prisma.subscription.findUnique({
           where: { businessId },
@@ -47,7 +50,7 @@ export class BillingController {
 
       if (
         existingSubscription &&
-        existingSubscription.status === "active" &&
+        existingSubscription.status === "ACTIVE" &&
         existingSubscription.planId === dbPlan.id
       ) {
         return res.status(400).json({
@@ -56,7 +59,61 @@ export class BillingController {
         });
       }
 
-      // 🔥 Create Stripe Checkout Session
+      /* ---------------------------
+      TRIAL PROTECTION
+      --------------------------- */
+
+      if (existingSubscription?.trialUsed) {
+
+        const session = await createCheckoutSession(
+          email,
+          businessId,
+          plan
+        );
+
+        return res.status(200).json({
+          success: true,
+          trial: false,
+          url: session.url,
+        });
+
+      }
+
+      /* ---------------------------
+      START 7 DAY TRIAL
+      --------------------------- */
+
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 7);
+
+      if (existingSubscription) {
+
+        await prisma.subscription.update({
+          where: { businessId },
+          data: {
+            planId: dbPlan.id,
+            status: "ACTIVE",
+            isTrial: true,
+            trialUsed: true,
+            currentPeriodEnd: trialEnd,
+          },
+        });
+
+      } else {
+
+        await prisma.subscription.create({
+          data: {
+            businessId,
+            planId: dbPlan.id,
+            status: "ACTIVE",
+            isTrial: true,
+            trialUsed: true,
+            currentPeriodEnd: trialEnd,
+          },
+        });
+
+      }
+
       const session = await createCheckoutSession(
         email,
         businessId,
@@ -65,16 +122,22 @@ export class BillingController {
 
       return res.status(200).json({
         success: true,
+        trial: true,
+        trialEndsAt: trialEnd,
         url: session.url,
       });
 
     } catch (error) {
+
       console.error("Checkout Error:", error);
 
       return res.status(500).json({
         success: false,
         message: "Checkout failed",
       });
+
     }
+
   }
+
 }

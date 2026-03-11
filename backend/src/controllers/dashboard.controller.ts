@@ -250,4 +250,41 @@ export class DashboardController {
     }
   }
 
+  /* ======================================
+     ACTIVE CONVERSATIONS (NEW)
+  ====================================== */
+  static async getActiveConversations(req: Request, res: Response) {
+
+    try {
+
+      const businessId = await getBusinessId(req);
+
+      if (!businessId) {
+        return res.status(401).json({
+          success: false,
+          message: "Unauthorized",
+        });
+      }
+
+      const data =
+        await DashboardService.getActiveConversations(businessId);
+
+      return res.status(200).json({
+        success: true,
+        data
+      });
+
+    } catch (error) {
+
+      console.error("Active Conversations Error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch active conversations",
+      });
+
+    }
+
+  }
+
 }

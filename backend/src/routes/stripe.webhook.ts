@@ -8,23 +8,33 @@ export const stripeWebhook = async (
   req: Request,
   res: Response
 ) => {
+
   const sig = req.headers["stripe-signature"] as string;
 
   let event: Stripe.Event;
 
   try {
+
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
       env.STRIPE_WEBHOOK_SECRET!
     );
+
   } catch (err) {
+
     console.error("❌ Signature verification failed.");
+
     return res.status(400).send("Webhook Error");
+
   }
 
   try {
-    // ✅ Idempotency protection
+
+    /* -----------------------------
+    IDEMPOTENCY PROTECTION
+    ----------------------------- */
+
     const existingEvent = await prisma.stripeEvent.findUnique({
       where: { eventId: event.id },
     });
@@ -39,10 +49,12 @@ export const stripeWebhook = async (
 
     switch (event.type) {
 
-      // ========================================
-      // CHECKOUT COMPLETED
-      // ========================================
+      /* =======================================
+      CHECKOUT COMPLETED
+      ======================================= */
+
       case "checkout.session.completed": {
+
         const session =
           event.data.object as Stripe.Checkout.Session;
 
@@ -68,7 +80,6 @@ export const stripeWebhook = async (
             stripeSubId
           );
 
-        // 🔥 FIX: force cast to any to access period safely
         const periodEnd =
           typeof (stripeSubscription as any).current_period_end === "number"
             ? (stripeSubscription as any).current_period_end
@@ -79,37 +90,62 @@ export const stripeWebhook = async (
           : null;
 
         await prisma.subscription.upsert({
+
           where: { businessId },
+
           update: {
+
             stripeSubscriptionId: stripeSubId,
+
             stripeCustomerId:
               typeof stripeSubscription.customer === "string"
                 ? stripeSubscription.customer
                 : null,
-            status: stripeSubscription.status,
-            currentPeriodEnd,
+
+            status: "ACTIVE",
+
             planId: plan.id,
+
+            currentPeriodEnd,
+
+            isTrial: false, // 🔥 trial removed when paid
+
           },
+
           create: {
+
             businessId,
+
             planId: plan.id,
+
             stripeSubscriptionId: stripeSubId,
+
             stripeCustomerId:
               typeof stripeSubscription.customer === "string"
                 ? stripeSubscription.customer
                 : null,
-            status: stripeSubscription.status,
+
+            status: "ACTIVE",
+
             currentPeriodEnd,
+
+            isTrial: false,
+
+            trialUsed: true,
+
           },
+
         });
 
         break;
       }
 
-      // ========================================
-      // SUBSCRIPTION UPDATED
-      // ========================================
+      /* =======================================
+      SUBSCRIPTION UPDATED
+      ======================================= */
+
       case "customer.subscription.updated": {
+
         const subscription =
           event.data.object as Stripe.Subscription;
 
@@ -121,97 +157,129 @@ export const stripeWebhook = async (
             : null;
 
         await prisma.subscription.updateMany({
+
           where: {
             stripeSubscriptionId: subscription.id,
           },
+
           data: {
-            status: subscription.status,
+
+            status:
+              subscription.status === "active"
+                ? "ACTIVE"
+                : "INACTIVE",
+
             currentPeriodEnd: periodEnd,
+
           },
+
         });
 
         break;
       }
 
-      // ========================================
-      // SUBSCRIPTION CANCELLED
-      // ========================================
+      /* =======================================
+      SUBSCRIPTION CANCELLED
+      ======================================= */
+
       case "customer.subscription.deleted": {
+
         const subscription =
           event.data.object as Stripe.Subscription;
 
         await prisma.subscription.updateMany({
+
           where: {
             stripeSubscriptionId: subscription.id,
           },
+
           data: {
-            status: subscription.status,
+            status: "INACTIVE",
           },
+
         });
 
         break;
       }
 
-      // ========================================
-      // PAYMENT FAILED
-      // ========================================
+      /* =======================================
+      PAYMENT FAILED
+      ======================================= */
+
       case "invoice.payment_failed": {
+
         const invoice =
           event.data.object as Stripe.Invoice;
 
         const subscriptionId =
-        typeof (invoice as any).subscription === "string"
-          ? (invoice as any).subscription: null;
+          typeof (invoice as any).subscription === "string"
+            ? (invoice as any).subscription
+            : null;
 
         if (!subscriptionId) break;
 
         await prisma.subscription.updateMany({
+
           where: {
             stripeSubscriptionId: subscriptionId,
           },
+
           data: {
-            status: "past_due",
+            status: "PAST_DUE",
           },
+
         });
 
         break;
       }
 
-      // ========================================
-      // PAYMENT SUCCESS
-      // ========================================
+      /* =======================================
+      PAYMENT SUCCESS
+      ======================================= */
+
       case "invoice.payment_succeeded": {
+
         const invoice =
           event.data.object as Stripe.Invoice;
 
         const subscriptionId =
-        typeof (invoice as any).subscription === "string"
-        ? (invoice as any).subscription: null;
+          typeof (invoice as any).subscription === "string"
+            ? (invoice as any).subscription
+            : null;
 
         if (!subscriptionId) break;
 
         await prisma.subscription.updateMany({
+
           where: {
             stripeSubscriptionId: subscriptionId,
           },
+
           data: {
-            status: "active",
+            status: "ACTIVE",
           },
+
         });
 
         break;
       }
 
       default:
+
         console.log(`Unhandled event type: ${event.type}`);
+
     }
 
     return res.json({ received: true });
 
   } catch (error) {
+
     console.error("❌ Webhook processing error:", error);
+
     return res.status(500).json({
       message: "Webhook handler failed",
     });
+
   }
+
 };

@@ -4,6 +4,7 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "../services/ai.service";
+import { generateAIFunnelReply } from "../services/aiFunnel.service";
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
 import { getIO } from "../sockets/socket.server";
 
@@ -32,10 +33,11 @@ function verifySignature(req: any): boolean {
 
 /*
 ---------------------------------------------------
-📌 1️⃣ WEBHOOK VERIFY (Meta setup time)
+📌 WEBHOOK VERIFY
 ---------------------------------------------------
 */
 router.get("/", (req: Request, res: Response) => {
+
   const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 
   const mode = req.query["hub.mode"];
@@ -47,16 +49,19 @@ router.get("/", (req: Request, res: Response) => {
   }
 
   return res.sendStatus(403);
+
 });
 
 /*
 ---------------------------------------------------
-📩 2️⃣ INCOMING MESSAGE HANDLER
+📩 INCOMING MESSAGE HANDLER
 ---------------------------------------------------
 */
 router.post("/", async (req: any, res: Response) => {
+
   try {
-    console.log("🔥 WEBHOOK HIT");
+
+    console.log("🔥 WHATSAPP WEBHOOK HIT");
 
     if (process.env.NODE_ENV === "production") {
       if (!verifySignature(req)) {
@@ -76,6 +81,7 @@ router.post("/", async (req: any, res: Response) => {
 
     const from = message.from;
     const text = message.text?.body;
+
     const phoneNumberId =
       body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
@@ -91,6 +97,7 @@ router.post("/", async (req: any, res: Response) => {
     🏢 IDENTIFY CLIENT
     ---------------------------------------------------
     */
+
     const client = await prisma.client.findFirst({
       where: {
         platform: "WHATSAPP",
@@ -106,9 +113,33 @@ router.post("/", async (req: any, res: Response) => {
 
     /*
     ---------------------------------------------------
+    🚨 PLAN CHECK
+    ---------------------------------------------------
+    */
+
+    const subscription = await prisma.subscription.findUnique({
+      where: { businessId: client.businessId },
+      include: { plan: true },
+    });
+
+    if (!subscription || !subscription.plan) {
+      console.log("❌ No subscription found");
+      return res.sendStatus(200);
+    }
+
+    const plan = subscription.plan.name;
+
+    if (plan === "BASIC") {
+      console.log("🚫 BASIC plan cannot use WhatsApp automation");
+      return res.sendStatus(200);
+    }
+
+    /*
+    ---------------------------------------------------
     👤 FIND OR CREATE LEAD
     ---------------------------------------------------
     */
+
     let lead = await prisma.lead.findFirst({
       where: {
         businessId: client.businessId,
@@ -117,6 +148,7 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     if (!lead) {
+
       lead = await prisma.lead.create({
         data: {
           businessId: client.businessId,
@@ -127,6 +159,7 @@ router.post("/", async (req: any, res: Response) => {
           followupCount: 0,
         },
       });
+
     }
 
     /*
@@ -134,6 +167,7 @@ router.post("/", async (req: any, res: Response) => {
     📝 STORE USER MESSAGE
     ---------------------------------------------------
     */
+
     const userMessage = await prisma.message.create({
       data: {
         leadId: lead.id,
@@ -142,25 +176,35 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
-    /*
-    ---------------------------------------------------
-    ⚡ REALTIME EMIT (USER MESSAGE)
-    ---------------------------------------------------
-    */
     const io = getIO();
 
     io.to(`lead_${lead.id}`).emit("new_message", userMessage);
 
     /*
     ---------------------------------------------------
-    🤖 GENERATE AI REPLY
+    🤖 AI REPLY (PLAN BASED)
     ---------------------------------------------------
     */
-    const aiReply = await generateAIReply({
-      businessId: client.businessId,
-      leadId: lead.id,
-      message: text,
-    });
+
+    let aiReply;
+
+    if (plan === "PRO" || plan === "ENTERPRISE") {
+
+      aiReply = await generateAIFunnelReply({
+        businessId: client.businessId,
+        leadId: lead.id,
+        message: text,
+      });
+
+    } else {
+
+      aiReply = await generateAIReply({
+        businessId: client.businessId,
+        leadId: lead.id,
+        message: text,
+      });
+
+    }
 
     console.log("🤖 AI REPLY:", aiReply);
 
@@ -169,6 +213,7 @@ router.post("/", async (req: any, res: Response) => {
     📝 STORE AI MESSAGE
     ---------------------------------------------------
     */
+
     const aiMessage = await prisma.message.create({
       data: {
         leadId: lead.id,
@@ -177,21 +222,18 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
-    /*
-    ---------------------------------------------------
-    ⚡ REALTIME EMIT (AI MESSAGE)
-    ---------------------------------------------------
-    */
     io.to(`lead_${lead.id}`).emit("new_message", aiMessage);
 
     /*
     ---------------------------------------------------
-    📤 SEND REPLY TO WHATSAPP
+    📤 SEND MESSAGE TO WHATSAPP
     ---------------------------------------------------
     */
+
     const accessToken = decrypt(client.accessToken);
 
     try {
+
       const response = await axios.post(
         `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
         {
@@ -209,24 +251,30 @@ router.post("/", async (req: any, res: Response) => {
       );
 
       console.log("✅ META RESPONSE:", response.data);
+
     } catch (err: any) {
+
       console.log(
         "❌ META ERROR:",
         err.response?.data || err.message
       );
+
       return res.sendStatus(200);
+
     }
 
     /*
     ---------------------------------------------------
-    ⏱ UPDATE LEAD STATE
+    ⏱ UPDATE LEAD
     ---------------------------------------------------
     */
+
     await prisma.lead.update({
       where: { id: lead.id },
       data: {
         lastMessageAt: new Date(),
         followupCount: 0,
+        unreadCount: { increment: 1 }
       },
     });
 
@@ -235,15 +283,20 @@ router.post("/", async (req: any, res: Response) => {
     🔄 RESET FOLLOWUPS
     ---------------------------------------------------
     */
+
     await cancelFollowups(lead.id);
     await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);
 
   } catch (error) {
+
     console.error("🚨 WHATSAPP WEBHOOK ERROR:", error);
+
     return res.sendStatus(500);
+
   }
+
 });
 
 export default router;

@@ -33,9 +33,14 @@ model Business {
   clients       Client[]
   subscription  Subscription?
   leads         Lead[]
-  usage         Usage[]   // ✅ changed to array for monthly tracking
+  usage         Usage[]
+  commentTriggers CommentTrigger[]
 
   createdAt     DateTime @default(now())
+
+  calendarConnections CalendarConnection[]
+  bookingSlots        BookingSlot[]
+  appointments        Appointment[]
 }
 
 model Client {
@@ -53,6 +58,8 @@ model Client {
   pricingInfo   String?
 
   leads         Lead[]
+  commentTriggers CommentTrigger[]
+
   isActive      Boolean  @default(true)
   deletedAt     DateTime?
   createdAt     DateTime @default(now())
@@ -63,7 +70,7 @@ model Client {
 model Plan {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
   name          String   @unique
-  priceId       String?  @unique   // Stripe price id
+  priceId       String?  @unique
   maxAiCalls    Int
   maxMessages   Int
   maxFollowups  Int
@@ -79,13 +86,16 @@ model Subscription {
   planId               String   @db.ObjectId
   plan                 Plan     @relation(fields: [planId], references: [id])
 
-  status String @default("INACTIVE") // ACTIVE, CANCELLED, PAST_DUE
-  stripeCustomerId String?
-  stripeSubscriptionId String? 
+  status               String   @default("INACTIVE")
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
   currentPeriodEnd     DateTime?
 
+  isTrial Boolean @default(false)
+  trialUsed Boolean @default(false)
+
   createdAt            DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt            DateTime @updatedAt
 }
 
 model Lead {
@@ -104,13 +114,24 @@ model Lead {
   platform       String
   stage          String   @default("NEW")
 
+  aiStage        String?  @default("NEW")
+
+  unreadCount    Int      @default(0)
+  leadScore      Int      @default(0)
+
   followupCount  Int      @default(0)
   lastFollowupAt DateTime?
 
   messages       Message[]
+  memories       Memory[]
+
   lastMessageAt  DateTime?
+  
   createdAt      DateTime @default(now())
-  deletedAt DateTime?
+  deletedAt      DateTime?
+
+  appointments   Appointment[]
+  conversationStates ConversationState[]
 }
 
 model Message {
@@ -121,6 +142,42 @@ model Message {
   content   String
   sender    String
   createdAt DateTime @default(now())
+}
+
+/* -----------------------------
+AI MEMORY ENGINE
+----------------------------- */
+
+model Memory {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  leadId    String   @db.ObjectId
+  lead      Lead     @relation(fields: [leadId], references: [id])
+
+  key       String
+  value     String
+
+  createdAt DateTime @default(now())
+}
+
+model CommentTrigger {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  clientId    String   @db.ObjectId
+  client      Client   @relation(fields: [clientId], references: [id])
+
+  reelId      String
+  keyword     String
+  replyText   String
+
+  aiPrompt    String?
+
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
 }
 
 model Usage {
@@ -135,8 +192,9 @@ model Usage {
   messagesUsed  Int      @default(0)
   followupsUsed Int      @default(0)
 
-  @@unique([businessId, month, year])  // ✅ monthly tracking
+  @@unique([businessId, month, year])
 }
+
 model RefreshToken {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   token      String   @unique
@@ -145,8 +203,86 @@ model RefreshToken {
   expiresAt  DateTime
   createdAt  DateTime @default(now())
 }
+
 model StripeEvent {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   eventId   String   @unique
   createdAt DateTime @default(now())
+}
+
+/* -----------------------------
+ENTERPRISE BOOKING SYSTEM
+----------------------------- */
+
+model CalendarConnection {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId   String   @db.ObjectId
+  business     Business @relation(fields: [businessId], references: [id])
+
+  provider     String
+
+  accessToken  String
+  refreshToken String
+  expiryDate   DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model BookingSlot {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId String   @db.ObjectId
+  business   Business @relation(fields: [businessId], references: [id])
+
+  dayOfWeek  Int
+  startTime  String
+  endTime    String
+
+  isActive   Boolean  @default(true)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Appointment {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId String   @db.ObjectId
+  business   Business @relation(fields: [businessId], references: [id])
+
+  leadId     String?  @db.ObjectId
+  lead       Lead?    @relation(fields: [leadId], references: [id])
+
+  name       String
+  email      String?
+  phone      String?
+
+  startTime  DateTime
+  endTime    DateTime
+
+  status     String   @default("BOOKED")
+
+  meetingLink String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+/* -----------------------------
+AI CONVERSATION STATE ENGINE
+----------------------------- */
+
+model ConversationState {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  leadId    String   @db.ObjectId
+  lead      Lead     @relation(fields: [leadId], references: [id])
+
+  state     String
+  context   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

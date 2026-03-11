@@ -2,263 +2,298 @@ import OpenAI from "openai";
 import prisma from "../config/prisma";
 import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
 
+/* FUNNEL */
+import { generateAIFunnelReply } from "./aiFunnel.service";
+
+/* MEMORY ENGINE */
+import {
+buildMemoryContext,
+updateMemory
+} from "./aiMemoryEngine.service";
+
 const openai = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1",
+apiKey: process.env.GROQ_API_KEY,
+baseURL: "https://api.groq.com/openai/v1",
 });
 
 interface AIInput {
-  businessId: string;
-  leadId: string;
-  message: string;
+businessId: string;
+leadId: string;
+message: string;
 }
 
 /* ---------------- USAGE + PLAN CHECK ---------------- */
 
 const checkAndIncrementUsage = async (businessId: string) => {
-  const { month, year } = getCurrentMonthYear();
 
-  const subscription = await prisma.subscription.findUnique({
-    where: { businessId },
-    include: { plan: true },
-  });
+const { month, year } = getCurrentMonthYear();
 
-  if (!subscription || subscription.status !== "ACTIVE") {
-    throw new Error("Inactive subscription");
-  }
+const subscription = await prisma.subscription.findUnique({
+where: { businessId },
+include: { plan: true },
+});
 
-  if (
-    subscription.plan.name === "FREE_TRIAL" &&
-    subscription.currentPeriodEnd &&
-    new Date() > subscription.currentPeriodEnd
-  ) {
-    throw new Error("Trial expired. Please upgrade to continue.");
-  }
+if (!subscription || subscription.status !== "ACTIVE") {
+return { blocked: true, reason: "INACTIVE_SUBSCRIPTION" };
+}
 
-  let usage = await prisma.usage.findUnique({
-    where: {
-      businessId_month_year: {
-        businessId,
-        month,
-        year,
-      },
-    },
-  });
+if (
+subscription.plan.name === "FREE_TRIAL" &&
+subscription.currentPeriodEnd &&
+new Date() > subscription.currentPeriodEnd
+) {
+return { blocked: true, reason: "TRIAL_EXPIRED" };
+}
 
-  if (!usage) {
-    usage = await prisma.usage.create({
-      data: {
-        businessId,
-        month,
-        year,
-        aiCallsUsed: 0,
-        messagesUsed: 0,
-        followupsUsed: 0,
-      },
-    });
-  }
+let usage = await prisma.usage.findUnique({
+where: {
+businessId_month_year: {
+businessId,
+month,
+year,
+},
+},
+});
 
-  if (!subscription.plan) {
-    throw new Error("Subscription plan not found");
-  }
+if (!usage) {
+usage = await prisma.usage.create({
+data: {
+businessId,
+month,
+year,
+aiCallsUsed: 0,
+messagesUsed: 0,
+followupsUsed: 0,
+},
+});
+}
 
-  if (usage.aiCallsUsed >= subscription.plan.maxAiCalls) {
-    throw new Error("Plan limit reached");
-  }
+if (usage.aiCallsUsed >= subscription.plan.maxAiCalls) {
+return { blocked: true, reason: "PLAN_LIMIT" };
+}
 
-  await prisma.usage.update({
-    where: {
-      businessId_month_year: {
-        businessId,
-        month,
-        year,
-      },
-    },
-    data: {
-      aiCallsUsed: { increment: 1 },
-      messagesUsed: { increment: 1 },
-    },
-  });
+await prisma.usage.update({
+where: {
+businessId_month_year: {
+businessId,
+month,
+year,
+},
+},
+data: {
+aiCallsUsed: { increment: 1 },
+messagesUsed: { increment: 1 },
+},
+});
+
+return { blocked: false, plan: subscription.plan.name };
 };
 
-/* ---------------- MEMORY ---------------- */
+/* ---------------- RECENT CHAT MEMORY ---------------- */
 
-const getConversationMemory = async (leadId: string) => {
-  const messages = await prisma.message.findMany({
-    where: { leadId },
-    orderBy: { createdAt: "asc" },
-    take: 10,
-  });
+const getRecentMessages = async (leadId: string) => {
 
-  return messages.map((m) => ({
-    role: m.sender === "AI" ? "assistant" : "user",
-    content: m.content,
-  }));
+const messages = await prisma.message.findMany({
+where: { leadId },
+orderBy: { createdAt: "desc" },
+take: 6,
+});
+
+return messages
+.reverse()
+.map((m) => ({
+role: m.sender === "AI" ? "assistant" : "user",
+content: m.content,
+}));
+
 };
 
-/* ---------------- LEAD EXTRACTION ---------------- */
+/* ---------------- LEAD DATA EXTRACTION ---------------- */
 
 const extractLeadData = async (leadId: string, message: string) => {
-  const emailMatch = message.match(
-    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i
-  );
 
-  const phoneMatch = message.match(/\b\d{10,15}\b/);
+const emailMatch = message.match(
+/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+.[A-Z]{2,}\b/i
+);
 
-  await prisma.lead.update({
-    where: { id: leadId },
-    data: {
-      email: emailMatch?.[0] || undefined,
-      phone: phoneMatch?.[0] || undefined,
-    },
-  });
+const phoneMatch = message.match(/\b\d{10,15}\b/);
+
+await prisma.lead.update({
+where: { id: leadId },
+data: {
+email: emailMatch?.[0] || undefined,
+phone: phoneMatch?.[0] || undefined,
+},
+});
+
 };
 
 /* ---------------- STAGE SYSTEM ---------------- */
 
 const determineStage = (message: string) => {
-  if (/price|cost|pricing/i.test(message)) return "INTERESTED";
-  if (/buy|purchase|order/i.test(message)) return "READY_TO_BUY";
-  return "NEW";
+
+if (/price|cost|pricing/i.test(message)) return "INTERESTED";
+
+if (/buy|purchase|order/i.test(message)) return "READY_TO_BUY";
+
+return "NEW";
+
 };
 
 const updateStage = async (leadId: string, message: string) => {
-  const stage = determineStage(message);
 
-  await prisma.lead.update({
-    where: { id: leadId },
-    data: { stage },
-  });
+const stage = determineStage(message);
+
+await prisma.lead.update({
+where: { id: leadId },
+data: { stage },
+});
+
 };
 
 /* ---------------- MAIN AI FUNCTION ---------------- */
 
 export const generateAIReply = async ({
-  businessId,
-  leadId,
-  message,
+businessId,
+leadId,
+message,
 }: AIInput) => {
 
-  console.log("AI SERVICE START", { businessId, leadId, message });
+console.log("AI SERVICE START", { businessId, leadId, message });
 
-  try {
+try {
 
-    /* -------- SAVE USER MESSAGE -------- */
+/* SAVE USER MESSAGE */
 
-    try {
+await prisma.message.create({
+  data: {
+    leadId,
+    content: message,
+    sender: "USER",
+  },
+});
 
-      const savedUser = await prisma.message.create({
-        data: {
-          leadId,
-          content: message,
-          sender: "USER",
-        },
-      });
+/* PLAN CHECK */
 
-      console.log("USER MESSAGE SAVED:", savedUser.id);
+const usageCheck = await checkAndIncrementUsage(businessId);
 
-    } catch (err) {
+if (usageCheck.blocked) {
 
-      console.error("USER MESSAGE SAVE FAILED:", err);
+  if (usageCheck.reason === "TRIAL_EXPIRED") {
+    return "Your 7-day trial has expired. Please upgrade to continue using our AI services.";
+  }
 
-    }
+  if (usageCheck.reason === "PLAN_LIMIT") {
+    return "You have reached your monthly AI usage limit. Please upgrade your plan.";
+  }
 
-    /* -------- PLAN CHECK -------- */
+  if (usageCheck.reason === "INACTIVE_SUBSCRIPTION") {
+    return "Your subscription is inactive. Please upgrade your plan.";
+  }
 
-    await checkAndIncrementUsage(businessId);
+}
 
-    const client = await prisma.client.findFirst({
-      where: {
-        businessId,
-        isActive: true,
-      },
-    });
+const planName = usageCheck.plan || "FREE_TRIAL";
 
-    if (!client) {
-      throw new Error("No active client found");
-    }
+/* PRO / ENTERPRISE → FUNNEL AI */
 
-    const memory = await getConversationMemory(leadId);
+if (planName === "PRO" || planName === "ENTERPRISE") {
 
-    const prompt = [
-      {
-        role: "system",
-        content: `
-You are a professional sales assistant.
+  return generateAIFunnelReply({
+    businessId,
+    leadId,
+    message,
+  });
 
-Business Info:
+}
+
+/* BASIC PLAN AI */
+
+const client = await prisma.client.findFirst({
+  where: {
+    businessId,
+    isActive: true,
+  },
+});
+
+if (!client) {
+  return "No active client found.";
+}
+
+/* MEMORY SYSTEM */
+
+const memoryContext = await buildMemoryContext(leadId);
+
+const recentMessages = await getRecentMessages(leadId);
+
+/* SYSTEM PROMPT */
+
+const systemPrompt = `
+
+You are a helpful AI assistant for a business.
+
+Business Information:
 ${client.businessInfo || "Not provided"}
 
-Pricing Details:
+Pricing Information:
 ${client.pricingInfo || "Ask admin for pricing"}
 
-Tone:
+Communication Style:
 ${client.aiTone || "Professional"}
 
+Customer Memory:
+${memoryContext.memory}
+
 Rules:
-- Do NOT invent pricing.
-- Only use provided pricing info.
-- Stay within business context.
-        `,
-      },
-      ...memory,
-      { role: "user", content: message },
-    ];
 
-    console.log("CALLING GROQ AI");
+* Use only the provided business information
+* Do not invent pricing
+* Be concise and helpful
+  `;
 
-    const response = await openai.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: prompt as any,
-    });
+  const prompt = [
+  { role: "system", content: systemPrompt },
+  ...recentMessages,
+  { role: "user", content: message },
+  ];
 
-    const reply =
-      response.choices?.[0]?.message?.content?.trim() ||
-      "Thanks for reaching out!";
+  const response = await openai.chat.completions.create({
+  model: "llama-3.1-8b-instant",
+  messages: prompt as any,
+  });
 
-    console.log("AI REPLY:", reply);
+  const reply =
+  response.choices?.[0]?.message?.content?.trim() ||
+  "Thanks for reaching out!";
 
-    /* -------- SAVE AI MESSAGE -------- */
+  /* SAVE AI MESSAGE */
 
-    try {
+  await prisma.message.create({
+  data: {
+  leadId,
+  content: reply,
+  sender: "AI",
+  },
+  });
 
-      const savedAI = await prisma.message.create({
-        data: {
-          leadId,
-          content: reply,
-          sender: "AI",
-        },
-      });
+  /* MEMORY UPDATE */
 
-      console.log("AI MESSAGE SAVED:", savedAI.id);
+  await updateMemory(leadId, message);
 
-    } catch (err) {
+  /* CRM UPDATE */
 
-      console.error("AI MESSAGE SAVE FAILED:", err);
+  await extractLeadData(leadId, message);
 
-    }
+  await updateStage(leadId, message);
 
-    await extractLeadData(leadId, message);
-    await updateStage(leadId, message);
-
-    return reply;
+  return reply;
 
   } catch (error: any) {
 
-    console.error("AI SERVICE ERROR:", error);
+  console.error("AI SERVICE ERROR:", error);
 
-    if (error.message === "Trial expired. Please upgrade to continue.") {
-      return "Your 7-day trial has expired. Please upgrade to continue using our AI services.";
-    }
+  return "Thanks for your message. Our team will respond shortly.";
 
-    if (error.message === "Plan limit reached") {
-      return "You have reached your monthly usage limit. Please upgrade your plan.";
-    }
-
-    if (error.message === "Inactive subscription") {
-      return "Your subscription is inactive. Please upgrade your plan.";
-    }
-
-    return "Thanks for your message. Our team will respond shortly.";
   }
+
 };

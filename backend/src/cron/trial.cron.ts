@@ -2,23 +2,23 @@ import cron from "node-cron";
 import prisma from "../config/prisma";
 
 export const startTrialExpiryCron = () => {
+
   cron.schedule("0 2 * * *", async () => {
+
     console.log("⏳ Running trial expiry check...");
 
     try {
+
       const now = new Date();
 
-      // 🔥 Find expired FREE_TRIAL subscriptions
       const expiredSubscriptions =
         await prisma.subscription.findMany({
           where: {
-            status: "active", // 🔥 lowercase to match Stripe
+            isTrial: true,
+            status: "ACTIVE",
             currentPeriodEnd: {
               not: null,
               lt: now,
-            },
-            plan: {
-              name: "FREE_TRIAL",
             },
           },
         });
@@ -32,17 +32,6 @@ export const startTrialExpiryCron = () => {
         `Found ${expiredSubscriptions.length} expired trials`
       );
 
-      // 🔥 Get FREE plan
-      const freePlan = await prisma.plan.findUnique({
-        where: { name: "FREE" },
-      });
-
-      if (!freePlan) {
-        console.error("FREE plan not configured.");
-        return;
-      }
-
-      // 🔥 Batch downgrade (faster & safer)
       await prisma.subscription.updateMany({
         where: {
           id: {
@@ -50,18 +39,21 @@ export const startTrialExpiryCron = () => {
           },
         },
         data: {
-          planId: freePlan.id,
-          status: "active",
-          currentPeriodEnd: null,
+          status: "INACTIVE",
+          isTrial: false,
         },
       });
 
       console.log(
-        `Downgraded ${expiredSubscriptions.length} subscriptions to FREE`
+        `Deactivated ${expiredSubscriptions.length} expired trials`
       );
 
     } catch (error) {
+
       console.error("Trial Cron Error:", error);
+
     }
+
   });
+
 };

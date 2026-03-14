@@ -34,10 +34,16 @@ export const runAutomationEngine = async ({
     const activeExecution = await prisma.automationExecution.findFirst({
       where: {
         leadId,
+        flow: {
+          businessId,
+        },
         status: "ACTIVE",
       },
       orderBy: {
         updatedAt: "desc",
+      },
+      include: {
+        flow: true,
       },
     });
 
@@ -98,13 +104,15 @@ export const runAutomationEngine = async ({
     if (!flow) return null;
 
     /* ==================================================
-    GET FIRST STEP
+    GET FIRST STEP (SAFER)
     ================================================== */
 
     const firstStep = await prisma.automationStep.findFirst({
       where: {
         flowId: flow.id,
-        stepKey: "START",
+      },
+      orderBy: {
+        createdAt: "asc",
       },
     });
 

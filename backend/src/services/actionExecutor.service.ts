@@ -46,7 +46,9 @@ export const executeAutomationActions = async ({
 
       if (!condition) return null;
 
-      const conditionMatched = message.includes(condition);
+      const conditionMatched = message
+        .toLowerCase()
+        .includes(condition);
 
       if (!conditionMatched) return null;
 
@@ -68,7 +70,13 @@ export const executeAutomationActions = async ({
         },
       });
 
-      return nextStep.message || null;
+      /* ONLY RETURN MESSAGE IF NEXT STEP SENDS MESSAGE */
+
+      if (nextStep.stepType === "SEND_MESSAGE") {
+        return nextStep.message || null;
+      }
+
+      return null;
 
     }
 

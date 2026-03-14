@@ -10,6 +10,9 @@ import { getIO } from "../sockets/socket.server";
 import { handleCommentAutomation } from "../services/commentAutomation.service";
 import { processWebhookEvent } from "../services/webhookDedup.service";
 
+/* ✅ FIX: import rate limiter */
+import { incrementRate } from "../redis/rateLimiter.redis";
+
 const router = Router();
 
 /* --------------------------------------------------- */
@@ -165,24 +168,16 @@ router.post("/", async (req: any, res: Response) => {
     let eventId: string | undefined;
     let pageId: string | undefined;
 
-    /* FORMAT 1 */
-
     const messaging = entry?.messaging?.[0];
 
-    if (messaging?.message?.text) {
+    if (messaging?.message?.text && !messaging?.message?.is_echo) {
 
       senderId = messaging.sender?.id;
       text = messaging.message.text;
-
-      /* safer page id detection */
-
       pageId = messaging.recipient?.id || entry.id;
-
       eventId = messaging.message.mid;
 
     }
-
-    /* FORMAT 2 */
 
     const changeMessage = entry?.changes?.[0]?.value?.messages?.[0];
 
@@ -203,7 +198,7 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     /* ---------------------------------------------------
-    SELF MESSAGE FILTER
+    BASIC VALIDATION
     --------------------------------------------------- */
 
     if (!senderId || !text) {
@@ -214,6 +209,10 @@ router.post("/", async (req: any, res: Response) => {
 
     }
 
+    /* ---------------------------------------------------
+    SELF MESSAGE FILTER
+    --------------------------------------------------- */
+
     if (pageId && senderId === pageId) {
 
       console.log("Message ignored (self message)");
@@ -223,11 +222,36 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     /* ---------------------------------------------------
+    SYSTEM MESSAGE FILTER
+    --------------------------------------------------- */
+
+    const lowerText = text.toLowerCase();
+
+    if (
+      lowerText.includes("please wait") ||
+      lowerText.includes("moment before sending")
+    ) {
+
+      console.log("System message ignored:", text);
+
+      return res.sendStatus(200);
+
+    }
+
+    /* ---------------------------------------------------
     WEBHOOK DEDUP
     --------------------------------------------------- */
 
+    if (!eventId) {
+
+      console.log("Event ID missing");
+
+      return res.sendStatus(200);
+
+    }
+
     const shouldProcess = await processWebhookEvent({
-      eventId: eventId || "unknown",
+      eventId,
       platform: "INSTAGRAM",
     });
 
@@ -304,6 +328,8 @@ router.post("/", async (req: any, res: Response) => {
       io.to(`lead_${lead.id}`).emit("new_message", userMessage);
 
     } catch {}
+
+
 
     /* ---------------------------------------------------
     ADD AI JOB

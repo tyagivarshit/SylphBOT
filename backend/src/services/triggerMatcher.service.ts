@@ -5,36 +5,92 @@ interface TriggerInput {
   message: string;
 }
 
+interface TriggerResult {
+  flowId: string;
+}
+
 export const matchAutomationTrigger = async ({
   businessId,
   message,
-}: TriggerInput) => {
+}: TriggerInput): Promise<TriggerResult | null> => {
 
-  const text = message.toLowerCase().trim();
+  try {
 
-  const flows = await prisma.automationFlow.findMany({
-    where: {
-      businessId,
-      status: "ACTIVE",
-    },
-  });
+    const text = message.toLowerCase().trim();
 
-  for (const flow of flows) {
+    /* ==================================================
+    FETCH ACTIVE FLOWS
+    ================================================== */
 
-    if (!flow.triggerValue) continue;
+    const flows = await prisma.automationFlow.findMany({
+      where: {
+        businessId,
+        status: "ACTIVE",
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
 
-    const triggerValue = flow.triggerValue.toLowerCase().trim();
+    if (!flows.length) return null;
 
-    if (text.includes(triggerValue)) {
+    /* ==================================================
+    LOOP FLOWS
+    ================================================== */
 
-      return {
-        flowId: flow.id,
-      };
+    for (const flow of flows) {
+
+      if (!flow.triggerValue) continue;
+
+      const triggerValue = flow.triggerValue
+        .toLowerCase()
+        .trim();
+
+      /* EXACT MATCH */
+
+      if (text === triggerValue) {
+
+        return {
+          flowId: flow.id,
+        };
+
+      }
+
+      /* WORD MATCH */
+
+      const words = text.split(" ");
+
+      if (words.includes(triggerValue)) {
+
+        return {
+          flowId: flow.id,
+        };
+
+      }
+
+      /* PARTIAL MATCH (SAFE) */
+
+      if (
+        text.length > triggerValue.length + 2 &&
+        text.includes(triggerValue)
+      ) {
+
+        return {
+          flowId: flow.id,
+        };
+
+      }
 
     }
 
-  }
+    return null;
 
-  return null;
+  } catch (error) {
+
+    console.error("🚨 Trigger matcher error:", error);
+
+    return null;
+
+  }
 
 };

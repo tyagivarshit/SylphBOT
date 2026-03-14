@@ -30,26 +30,42 @@ const checkAIAbuse = async (leadId: string, message: string) => {
     take: 5,
   });
 
+  const normalizedMessage = message.toLowerCase().trim();
+
+  /* SAME MESSAGE SPAM */
+
   const sameMessageCount = recentMessages.filter(
-    (m) => m.content.toLowerCase() === message.toLowerCase()
+    (m) =>
+      m.content &&
+      m.content.toLowerCase().trim() === normalizedMessage
   ).length;
 
   if (sameMessageCount >= 3) {
     return { blocked: true, reason: "SPAM_DETECTED" };
   }
 
-  if (recentMessages.length > 0) {
+  /* TOO FAST MESSAGE FIX */
 
-    const last = new Date(recentMessages[0].createdAt).getTime();
-    const now = Date.now();
+  if (recentMessages.length > 1) {
 
-    const diffSeconds = (now - last) / 1000;
+    const previousMessage = recentMessages[1];
 
-    if (diffSeconds < 2) {
-      return { blocked: true, reason: "TOO_FAST" };
+    if (previousMessage?.createdAt) {
+
+      const last = new Date(previousMessage.createdAt).getTime();
+      const now = Date.now();
+
+      const diffSeconds = (now - last) / 1000;
+
+      if (diffSeconds < 1) {
+        return { blocked: true, reason: "TOO_FAST" };
+      }
+
     }
 
   }
+
+  /* AI MESSAGE LIMIT */
 
   const aiMessages = await prisma.message.count({
     where: {

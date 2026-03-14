@@ -28,6 +28,24 @@ interface AIInput {
   message: string;
 }
 
+/* ---------------- SYSTEM MESSAGE FILTER ---------------- */
+
+const isSystemMessage = (message: string) => {
+
+  const msg = message.toLowerCase();
+
+  if (
+    msg.includes("please wait a moment") ||
+    msg.includes("moment before sending") ||
+    msg.includes("try again later")
+  ) {
+    return true;
+  }
+
+  return false;
+
+};
+
 /* ---------------- AI ABUSE PROTECTION ---------------- */
 
 const checkAIAbuse = async (leadId: string, message: string) => {
@@ -40,8 +58,6 @@ const checkAIAbuse = async (leadId: string, message: string) => {
     orderBy: { createdAt: "desc" },
     take: 5,
   });
-
-  /* CONTINUOUS SPAM CHECK */
 
   if (recentMessages.length === 5) {
 
@@ -72,10 +88,9 @@ const checkAIAbuse = async (leadId: string, message: string) => {
 
 };
 
-
 /* ---------------- PLAN + USAGE ---------------- */
 
-const checkAndIncrementUsage = async (businessId: string) => {
+const checkUsage = async (businessId: string) => {
 
   const { month, year } = getCurrentMonthYear();
 
@@ -125,6 +140,14 @@ const checkAndIncrementUsage = async (businessId: string) => {
     return { blocked: true, reason: "PLAN_LIMIT" };
   }
 
+  return { blocked: false, plan: subscription.plan.name };
+
+};
+
+const incrementUsage = async (businessId: string) => {
+
+  const { month, year } = getCurrentMonthYear();
+
   await prisma.usage.update({
     where: {
       businessId_month_year: {
@@ -139,10 +162,7 @@ const checkAndIncrementUsage = async (businessId: string) => {
     },
   });
 
-  return { blocked: false, plan: subscription.plan.name };
-
 };
-
 
 /* ---------------- LEAD DATA EXTRACTION ---------------- */
 
@@ -165,7 +185,6 @@ const extractLeadData = async (leadId: string, message: string) => {
   });
 
 };
-
 
 /* ---------------- STAGE SYSTEM ---------------- */
 
@@ -191,7 +210,6 @@ const updateStage = async (leadId: string, message: string) => {
 
 };
 
-
 /* ---------------- MAIN AI FUNCTION ---------------- */
 
 export const generateAIReply = async ({
@@ -203,6 +221,19 @@ export const generateAIReply = async ({
   console.log("AI SERVICE START", { businessId, leadId });
 
   try {
+
+    /* EMPTY MESSAGE PROTECTION */
+
+    if (!message || !message.trim()) {
+      return "Thanks for reaching out!";
+    }
+
+    /* SYSTEM MESSAGE PROTECTION */
+
+    if (isSystemMessage(message)) {
+      console.log("System message blocked:", message);
+      return "";
+    }
 
     const abuseCheck = await checkAIAbuse(leadId, message);
 
@@ -218,7 +249,7 @@ export const generateAIReply = async ({
 
     }
 
-    const usageCheck = await checkAndIncrementUsage(businessId);
+    const usageCheck = await checkUsage(businessId);
 
     if (usageCheck.blocked) {
 
@@ -240,11 +271,15 @@ export const generateAIReply = async ({
 
     if (planName === "PRO" || planName === "ENTERPRISE") {
 
-      return generateAIFunnelReply({
+      const reply = await generateAIFunnelReply({
         businessId,
         leadId,
         message,
       });
+
+      await incrementUsage(businessId);
+
+      return reply;
 
     }
 
@@ -261,10 +296,6 @@ export const generateAIReply = async ({
 
     const memoryContext = await buildMemoryContext(leadId);
 
-    /* ============================
-       KNOWLEDGE VECTOR SEARCH
-    ============================ */
-
     const knowledgeResults = await searchKnowledge(
       businessId,
       message
@@ -273,10 +304,6 @@ export const generateAIReply = async ({
     const knowledgeText = knowledgeResults
       .map(k => `${k.title}: ${k.content}`)
       .join("\n");
-
-    /* ============================
-       UPDATED AI TRAINING PROMPT
-    ============================ */
 
     const systemPrompt = `
 You are a helpful AI assistant for a business.
@@ -336,6 +363,8 @@ Rules:
         sender: "AI",
       },
     });
+
+    await incrementUsage(businessId);
 
     await updateMemory(leadId, message);
 

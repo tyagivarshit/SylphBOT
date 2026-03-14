@@ -30,8 +30,10 @@ initSocket(server);
 /* START SERVER */
 /* ============================= */
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
+
   console.log(`🚀 Server running on port ${PORT}`);
+
 });
 
 /* ============================= */

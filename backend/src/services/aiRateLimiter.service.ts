@@ -2,7 +2,7 @@ import { incrementRate } from "../redis/rateLimiter.redis";
 import logger from "../utils/logger";
 
 const PLATFORM_LIMITS: Record<string, number> = {
-  INSTAGRAM: 15,
+  INSTAGRAM: 25,
   WHATSAPP: 40,
 };
 
@@ -18,43 +18,88 @@ export const checkAIRateLimit = async ({
   platform,
 }: RateInput) => {
 
-  const limit = PLATFORM_LIMITS[platform] || 10;
+  try {
 
-  /* PLATFORM SPECIFIC REDIS COUNTER */
+    /* BASIC VALIDATION */
 
-  const current = await incrementRate(
-    businessId,
-    leadId,
-    platform, // 👈 important fix
-    30
-  );
+    if (!businessId || !leadId) {
+      return { blocked: false };
+    }
 
-  if (current > limit) {
+    /* NORMALIZE PLATFORM */
 
-    logger.warn(
+    const normalizedPlatform = (platform || "UNKNOWN").toUpperCase();
+
+    const limit = PLATFORM_LIMITS[normalizedPlatform] || 20;
+
+    /* REDIS COUNTER */
+
+    const current = await incrementRate(
+      businessId,
+      leadId,
+      normalizedPlatform,
+      60 // ⬅️ 60 second window
+    );
+
+    logger.info(
       {
         businessId,
         leadId,
-        platform,
+        platform: normalizedPlatform,
         current,
         limit,
       },
-      "AI RATE LIMIT TRIGGERED"
+      "AI RATE LIMIT CHECK"
     );
 
+    /* BLOCK CONDITION */
+
+    if (current > limit) {
+
+      logger.warn(
+        {
+          businessId,
+          leadId,
+          platform: normalizedPlatform,
+          current,
+          limit,
+        },
+        "AI RATE LIMIT TRIGGERED"
+      );
+
+      return {
+        blocked: true,
+        reason: "RATE_LIMIT",
+        limit,
+        current,
+      };
+
+    }
+
     return {
-      blocked: true,
-      reason: "RATE_LIMIT",
+      blocked: false,
       limit,
       current,
     };
 
-  }
+  } catch (error) {
 
-  return {
-    blocked: false,
-    limit,
-    current,
-  };
+    logger.error(
+      {
+        businessId,
+        leadId,
+        platform,
+        error,
+      },
+      "AI RATE LIMIT ERROR"
+    );
+
+    /* FAIL SAFE */
+
+    return {
+      blocked: false,
+    };
+
+  }
 
 };

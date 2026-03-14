@@ -162,6 +162,9 @@ model Lead {
   stage          String   @default("NEW")
   aiStage        String?  @default("NEW")
 
+  isHumanActive Boolean @default(false)
+  assignedAgentId String?
+
   intent         String?   // 🔹 AI Intent Detection
 
   unreadCount    Int      @default(0)

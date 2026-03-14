@@ -15,7 +15,7 @@ export const getRateKey = (
 ) => {
 
   if (platform) {
-    return `${PREFIX}:${businessId}:${leadId}:${platform}`;
+    return `${PREFIX}:${platform}:${businessId}:${leadId}`;
   }
 
   return `${PREFIX}:${businessId}:${leadId}`;
@@ -23,7 +23,7 @@ export const getRateKey = (
 };
 
 /* -------------------------------------------------- */
-/* INCREMENT RATE */
+/* INCREMENT RATE (CORRECT WINDOW LOGIC) */
 /* -------------------------------------------------- */
 
 export const incrementRate = async (
@@ -35,13 +35,26 @@ export const incrementRate = async (
 
   const key = getRateKey(businessId, leadId, platform);
 
-  const count = await redis.incr(key);
+  try {
 
-  if (count === 1) {
-    await redis.expire(key, windowSeconds);
+    const count = await redis.incr(key);
+
+    /* TTL ONLY FIRST TIME */
+
+    if (count === 1) {
+      await redis.expire(key, windowSeconds);
+    }
+
+    return count;
+
+  } catch (error) {
+
+    console.error("RATE LIMIT REDIS ERROR:", error);
+
+    /* FAIL SAFE */
+    return 0;
+
   }
-
-  return count;
 
 };
 
@@ -60,5 +73,35 @@ export const getRate = async (
   const value = await redis.get(key);
 
   return Number(value || 0);
+
+};
+
+/* -------------------------------------------------- */
+/* RESET RATE (MANUAL UNBLOCK) */
+/* -------------------------------------------------- */
+
+export const resetRate = async (
+  businessId: string,
+  leadId: string,
+  platform?: string
+) => {
+
+  const key = getRateKey(businessId, leadId, platform);
+
+  await redis.del(key);
+
+};
+
+/* -------------------------------------------------- */
+/* CLEAR ALL RATE LIMITS (ADMIN TOOL) */
+/* -------------------------------------------------- */
+
+export const clearAllRates = async () => {
+
+  const keys = await redis.keys(`${PREFIX}:*`);
+
+  if (keys.length > 0) {
+    await redis.del(keys);
+  }
 
 };

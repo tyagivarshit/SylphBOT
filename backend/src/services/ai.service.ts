@@ -7,229 +7,278 @@ import { generateAIFunnelReply } from "./aiFunnel.service";
 
 /* MEMORY ENGINE */
 import {
-buildMemoryContext,
-updateMemory
+  buildMemoryContext,
+  updateMemory
 } from "./aiMemoryEngine.service";
 
+/* SUMMARY ENGINE */
+import { generateConversationSummary } from "./conversationSummary.service";
+
+/* KNOWLEDGE SEARCH */
+import { searchKnowledge } from "./knowledgeSearch.service";
+
 const openai = new OpenAI({
-apiKey: process.env.GROQ_API_KEY,
-baseURL: "https://api.groq.com/openai/v1",
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
 });
 
 interface AIInput {
-businessId: string;
-leadId: string;
-message: string;
+  businessId: string;
+  leadId: string;
+  message: string;
 }
 
-/* ---------------- USAGE + PLAN CHECK ---------------- */
+/* ---------------- AI ABUSE PROTECTION ---------------- */
+
+const checkAIAbuse = async (leadId: string, message: string) => {
+
+  const recentMessages = await prisma.message.findMany({
+    where: {
+      leadId,
+      sender: "USER",
+    },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
+
+  /* CONTINUOUS SPAM CHECK */
+
+  if (recentMessages.length === 5) {
+
+    const allSame = recentMessages.every(
+      (m) =>
+        m.content.toLowerCase().trim() ===
+        message.toLowerCase().trim()
+    );
+
+    if (allSame) {
+      return { blocked: true, reason: "SPAM_DETECTED" };
+    }
+
+  }
+
+  const aiMessages = await prisma.message.count({
+    where: {
+      leadId,
+      sender: "AI",
+    },
+  });
+
+  if (aiMessages >= 500) {
+    return { blocked: true, reason: "LIMIT_REACHED" };
+  }
+
+  return { blocked: false };
+
+};
+
+
+/* ---------------- PLAN + USAGE ---------------- */
 
 const checkAndIncrementUsage = async (businessId: string) => {
 
-const { month, year } = getCurrentMonthYear();
+  const { month, year } = getCurrentMonthYear();
 
-const subscription = await prisma.subscription.findUnique({
-where: { businessId },
-include: { plan: true },
-});
+  const subscription = await prisma.subscription.findUnique({
+    where: { businessId },
+    include: { plan: true },
+  });
 
-if (!subscription || subscription.status !== "ACTIVE") {
-return { blocked: true, reason: "INACTIVE_SUBSCRIPTION" };
-}
+  if (!subscription || subscription.status !== "ACTIVE") {
+    return { blocked: true, reason: "INACTIVE_SUBSCRIPTION" };
+  }
 
-if (
-subscription.plan.name === "FREE_TRIAL" &&
-subscription.currentPeriodEnd &&
-new Date() > subscription.currentPeriodEnd
-) {
-return { blocked: true, reason: "TRIAL_EXPIRED" };
-}
+  if (
+    subscription.plan.name === "FREE_TRIAL" &&
+    subscription.currentPeriodEnd &&
+    new Date() > subscription.currentPeriodEnd
+  ) {
+    return { blocked: true, reason: "TRIAL_EXPIRED" };
+  }
 
-let usage = await prisma.usage.findUnique({
-where: {
-businessId_month_year: {
-businessId,
-month,
-year,
-},
-},
-});
+  let usage = await prisma.usage.findUnique({
+    where: {
+      businessId_month_year: {
+        businessId,
+        month,
+        year,
+      },
+    },
+  });
 
-if (!usage) {
-usage = await prisma.usage.create({
-data: {
-businessId,
-month,
-year,
-aiCallsUsed: 0,
-messagesUsed: 0,
-followupsUsed: 0,
-},
-});
-}
+  if (!usage) {
 
-if (usage.aiCallsUsed >= subscription.plan.maxAiCalls) {
-return { blocked: true, reason: "PLAN_LIMIT" };
-}
+    usage = await prisma.usage.create({
+      data: {
+        businessId,
+        month,
+        year,
+        aiCallsUsed: 0,
+        messagesUsed: 0,
+        followupsUsed: 0,
+      },
+    });
 
-await prisma.usage.update({
-where: {
-businessId_month_year: {
-businessId,
-month,
-year,
-},
-},
-data: {
-aiCallsUsed: { increment: 1 },
-messagesUsed: { increment: 1 },
-},
-});
+  }
 
-return { blocked: false, plan: subscription.plan.name };
-};
+  if (usage.aiCallsUsed >= subscription.plan.maxAiCalls) {
+    return { blocked: true, reason: "PLAN_LIMIT" };
+  }
 
-/* ---------------- RECENT CHAT MEMORY ---------------- */
+  await prisma.usage.update({
+    where: {
+      businessId_month_year: {
+        businessId,
+        month,
+        year,
+      },
+    },
+    data: {
+      aiCallsUsed: { increment: 1 },
+      messagesUsed: { increment: 1 },
+    },
+  });
 
-const getRecentMessages = async (leadId: string) => {
-
-const messages = await prisma.message.findMany({
-where: { leadId },
-orderBy: { createdAt: "desc" },
-take: 6,
-});
-
-return messages
-.reverse()
-.map((m) => ({
-role: m.sender === "AI" ? "assistant" : "user",
-content: m.content,
-}));
+  return { blocked: false, plan: subscription.plan.name };
 
 };
+
 
 /* ---------------- LEAD DATA EXTRACTION ---------------- */
 
 const extractLeadData = async (leadId: string, message: string) => {
 
-const emailMatch = message.match(
-/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+.[A-Z]{2,}\b/i
-);
+  const emailMatch = message.match(
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i
+  );
 
-const phoneMatch = message.match(/\b\d{10,15}\b/);
+  const phoneMatch = message.match(/\b\d{10,15}\b/);
 
-await prisma.lead.update({
-where: { id: leadId },
-data: {
-email: emailMatch?.[0] || undefined,
-phone: phoneMatch?.[0] || undefined,
-},
-});
+  if (!emailMatch && !phoneMatch) return;
+
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: {
+      email: emailMatch?.[0] || undefined,
+      phone: phoneMatch?.[0] || undefined,
+    },
+  });
 
 };
+
 
 /* ---------------- STAGE SYSTEM ---------------- */
 
 const determineStage = (message: string) => {
 
-if (/price|cost|pricing/i.test(message)) return "INTERESTED";
+  const msg = message.toLowerCase();
 
-if (/buy|purchase|order/i.test(message)) return "READY_TO_BUY";
+  if (/price|cost|pricing/.test(msg)) return "INTERESTED";
+  if (/buy|purchase|order/.test(msg)) return "READY_TO_BUY";
 
-return "NEW";
+  return "NEW";
 
 };
 
 const updateStage = async (leadId: string, message: string) => {
 
-const stage = determineStage(message);
+  const stage = determineStage(message);
 
-await prisma.lead.update({
-where: { id: leadId },
-data: { stage },
-});
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { stage },
+  });
 
 };
+
 
 /* ---------------- MAIN AI FUNCTION ---------------- */
 
 export const generateAIReply = async ({
-businessId,
-leadId,
-message,
+  businessId,
+  leadId,
+  message,
 }: AIInput) => {
 
-console.log("AI SERVICE START", { businessId, leadId, message });
+  console.log("AI SERVICE START", { businessId, leadId });
 
-try {
+  try {
 
-/* SAVE USER MESSAGE */
+    const abuseCheck = await checkAIAbuse(leadId, message);
 
-await prisma.message.create({
-  data: {
-    leadId,
-    content: message,
-    sender: "USER",
-  },
-});
+    if (abuseCheck.blocked) {
 
-/* PLAN CHECK */
+      if (abuseCheck.reason === "SPAM_DETECTED") {
+        return "Please avoid repeating the same message.";
+      }
 
-const usageCheck = await checkAndIncrementUsage(businessId);
+      if (abuseCheck.reason === "LIMIT_REACHED") {
+        return "Conversation limit reached. Our team will assist you shortly.";
+      }
 
-if (usageCheck.blocked) {
+    }
 
-  if (usageCheck.reason === "TRIAL_EXPIRED") {
-    return "Your 7-day trial has expired. Please upgrade to continue using our AI services.";
-  }
+    const usageCheck = await checkAndIncrementUsage(businessId);
 
-  if (usageCheck.reason === "PLAN_LIMIT") {
-    return "You have reached your monthly AI usage limit. Please upgrade your plan.";
-  }
+    if (usageCheck.blocked) {
 
-  if (usageCheck.reason === "INACTIVE_SUBSCRIPTION") {
-    return "Your subscription is inactive. Please upgrade your plan.";
-  }
+      if (usageCheck.reason === "TRIAL_EXPIRED") {
+        return "Your trial has expired. Please upgrade.";
+      }
 
-}
+      if (usageCheck.reason === "PLAN_LIMIT") {
+        return "You have reached your monthly AI usage limit.";
+      }
 
-const planName = usageCheck.plan || "FREE_TRIAL";
+      if (usageCheck.reason === "INACTIVE_SUBSCRIPTION") {
+        return "Your subscription is inactive.";
+      }
 
-/* PRO / ENTERPRISE → FUNNEL AI */
+    }
 
-if (planName === "PRO" || planName === "ENTERPRISE") {
+    const planName = usageCheck.plan || "FREE_TRIAL";
 
-  return generateAIFunnelReply({
-    businessId,
-    leadId,
-    message,
-  });
+    if (planName === "PRO" || planName === "ENTERPRISE") {
 
-}
+      return generateAIFunnelReply({
+        businessId,
+        leadId,
+        message,
+      });
 
-/* BASIC PLAN AI */
+    }
 
-const client = await prisma.client.findFirst({
-  where: {
-    businessId,
-    isActive: true,
-  },
-});
+    const client = await prisma.client.findFirst({
+      where: {
+        businessId,
+        isActive: true,
+      },
+    });
 
-if (!client) {
-  return "No active client found.";
-}
+    if (!client) {
+      return "No active client found.";
+    }
 
-/* MEMORY SYSTEM */
+    const memoryContext = await buildMemoryContext(leadId);
 
-const memoryContext = await buildMemoryContext(leadId);
+    /* ============================
+       KNOWLEDGE VECTOR SEARCH
+    ============================ */
 
-const recentMessages = await getRecentMessages(leadId);
+    const knowledgeResults = await searchKnowledge(
+      businessId,
+      message
+    );
 
-/* SYSTEM PROMPT */
+    const knowledgeText = knowledgeResults
+      .map(k => `${k.title}: ${k.content}`)
+      .join("\n");
 
-const systemPrompt = `
+    /* ============================
+       UPDATED AI TRAINING PROMPT
+    ============================ */
 
+    const systemPrompt = `
 You are a helpful AI assistant for a business.
 
 Business Information:
@@ -238,61 +287,76 @@ ${client.businessInfo || "Not provided"}
 Pricing Information:
 ${client.pricingInfo || "Ask admin for pricing"}
 
+FAQ Knowledge:
+${client.faqKnowledge || "No FAQ knowledge provided"}
+
+Sales Instructions:
+${client.salesInstructions || "Be helpful and guide the customer"}
+
+Knowledge Base:
+${knowledgeText || "No additional knowledge provided"}
+
 Communication Style:
 ${client.aiTone || "Professional"}
 
 Customer Memory:
 ${memoryContext.memory}
 
+Conversation Summary:
+${memoryContext.summary}
+
 Rules:
+- Use only provided business information
+- Never invent pricing
+- Follow the sales instructions if provided
+- Use FAQ knowledge when relevant
+- Use knowledge base if relevant
+- Be concise and helpful
+`;
 
-* Use only the provided business information
-* Do not invent pricing
-* Be concise and helpful
-  `;
+    const prompt = [
+      { role: "system", content: systemPrompt },
+      ...memoryContext.conversation,
+      { role: "user", content: message },
+    ];
 
-  const prompt = [
-  { role: "system", content: systemPrompt },
-  ...recentMessages,
-  { role: "user", content: message },
-  ];
+    const response = await openai.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: prompt as any,
+    });
 
-  const response = await openai.chat.completions.create({
-  model: "llama-3.1-8b-instant",
-  messages: prompt as any,
-  });
+    const reply =
+      response.choices?.[0]?.message?.content?.trim() ||
+      "Thanks for reaching out!";
 
-  const reply =
-  response.choices?.[0]?.message?.content?.trim() ||
-  "Thanks for reaching out!";
+    await prisma.message.create({
+      data: {
+        leadId,
+        content: reply,
+        sender: "AI",
+      },
+    });
 
-  /* SAVE AI MESSAGE */
+    await updateMemory(leadId, message);
 
-  await prisma.message.create({
-  data: {
-  leadId,
-  content: reply,
-  sender: "AI",
-  },
-  });
+    const messageCount = await prisma.message.count({
+      where: { leadId },
+    });
 
-  /* MEMORY UPDATE */
+    if (messageCount % 10 === 0) {
+      await generateConversationSummary(leadId);
+    }
 
-  await updateMemory(leadId, message);
+    await extractLeadData(leadId, message);
+    await updateStage(leadId, message);
 
-  /* CRM UPDATE */
-
-  await extractLeadData(leadId, message);
-
-  await updateStage(leadId, message);
-
-  return reply;
+    return reply;
 
   } catch (error: any) {
 
-  console.error("AI SERVICE ERROR:", error);
+    console.error("AI SERVICE ERROR:", error);
 
-  return "Thanks for your message. Our team will respond shortly.";
+    return "Thanks for your message. Our team will respond shortly.";
 
   }
 

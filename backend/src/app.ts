@@ -13,11 +13,16 @@ import billingRoutes from "./routes/billing.routes";
 import { stripeWebhook } from "./routes/stripe.webhook";
 import dashboardRoutes from "./routes/dashboard.routes";
 
-/* 🟢 NEW IMPORT */
+/* 🟢 EXISTING */
 import commentTriggerRoutes from "./routes/commentTrigger.routes";
-
-/* 🟢 NEW IMPORT */
 import messageRoutes from "./routes/message.routes";
+
+/* 🟢 NEW */
+import automationRoutes from "./routes/automation.routes";
+import { monitoringMiddleware } from "./middleware/monitoring.middleware";
+
+/* 🟢 KNOWLEDGE BASE (NEW FEATURE) */
+import knowledgeRoutes from "./routes/knowledge.routes";
 
 import {
   authLimiter,
@@ -26,8 +31,6 @@ import {
 } from "./middleware/rateLimit.middleware";
 
 import { startTrialExpiryCron } from "./cron/trial.cron";
-
-/* 🟢 NEW IMPORT */
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
 
 import { env } from "./config/env";
@@ -84,6 +87,12 @@ app.use(
 );
 
 /* ============================= */
+/* MONITORING */
+/* ============================= */
+
+app.use(monitoringMiddleware);
+
+/* ============================= */
 /* JSON PARSER */
 /* ============================= */
 
@@ -107,11 +116,17 @@ app.use("/api/billing", billingRoutes);
 
 app.use("/api/dashboard", dashboardRoutes);
 
-/* 🟢 NEW ROUTE */
+/* 🟢 COMMENT AUTOMATION */
 app.use("/api/comment-triggers", commentTriggerRoutes);
 
-/* 🟢 NEW ROUTE */
+/* 🟢 MESSAGE SYSTEM */
 app.use("/api/messages", messageRoutes);
+
+/* 🟢 AUTOMATION FLOWS */
+app.use("/api/automations", automationRoutes);
+
+/* 🟢 AI KNOWLEDGE BASE */
+app.use("/api/knowledge", knowledgeRoutes);
 
 /* ============================= */
 /* HEALTH */
@@ -140,6 +155,7 @@ app.use((req, res) => {
 /* ============================= */
 
 app.use((err: any, req: any, res: any, next: any) => {
+
   console.error("Global Error:", err);
 
   res.status(err.status || 500).json({
@@ -149,13 +165,15 @@ app.use((err: any, req: any, res: any, next: any) => {
         ? "Internal server error"
         : err.message,
   });
+
 });
 
+/* ============================= */
+/* CRONS */
 /* ============================= */
 
 startTrialExpiryCron();
 
-/* 🟢 NEW CRON START */
 startMetaTokenRefreshCron();
 
 export default app;

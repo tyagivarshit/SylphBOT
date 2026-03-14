@@ -7,26 +7,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
-  name          String
-  email         String   @unique
-  password      String
-  role          String   @default("OWNER")
+/* =====================================================
+USER SYSTEM
+===================================================== */
 
-  isVerified    Boolean  @default(false)   
-  verifyToken   String?            
+model User {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  name              String
+  email             String   @unique
+  password          String
+  role              String   @default("OWNER")
+
+  isVerified        Boolean  @default(false)
+  verifyToken       String?
   verifyTokenExpiry DateTime?
 
-  businesses    Business[]
-  refreshTokens RefreshToken[] 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  businesses        Business[]
+  refreshTokens     RefreshToken[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
+
+/* =====================================================
+BUSINESS
+===================================================== */
 
 model Business {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
   name          String
+
   ownerId       String   @db.ObjectId
   owner         User     @relation(fields: [ownerId], references: [id])
 
@@ -34,52 +44,81 @@ model Business {
   subscription  Subscription?
   leads         Lead[]
   usage         Usage[]
-  commentTriggers CommentTrigger[]
 
-  createdAt     DateTime @default(now())
+  commentTriggers CommentTrigger[]
+  automationFlows AutomationFlow[]
 
   calendarConnections CalendarConnection[]
   bookingSlots        BookingSlot[]
   appointments        Appointment[]
+
+  knowledgeBases KnowledgeBase[]
+
+  createdAt     DateTime @default(now())
+
+  @@index([ownerId])
 }
+
+/* =====================================================
+CLIENT CONNECTIONS
+===================================================== */
 
 model Client {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
   businessId    String   @db.ObjectId
   business      Business @relation(fields: [businessId], references: [id])
 
   platform      String
+
   phoneNumberId String?  @unique
   pageId        String?  @unique
+
   accessToken   String
 
-  aiTone        String?
-  businessInfo  String?
-  pricingInfo   String?
+  /* AI TRAINING */
+
+  aiTone            String?
+  businessInfo      String?
+  pricingInfo       String?
+  faqKnowledge      String?
+  salesInstructions String?
 
   leads         Lead[]
   commentTriggers CommentTrigger[]
 
   isActive      Boolean  @default(true)
   deletedAt     DateTime?
+
   createdAt     DateTime @default(now())
 
   @@unique([businessId, platform])
+  @@index([businessId])
 }
 
+/* =====================================================
+PLANS
+===================================================== */
+
 model Plan {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
-  name          String   @unique
-  priceId       String?  @unique
-  maxAiCalls    Int
-  maxMessages   Int
-  maxFollowups  Int
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  name         String   @unique
+  priceId      String?  @unique
+
+  maxAiCalls   Int
+  maxMessages  Int
+  maxFollowups Int
 
   subscriptions Subscription[]
 }
 
+/* =====================================================
+SUBSCRIPTIONS
+===================================================== */
+
 model Subscription {
   id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+
   businessId           String   @unique @db.ObjectId
   business             Business @relation(fields: [businessId], references: [id])
 
@@ -87,19 +126,26 @@ model Subscription {
   plan                 Plan     @relation(fields: [planId], references: [id])
 
   status               String   @default("INACTIVE")
+
   stripeCustomerId     String?
   stripeSubscriptionId String?
+
   currentPeriodEnd     DateTime?
 
-  isTrial Boolean @default(false)
-  trialUsed Boolean @default(false)
+  isTrial              Boolean @default(false)
+  trialUsed            Boolean @default(false)
 
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
 
+/* =====================================================
+LEADS (CRM)
+===================================================== */
+
 model Lead {
   id             String   @id @default(auto()) @map("_id") @db.ObjectId
+
   businessId     String   @db.ObjectId
   business       Business @relation(fields: [businessId], references: [id])
 
@@ -112,9 +158,11 @@ model Lead {
   email          String?
 
   platform       String
-  stage          String   @default("NEW")
 
+  stage          String   @default("NEW")
   aiStage        String?  @default("NEW")
+
+  intent         String?   // 🔹 AI Intent Detection
 
   unreadCount    Int      @default(0)
   leadScore      Int      @default(0)
@@ -124,29 +172,45 @@ model Lead {
 
   messages       Message[]
   memories       Memory[]
+  summaries      ConversationSummary[]
 
   lastMessageAt  DateTime?
-  
-  createdAt      DateTime @default(now())
-  deletedAt      DateTime?
 
   appointments   Appointment[]
   conversationStates ConversationState[]
+  automationExecutions AutomationExecution[]
+
+  createdAt      DateTime @default(now())
+  deletedAt      DateTime?
+
+  @@index([businessId])
+  @@index([phone])
+  @@index([instagramId])
+  @@index([clientId])
 }
+
+/* =====================================================
+MESSAGES
+===================================================== */
 
 model Message {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
+
   leadId    String   @db.ObjectId
   lead      Lead     @relation(fields: [leadId], references: [id])
 
   content   String
   sender    String
+
   createdAt DateTime @default(now())
+
+  @@index([leadId])
+  @@index([createdAt])
 }
 
-/* -----------------------------
+/* =====================================================
 AI MEMORY ENGINE
------------------------------ */
+===================================================== */
 
 model Memory {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
@@ -158,30 +222,144 @@ model Memory {
   value     String
 
   createdAt DateTime @default(now())
+
+  @@index([leadId])
 }
 
+/* =====================================================
+CONVERSATION SUMMARY
+===================================================== */
+
+model ConversationSummary {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  leadId    String   @db.ObjectId
+  lead      Lead     @relation(fields: [leadId], references: [id])
+
+  summary   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([leadId])
+}
+
+/* =====================================================
+WEBHOOK EVENT DEDUPLICATION
+===================================================== */
+
+model WebhookEvent {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  eventId   String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+
+  @@index([platform])
+}
+
+/* =====================================================
+INSTAGRAM COMMENT AUTOMATION
+===================================================== */
+
 model CommentTrigger {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId String   @db.ObjectId
+  business   Business @relation(fields: [businessId], references: [id])
+
+  clientId   String   @db.ObjectId
+  client     Client   @relation(fields: [clientId], references: [id])
+
+  reelId     String
+  keyword    String
+  replyText  String
+
+  aiPrompt   String?
+
+  isActive   Boolean  @default(true)
+
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+  @@index([clientId])
+}
+
+/* =====================================================
+DM FUNNEL AUTOMATION SYSTEM
+===================================================== */
+
+model AutomationFlow {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
 
   businessId  String   @db.ObjectId
   business    Business @relation(fields: [businessId], references: [id])
 
-  clientId    String   @db.ObjectId
-  client      Client   @relation(fields: [clientId], references: [id])
+  name        String
+  channel     String
+  status      String   @default("ACTIVE")
 
-  reelId      String
-  keyword     String
-  replyText   String
+  triggerType String
+  triggerValue String?
 
-  aiPrompt    String?
-
-  isActive    Boolean  @default(true)
+  steps       AutomationStep[]
+  executions  AutomationExecution[]
 
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([channel])
 }
+
+model AutomationStep {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  flowId      String   @db.ObjectId
+  flow        AutomationFlow @relation(fields: [flowId], references: [id])
+
+  stepKey     String
+  stepType    String
+
+  message     String?
+  condition   String?
+  nextStep    String?
+
+  metadata    Json?
+
+  createdAt   DateTime @default(now())
+
+  @@index([flowId])
+  @@index([stepKey])
+}
+
+model AutomationExecution {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  flowId      String   @db.ObjectId
+  flow        AutomationFlow @relation(fields: [flowId], references: [id])
+
+  leadId      String   @db.ObjectId
+  lead        Lead     @relation(fields: [leadId], references: [id])
+
+  currentStep String
+  variables   Json?
+
+  status      String   @default("ACTIVE")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([leadId])
+  @@index([flowId])
+}
+
+/* =====================================================
+USAGE TRACKING
+===================================================== */
 
 model Usage {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
   businessId    String   @db.ObjectId
   business      Business @relation(fields: [businessId], references: [id])
 
@@ -193,16 +371,31 @@ model Usage {
   followupsUsed Int      @default(0)
 
   @@unique([businessId, month, year])
+  @@index([businessId])
 }
+
+/* =====================================================
+REFRESH TOKENS
+===================================================== */
 
 model RefreshToken {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
   token      String   @unique
+
   userId     String   @db.ObjectId
   user       User     @relation(fields: [userId], references: [id])
+
   expiresAt  DateTime
+
   createdAt  DateTime @default(now())
+
+  @@index([userId])
 }
+
+/* =====================================================
+STRIPE EVENTS
+===================================================== */
 
 model StripeEvent {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
@@ -210,9 +403,9 @@ model StripeEvent {
   createdAt DateTime @default(now())
 }
 
-/* -----------------------------
+/* =====================================================
 ENTERPRISE BOOKING SYSTEM
------------------------------ */
+===================================================== */
 
 model CalendarConnection {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId
@@ -224,10 +417,13 @@ model CalendarConnection {
 
   accessToken  String
   refreshToken String
+
   expiryDate   DateTime?
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([businessId])
 }
 
 model BookingSlot {
@@ -244,6 +440,8 @@ model BookingSlot {
 
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([businessId])
 }
 
 model Appointment {
@@ -268,11 +466,14 @@ model Appointment {
 
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([leadId])
 }
 
-/* -----------------------------
+/* =====================================================
 AI CONVERSATION STATE ENGINE
------------------------------ */
+===================================================== */
 
 model ConversationState {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
@@ -283,6 +484,36 @@ model ConversationState {
   state     String
   context   String?
 
+  expiresAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([leadId])
+}
+
+/* =====================================================
+AI KNOWLEDGE BASE
+===================================================== */
+
+model KnowledgeBase {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  title       String
+  content     String
+
+  embedding   Json?    // 🔹 Vector Embedding
+
+  sourceType  String
+  sourceUrl   String?
+
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([businessId])
 }

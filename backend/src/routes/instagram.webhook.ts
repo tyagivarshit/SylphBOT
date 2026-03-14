@@ -1,337 +1,362 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
-import axios from "axios";
 import prisma from "../config/prisma";
-import { decrypt } from "../utils/encrypt";
-import { generateAIReply } from "../services/ai.service";
-import { generateAIFunnelReply } from "../services/aiFunnel.service";
-import { routeAIMessage } from "../services/aiRouter.service";
+
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
+import { addAIJob } from "../queues/ai.queue";
+
 import { getIO } from "../sockets/socket.server";
+
 import { handleCommentAutomation } from "../services/commentAutomation.service";
+import { processWebhookEvent } from "../services/webhookDedup.service";
 
 const router = Router();
 
 /* --------------------------------------------------- */
+
 const log = (...args: any[]) => {
-console.log("[INSTAGRAM WEBHOOK]", ...args);
+  console.log("[INSTAGRAM WEBHOOK]", ...args);
 };
+
+/* --------------------------------------------------- */
+/* SIGNATURE VERIFY */
 /* --------------------------------------------------- */
 
-/* SIGNATURE VERIFY */
-
 const verifySignature = (req: any): boolean => {
-try {
-const signature = req.headers["x-hub-signature-256"] as string;
-const appSecret = process.env.META_APP_SECRET;
 
-if (!signature || !appSecret) return false;
+  try {
 
-const expected =
-"sha256=" +
-crypto
-.createHmac("sha256", appSecret)
-.update(req.body)
-.digest("hex");
+    const signature = req.headers["x-hub-signature-256"] as string;
+    const appSecret = process.env.META_APP_SECRET;
 
-return signature === expected;
+    if (!signature || !appSecret) return false;
 
-} catch {
-return false;
-}
+    const expected =
+      "sha256=" +
+      crypto
+        .createHmac("sha256", appSecret)
+        .update(req.rawBody || req.body)
+        .digest("hex");
+
+    return signature === expected;
+
+  } catch {
+
+    return false;
+
+  }
+
 };
 
-/* ---------------------------------------------------
-WEBHOOK VERIFY
---------------------------------------------------- */
+/* --------------------------------------------------- */
+/* WEBHOOK VERIFY */
+/* --------------------------------------------------- */
 
 router.get("/", (req: Request, res: Response) => {
 
-const mode = req.query["hub.mode"];
-const token = req.query["hub.verify_token"];
-const challenge = req.query["hub.challenge"];
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
-if (mode === "subscribe" && token === process.env.INSTAGRAM_VERIFY_TOKEN) {
-log("Webhook verified");
-return res.status(200).send(challenge);
-}
+  if (mode === "subscribe" && token === process.env.INSTAGRAM_VERIFY_TOKEN) {
 
-log("Webhook verification failed");
-return res.sendStatus(403);
+    log("Webhook verified");
+
+    return res.status(200).send(challenge);
+
+  }
+
+  log("Webhook verification failed");
+
+  return res.sendStatus(403);
 
 });
 
-/* ---------------------------------------------------
-INSTAGRAM WEBHOOK
---------------------------------------------------- */
+/* --------------------------------------------------- */
+/* INSTAGRAM WEBHOOK */
+/* --------------------------------------------------- */
 
 router.post("/", async (req: any, res: Response) => {
 
-console.log("🔥 INSTAGRAM WEBHOOK HIT");
+  console.log("🔥 INSTAGRAM WEBHOOK HIT");
 
-let body: any;
+  let body: any;
 
-try {
+  try {
 
-body =
-Buffer.isBuffer(req.body)
-? JSON.parse(req.body.toString("utf8"))
-: req.body;
+    body =
+      Buffer.isBuffer(req.body)
+        ? JSON.parse(req.body.toString("utf8"))
+        : req.body;
 
-} catch (err) {
+  } catch {
 
-log("Body parse failed");
-return res.sendStatus(400);
+    log("Body parse failed");
 
-}
+    return res.sendStatus(400);
 
-console.log("📩 BODY:", JSON.stringify(body, null, 2));
+  }
 
-try {
+  try {
 
-if (process.env.NODE_ENV === "production" && !verifySignature(req)) {
-log("Invalid signature");
-return res.sendStatus(403);
-}
+    if (process.env.NODE_ENV === "production" && !verifySignature(req)) {
 
-/* ---------------------------------------------------
-COMMENT AUTOMATION
---------------------------------------------------- */
+      log("Invalid signature");
 
-const change = body.entry?.[0]?.changes?.[0];
+      return res.sendStatus(403);
 
-if (change?.value?.item === "comment") {
+    }
 
-const commentText = change.value.comment?.text;
-const instagramUserId = change.value.from?.id;
-const reelId = change.value.media?.id;
-const pageId = change.value.id;
+    const entry = body.entry?.[0];
 
-if (!commentText || !instagramUserId || !reelId) {
-return res.sendStatus(200);
-}
+    if (!entry) return res.sendStatus(200);
 
-log("Comment detected:", commentText);
+    /* ---------------------------------------------------
+    COMMENT AUTOMATION
+    --------------------------------------------------- */
 
-const client = await prisma.client.findFirst({
-where: {
-platform: "INSTAGRAM",
-pageId: pageId,
-isActive: true,
-},
-});
+    const change = entry?.changes?.[0];
 
-if (!client) {
-log("Client not found for comment automation");
-return res.sendStatus(200);
-}
+    if (change?.value?.item === "comment") {
 
-await handleCommentAutomation({
-businessId: client.businessId,
-clientId: client.id,
-instagramUserId,
-reelId,
-commentText,
-});
+      const commentText = change.value.comment?.text;
+      const instagramUserId = change.value.from?.id;
+      const reelId = change.value.media?.id;
+      const pageId = change.value.id;
 
-return res.sendStatus(200);
-}
+      if (!commentText || !instagramUserId || !reelId) {
+        return res.sendStatus(200);
+      }
 
-/* ---------------------------------------------------
-DM MESSAGE HANDLER
---------------------------------------------------- */
+      const client = await prisma.client.findFirst({
+        where: {
+          platform: "INSTAGRAM",
+          pageId,
+          isActive: true,
+        },
+      });
 
-const entry = body.entry?.[0];
-const messaging = entry?.messaging?.[0];
+      if (!client) {
 
-if (!entry || !messaging) {
-return res.sendStatus(200);
-}
+        log("Client not found for comment automation");
 
-if (!messaging.message) {
-log("Non-message event ignored");
-return res.sendStatus(200);
-}
+        return res.sendStatus(200);
 
-const senderId = String(messaging.sender?.id);
-const pageId = String(entry.id);
-const text = messaging.message?.text;
+      }
 
-if (!senderId || !text) {
-return res.sendStatus(200);
-}
+      await handleCommentAutomation({
+        businessId: client.businessId,
+        clientId: client.id,
+        instagramUserId,
+        reelId,
+        commentText,
+      });
 
-if (senderId === pageId) {
-log("Echo message ignored");
-return res.sendStatus(200);
-}
+      return res.sendStatus(200);
 
-log("Incoming message:", text);
+    }
 
-/* ---------- CLIENT ---------- */
+    /* ---------------------------------------------------
+    MESSAGE DETECTION
+    --------------------------------------------------- */
 
-const client = await prisma.client.findFirst({
-where: {
-platform: "INSTAGRAM",
-pageId: pageId,
-isActive: true,
-},
-});
+    let senderId: string | undefined;
+    let text: string | undefined;
+    let eventId: string | undefined;
+    let pageId: string | undefined;
 
-if (!client) {
-log("Client not found:", pageId);
-return res.sendStatus(200);
-}
+    /* FORMAT 1 */
 
-/* ---------- LEAD ---------- */
+    const messaging = entry?.messaging?.[0];
 
-let lead = await prisma.lead.findFirst({
-where: {
-businessId: client.businessId,
-instagramId: senderId,
-},
-});
+    if (messaging?.message?.text) {
 
-if (!lead) {
+      senderId = messaging.sender?.id;
+      text = messaging.message.text;
 
-lead = await prisma.lead.create({
-data: {
-businessId: client.businessId,
-clientId: client.id,
-instagramId: senderId,
-platform: "INSTAGRAM",
-stage: "NEW",
-},
-});
+      /* safer page id detection */
 
-log("Lead created:", lead.id);
+      pageId = messaging.recipient?.id || entry.id;
 
-}
+      eventId = messaging.message.mid;
 
-const io = getIO();
+    }
 
-/* ---------- PLAN CHECK ---------- */
+    /* FORMAT 2 */
 
-const subscription = await prisma.subscription.findUnique({
-where: { businessId: client.businessId },
-include: { plan: true },
-});
+    const changeMessage = entry?.changes?.[0]?.value?.messages?.[0];
 
-/* ---------- AI ROUTER ---------- */
+    if (!text && changeMessage?.text?.body) {
 
-let aiReply: string | null = null;
+      senderId = changeMessage.from;
+      text = changeMessage.text.body;
+      pageId = entry.id;
+      eventId = changeMessage.id;
 
-try {
+    }
 
-aiReply = await routeAIMessage({
-businessId: client.businessId,
-leadId: lead.id,
-message: text,
-});
+    console.log("DEBUG MESSAGE:", {
+      senderId,
+      text,
+      eventId,
+      pageId
+    });
 
-} catch (err) {
+    /* ---------------------------------------------------
+    SELF MESSAGE FILTER
+    --------------------------------------------------- */
 
-log("AI router failed, fallback triggered:", err);
+    if (!senderId || !text) {
 
-try {
+      console.log("Message ignored (missing sender/text)");
 
-if (
-  subscription?.plan.name === "PRO" ||
-  subscription?.plan.name === "ENTERPRISE"
-) {
+      return res.sendStatus(200);
 
-  aiReply = await generateAIFunnelReply({
-    businessId: client.businessId,
-    leadId: lead.id,
-    message: text,
-  });
+    }
 
-} else {
+    if (pageId && senderId === pageId) {
 
-  aiReply = await generateAIReply({
-    businessId: client.businessId,
-    leadId: lead.id,
-    message: text,
-  });
+      console.log("Message ignored (self message)");
 
-}
+      return res.sendStatus(200);
 
-} catch (fallbackError) {
+    }
 
-log("AI fallback failed:", fallbackError);
+    /* ---------------------------------------------------
+    WEBHOOK DEDUP
+    --------------------------------------------------- */
 
-}
+    const shouldProcess = await processWebhookEvent({
+      eventId: eventId || "unknown",
+      platform: "INSTAGRAM",
+    });
 
-}
+    if (!shouldProcess) {
 
-log("AI reply generated:", aiReply);
+      log("Duplicate webhook ignored");
 
-if (!aiReply) {
-aiReply = "Thanks for your message! We'll reply shortly.";
-}
+      return res.sendStatus(200);
 
-/* ---------- SOCKET EMIT ---------- */
+    }
 
-io.to(`lead_${lead.id}`).emit("new_message", {
-sender: "USER",
-content: text
-});
+    /* ---------------------------------------------------
+    CLIENT
+    --------------------------------------------------- */
 
-io.to(`lead_${lead.id}`).emit("new_message", {
-sender: "AI",
-content: aiReply
-});
+    const client = await prisma.client.findFirst({
+      where: {
+        platform: "INSTAGRAM",
+        pageId,
+        isActive: true,
+      },
+    });
 
-/* ---------- LEAD UPDATE ---------- */
+    if (!client) {
 
-await prisma.lead.update({
-where: { id: lead.id },
-data: {
-lastMessageAt: new Date(),
-followupCount: 0,
-unreadCount: { increment: 1 }
-},
-});
+      log("Client not found:", pageId);
 
-await cancelFollowups(lead.id);
-await scheduleFollowups(lead.id);
+      return res.sendStatus(200);
 
-/* ---------- SEND MESSAGE ---------- */
+    }
 
-const accessToken = decrypt(client.accessToken);
+    /* ---------------------------------------------------
+    LEAD
+    --------------------------------------------------- */
 
-try {
+    let lead = await prisma.lead.findFirst({
+      where: {
+        businessId: client.businessId,
+        instagramId: senderId,
+      },
+    });
 
-await axios.post(
-"https://graph.facebook.com/v19.0/me/messages",
-{
-recipient: { id: senderId },
-message: { text: aiReply },
-},
-{
-headers: {
-Authorization: `Bearer ${accessToken}`,
-"Content-Type": "application/json",
-},
-}
-);
+    if (!lead) {
 
-log("Message sent to Instagram");
+      lead = await prisma.lead.create({
+        data: {
+          businessId: client.businessId,
+          clientId: client.id,
+          instagramId: senderId,
+          platform: "INSTAGRAM",
+          stage: "NEW",
+        },
+      });
 
-} catch (err: any) {
+      log("Lead created:", lead.id);
 
-log("Instagram send error:", err.response?.data || err.message);
+    }
 
-}
+    /* ---------------------------------------------------
+    SAVE USER MESSAGE
+    --------------------------------------------------- */
 
-return res.sendStatus(200);
+    const userMessage = await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        content: text,
+        sender: "USER",
+      },
+    });
 
-} catch (error) {
+    try {
 
-log("Webhook error:", error);
-return res.sendStatus(500);
+      const io = getIO();
+      io.to(`lead_${lead.id}`).emit("new_message", userMessage);
 
-}
+    } catch {}
+
+    /* ---------------------------------------------------
+    ADD AI JOB
+    --------------------------------------------------- */
+
+    console.log("AI JOB DATA:", {
+      businessId: client.businessId,
+      leadId: lead.id,
+      message: text,
+      platform: "INSTAGRAM",
+      senderId,
+      pageId,
+    });
+
+    await addAIJob({
+      businessId: client.businessId,
+      leadId: lead.id,
+      message: text,
+      platform: "INSTAGRAM",
+      senderId,
+      pageId,
+      accessTokenEncrypted: client.accessToken,
+    });
+
+    /* ---------------------------------------------------
+    UPDATE LEAD
+    --------------------------------------------------- */
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        lastMessageAt: new Date(),
+        followupCount: 0,
+        unreadCount: { increment: 1 },
+      },
+    });
+
+    /* ---------------------------------------------------
+    FOLLOWUP RESET
+    --------------------------------------------------- */
+
+    await cancelFollowups(lead.id);
+    await scheduleFollowups(lead.id);
+
+    return res.sendStatus(200);
+
+  } catch (error) {
+
+    log("Webhook error:", error);
+
+    return res.sendStatus(500);
+
+  }
 
 });
 

@@ -1,105 +1,192 @@
 import { generateIntentReply } from "./aiIntentEngine.service";
-import { handleAIBookingIntent, confirmAIBooking } from "./aiBookingEngine.service";
-import { getConversationState, clearConversationState } from "./conversationState.service";
+import {
+  handleAIBookingIntent,
+  confirmAIBooking,
+} from "./aiBookingEngine.service";
+import {
+  getConversationState,
+  clearConversationState,
+} from "./conversationState.service";
+import { generateAIFunnelReply } from "./aiFunnel.service";
+import { generateAIReply } from "./ai.service";
 
 /*
+=========================================================
 AI ROUTER
-Decides which AI system should handle the message
+Central decision layer for all AI systems
+Priority order:
+
+1. Conversation state engine
+2. Booking engine
+3. Intent engine
+4. Funnel AI
+5. Basic AI fallback
+=========================================================
 */
 
 interface RouterInput {
-businessId: string;
-leadId: string;
-message: string;
+  businessId: string;
+  leadId: string;
+  message: string;
 }
 
 export const routeAIMessage = async ({
-businessId,
-leadId,
-message,
-}: RouterInput) => {
+  businessId,
+  leadId,
+  message,
+}: RouterInput): Promise<string> => {
 
-try {
+  try {
 
-/* CHECK EXISTING CONVERSATION STATE */
+    const lowerMessage = message.toLowerCase().trim();
 
-const state = await getConversationState(leadId);
+    /* =================================================
+    1️⃣ CONVERSATION STATE ENGINE
+    ================================================= */
 
-if (state?.state === "BOOKING_SELECTION") {
+    const state = await getConversationState(leadId);
 
-const slotIndex = parseInt(message);
+    if (state?.state === "BOOKING_SELECTION") {
 
-if (!isNaN(slotIndex)) {
+      const slotIndex = parseInt(message);
 
-const slots = JSON.parse(state.context || "[]");
+      if (!isNaN(slotIndex)) {
 
-const selectedSlot = slots[slotIndex - 1];
+        try {
 
-if (selectedSlot) {
+          const slots: string[] = JSON.parse(state.context || "[]");
 
-  const result = await confirmAIBooking(
-    businessId,
-    leadId,
-    new Date(selectedSlot)
-  );
+          const selectedSlot = slots[slotIndex - 1];
 
-  /* CLEAR STATE AFTER BOOKING */
-  await clearConversationState(leadId);
+          if (selectedSlot) {
 
-  return result.message;
+            const result = await confirmAIBooking(
+              businessId,
+              leadId,
+              new Date(selectedSlot)
+            );
 
-}
+            await clearConversationState(leadId);
 
-}
+            return result.message;
 
-}
+          }
 
-/* BOOKING KEYWORD CHECK */
+          return "Please select a valid slot number.";
 
-const bookingKeywords = [
-"book",
-"appointment",
-"call",
-"meeting",
-"schedule"
-];
+        } catch (err) {
 
-const lowerMessage = message.toLowerCase();
+          console.error("BOOKING STATE PARSE ERROR", err);
 
-const isBooking = bookingKeywords.some((word) =>
-lowerMessage.includes(word)
-);
+          await clearConversationState(leadId);
 
-/* BOOKING FLOW */
+        }
 
-if (isBooking) {
+      }
 
-const result = await handleAIBookingIntent(
-businessId,
-leadId,
-message
-);
+    }
 
-return result.message;
+    /* =================================================
+    2️⃣ BOOKING ENGINE
+    ================================================= */
 
-}
+    const bookingKeywords = [
+      "book",
+      "appointment",
+      "call",
+      "meeting",
+      "schedule",
+      "demo",
+    ];
 
-/* DEFAULT INTENT ENGINE */
+    const isBookingIntent = bookingKeywords.some((word) =>
+      lowerMessage.includes(word)
+    );
 
-const reply = await generateIntentReply({
-businessId,
-leadId,
-message,
-});
+    if (isBookingIntent) {
 
-return reply;
+      try {
 
-} catch (error) {
+        const bookingResult = await handleAIBookingIntent(
+          businessId,
+          leadId,
+          message
+        );
 
-console.error("AI ROUTER ERROR:", error);
+        if (bookingResult?.handled) {
+          return bookingResult.message;
+        }
 
-return "AI failed to process message";
+      } catch (err) {
 
-}
+        console.log("Booking engine failed");
+
+      }
+
+    }
+
+    /* =================================================
+    3️⃣ INTENT ENGINE
+    ================================================= */
+
+    try {
+
+      const intentReply = await generateIntentReply({
+        businessId,
+        leadId,
+        message,
+      });
+
+      if (intentReply) {
+        return intentReply;
+      }
+
+    } catch (err) {
+
+      console.log("Intent engine failed");
+
+    }
+
+    /* =================================================
+    4️⃣ FUNNEL AI
+    ================================================= */
+
+    try {
+
+      const funnelReply = await generateAIFunnelReply({
+        businessId,
+        leadId,
+        message,
+      });
+
+      if (funnelReply) {
+        return funnelReply;
+      }
+
+    } catch (err) {
+
+      console.log("Funnel AI failed");
+
+    }
+
+    /* =================================================
+    5️⃣ BASIC AI FALLBACK
+    ================================================= */
+
+    const basicReply = await generateAIReply({
+      businessId,
+      leadId,
+      message,
+    });
+
+    return basicReply;
+
+  } catch (error) {
+
+    console.error("AI ROUTER ERROR:", error);
+
+    return "Sorry, something went wrong while processing your message.";
+
+  }
 
 };

@@ -1,133 +1,207 @@
 import prisma from "../config/prisma";
 
 /*
+=====================================================
 FETCH AVAILABLE SLOTS
+=====================================================
 */
+
 export const fetchAvailableSlots = async (
-businessId: string,
-date: Date
-) => {
-const dayOfWeek = date.getDay();
+  businessId: string,
+  date: Date
+): Promise<Date[]> => {
 
-/*
-BUSINESS SLOT CONFIG
-*/
-const slots = await prisma.bookingSlot.findMany({
-where: {
-businessId,
-dayOfWeek,
-isActive: true,
-},
-});
+  const dayOfWeek = date.getDay();
 
-if (!slots.length) return [];
+  /* ------------------------------------------------
+  BUSINESS SLOT CONFIG
+  ------------------------------------------------ */
 
-/*
-EXISTING APPOINTMENTS
-*/
-const startOfDay = new Date(date);
-startOfDay.setHours(0, 0, 0, 0);
+  const slots = await prisma.bookingSlot.findMany({
+    where: {
+      businessId,
+      dayOfWeek,
+      isActive: true,
+    },
+    orderBy: {
+      startTime: "asc",
+    },
+  });
 
-const endOfDay = new Date(date);
-endOfDay.setHours(23, 59, 59, 999);
+  if (!slots.length) return [];
 
-const appointments = await prisma.appointment.findMany({
-where: {
-businessId,
-startTime: {
-gte: startOfDay,
-lte: endOfDay,
-},
-status: "BOOKED",
-},
-});
+  /* ------------------------------------------------
+  EXISTING APPOINTMENTS
+  ------------------------------------------------ */
 
-const bookedTimes = appointments.map((a) =>
-a.startTime.toISOString()
-);
+  const startOfDay = new Date(date);
+  startOfDay.setHours(0, 0, 0, 0);
 
-/*
-GENERATE SLOT LIST
-*/
-const availableSlots: Date[] = [];
+  const endOfDay = new Date(date);
+  endOfDay.setHours(23, 59, 59, 999);
 
-for (const slot of slots) {
-const [startHour, startMinute] = slot.startTime.split(":").map(Number);
-const [endHour, endMinute] = slot.endTime.split(":").map(Number);
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      businessId,
+      startTime: {
+        gte: startOfDay,
+        lte: endOfDay,
+      },
+      status: "BOOKED",
+    },
+    select: {
+      startTime: true,
+    },
+  });
 
-let current = new Date(date);
-current.setHours(startHour, startMinute, 0, 0);
+  const bookedTimes = new Set(
+    appointments.map((a) => a.startTime.toISOString())
+  );
 
-const end = new Date(date);
-end.setHours(endHour, endMinute, 0, 0);
+  /* ------------------------------------------------
+  GENERATE SLOT LIST
+  ------------------------------------------------ */
 
-while (current < end) {
-  const exists = bookedTimes.includes(current.toISOString());
+  const availableSlots: Date[] = [];
 
-  if (!exists) {
-    availableSlots.push(new Date(current));
+  for (const slot of slots) {
+
+    const [startHour, startMinute] = slot.startTime
+      .split(":")
+      .map(Number);
+
+    const [endHour, endMinute] = slot.endTime
+      .split(":")
+      .map(Number);
+
+    let current = new Date(date);
+    current.setHours(startHour, startMinute, 0, 0);
+
+    const end = new Date(date);
+    end.setHours(endHour, endMinute, 0, 0);
+
+    while (current < end) {
+
+      const iso = current.toISOString();
+
+      if (!bookedTimes.has(iso)) {
+
+        if (current > new Date()) {
+          availableSlots.push(new Date(current));
+        }
+
+      }
+
+      current = new Date(current.getTime() + 30 * 60000);
+
+    }
+
   }
 
-  current = new Date(current.getTime() + 30 * 60000);
-}
+  return availableSlots;
 
-}
-
-return availableSlots;
 };
 
 /*
+=====================================================
 CREATE APPOINTMENT
+=====================================================
 */
-export const createNewAppointment = async (data: any) => {
-const {
-businessId,
-leadId,
-name,
-email,
-phone,
-startTime,
-endTime,
-} = data;
 
-const appointment = await prisma.appointment.create({
-data: {
-businessId,
-leadId,
-name,
-email,
-phone,
-startTime: new Date(startTime),
-endTime: new Date(endTime),
-status: "BOOKED",
-},
-});
-
-/*
-UPDATE LEAD STAGE
-*/
-if (leadId) {
-await prisma.lead.update({
-where: { id: leadId },
-data: {
-stage: "BOOKED_CALL",
-},
-});
+interface AppointmentInput {
+  businessId: string;
+  leadId?: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  startTime: Date;
+  endTime: Date;
 }
 
-return appointment;
+export const createNewAppointment = async (
+  data: AppointmentInput
+) => {
+
+  const {
+    businessId,
+    leadId,
+    name,
+    email,
+    phone,
+    startTime,
+    endTime,
+  } = data;
+
+  /* ------------------------------------------------
+  DOUBLE BOOKING PROTECTION
+  ------------------------------------------------ */
+
+  const existing = await prisma.appointment.findFirst({
+    where: {
+      businessId,
+      startTime: new Date(startTime),
+      status: "BOOKED",
+    },
+  });
+
+  if (existing) {
+    throw new Error("Slot already booked");
+  }
+
+  /* ------------------------------------------------
+  CREATE APPOINTMENT
+  ------------------------------------------------ */
+
+  const appointment = await prisma.appointment.create({
+    data: {
+      businessId,
+      leadId,
+      name,
+      email,
+      phone,
+      startTime: new Date(startTime),
+      endTime: new Date(endTime),
+      status: "BOOKED",
+    },
+  });
+
+  /* ------------------------------------------------
+  UPDATE LEAD STAGE
+  ------------------------------------------------ */
+
+  if (leadId) {
+
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        stage: "BOOKED_CALL",
+        lastMessageAt: new Date(),
+      },
+    });
+
+  }
+
+  return appointment;
+
 };
 
 /*
+=====================================================
 CANCEL APPOINTMENT
+=====================================================
 */
+
 export const cancelExistingAppointment = async (
-appointmentId: string
+  appointmentId: string
 ) => {
-return prisma.appointment.update({
-where: { id: appointmentId },
-data: {
-status: "CANCELLED",
-},
-});
+
+  const appointment = await prisma.appointment.update({
+    where: { id: appointmentId },
+    data: {
+      status: "CANCELLED",
+    },
+  });
+
+  return appointment;
+
 };

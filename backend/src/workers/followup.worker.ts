@@ -4,16 +4,20 @@ import prisma from "../config/prisma";
 import { redisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "../services/ai.service";
+import { getIO } from "../sockets/socket.server";
 
 new Worker(
   "followupQueue",
   async (job) => {
+
     try {
+
       const { leadId, type } = job.data;
 
       console.log(`⏳ Processing followup ${type} for lead ${leadId}`);
 
-      // 1️⃣ Fetch lead
+      /* FETCH LEAD */
+
       const lead = await prisma.lead.findUnique({
         where: { id: leadId },
         include: { client: true },
@@ -29,13 +33,22 @@ new Worker(
         return;
       }
 
-      // 2️⃣ Followup limit check
+      /* STOP FOLLOWUPS IF USER REPLIED */
+
+      if (lead.unreadCount > 0) {
+        console.log("🛑 Lead already replied, skipping followup");
+        return;
+      }
+
+      /* FOLLOWUP LIMIT */
+
       if ((lead.followupCount ?? 0) >= 3) {
         console.log("🚫 Followup limit reached");
         return;
       }
 
-      // 3️⃣ Generate AI followup
+      /* GENERATE AI FOLLOWUP */
+
       const aiReply = await generateAIReply({
         businessId: lead.businessId,
         leadId: lead.id,
@@ -44,23 +57,18 @@ new Worker(
 
       console.log("🤖 AI Generated:", aiReply);
 
-      // ===============================
-      // 📲 WHATSAPP (UNCHANGED)
-      // ===============================
+      const accessToken = decrypt(lead.client.accessToken);
+
+      /* SEND MESSAGE */
+
       if (lead.platform === "WHATSAPP") {
-        if (!lead.client.phoneNumberId) {
-          console.log("❌ Client phoneNumberId missing");
+
+        if (!lead.client.phoneNumberId || !lead.phone) {
+          console.log("❌ WhatsApp data missing");
           return;
         }
 
-        if (!lead.phone) {
-          console.log("❌ Lead phone missing");
-          return;
-        }
-
-        const accessToken = decrypt(lead.client.accessToken);
-
-        const response = await axios.post(
+        await axios.post(
           `https://graph.facebook.com/v19.0/${lead.client.phoneNumberId}/messages`,
           {
             messaging_product: "whatsapp",
@@ -69,6 +77,7 @@ new Worker(
             text: { body: aiReply },
           },
           {
+            timeout: 10000,
             headers: {
               Authorization: `Bearer ${accessToken}`,
               "Content-Type": "application/json",
@@ -76,26 +85,16 @@ new Worker(
           }
         );
 
-        console.log("✅ META RESPONSE:", response.data);
       }
 
-      // ===============================
-      // 📸 INSTAGRAM FOLLOWUP (NEW)
-      // ===============================
       else if (lead.platform === "INSTAGRAM") {
-        if (!lead.client.pageId) {
-          console.log("❌ Client pageId missing");
+
+        if (!lead.client.pageId || !lead.instagramId) {
+          console.log("❌ Instagram data missing");
           return;
         }
 
-        if (!lead.instagramId) {
-          console.log("❌ Lead instagramId missing");
-          return;
-        }
-
-        const accessToken = decrypt(lead.client.accessToken);
-
-        const response = await axios.post(
+        await axios.post(
           `https://graph.facebook.com/v19.0/${lead.client.pageId}/messages`,
           {
             recipient: {
@@ -106,6 +105,7 @@ new Worker(
             },
           },
           {
+            timeout: 10000,
             headers: {
               Authorization: `Bearer ${accessToken}`,
               "Content-Type": "application/json",
@@ -113,34 +113,58 @@ new Worker(
           }
         );
 
-        console.log("✅ INSTAGRAM FOLLOWUP SENT:", response.data);
       }
 
-      // 5️⃣ Store AI message
-      await prisma.message.create({
+      /* SAVE MESSAGE */
+
+      const aiMessage = await prisma.message.create({
         data: {
+          leadId: lead.id,
           content: aiReply,
           sender: "AI",
-          leadId: lead.id,
         },
       });
 
-      // 6️⃣ Update followup count
+      /* SOCKET EVENT */
+
+      try {
+
+        const io = getIO();
+
+        io.to(`lead_${lead.id}`).emit("new_message", aiMessage);
+
+      } catch {}
+
+      /* UPDATE FOLLOWUP STATE */
+
       await prisma.lead.update({
         where: { id: lead.id },
         data: {
           followupCount: { increment: 1 },
+          lastFollowupAt: new Date(),
         },
       });
 
       console.log(`✅ Followup ${type} sent successfully`);
+
     } catch (err: any) {
+
       console.log("🚨 FOLLOWUP WORKER ERROR:");
-      console.log(err.response?.data || err.message || err);
+
+      console.log(
+        err.response?.data ||
+        err.message ||
+        err
+      );
+
+      throw err;
+
     }
+
   },
   {
     connection: redisConnection,
+    concurrency: 5,
   }
 );
 

@@ -1,4 +1,5 @@
 console.log("CLIENT ROUTES FILE LOADED");
+
 import { Router } from "express";
 import {
   createClient,
@@ -6,8 +7,10 @@ import {
   getSingleClient,
   updateClient,
   deleteClient,
-  metaOAuthConnect, // 🟢 NEW
+  metaOAuthConnect,
+  updateAITraining, // 🟢 NEW
 } from "../controllers/client.controller";
+
 import { protect } from "../middleware/auth.middleware";
 
 const router = Router();
@@ -20,5 +23,8 @@ router.delete("/:id", protect, deleteClient);
 
 /* 🟢 NEW ROUTE FOR INSTAGRAM OAUTH */
 router.post("/oauth/meta", protect, metaOAuthConnect);
+
+/* 🟢 NEW ROUTE FOR AI TRAINING PANEL */
+router.put("/ai-training/:id", protect, updateAITraining);
 
 export default router;

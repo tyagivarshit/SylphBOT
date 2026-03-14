@@ -46,6 +46,11 @@ export const createClient = async (req: Request, res: Response) => {
       aiTone,
       businessInfo,
       pricingInfo,
+
+      /* NEW AI TRAINING FIELDS */
+      faqKnowledge,
+      salesInstructions
+
     } = req.body;
 
     if (!platform || !accessToken) {
@@ -121,6 +126,10 @@ export const createClient = async (req: Request, res: Response) => {
         businessInfo: businessInfo || null,
         pricingInfo: pricingInfo || null,
 
+        /* NEW */
+        faqKnowledge: faqKnowledge || null,
+        salesInstructions: salesInstructions || null,
+
         isActive: true,
       },
     });
@@ -158,7 +167,18 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
   try {
 
     const userId = (req as any).user?.id;
-    const { code, aiTone, businessInfo, pricingInfo } = req.body;
+
+    const {
+      code,
+      aiTone,
+      businessInfo,
+      pricingInfo,
+
+      /* NEW */
+      faqKnowledge,
+      salesInstructions
+
+    } = req.body;
 
     if (!userId || !code) {
       return res.status(400).json({
@@ -219,12 +239,6 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
     }
 
-    /*
-    -----------------------------------------
-    GET INSTAGRAM BUSINESS ACCOUNT
-    -----------------------------------------
-    */
-
     const igRes = await axios.get(
       `https://graph.facebook.com/v19.0/${page.id}`,
       {
@@ -266,6 +280,10 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           businessInfo: businessInfo || null,
           pricingInfo: pricingInfo || null,
 
+          /* NEW */
+          faqKnowledge: faqKnowledge || null,
+          salesInstructions: salesInstructions || null,
+
           isActive: true,
         },
       });
@@ -282,6 +300,10 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           aiTone: aiTone || null,
           businessInfo: businessInfo || null,
           pricingInfo: pricingInfo || null,
+
+          /* NEW */
+          faqKnowledge: faqKnowledge || null,
+          salesInstructions: salesInstructions || null,
 
           isActive: true,
         },
@@ -300,6 +322,79 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     return res.status(500).json({
       message: "Instagram connection failed",
+    });
+
+  }
+
+};
+
+/*
+---------------------------------------------------
+AI TRAINING UPDATE
+---------------------------------------------------
+*/
+
+export const updateAITraining = async (req: Request, res: Response) => {
+
+  try {
+
+    const userId = (req as any).user?.id;
+    const id = req.params.id as string;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const {
+      businessInfo,
+      pricingInfo,
+      aiTone,
+      faqKnowledge,
+      salesInstructions
+    } = req.body;
+
+    const business = await getBusinessByOwner(userId);
+
+    if (!business) {
+      return res.status(404).json({ message: "Business not found" });
+    }
+
+    const client = await prisma.client.findFirst({
+      where: {
+        id,
+        businessId: business.id,
+        isActive: true
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({
+        message: "Client not found"
+      });
+    }
+
+    const updatedClient = await prisma.client.update({
+      where: { id },
+      data: {
+        businessInfo,
+        pricingInfo,
+        aiTone,
+        faqKnowledge,
+        salesInstructions
+      }
+    });
+
+    return res.json({
+      message: "AI training updated successfully",
+      client: updatedClient
+    });
+
+  } catch (error) {
+
+    console.error("AI training update error:", error);
+
+    return res.status(500).json({
+      message: "AI training update failed"
     });
 
   }

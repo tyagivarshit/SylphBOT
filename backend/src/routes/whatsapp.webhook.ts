@@ -1,22 +1,25 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
-import axios from "axios";
 import prisma from "../config/prisma";
-import { decrypt } from "../utils/encrypt";
-import { generateAIReply } from "../services/ai.service";
-import { generateAIFunnelReply } from "../services/aiFunnel.service";
+
+import { addAIJob } from "../queues/ai.queue";
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
+
 import { getIO } from "../sockets/socket.server";
+import { processWebhookEvent } from "../services/webhookDedup.service";
 
 const router = Router();
 
 /*
 ---------------------------------------------------
-🔐 SIGNATURE VERIFICATION
+SIGNATURE VERIFICATION
 ---------------------------------------------------
 */
+
 function verifySignature(req: any): boolean {
+
   const signature = req.headers["x-hub-signature-256"] as string;
+
   const appSecret = process.env.META_APP_SECRET as string;
 
   if (!signature || !appSecret) return false;
@@ -29,23 +32,29 @@ function verifySignature(req: any): boolean {
       .digest("hex");
 
   return signature === expected;
+
 }
 
 /*
 ---------------------------------------------------
-📌 WEBHOOK VERIFY
+WEBHOOK VERIFY
 ---------------------------------------------------
 */
+
 router.get("/", (req: Request, res: Response) => {
 
   const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 
   const mode = req.query["hub.mode"];
+
   const token = req.query["hub.verify_token"];
+
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
+
     return res.status(200).send(challenge);
+
   }
 
   return res.sendStatus(403);
@@ -54,20 +63,30 @@ router.get("/", (req: Request, res: Response) => {
 
 /*
 ---------------------------------------------------
-📩 INCOMING MESSAGE HANDLER
+WHATSAPP WEBHOOK
 ---------------------------------------------------
 */
+
 router.post("/", async (req: any, res: Response) => {
 
   try {
 
     console.log("🔥 WHATSAPP WEBHOOK HIT");
 
+    /*
+    SIGNATURE VERIFY
+    */
+
     if (process.env.NODE_ENV === "production") {
+
       if (!verifySignature(req)) {
+
         console.log("❌ Signature verification failed");
+
         return res.sendStatus(403);
+
       }
+
     }
 
     const body = JSON.parse(req.body.toString());
@@ -75,27 +94,44 @@ router.post("/", async (req: any, res: Response) => {
     const message =
       body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-    if (!message) {
+    if (!message) return res.sendStatus(200);
+
+    /*
+    WEBHOOK DEDUP
+    */
+
+    const eventId = message?.id;
+
+    const shouldProcess = await processWebhookEvent({
+      eventId,
+      platform: "WHATSAPP",
+    });
+
+    if (!shouldProcess) {
+
+      console.log("⚠️ Duplicate webhook ignored");
+
       return res.sendStatus(200);
+
     }
 
     const from = message.from;
+
     const text = message.text?.body;
 
     const phoneNumberId =
       body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
     if (!from || !text || !phoneNumberId) {
+
       return res.sendStatus(200);
+
     }
 
-    console.log("📩 Incoming from:", from);
-    console.log("💬 Text:", text);
+    console.log("📩 Incoming:", text);
 
     /*
-    ---------------------------------------------------
-    🏢 IDENTIFY CLIENT
-    ---------------------------------------------------
+    FIND CLIENT
     */
 
     const client = await prisma.client.findFirst({
@@ -107,14 +143,15 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     if (!client) {
-      console.log("⚠️ No active WhatsApp client found");
+
+      console.log("⚠️ Client not found");
+
       return res.sendStatus(200);
+
     }
 
     /*
-    ---------------------------------------------------
-    🚨 PLAN CHECK
-    ---------------------------------------------------
+    PLAN CHECK
     */
 
     const subscription = await prisma.subscription.findUnique({
@@ -123,21 +160,25 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     if (!subscription || !subscription.plan) {
-      console.log("❌ No subscription found");
+
+      console.log("❌ No subscription");
+
       return res.sendStatus(200);
+
     }
 
     const plan = subscription.plan.name;
 
     if (plan === "BASIC") {
-      console.log("🚫 BASIC plan cannot use WhatsApp automation");
+
+      console.log("🚫 BASIC plan blocked");
+
       return res.sendStatus(200);
+
     }
 
     /*
-    ---------------------------------------------------
-    👤 FIND OR CREATE LEAD
-    ---------------------------------------------------
+    FIND OR CREATE LEAD
     */
 
     let lead = await prisma.lead.findFirst({
@@ -160,12 +201,12 @@ router.post("/", async (req: any, res: Response) => {
         },
       });
 
+      console.log("👤 Lead created");
+
     }
 
     /*
-    ---------------------------------------------------
-    📝 STORE USER MESSAGE
-    ---------------------------------------------------
+    SAVE USER MESSAGE
     */
 
     const userMessage = await prisma.message.create({
@@ -176,97 +217,30 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
+    /*
+    REALTIME SOCKET
+    */
+
     const io = getIO();
 
     io.to(`lead_${lead.id}`).emit("new_message", userMessage);
 
     /*
-    ---------------------------------------------------
-    🤖 AI REPLY (PLAN BASED)
-    ---------------------------------------------------
+    ADD AI JOB
     */
 
-    let aiReply;
-
-    if (plan === "PRO" || plan === "ENTERPRISE") {
-
-      aiReply = await generateAIFunnelReply({
-        businessId: client.businessId,
-        leadId: lead.id,
-        message: text,
-      });
-
-    } else {
-
-      aiReply = await generateAIReply({
-        businessId: client.businessId,
-        leadId: lead.id,
-        message: text,
-      });
-
-    }
-
-    console.log("🤖 AI REPLY:", aiReply);
-
-    /*
-    ---------------------------------------------------
-    📝 STORE AI MESSAGE
-    ---------------------------------------------------
-    */
-
-    const aiMessage = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        content: aiReply,
-        sender: "AI",
-      },
+    await addAIJob({
+      businessId: client.businessId,
+      leadId: lead.id,
+      message: text,
+      platform: "WHATSAPP",
+      senderId: from,
+      phoneNumberId,
+      accessTokenEncrypted: client.accessToken,
     });
 
-    io.to(`lead_${lead.id}`).emit("new_message", aiMessage);
-
     /*
-    ---------------------------------------------------
-    📤 SEND MESSAGE TO WHATSAPP
-    ---------------------------------------------------
-    */
-
-    const accessToken = decrypt(client.accessToken);
-
-    try {
-
-      const response = await axios.post(
-        `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
-        {
-          messaging_product: "whatsapp",
-          to: from,
-          type: "text",
-          text: { body: aiReply },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      console.log("✅ META RESPONSE:", response.data);
-
-    } catch (err: any) {
-
-      console.log(
-        "❌ META ERROR:",
-        err.response?.data || err.message
-      );
-
-      return res.sendStatus(200);
-
-    }
-
-    /*
-    ---------------------------------------------------
-    ⏱ UPDATE LEAD
-    ---------------------------------------------------
+    UPDATE LEAD
     */
 
     await prisma.lead.update({
@@ -274,17 +248,16 @@ router.post("/", async (req: any, res: Response) => {
       data: {
         lastMessageAt: new Date(),
         followupCount: 0,
-        unreadCount: { increment: 1 }
+        unreadCount: { increment: 1 },
       },
     });
 
     /*
-    ---------------------------------------------------
-    🔄 RESET FOLLOWUPS
-    ---------------------------------------------------
+    RESET FOLLOWUPS
     */
 
     await cancelFollowups(lead.id);
+
     await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);

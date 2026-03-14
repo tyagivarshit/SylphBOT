@@ -21,8 +21,11 @@ export const handleCommentAutomation = async ({
 
   try {
 
+    const text = commentText?.toLowerCase()?.trim();
+    if (!text) return;
+
     /* ---------------------------------------------------
-    PLAN CHECK (BASIC ONLY)
+    PLAN CHECK
     --------------------------------------------------- */
 
     const subscription = await prisma.subscription.findUnique({
@@ -50,8 +53,8 @@ export const handleCommentAutomation = async ({
 
     if (!trigger) return;
 
-    const keyword = trigger.keyword.toLowerCase().trim();
-    const text = commentText.toLowerCase().trim();
+    const keyword = trigger.keyword?.toLowerCase()?.trim();
+    if (!keyword) return;
 
     if (!text.includes(keyword)) return;
 
@@ -82,13 +85,12 @@ export const handleCommentAutomation = async ({
     }
 
     /* ---------------------------------------------------
-    DUPLICATE SPAM PROTECTION
+    DUPLICATE PROTECTION
     --------------------------------------------------- */
 
     const recentAIMessage = await prisma.message.findFirst({
       where: {
         leadId: lead.id,
-        content: trigger.replyText,
         sender: "AI",
       },
       orderBy: {
@@ -103,7 +105,7 @@ export const handleCommentAutomation = async ({
 
       const minutes = diff / (1000 * 60);
 
-      if (minutes < 60) {
+      if (minutes < 1) {
         console.log("Duplicate automation blocked");
         return;
       }
@@ -118,7 +120,7 @@ export const handleCommentAutomation = async ({
       where: { id: clientId },
     });
 
-    if (!client) return;
+    if (!client?.accessToken) return;
 
     const accessToken = decrypt(client.accessToken);
 
@@ -126,7 +128,7 @@ export const handleCommentAutomation = async ({
     AI PROMPT SUPPORT
     --------------------------------------------------- */
 
-    let replyMessage = trigger.replyText;
+    let replyMessage = trigger.replyText || "Thanks for your comment!";
 
     if (trigger.aiPrompt) {
 
@@ -145,7 +147,7 @@ export const handleCommentAutomation = async ({
           replyMessage = aiResponse;
         }
 
-      } catch (err) {
+      } catch {
         console.log("AI prompt failed, using default reply");
       }
 
@@ -166,12 +168,13 @@ export const handleCommentAutomation = async ({
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
+          timeout: 10000,
         }
       );
 
       console.log("Instagram comment reply sent");
 
-    } catch (err) {
+    } catch {
 
       console.log("Comment reply failed");
 
@@ -198,12 +201,13 @@ export const handleCommentAutomation = async ({
             Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
           },
+          timeout: 10000,
         }
       );
 
       console.log("Instagram DM sent");
 
-    } catch (err) {
+    } catch {
 
       console.log("DM send failed");
 

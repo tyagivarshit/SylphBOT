@@ -8,6 +8,7 @@ const openai = new OpenAI({
 
 /* ----------------------------------
 SHORT TERM MEMORY
+(last 8 messages instead of 6 for better context)
 ---------------------------------- */
 
 const getRecentMessages = async (leadId: string) => {
@@ -15,23 +16,28 @@ const getRecentMessages = async (leadId: string) => {
   const messages = await prisma.message.findMany({
     where: { leadId },
     orderBy: { createdAt: "desc" },
-    take: 10,
+    take: 8,
   });
 
-  return messages.reverse().map((m) => ({
-    role: m.sender === "AI" ? "assistant" : "user",
-    content: m.content,
-  }));
+  return messages
+    .reverse()
+    .map((m) => ({
+      role: m.sender === "AI" ? "assistant" : "user",
+      content: m.content,
+    }));
+
 };
 
 /* ----------------------------------
 LONG TERM MEMORY
+(customer facts)
 ---------------------------------- */
 
 const getLongTermMemory = async (leadId: string) => {
 
   const memories = await prisma.memory.findMany({
     where: { leadId },
+    orderBy: { createdAt: "asc" },
   });
 
   if (!memories.length) return "";
@@ -39,16 +45,34 @@ const getLongTermMemory = async (leadId: string) => {
   return memories
     .map((m) => `${m.key}: ${m.value}`)
     .join("\n");
+
 };
 
 /* ----------------------------------
-FACT EXTRACTION
+CONVERSATION SUMMARY
+---------------------------------- */
+
+const getConversationSummary = async (leadId: string) => {
+
+  const summary = await prisma.conversationSummary.findFirst({
+    where: { leadId },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  return summary?.summary || "";
+
+};
+
+/* ----------------------------------
+FACT EXTRACTION (HARDENED)
 ---------------------------------- */
 
 const extractFacts = async (message: string) => {
 
-  const prompt = `
-Extract useful customer information.
+  try {
+
+    const prompt = `
+Extract useful structured customer information.
 
 Possible keys:
 name
@@ -56,31 +80,49 @@ budget
 service
 timeline
 
-Return JSON.
+Return ONLY valid JSON.
+
+Example:
+{
+"name": "John",
+"budget": "2000",
+"service": "Website development",
+"timeline": "2 weeks"
+}
 
 Message:
 ${message}
 `;
 
-  const response = await openai.chat.completions.create({
-    model: "llama-3.1-8b-instant",
-    messages: [
-      { role: "system", content: "Extract structured data." },
-      { role: "user", content: prompt },
-    ],
-  });
+    const response = await openai.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      temperature: 0,
+      messages: [
+        { role: "system", content: "Extract structured CRM data." },
+        { role: "user", content: prompt },
+      ],
+    });
 
-  try {
-    return JSON.parse(
-      response.choices?.[0]?.message?.content || "{}"
-    );
+    const content =
+      response.choices?.[0]?.message?.content?.trim() || "{}";
+
+    try {
+      return JSON.parse(content);
+    } catch {
+      return {};
+    }
+
   } catch {
+
     return {};
+
   }
+
 };
 
 /* ----------------------------------
 STORE MEMORY
+(avoid duplicates + normalize)
 ---------------------------------- */
 
 const storeMemory = async (
@@ -90,16 +132,38 @@ const storeMemory = async (
 
   const entries = Object.entries(facts);
 
+  if (!entries.length) return;
+
+  const existingMemories = await prisma.memory.findMany({
+    where: { leadId },
+  });
+
+  const existingKeys = new Set(
+    existingMemories.map((m) => m.key.toLowerCase())
+  );
+
+  const createData: any[] = [];
+
   for (const [key, value] of entries) {
 
     if (!value) continue;
 
-    await prisma.memory.create({
-      data: {
-        leadId,
-        key,
-        value: String(value),
-      },
+    const normalizedKey = key.toLowerCase().trim();
+
+    if (existingKeys.has(normalizedKey)) continue;
+
+    createData.push({
+      leadId,
+      key: normalizedKey,
+      value: String(value).trim(),
+    });
+
+  }
+
+  if (createData.length) {
+
+    await prisma.memory.createMany({
+      data: createData,
     });
 
   }
@@ -108,19 +172,23 @@ const storeMemory = async (
 
 /* ----------------------------------
 CONTEXT BUILDER
+(optimized AI context)
 ---------------------------------- */
 
 export const buildMemoryContext = async (
   leadId: string
 ) => {
 
-  const shortMemory = await getRecentMessages(leadId);
-
-  const longMemory = await getLongTermMemory(leadId);
+  const [shortMemory, longMemory, summary] = await Promise.all([
+    getRecentMessages(leadId),
+    getLongTermMemory(leadId),
+    getConversationSummary(leadId),
+  ]);
 
   return {
     conversation: shortMemory,
     memory: longMemory,
+    summary,
   };
 
 };
@@ -136,10 +204,16 @@ export const updateMemory = async (
 
   try {
 
+    if (!message || message.length < 3) return;
+
     const facts = await extractFacts(message);
 
+    if (!facts || typeof facts !== "object") return;
+
     if (Object.keys(facts).length > 0) {
+
       await storeMemory(leadId, facts);
+
     }
 
   } catch (error) {

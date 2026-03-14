@@ -14,6 +14,59 @@ interface FunnelInput {
 }
 
 /* ---------------------------------------------------
+AI ABUSE PROTECTION
+--------------------------------------------------- */
+
+const checkAIAbuse = async (leadId: string, message: string) => {
+
+  const recentMessages = await prisma.message.findMany({
+    where: {
+      leadId,
+      sender: "USER",
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: 5,
+  });
+
+  const sameMessageCount = recentMessages.filter(
+    (m) => m.content.toLowerCase() === message.toLowerCase()
+  ).length;
+
+  if (sameMessageCount >= 3) {
+    return { blocked: true, reason: "SPAM_DETECTED" };
+  }
+
+  if (recentMessages.length > 0) {
+
+    const last = new Date(recentMessages[0].createdAt).getTime();
+    const now = Date.now();
+
+    const diffSeconds = (now - last) / 1000;
+
+    if (diffSeconds < 2) {
+      return { blocked: true, reason: "TOO_FAST" };
+    }
+
+  }
+
+  const aiMessages = await prisma.message.count({
+    where: {
+      leadId,
+      sender: "AI",
+    },
+  });
+
+  if (aiMessages >= 50) {
+    return { blocked: true, reason: "LIMIT_REACHED" };
+  }
+
+  return { blocked: false };
+
+};
+
+/* ---------------------------------------------------
 PLAN USAGE CHECK
 --------------------------------------------------- */
 
@@ -152,9 +205,7 @@ const detectStage = (message: string) => {
   const msg = message.toLowerCase();
 
   if (/price|cost|pricing|package/.test(msg)) return "INTERESTED";
-
   if (/demo|call|meeting/.test(msg)) return "QUALIFIED";
-
   if (/buy|purchase|order|start|book/.test(msg)) return "READY_TO_BUY";
 
   return "NEW";
@@ -183,9 +234,7 @@ const scoreLead = (message: string) => {
   let score = 0;
 
   if (/price|cost/.test(msg)) score += 2;
-
   if (/buy|purchase|order/.test(msg)) score += 5;
-
   if (/demo|call/.test(msg)) score += 3;
 
   return score;
@@ -195,9 +244,7 @@ const scoreLead = (message: string) => {
 const detectLeadTemperature = (score: number) => {
 
   if (score >= 7) return "HOT";
-
   if (score >= 4) return "WARM";
-
   return "COLD";
 
 };
@@ -216,15 +263,23 @@ export const generateAIFunnelReply = async ({
 
   try {
 
-    /* SAVE USER MESSAGE */
+    const abuseCheck = await checkAIAbuse(leadId, message);
 
-    await prisma.message.create({
-      data: {
-        leadId,
-        content: message,
-        sender: "USER",
-      },
-    });
+    if (abuseCheck.blocked) {
+
+      if (abuseCheck.reason === "SPAM_DETECTED") {
+        return "Please avoid repeating the same message.";
+      }
+
+      if (abuseCheck.reason === "TOO_FAST") {
+        return "Please wait a moment before sending another message.";
+      }
+
+      if (abuseCheck.reason === "LIMIT_REACHED") {
+        return "Conversation limit reached. Our team will assist you shortly.";
+      }
+
+    }
 
     await checkUsage(businessId);
 
@@ -267,15 +322,9 @@ Important Rules:
 `;
 
     const messages = [
-      {
-        role: "system",
-        content: systemPrompt,
-      },
+      { role: "system", content: systemPrompt },
       ...memory,
-      {
-        role: "user",
-        content: message,
-      },
+      { role: "user", content: message },
     ];
 
     const response = await openai.chat.completions.create({
@@ -287,8 +336,6 @@ Important Rules:
       response.choices?.[0]?.message?.content?.trim() ||
       "Thanks for your message!";
 
-    /* SAVE AI MESSAGE */
-
     await prisma.message.create({
       data: {
         leadId,
@@ -297,18 +344,11 @@ Important Rules:
       },
     });
 
-    /* EXTRACT DATA */
-
     await extractLeadData(leadId, message);
-
-    /* UPDATE STAGE */
 
     await updateStage(leadId, message);
 
-    /* LEAD SCORING */
-
     const leadScore = scoreLead(message);
-
     const temperature = detectLeadTemperature(leadScore);
 
     await prisma.lead.update({

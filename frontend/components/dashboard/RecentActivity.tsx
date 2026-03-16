@@ -4,35 +4,46 @@ export default function RecentActivity({ activity }: { activity: any[] }) {
 
 return(
 
-<div className="bg-white border border-gray-300 rounded-xl p-5 shadow-sm">
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
 
-<h2 className="text-sm font-semibold text-gray-800 mb-4">
+<h2 className="text-sm font-semibold text-gray-900 mb-5">
 Recent Activity
 </h2>
 
 {!activity || activity.length === 0 ? (
 
-<p className="text-sm text-gray-500">
+<div className="text-sm text-gray-400 py-6 text-center">
 No activity yet
-</p>
+</div>
 
 ) : (
 
-<div className="space-y-3">
+<div className="space-y-4">
 
 {activity.map((item:any)=>(
 
 <div
 key={item.id}
-className="flex items-center justify-between text-sm text-gray-700"
+className="flex items-start justify-between text-sm text-gray-700"
 >
 
-<span>
+<div className="flex items-start gap-2">
+
+<span className="w-2 h-2 mt-1.5 rounded-full bg-blue-500 shrink-0"/>
+
+<span className="leading-snug">
 {item.text}
 </span>
 
-<span className="text-xs text-gray-400">
-{new Date(item.time).toLocaleTimeString()}
+</div>
+
+<span className="text-xs text-gray-400 whitespace-nowrap ml-4">
+
+{new Date(item.time).toLocaleTimeString([],{
+hour:"2-digit",
+minute:"2-digit"
+})}
+
 </span>
 
 </div>

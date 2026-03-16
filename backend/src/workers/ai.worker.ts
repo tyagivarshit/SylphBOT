@@ -11,6 +11,9 @@ import { checkAIRateLimit } from "../services/aiRateLimiter.service";
 import { getIO } from "../sockets/socket.server";
 import logger from "../utils/logger";
 
+/* SENTRY MONITORING */
+import * as Sentry from "@sentry/node";
+
 /* ---------------- HUMAN DELAY HELPER ---------------- */
 
 const delay = (ms: number) =>
@@ -72,6 +75,7 @@ const worker = new Worker(
       } catch (error) {
 
         logger.warn({ leadId, error }, "Automation engine failed");
+        Sentry.captureException(error);
 
       }
 
@@ -130,6 +134,7 @@ const worker = new Worker(
       } catch (error) {
 
         logger.warn({ leadId, error }, "Socket emit failed");
+        Sentry.captureException(error);
 
       }
 
@@ -175,6 +180,8 @@ const worker = new Worker(
             "WhatsApp send failed"
           );
 
+          Sentry.captureException(error);
+
         }
 
       }
@@ -199,12 +206,8 @@ const worker = new Worker(
               "Preparing Instagram reply"
             );
 
-            /* HUMAN LIKE RANDOM DELAY (2-4 sec) */
-
             const randomDelay = 2000 + Math.floor(Math.random() * 2000);
             await delay(randomDelay);
-
-            /* TYPING INDICATOR */
 
             await axios.post(
               "https://graph.facebook.com/v19.0/me/messages",
@@ -220,11 +223,7 @@ const worker = new Worker(
               }
             );
 
-            /* TYPING WAIT */
-
             await delay(1500);
-
-            /* ACTUAL MESSAGE SEND */
 
             const response = await axios.post(
               "https://graph.facebook.com/v19.0/me/messages",
@@ -258,6 +257,8 @@ const worker = new Worker(
               "Instagram send failed"
             );
 
+            Sentry.captureException(error);
+
           }
 
         }
@@ -274,6 +275,7 @@ const worker = new Worker(
         },
       }).catch((error) => {
         logger.warn({ leadId, error }, "Lead update failed");
+        Sentry.captureException(error);
       });
 
       logger.info({ leadId }, "AI Worker Completed");
@@ -287,6 +289,8 @@ const worker = new Worker(
         },
         "AI Worker Error"
       );
+
+      Sentry.captureException(error);
 
       throw error;
 
@@ -307,6 +311,8 @@ worker.on("failed", (job, err) => {
     { jobId: job?.id, error: err },
     "AI Worker Failed"
   );
+
+  Sentry.captureException(err);
 
 });
 

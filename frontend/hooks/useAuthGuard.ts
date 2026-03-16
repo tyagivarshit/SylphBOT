@@ -6,39 +6,46 @@ import { getToken, removeToken } from "@/lib/token"
 
 export default function useAuthGuard(){
 
-  const router = useRouter()
+const router = useRouter()
 
-  useEffect(()=>{
+useEffect(()=>{
 
-    const token = getToken()
+if(typeof window === "undefined") return
 
-    if(!token){
-      router.replace("/login")
-      return
-    }
+const token = getToken()
+console.log("guard token:", token)
 
-    try{
+if(!token){
+  router.replace("/auth/login")
+  return
+}
 
-      const payload = JSON.parse(
-        atob(token.split(".")[1])
-      )
+try{
 
-      if(payload.exp * 1000 < Date.now()){
+  if(!token.includes(".")){
+    removeToken()
+    router.replace("/auth/login")
+    return
+  }
 
-        removeToken()
+  const payload = JSON.parse(
+    atob(token.split(".")[1])
+  )
 
-        router.replace("/login")
+  if(payload.exp * 1000 < Date.now()){
 
-      }
+    removeToken()
 
-    }catch{
+    router.replace("/auth/login")
 
-      removeToken()
+  }
 
-      router.replace("/login")
+}catch{
 
-    }
+  removeToken()
 
-  },[router])
+  router.replace("/auth/login")
 
+}
+},[router])
 }

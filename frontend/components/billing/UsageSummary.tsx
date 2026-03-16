@@ -9,94 +9,74 @@ aiLimit = 1000,
 msgUsed = 120,
 msgLimit = 500
 
-}: any) {
+}: any){
 
 const items = [
 
 {
 label:"AI Calls",
-icon:<Zap size={16} className="text-blue-600"/>,
+icon:<Zap size={16}/>,
 used:aiUsed,
-limit:aiLimit,
-desc:"monthly AI calls"
+limit:aiLimit
 },
 
 {
 label:"Messages Sent",
-icon:<MessageSquare size={16} className="text-blue-600"/>,
+icon:<MessageSquare size={16}/>,
 used:msgUsed,
-limit:msgLimit,
-desc:"monthly message limit"
+limit:msgLimit
 }
 
 ]
 
-return (
+return(
 
-<div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm space-y-6">
+<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-6">
 
-{/* Header */}
+<div className="flex justify-between items-center">
 
-<div className="flex items-center justify-between">
-
-<h3 className="text-base sm:text-lg font-semibold text-gray-900">
+<h3 className="text-lg font-semibold text-gray-900">
 Usage Summary
 </h3>
 
 <span className="text-xs text-gray-500">
-Current Plan Usage
+Current Billing Cycle
 </span>
 
 </div>
 
-
-{/* Usage Blocks */}
-
 {items.map((item)=>{
 
-const percent = item.limit
-? Math.min(Math.round((item.used/item.limit)*100),100)
-: 0
-
-let color="bg-blue-600"
-
-if(percent>80) color="bg-red-500"
-else if(percent>60) color="bg-yellow-500"
+const percent = Math.min(Math.round((item.used/item.limit)*100),100)
 
 return(
 
 <div key={item.label} className="space-y-2">
 
-<div className="flex items-center justify-between">
+<div className="flex justify-between text-sm">
 
-<div className="flex items-center gap-2">
-
+<div className="flex items-center gap-2 text-gray-700">
 {item.icon}
-
-<p className="text-sm font-medium text-gray-700">
 {item.label}
-</p>
-
 </div>
 
-<span className="text-xs text-gray-500 whitespace-nowrap">
+<span className="text-gray-500">
 {item.used} / {item.limit}
 </span>
 
 </div>
 
-
-<div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+<div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
 
 <div
-className={`${color} h-2 rounded-full transition-all duration-500`}
-style={{ width: `${percent}%` }}
+className="h-2 bg-blue-600 rounded-full transition-all"
+style={{width:`${percent}%`}}
 ></div>
 
 </div>
 
 <p className="text-xs text-gray-500">
-{percent}% of your {item.desc} used
+{percent}% used this month
 </p>
 
 </div>
@@ -105,19 +85,11 @@ style={{ width: `${percent}%` }}
 
 })}
 
-
-{/* Upgrade */}
-
-<div className="pt-2">
-
-<button className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition">
+<button className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg">
 Upgrade Plan
 </button>
 
 </div>
 
-</div>
-
 )
-
 }

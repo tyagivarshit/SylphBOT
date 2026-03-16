@@ -16,7 +16,8 @@ const style = colors[stage] || "bg-gray-50 text-gray-700 border-gray-200"
 return (
 
 <span
-className={`inline-flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-[11px] sm:text-xs font-medium border whitespace-nowrap ${style}`}
+className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${style}`}
+
 >
 
 <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70"/>

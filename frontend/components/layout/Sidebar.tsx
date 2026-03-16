@@ -6,19 +6,66 @@ import {
 LayoutDashboard,
 Users,
 MessageSquare,
+Workflow,
+Brain,
+BookOpen,
+Calendar,
+BarChart3,
 CreditCard,
 Settings,
-Brain,
+MessageCircle,
 X
 } from "lucide-react"
 
 const menu = [
+
+{
+section: "Overview",
+items: [
 { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-{ name: "Leads", href: "/leads", icon: MessageSquare },
-{ name: "Clients", href: "/clients", icon: Users },
+]
+},
+
+{
+section: "CRM",
+items: [
+{ name: "Leads", href: "/leads", icon: Users },
+{ name: "Conversations", href: "/conversations", icon: MessageCircle },
+]
+},
+
+{
+section: "Automation",
+items: [
+{ name: "Automation", href: "/automation", icon: Workflow },
+{ name: "Comment Automation", href: "/comment-automation", icon: MessageSquare },
+]
+},
+
+{
+section: "AI",
+items: [
+{ name: "AI Training", href: "/ai-training", icon: Brain },
+{ name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+]
+},
+
+{
+section: "Business",
+items: [
+{ name: "Booking", href: "/booking", icon: Calendar },
+{ name: "Analytics", href: "/analytics", icon: BarChart3 },
 { name: "Billing", href: "/billing", icon: CreditCard },
-{ name: "AI Settings", href: "/ai-settings", icon: Brain },
+]
+},
+
+{
+section: "System",
+items: [
 { name: "Settings", href: "/settings", icon: Settings },
+]
+}
+
 ]
 
 export default function Sidebar({
@@ -32,7 +79,7 @@ return(
 
 <>
 
-{/* Overlay (mobile) */}
+{/* Mobile Overlay */}
 
 {open && (
 
@@ -50,6 +97,7 @@ ${open ? "translate-x-0" : "-translate-x-full"}
 
 lg:translate-x-0
 `}
+
 >
 
 {/* Logo */}
@@ -68,26 +116,39 @@ AI Automation Platform
 
 </div>
 
-{/* Close button mobile */}
-
 <button
 onClick={()=>setOpen(false)}
 className="lg:hidden"
+
 >
+
 <X size={20}/>
 </button>
 
 </div>
 
-
 {/* Navigation */}
 
-<nav className="flex-1 px-3 py-6 space-y-1">
+<nav className="flex-1 overflow-y-auto px-3 py-6 space-y-6">
 
-{menu.map((item)=>{
+{menu.map((group)=>{
+
+return(
+
+<div key={group.section}>
+
+<p className="px-3 mb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+
+{group.section}
+
+</p>
+
+<div className="space-y-1">
+
+{group.items.map((item)=>{
 
 const Icon = item.icon
-const active = pathname === item.href
+const active = pathname.startsWith(item.href)
 
 return(
 
@@ -101,10 +162,10 @@ ${active
 : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
 }
 `}
+
 >
 
-{active && (
-<span className="absolute left-0 top-0 h-full w-1 bg-blue-600 rounded-r-md"/>
+{active && ( <span className="absolute left-0 top-0 h-full w-1 bg-blue-600 rounded-r-md"/>
 )}
 
 <Icon size={18}/>
@@ -117,8 +178,15 @@ ${active
 
 })}
 
-</nav>
+</div>
 
+</div>
+
+)
+
+})}
+
+</nav>
 
 {/* Footer */}
 
@@ -131,7 +199,7 @@ Free Plan
 </p>
 
 <p className="text-gray-500 mt-1">
-Upgrade to unlock automation
+Upgrade to unlock AI automation
 </p>
 
 </div>

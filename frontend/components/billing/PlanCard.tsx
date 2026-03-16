@@ -3,8 +3,9 @@
 const plans = [
 
 {
-name:"RESPONDER",
-price:"₹999 / month",
+name:"BASIC",
+price:"₹999",
+period:"/month",
 features:[
 "AI replies to WhatsApp messages",
 "AI replies to Instagram DMs",
@@ -15,10 +16,11 @@ popular:false
 },
 
 {
-name:"LEADS",
-price:"₹1999 / month",
+name:"PRO",
+price:"₹1999",
+period:"/month",
 features:[
-"Everything in Responder",
+"Everything in Basic",
 "Lead capture system",
 "Leads dashboard",
 "Lead stage tracking",
@@ -28,10 +30,11 @@ popular:true
 },
 
 {
-name:"AUTOMATION",
-price:"₹3999 / month",
+name:"ELITE",
+price:"₹3999",
+period:"/month",
 features:[
-"Everything in Leads",
+"Everything in Pro",
 "Meeting booking automation",
 "Calendar scheduling",
 "Follow-up automation",
@@ -54,61 +57,70 @@ return(
 
 <div
 key={plan.name}
-className={`bg-white rounded-xl p-5 sm:p-6 shadow-sm space-y-5 transition hover:shadow-md
+className={`relative bg-white rounded-xl p-6 shadow-sm transition hover:shadow-lg
 
 ${plan.popular
-? "border-2 border-blue-600 shadow-md"
+? "border-2 border-blue-600 scale-[1.02]"
 : "border border-gray-200"
 }
 `}
+
 >
-
-{/* HEADER */}
-
-<div className="flex items-center justify-between">
-
-<div>
-
-<h3 className="text-base sm:text-lg font-semibold text-gray-900">
-{plan.name}
-</h3>
-
-<p className="text-sm text-gray-500 mt-1">
-{plan.price}
-</p>
-
-</div>
 
 {plan.popular && (
 
-<span className="bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
-POPULAR
+<span className="absolute -top-3 left-6 bg-blue-600 text-white text-xs font-semibold px-3 py-1 rounded-full">
+BEST VALUE
 </span>
 
 )}
 
+<div className="space-y-3">
+
+<h3 className="text-lg font-semibold text-gray-900">
+{plan.name}
+</h3>
+
+<div className="flex items-end gap-1">
+
+<span className="text-3xl font-bold text-gray-900">
+{plan.price}
+</span>
+
+<span className="text-sm text-gray-500">
+{plan.period}
+</span>
+
 </div>
 
+</div>
 
-{/* FEATURES */}
-
-<ul className="text-sm text-gray-600 space-y-2">
+<ul className="mt-6 space-y-2 text-sm text-gray-600">
 
 {plan.features.map((f,index)=>(
 
-<li key={index}>
-✔ {f}
+<li key={index} className="flex gap-2">
+<span className="text-green-600">✔</span>
+{f}
 </li>
 
 ))}
 
 </ul>
 
+<button
+className={`w-full mt-6 text-sm font-medium py-2 rounded-lg transition
 
-{/* ACTION */}
+${plan.popular
+? "bg-blue-600 hover:bg-blue-700 text-white"
+: "bg-gray-100 hover:bg-gray-200 text-gray-900"
+}
+`}
 
-<button className="w-full bg-blue-600 hover:bg-blue-700 transition text-white text-sm font-medium px-4 py-2 rounded-lg">
-Choose Plan
+>
+
+Choose {plan.name}
+
 </button>
 
 </div>

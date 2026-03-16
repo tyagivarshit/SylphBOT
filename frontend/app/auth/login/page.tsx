@@ -12,63 +12,84 @@ import { setToken, getToken } from "@/lib/token";
 
 export default function LoginPage() {
 
-const router = useRouter()
+const router = useRouter();
 
-const [email,setEmail] = useState("")
-const [password,setPassword] = useState("")
-const [loading,setLoading] = useState(false)
-const [showPassword,setShowPassword] = useState(false)
-const [remember,setRemember] = useState(false)
+const [email,setEmail] = useState("");
+const [password,setPassword] = useState("");
+const [loading,setLoading] = useState(false);
+const [showPassword,setShowPassword] = useState(false);
+const [remember,setRemember] = useState(false);
 
 useEffect(()=>{
 
-const token = getToken()
+const token = getToken();
 
 if(token){
-router.push("/dashboard")
+router.replace("/dashboard");
 }
 
-},[])
+},[router]);
 
-const handleLogin = async()=>{
+const validateEmail = (value:string)=>{
+return /^[^\s@]+@[^\s@]+.[^\s@]+$/.test(value);
+};
 
-if(!email || !password){
-toast.error("Enter email and password")
-return
+const handleLogin = async(e?:React.FormEvent)=>{
+
+if(e) e.preventDefault();
+
+if(loading) return;
+
+const cleanEmail = email.trim();
+
+if(!cleanEmail || !password){
+toast.error("Enter email and password");
+return;
+}
+
+if(!validateEmail(cleanEmail)){
+toast.error("Enter a valid email");
+return;
 }
 
 try{
 
-setLoading(true)
+setLoading(true);
 
-const data = await loginUser(email,password)
+const data = await loginUser(cleanEmail,password);
 
-if(data.error){
-toast.error(data.error)
-return
+if(data?.error){
+toast.error(data.error);
+return;
 }
 
-setToken(data.accessToken)
+setToken(data.accessToken, remember);
+console.log("token after login:", getToken())
 
-toast.success("Login successful 🚀")
+toast.success("Login successful 🚀");
 
-router.push("/dashboard")
+router.replace("/dashboard");
 
-}catch(err){
+}catch(err:any){
 
-toast.error("Server error")
+const message =
+err?.response?.data?.message ||
+err?.message ||
+"Server error";
+
+toast.error(message);
 
 }finally{
 
-setLoading(false)
+setLoading(false);
 
 }
 
-}
+};
 
 const handleGoogleLogin = ()=>{
-toast("Google login coming soon")
-}
+toast("Google login coming soon");
+};
 
 return(
 
@@ -103,6 +124,7 @@ Sign in to continue to your dashboard
 <button
 onClick={handleGoogleLogin}
 className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
+
 >
 
 <FcGoogle size={18}/>
@@ -129,15 +151,9 @@ OR
 
 {/* Form */}
 
-<div
+<form
 className="space-y-3"
-onKeyDown={(e)=>{
-
-if(e.key==="Enter"){
-handleLogin()
-}
-
-}}
+onSubmit={handleLogin}
 >
 
 {/* Email */}
@@ -150,7 +166,7 @@ Email
 
 <input
 type="email"
-placeholder="you@example.com"
+placeholder="[you@example.com](mailto:you@example.com)"
 value={email}
 onChange={(e)=>setEmail(e.target.value)}
 className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -191,6 +207,7 @@ className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm text-
 type="button"
 onClick={()=>setShowPassword(!showPassword)}
 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+
 >
 
 {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
@@ -223,16 +240,17 @@ Remember me
 {/* Login button */}
 
 <button
-onClick={handleLogin}
+type="submit"
 disabled={loading}
-className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition"
+className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition disabled:opacity-70"
+
 >
 
 {loading ? "Signing in..." : "Sign in"}
 
 </button>
 
-</div>
+</form>
 
 {/* Footer */}
 
@@ -255,6 +273,6 @@ Sign up
 
 </div>
 
-)
+);
 
 }

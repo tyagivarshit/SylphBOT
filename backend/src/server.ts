@@ -6,6 +6,9 @@ import app from "./app";
 import { initSocket } from "./sockets/socket.server";
 import prisma from "./config/prisma";
 
+/* MONITORING */
+import * as Sentry from "@sentry/node";
+
 /* WORKERS */
 import "./workers/ai.worker";
 import "./workers/funnel.worker";
@@ -13,6 +16,15 @@ import "./workers/funnel.worker";
 const PORT = process.env.PORT || 5000;
 
 console.log("🚨 THIS IS SYLPH BACKEND 🚨");
+
+/* ============================= */
+/* SENTRY INIT (MONITORING) */
+/* ============================= */
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN || "",
+  tracesSampleRate: 1.0,
+});
 
 /* ============================= */
 /* CREATE SERVER */
@@ -56,6 +68,7 @@ const shutdown = async () => {
   } catch (error) {
 
     console.error("Shutdown error:", error);
+    Sentry.captureException(error);
     process.exit(1);
 
   }
@@ -72,11 +85,13 @@ process.on("SIGTERM", shutdown);
 process.on("uncaughtException", (err) => {
 
   console.error("🚨 Uncaught Exception:", err);
+  Sentry.captureException(err);
 
 });
 
 process.on("unhandledRejection", (reason) => {
 
   console.error("🚨 Unhandled Promise Rejection:", reason);
+  Sentry.captureException(reason);
 
 });

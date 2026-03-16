@@ -8,9 +8,8 @@ import { FcGoogle } from "react-icons/fc";
 import { Eye, EyeOff } from "lucide-react";
 
 import { loginUser } from "@/lib/auth";
-import { setToken, getToken } from "@/lib/token";
 
-export default function LoginPage() {
+export default function LoginPage(){
 
 const router = useRouter();
 
@@ -18,11 +17,12 @@ const [email,setEmail] = useState("");
 const [password,setPassword] = useState("");
 const [loading,setLoading] = useState(false);
 const [showPassword,setShowPassword] = useState(false);
-const [remember,setRemember] = useState(false);
+
+/* ================= SESSION CHECK ================= */
 
 useEffect(()=>{
 
-const token = getToken();
+const token = localStorage.getItem("accessToken");
 
 if(token){
 router.replace("/dashboard");
@@ -30,9 +30,13 @@ router.replace("/dashboard");
 
 },[router]);
 
+/* ================= EMAIL VALIDATION ================= */
+
 const validateEmail = (value:string)=>{
-return /^[^\s@]+@[^\s@]+.[^\s@]+$/.test(value);
+return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 };
+
+/* ================= LOGIN ================= */
 
 const handleLogin = async(e?:React.FormEvent)=>{
 
@@ -58,13 +62,9 @@ setLoading(true);
 
 const data = await loginUser(cleanEmail,password);
 
-if(data?.error){
-toast.error(data.error);
-return;
-}
+/* store token */
 
-setToken(data.accessToken, remember);
-console.log("token after login:", getToken())
+localStorage.setItem("accessToken",data.accessToken);
 
 toast.success("Login successful 🚀");
 
@@ -72,12 +72,7 @@ router.replace("/dashboard");
 
 }catch(err:any){
 
-const message =
-err?.response?.data?.message ||
-err?.message ||
-"Server error";
-
-toast.error(message);
+toast.error(err?.message || "Server error");
 
 }finally{
 
@@ -87,8 +82,19 @@ setLoading(false);
 
 };
 
+/* ================= GOOGLE LOGIN ================= */
+
 const handleGoogleLogin = ()=>{
-toast("Google login coming soon");
+
+const API = process.env.NEXT_PUBLIC_API_URL;
+
+if(!API){
+toast.error("API URL not configured");
+return;
+}
+
+window.location.href = `${API}/api/auth/google`;
+
 };
 
 return(
@@ -97,15 +103,11 @@ return(
 
 <div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-6">
 
-{/* Logo */}
-
 <div className="text-center mb-4">
 <h1 className="text-lg sm:text-xl font-bold text-gray-900">
 Sylph AI
 </h1>
 </div>
-
-{/* Heading */}
 
 <div className="text-center mb-5">
 
@@ -119,12 +121,9 @@ Sign in to continue to your dashboard
 
 </div>
 
-{/* Google login */}
-
 <button
 onClick={handleGoogleLogin}
 className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
-
 >
 
 <FcGoogle size={18}/>
@@ -134,8 +133,6 @@ Continue with Google
 </span>
 
 </button>
-
-{/* Divider */}
 
 <div className="flex items-center gap-3 my-5">
 
@@ -149,14 +146,10 @@ OR
 
 </div>
 
-{/* Form */}
-
 <form
 className="space-y-3"
 onSubmit={handleLogin}
 >
-
-{/* Email */}
 
 <div>
 
@@ -166,15 +159,13 @@ Email
 
 <input
 type="email"
-placeholder="[you@example.com](mailto:you@example.com)"
+placeholder="you@example.com"
 value={email}
 onChange={(e)=>setEmail(e.target.value)}
 className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
 />
 
 </div>
-
-{/* Password */}
 
 <div>
 
@@ -207,7 +198,6 @@ className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm text-
 type="button"
 onClick={()=>setShowPassword(!showPassword)}
 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-
 >
 
 {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
@@ -218,32 +208,10 @@ className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
 
 </div>
 
-{/* Remember me */}
-
-<div className="flex items-center justify-between text-xs">
-
-<label className="flex items-center gap-2 text-gray-600">
-
-<input
-type="checkbox"
-checked={remember}
-onChange={()=>setRemember(!remember)}
-className="accent-blue-600"
-/>
-
-Remember me
-
-</label>
-
-</div>
-
-{/* Login button */}
-
 <button
 type="submit"
 disabled={loading}
 className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition disabled:opacity-70"
-
 >
 
 {loading ? "Signing in..." : "Sign in"}
@@ -251,8 +219,6 @@ className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold
 </button>
 
 </form>
-
-{/* Footer */}
 
 <p className="text-xs text-gray-500 mt-5 text-center">
 
@@ -262,9 +228,7 @@ Don’t have an account?{" "}
 href="/auth/register"
 className="text-blue-600 font-medium hover:underline"
 >
-
 Sign up
-
 </Link>
 
 </p>

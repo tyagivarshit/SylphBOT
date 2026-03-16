@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import toast from "react-hot-toast"
 import { Mail } from "lucide-react"
+import { forgotPassword } from "@/lib/auth"
 
 export default function ForgotPage(){
 
@@ -37,17 +38,15 @@ try{
 
 setLoading(true)
 
-/* Replace with API call */
-
-await new Promise((res)=>setTimeout(res,1000))
+await forgotPassword(cleanEmail)
 
 setSent(true)
 
 toast.success("Reset link sent")
 
-}catch{
+}catch(err:any){
 
-toast.error("Failed to send reset link")
+toast.error(err?.message || "Failed to send reset link")
 
 }finally{
 
@@ -134,7 +133,7 @@ Email address
 
 <input
 type="email"
-placeholder="[you@example.com](mailto:you@example.com)"
+placeholder="you@example.com"
 value={email}
 onChange={(e)=>setEmail(e.target.value)}
 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pl-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -155,7 +154,6 @@ className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
 type="submit"
 disabled={loading}
 className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-70"
-
 >
 
 {loading ? "Sending..." : "Send reset link"}

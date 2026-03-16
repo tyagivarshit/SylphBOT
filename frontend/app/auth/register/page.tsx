@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 import { FcGoogle } from "react-icons/fc";
 import { Eye, EyeOff } from "lucide-react";
 
-import { registerUser } from "@/lib/auth";
+import { registerUser, resendVerification } from "@/lib/auth";
 
 export default function RegisterPage(){
 
@@ -18,10 +18,15 @@ const [email,setEmail] = useState("")
 const [password,setPassword] = useState("")
 const [loading,setLoading] = useState(false)
 const [showPassword,setShowPassword] = useState(false)
+const [emailSent,setEmailSent] = useState(false)
+
+/* ================= EMAIL VALIDATION ================= */
 
 const validateEmail = (value:string)=>{
-return /^[^\s@]+@[^\s@]+.[^\s@]+$/.test(value)
+return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
+
+/* ================= REGISTER ================= */
 
 const handleRegister = async(e?:React.FormEvent)=>{
 
@@ -51,21 +56,15 @@ try{
 
 setLoading(true)
 
-const data = await registerUser(cleanName,cleanEmail,password)
+await registerUser(cleanName,cleanEmail,password)
 
-if(data?.error){
-toast.error(data.error)
-return
-}
+toast.success("Account created 🎉 Check your email")
 
-toast.success("Account created 🎉")
-
-router.replace("/auth/login")
+setEmailSent(true)
 
 }catch(err:any){
 
 const message =
-err?.response?.data?.message ||
 err?.message ||
 "Server error"
 
@@ -79,8 +78,42 @@ setLoading(false)
 
 }
 
+/* ================= RESEND EMAIL ================= */
+
+const handleResendVerification = async ()=>{
+
+if(!email){
+toast.error("Enter email first")
+return
+}
+
+try{
+
+await resendVerification(email)
+
+toast.success("Verification email sent again")
+
+}catch(err:any){
+
+toast.error(err?.message || "Failed to resend email")
+
+}
+
+}
+
+/* ================= GOOGLE REGISTER ================= */
+
 const handleGoogleRegister = ()=>{
-toast("Google signup coming soon")
+
+const API = process.env.NEXT_PUBLIC_API_URL
+
+if(!API){
+toast.error("API URL not configured")
+return
+}
+
+window.location.href = `${API}/api/auth/google`
+
 }
 
 return(
@@ -97,6 +130,76 @@ Sylph AI
 </h1>
 </div>
 
+{/* VERIFY EMAIL SCREEN */}
+
+{emailSent ? (
+
+<div className="text-center">
+
+<div className="mx-auto w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mb-6">
+
+<svg
+className="w-8 h-8 text-blue-600"
+fill="none"
+stroke="currentColor"
+strokeWidth="2"
+viewBox="0 0 24 24"
+>
+
+<path
+strokeLinecap="round"
+strokeLinejoin="round"
+d="M3 8l9 6 9-6M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8"
+/>
+
+</svg>
+
+</div>
+
+<h2 className="text-lg font-semibold text-gray-900">
+Verify your email
+</h2>
+
+<p className="text-sm text-gray-500 mt-2">
+We sent a verification link to
+</p>
+
+<p className="text-sm font-medium text-gray-900 mt-1">
+{email}
+</p>
+
+<p className="text-xs text-gray-500 mt-3">
+Click the link in your email to activate your account.
+</p>
+
+<button
+onClick={handleResendVerification}
+className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition"
+>
+Resend verification email
+</button>
+
+<p className="text-xs text-gray-500 mt-4">
+Didn't receive the email? Check your spam folder.
+</p>
+
+<div className="mt-4 text-sm">
+
+<Link
+href="/auth/login"
+className="text-blue-600 hover:underline font-medium"
+>
+Go to login
+</Link>
+
+</div>
+
+</div>
+
+) : (
+
+<>
+
 {/* Heading */}
 
 <div className="text-center mb-5">
@@ -111,12 +214,11 @@ Start automating your customer conversations
 
 </div>
 
-{/* Google signup */}
+{/* GOOGLE SIGNUP */}
 
 <button
 onClick={handleGoogleRegister}
 className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
-
 >
 
 <FcGoogle size={18}/>
@@ -141,14 +243,14 @@ OR
 
 </div>
 
-{/* Form */}
+{/* REGISTER FORM */}
 
 <form
 className="space-y-3"
 onSubmit={handleRegister}
 >
 
-{/* Name */}
+{/* NAME */}
 
 <div>
 
@@ -166,7 +268,7 @@ className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-
 
 </div>
 
-{/* Email */}
+{/* EMAIL */}
 
 <div>
 
@@ -176,7 +278,7 @@ Email
 
 <input
 type="email"
-placeholder="[you@example.com](mailto:you@example.com)"
+placeholder="you@example.com"
 value={email}
 onChange={(e)=>setEmail(e.target.value)}
 className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -184,7 +286,7 @@ className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-
 
 </div>
 
-{/* Password */}
+{/* PASSWORD */}
 
 <div>
 
@@ -206,7 +308,6 @@ className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm text-
 type="button"
 onClick={()=>setShowPassword(!showPassword)}
 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-
 >
 
 {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
@@ -217,13 +318,12 @@ className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
 
 </div>
 
-{/* Register button */}
+{/* SUBMIT */}
 
 <button
 type="submit"
 disabled={loading}
 className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition disabled:opacity-70"
-
 >
 
 {loading ? "Creating..." : "Create account"}
@@ -232,7 +332,7 @@ className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold
 
 </form>
 
-{/* Footer */}
+{/* FOOTER */}
 
 <p className="text-xs text-gray-500 mt-5 text-center">
 
@@ -242,12 +342,14 @@ Already have an account?{" "}
 href="/auth/login"
 className="text-blue-600 font-medium hover:underline"
 >
-
 Login
-
 </Link>
 
 </p>
+
+</>
+
+)}
 
 </div>
 

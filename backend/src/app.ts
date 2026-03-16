@@ -2,9 +2,12 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
+import cookieParser from "cookie-parser";
+import csrf from "csurf";
 import prisma from "./config/prisma";
 
 import authRoutes from "./routes/auth.routes";
+import googleAuthRoutes from "./routes/googleAuth.routes";
 import clientRoutes from "./routes/client.routes";
 import aiRoutes from "./routes/ai.routes";
 import whatsappWebhook from "./routes/whatsapp.webhook";
@@ -49,12 +52,34 @@ app.use(compression());
 
 app.use(globalLimiter);
 
+/* ============================= */
+/* COOKIE PARSER */
+/* ============================= */
+
+app.use(cookieParser());
+
+/* ============================= */
+/* CORS */
+/* ============================= */
+
 app.use(
   cors({
     origin: env.FRONTEND_URL,
     credentials: true,
   })
 );
+
+/* ============================= */
+/* CSRF PROTECTION */
+/* ============================= */
+
+const csrfProtection = csrf({
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax"
+  }
+});
 
 /* ============================= */
 /* STRIPE WEBHOOK (RAW BODY) */
@@ -106,7 +131,15 @@ app.get("/", (req, res) => {
   res.send("API Running 🚀");
 });
 
+/* AUTH ROUTES */
+
 app.use("/api/auth", authLimiter, authRoutes);
+
+/* GOOGLE AUTH */
+
+app.use("/api/auth", googleAuthRoutes);
+
+/* OTHER ROUTES */
 
 app.use("/api/clients", clientRoutes);
 

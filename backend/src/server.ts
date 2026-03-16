@@ -6,6 +6,10 @@ import app from "./app";
 import { initSocket } from "./sockets/socket.server";
 import prisma from "./config/prisma";
 
+/* PASSPORT */
+import passport from "passport";
+import { configurePassport } from "./config/passport";
+
 /* MONITORING */
 import * as Sentry from "@sentry/node";
 
@@ -25,6 +29,13 @@ Sentry.init({
   dsn: process.env.SENTRY_DSN || "",
   tracesSampleRate: 1.0,
 });
+
+/* ============================= */
+/* PASSPORT INIT */
+/* ============================= */
+
+configurePassport();
+app.use(passport.initialize());
 
 /* ============================= */
 /* CREATE SERVER */

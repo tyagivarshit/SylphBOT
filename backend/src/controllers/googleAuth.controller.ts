@@ -64,12 +64,27 @@ expiresAt:expiry
 }
 })
 
-/* redirect frontend */
+/* set cookies */
 
-const redirectURL =
-`${process.env.FRONTEND_URL}/auth/google-success?token=${accessToken}`
+res.cookie("accessToken", accessToken, {
+httpOnly:true,
+secure:process.env.NODE_ENV==="production",
+sameSite:"lax",
+maxAge:15*60*1000
+})
 
-return res.redirect(redirectURL)
+res.cookie("refreshToken", refreshToken, {
+httpOnly:true,
+secure:process.env.NODE_ENV==="production",
+sameSite:"lax",
+maxAge:7*24*60*60*1000
+})
+
+/* redirect dashboard */
+
+return res.redirect(
+`${process.env.FRONTEND_URL}/dashboard`
+)
 
 }catch(error){
 

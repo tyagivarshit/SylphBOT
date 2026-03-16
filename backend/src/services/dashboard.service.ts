@@ -4,9 +4,9 @@ import { Prisma } from "@prisma/client";
 
 export class DashboardService {
 
-  // ======================================
-  // DASHBOARD STATS
-  // ======================================
+  /* ======================================
+     DASHBOARD STATS
+  ====================================== */
   static async getStats(businessId: string) {
 
     const todayStart = startOfDay(new Date());
@@ -15,6 +15,8 @@ export class DashboardService {
     const baseFilter: Prisma.LeadWhereInput = {
       businessId
     };
+
+    console.log("Dashboard query businessId:", businessId);
 
     const subscription = await prisma.subscription.findUnique({
       where: { businessId },
@@ -48,18 +50,19 @@ export class DashboardService {
         }
       }),
 
+      /* USER messages today */
       prisma.message.count({
         where: {
           lead: { businessId },
-          sender: "USER",
           createdAt: { gte: todayStart }
         }
       }),
 
+      /* AI calls */
       prisma.message.count({
         where: {
           lead: { businessId },
-          sender: "USER"
+          sender: "AI"
         }
       }),
 
@@ -81,6 +84,7 @@ export class DashboardService {
     return {
       totalLeads,
       leadsToday,
+      leadsThisMonth,
       messagesToday,
       aiCallsUsed,
       aiCallsLimit: subscription?.plan?.maxAiCalls || 0,
@@ -91,9 +95,9 @@ export class DashboardService {
     };
   }
 
-  // ======================================
-  // LEADS LIST
-  // ======================================
+  /* ======================================
+     LEADS LIST
+  ====================================== */
   static async getLeadsList(
     businessId: string,
     page: number,
@@ -115,15 +119,9 @@ export class DashboardService {
     if (search) {
 
       where.OR = [
-        {
-          name: { contains: search, mode: "insensitive" }
-        },
-        {
-          phone: { contains: search }
-        },
-        {
-          email: { contains: search, mode: "insensitive" }
-        }
+        { name: { contains: search, mode: "insensitive" } },
+        { phone: { contains: search } },
+        { email: { contains: search, mode: "insensitive" } }
       ];
 
     }
@@ -162,9 +160,9 @@ export class DashboardService {
     };
   }
 
-  // ======================================
-  // LEAD DETAIL
-  // ======================================
+  /* ======================================
+     LEAD DETAIL
+  ====================================== */
   static async getLeadDetail(businessId: string, leadId: string) {
 
     const lead = await prisma.lead.findFirst({
@@ -181,9 +179,9 @@ export class DashboardService {
     return lead;
   }
 
-  // ======================================
-  // UPDATE LEAD STAGE
-  // ======================================
+  /* ======================================
+     UPDATE LEAD STAGE
+  ====================================== */
   static async updateLeadStage(
     businessId: string,
     leadId: string,
@@ -202,9 +200,9 @@ export class DashboardService {
     });
   }
 
-  // ======================================
-  // LEADS GROWTH
-  // ======================================
+  /* ======================================
+     LEADS GROWTH
+  ====================================== */
   static async getLeadsGrowth(businessId: string) {
 
     const today = new Date();
@@ -241,9 +239,9 @@ export class DashboardService {
       }));
   }
 
-  // ======================================
-  // MESSAGES GROWTH
-  // ======================================
+  /* ======================================
+     MESSAGES GROWTH
+  ====================================== */
   static async getMessagesGrowth(businessId: string) {
 
     const today = new Date();
@@ -280,17 +278,15 @@ export class DashboardService {
       }));
   }
 
-  // ======================================
-  // RECENT ACTIVITY
-  // ======================================
+  /* ======================================
+     RECENT ACTIVITY
+  ====================================== */
   static async getRecentActivity(businessId: string) {
 
     const leads = await prisma.lead.findMany({
 
       where: { businessId },
-
       orderBy: { createdAt: "desc" },
-
       take: 5,
 
       select: {
@@ -303,17 +299,15 @@ export class DashboardService {
     });
 
     return leads.map((lead) => ({
-
       id: lead.id,
       text: `New lead from ${lead.platform} (${lead.name || "Unknown"})`,
       time: lead.createdAt
-
     }));
   }
 
-  // ======================================
-  // ACTIVE CONVERSATIONS (NEW)
-  // ======================================
+  /* ======================================
+     ACTIVE CONVERSATIONS
+  ====================================== */
   static async getActiveConversations(businessId: string) {
 
     const leads = await prisma.lead.findMany({

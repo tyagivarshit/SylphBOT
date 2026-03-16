@@ -6,10 +6,13 @@ import {
   resendVerificationEmail,
   logout,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  getMe
 } from "../controllers/auth.controller";
+
 import { refreshAccessToken } from "../controllers/token.controller";
 import { loginLimiter } from "../middleware/loginLimiter";
+import { protect } from "../middleware/auth.middleware";
 
 const router = Router();
 
@@ -22,6 +25,10 @@ router.post("/login", loginLimiter, login);
 router.post("/refresh", refreshAccessToken);
 
 router.get("/verify-email", verifyEmail);
+
+/* 🔐 CURRENT USER */
+
+router.get("/me", protect, getMe);
 
 /* NEW ROUTES */
 

@@ -133,7 +133,7 @@ app.get("/", (req, res) => {
 
 /* AUTH ROUTES */
 
-app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/auth", authRoutes);
 
 /* GOOGLE AUTH */
 

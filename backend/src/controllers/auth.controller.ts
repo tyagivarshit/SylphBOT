@@ -13,6 +13,7 @@ import { sendVerificationEmail } from "../services/email.service";
 
 export const register = async (req: Request, res: Response) => {
   try {
+
     const name = req.body.name?.trim();
     const email = req.body.email?.toLowerCase().trim();
     const password = req.body.password;
@@ -94,8 +95,7 @@ export const register = async (req: Request, res: Response) => {
 
     return res.status(201).json({
       success: true,
-      message:
-        "User registered successfully. Please verify your email.",
+      message: "User registered successfully. Please verify your email.",
     });
 
   } catch (error) {
@@ -126,11 +126,32 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    /* ===== CHECK LIMITER ===== */
+
+    const limiterKey = `login:limit:${email}`;
+    const attempts = await redis.get(limiterKey);
+
+    if (attempts && Number(attempts) >= 5) {
+
+      const ttl = await redis.ttl(limiterKey);
+
+      return res.status(429).json({
+        success: false,
+        message: "Too many login attempts. Please wait before trying again.",
+        retryAfter: ttl > 0 ? ttl : 60
+      });
+
+    }
+
     const user = await prisma.user.findUnique({
       where: { email },
     });
 
     if (!user) {
+
+      await redis.incr(limiterKey);
+      await redis.expire(limiterKey, 60);
+
       return res.status(400).json({
         success: false,
         message: "Invalid credentials",
@@ -147,10 +168,18 @@ export const login = async (req: Request, res: Response) => {
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
+
+      const attempts = await redis.incr(limiterKey);
+
+      if (attempts === 1) {
+        await redis.expire(limiterKey, 60);
+      }
+
       return res.status(400).json({
         success: false,
         message: "Invalid credentials",
       });
+
     }
 
     const business = await prisma.business.findFirst({
@@ -176,14 +205,7 @@ export const login = async (req: Request, res: Response) => {
       },
     });
 
-    /* ===== RESET LOGIN LIMITER ===== */
-
-    const ip =
-      (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-      req.socket.remoteAddress ||
-      "unknown";
-
-    const limiterKey = `login:limit:${ip}:${email}`;
+    /* ===== RESET LIMITER ON SUCCESS ===== */
 
     await redis.del(limiterKey);
 
@@ -193,6 +215,7 @@ export const login = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
+      path: "/",
       maxAge: 15 * 60 * 1000,
     });
 
@@ -200,6 +223,7 @@ export const login = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -215,6 +239,47 @@ export const login = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: "Login failed",
+    });
+
+  }
+
+};
+
+/* ================= GET CURRENT USER ================= */
+
+export const getMe = async (req: Request, res: Response) => {
+
+  try {
+
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      user
+    });
+
+  } catch (error) {
+
+    console.error("GetMe Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch user",
     });
 
   }
@@ -286,8 +351,8 @@ export const logout = async (req: Request, res: Response) => {
       });
     }
 
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
+    res.clearCookie("accessToken", { path: "/" });
+    res.clearCookie("refreshToken", { path: "/" });
 
     return res.status(200).json({
       success: true,

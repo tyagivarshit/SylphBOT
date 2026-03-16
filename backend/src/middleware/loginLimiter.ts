@@ -4,6 +4,8 @@ import { redis } from "../config/redis";
 const WINDOW = 60; // seconds
 const MAX_ATTEMPTS = 5;
 
+/* ================= CHECK LIMIT ================= */
+
 export const loginLimiter = async (
   req: Request,
   res: Response,
@@ -11,44 +13,15 @@ export const loginLimiter = async (
 ) => {
   try {
 
-    /* ================= IP DETECTION ================= */
+    const email =
+      req.body?.email?.toLowerCase()?.trim() || "unknown";
 
-    const forwarded = req.headers["x-forwarded-for"] as string | undefined;
+    const key = `login:limit:${email}`;
 
-    const ip =
-      forwarded?.split(",")[0]?.trim() ||
-      req.socket.remoteAddress ||
-      "unknown";
+    const attempts = await redis.get(key);
+    const ttl = await redis.ttl(key);
 
-    /* ================= EMAIL ================= */
-
-    const email = req.body?.email?.toLowerCase()?.trim() || "unknown";
-
-    /* ================= REDIS KEY ================= */
-
-    const key = `login:limit:${ip}:${email}`;
-
-    /* ================= REDIS PIPELINE ================= */
-
-    const pipeline = redis.pipeline();
-
-    pipeline.incr(key);
-    pipeline.ttl(key);
-
-    const results = await pipeline.exec();
-
-    const attempts = results?.[0]?.[1] as number;
-    const ttl = results?.[1]?.[1] as number;
-
-    /* ================= FIRST ATTEMPT ================= */
-
-    if (attempts === 1) {
-      await redis.expire(key, WINDOW);
-    }
-
-    /* ================= LIMIT EXCEEDED ================= */
-
-    if (attempts > MAX_ATTEMPTS) {
+    if (attempts && Number(attempts) >= MAX_ATTEMPTS) {
 
       res.setHeader("Retry-After", ttl > 0 ? ttl : WINDOW);
 
@@ -60,21 +33,37 @@ export const loginLimiter = async (
 
     }
 
-    /* ================= ATTEMPTS INFO ================= */
-
-    const remaining = MAX_ATTEMPTS - attempts;
-
-    res.setHeader("X-Login-Attempts-Remaining", remaining);
-
     next();
 
   } catch (error) {
 
     console.error("Login limiter error:", error);
 
-    /* fail-open strategy */
-
     next();
 
   }
+};
+
+/* ================= RECORD FAILED LOGIN ================= */
+
+export const recordFailedLogin = async (email: string) => {
+
+  const key = `login:limit:${email}`;
+
+  const attempts = await redis.incr(key);
+
+  if (attempts === 1) {
+    await redis.expire(key, WINDOW);
+  }
+
+};
+
+/* ================= RESET LIMITER ================= */
+
+export const resetLoginLimiter = async (email: string) => {
+
+  const key = `login:limit:${email}`;
+
+  await redis.del(key);
+
 };

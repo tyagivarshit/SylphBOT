@@ -22,13 +22,28 @@ const [showPassword,setShowPassword] = useState(false);
 
 useEffect(()=>{
 
-const token = localStorage.getItem("accessToken");
+const checkSession = async()=>{
 
-if(token){
-router.replace("/dashboard");
+try{
+
+const res = await fetch(
+`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+{
+credentials:"include"
+}
+)
+
+if(res.ok){
+router.replace("/dashboard")
 }
 
-},[router]);
+}catch{}
+
+}
+
+checkSession()
+
+},[router])
 
 /* ================= EMAIL VALIDATION ================= */
 
@@ -60,11 +75,7 @@ try{
 
 setLoading(true);
 
-const data = await loginUser(cleanEmail,password);
-
-/* store token */
-
-localStorage.setItem("accessToken",data.accessToken);
+await loginUser(cleanEmail,password);
 
 toast.success("Login successful 🚀");
 

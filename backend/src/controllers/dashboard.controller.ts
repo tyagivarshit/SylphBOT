@@ -3,24 +3,27 @@ import prisma from "../config/prisma";
 import { DashboardService } from "../services/dashboard.service";
 
 /* ======================================
-   HELPER: GET BUSINESS ID FROM USER
+   HELPER: GET BUSINESS ID
 ====================================== */
 async function getBusinessId(req: Request): Promise<string | null> {
 
-  const userId = req.user?.id;
+  // 1️⃣ Try from token first
+  let businessId = req.user?.businessId || null;
 
-  if (!userId) return null;
+  // 2️⃣ Fallback: fetch from DB if token missing businessId
+  if (!businessId && req.user?.id) {
 
-  const business = await prisma.business.findFirst({
-    where: {
-      ownerId: userId,
-    },
-    select: {
-      id: true,
-    },
-  });
+    const business = await prisma.business.findFirst({
+      where: { ownerId: req.user.id },
+      select: { id: true }
+    });
 
-  return business?.id || null;
+    businessId = business?.id || null;
+  }
+
+  console.log("Dashboard businessId:", businessId);
+
+  return businessId;
 }
 
 export class DashboardController {
@@ -61,7 +64,7 @@ export class DashboardController {
   }
 
   /* ======================================
-     LEADS GROWTH (NEW - FOR CHART)
+     LEADS GROWTH
   ====================================== */
   static async getLeadsGrowth(req: Request, res: Response) {
 
@@ -251,7 +254,7 @@ export class DashboardController {
   }
 
   /* ======================================
-     ACTIVE CONVERSATIONS (NEW)
+     ACTIVE CONVERSATIONS
   ====================================== */
   static async getActiveConversations(req: Request, res: Response) {
 

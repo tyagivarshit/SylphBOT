@@ -1,51 +1,52 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getToken, removeToken } from "@/lib/token"
 
 export default function useAuthGuard(){
 
-const router = useRouter()
+  const router = useRouter()
+  const [loading,setLoading] = useState(true)
 
-useEffect(()=>{
+  useEffect(()=>{
 
-if(typeof window === "undefined") return
+    let mounted = true
 
-const token = getToken()
-console.log("guard token:", token)
+    const checkAuth = async()=>{
 
-if(!token){
-  router.replace("/auth/login")
-  return
-}
+      try{
 
-try{
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+          {
+            credentials:"include",
+            cache:"no-store"
+          }
+        )
 
-  if(!token.includes(".")){
-    removeToken()
-    router.replace("/auth/login")
-    return
-  }
+        if(!res.ok){
+          router.replace("/auth/login")
+          return
+        }
 
-  const payload = JSON.parse(
-    atob(token.split(".")[1])
-  )
+        if(mounted){
+          setLoading(false)
+        }
 
-  if(payload.exp * 1000 < Date.now()){
+      }catch{
+        router.replace("/auth/login")
+      }
 
-    removeToken()
+    }
 
-    router.replace("/auth/login")
+    checkAuth()
 
-  }
+    return ()=>{
+      mounted = false
+    }
 
-}catch{
+  },[router])
 
-  removeToken()
+  return loading
 
-  router.replace("/auth/login")
-
-}
-},[router])
 }

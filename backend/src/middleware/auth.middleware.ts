@@ -7,47 +7,38 @@ export const protect = (
   res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers.authorization;
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const cookieToken = req.cookies?.accessToken;
+  const headerToken = req.headers.authorization?.split(" ")[1];
+
+  const token = cookieToken || headerToken;
+
+  if (!token) {
     return res.status(401).json({ message: "Not authorized" });
   }
 
-  const token = authHeader.split(" ")[1];
-
   try {
-    const decoded = jwt.verify(
-      token,
-      env.JWT_SECRET
-    ) as {
+
+    const decoded = jwt.verify(token, env.JWT_SECRET) as {
       id: string;
       role: string;
       email: string;
-      businessId: string; 
+      businessId: string;
     };
 
     req.user = {
       id: decoded.id,
       role: decoded.role,
       email: decoded.email,
-      businessId: decoded.businessId,
+      businessId: decoded.businessId
     };
 
     next();
-  } catch {
-    return res.status(401).json({ message: "Invalid token" });
-  }
-};
 
-export const authorize = (...roles: string[]) => {
-  return (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Access denied" });
-    }
-    next();
-  };
+  } catch {
+
+    return res.status(401).json({ message: "Invalid token" });
+
+  }
+
 };

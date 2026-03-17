@@ -6,7 +6,7 @@ declare module "express-serve-static-core" {
       id: string;
       role: string;
       email: string;
-      businessId: string; // ✅ add this
+      businessId: string;
     };
   }
 }

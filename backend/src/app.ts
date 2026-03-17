@@ -13,7 +13,7 @@ import aiRoutes from "./routes/ai.routes";
 import whatsappWebhook from "./routes/whatsapp.webhook";
 import instagramWebhook from "./routes/instagram.webhook";
 import billingRoutes from "./routes/billing.routes";
-import { stripeWebhook } from "./routes/stripe.webhook";
+import stripeWebhookRoutes from "./routes/stripeWebhook.routes"; // ✅ FIXED
 import dashboardRoutes from "./routes/dashboard.routes";
 
 /* 🟢 EXISTING */
@@ -24,7 +24,7 @@ import messageRoutes from "./routes/message.routes";
 import automationRoutes from "./routes/automation.routes";
 import { monitoringMiddleware } from "./middleware/monitoring.middleware";
 
-/* 🟢 KNOWLEDGE BASE (NEW FEATURE) */
+/* 🟢 KNOWLEDGE BASE */
 import knowledgeRoutes from "./routes/knowledge.routes";
 
 import {
@@ -35,6 +35,7 @@ import {
 
 import { startTrialExpiryCron } from "./cron/trial.cron";
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
+import { startUsageResetCron } from "./cron/resetUsage.cron";
 
 import { env } from "./config/env";
 
@@ -77,22 +78,22 @@ const csrfProtection = csrf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax"
-  }
+    sameSite: "lax",
+  },
 });
 
 /* ============================= */
 /* STRIPE WEBHOOK (RAW BODY) */
 /* ============================= */
 
-app.post(
-  "/api/webhook/stripe",
+app.use(
+  "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
-  stripeWebhook
+  stripeWebhookRoutes // ✅ FIXED (router)
 );
 
 /* ============================= */
-/* WHATSAPP WEBHOOK (RAW BODY) */
+/* WHATSAPP WEBHOOK */
 /* ============================= */
 
 app.use(
@@ -102,7 +103,7 @@ app.use(
 );
 
 /* ============================= */
-/* INSTAGRAM WEBHOOK (RAW BODY) */
+/* INSTAGRAM WEBHOOK */
 /* ============================= */
 
 app.use(
@@ -131,34 +132,44 @@ app.get("/", (req, res) => {
   res.send("API Running 🚀");
 });
 
-/* AUTH ROUTES */
+/* AUTH */
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
 
 /* GOOGLE AUTH */
 
 app.use("/api/auth", googleAuthRoutes);
 
-/* OTHER ROUTES */
+/* CLIENTS */
 
 app.use("/api/clients", clientRoutes);
 
+/* AI */
+
 app.use("/api/ai", aiLimiter, aiRoutes);
+
+/* BILLING */
 
 app.use("/api/billing", billingRoutes);
 
+/* DASHBOARD */
+
 app.use("/api/dashboard", dashboardRoutes);
 
-/* 🟢 COMMENT AUTOMATION */
+/* COMMENT AUTOMATION */
+
 app.use("/api/comment-triggers", commentTriggerRoutes);
 
-/* 🟢 MESSAGE SYSTEM */
+/* MESSAGE SYSTEM */
+
 app.use("/api/messages", messageRoutes);
 
-/* 🟢 AUTOMATION FLOWS */
+/* AUTOMATION FLOWS */
+
 app.use("/api/automations", automationRoutes);
 
-/* 🟢 AI KNOWLEDGE BASE */
+/* KNOWLEDGE BASE */
+
 app.use("/api/knowledge", knowledgeRoutes);
 
 /* ============================= */
@@ -188,7 +199,6 @@ app.use((req, res) => {
 /* ============================= */
 
 app.use((err: any, req: any, res: any, next: any) => {
-
   console.error("Global Error:", err);
 
   res.status(err.status || 500).json({
@@ -198,7 +208,6 @@ app.use((err: any, req: any, res: any, next: any) => {
         ? "Internal server error"
         : err.message,
   });
-
 });
 
 /* ============================= */
@@ -206,7 +215,7 @@ app.use((err: any, req: any, res: any, next: any) => {
 /* ============================= */
 
 startTrialExpiryCron();
-
 startMetaTokenRefreshCron();
+startUsageResetCron();
 
 export default app;

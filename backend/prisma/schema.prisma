@@ -106,11 +106,13 @@ PLANS
 model Plan {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId
   name         String   @unique
-  priceId      String?  @unique
+  priceIdINR String?
+  priceIdUSD String?
 
   maxAiCalls   Int
   maxMessages  Int
   maxFollowups Int
+
 
   subscriptions Subscription[]
 }
@@ -134,6 +136,9 @@ model Subscription {
   stripeSubscriptionId String?
 
   currentPeriodEnd     DateTime?
+
+  currency             String?   // INR / USD
+  billingCycle         String?   // monthly / yearly
 
   isTrial              Boolean @default(false)
   trialUsed            Boolean @default(false)
@@ -406,6 +411,7 @@ STRIPE EVENTS
 model StripeEvent {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   eventId   String   @unique
+  type      String 
   createdAt DateTime @default(now())
 }
 
@@ -523,3 +529,4 @@ model KnowledgeBase {
 
   @@index([businessId])
 }
+

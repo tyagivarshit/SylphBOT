@@ -10,34 +10,37 @@ import {
   getMe
 } from "../controllers/auth.controller";
 
-import { refreshAccessToken } from "../controllers/token.controller";
 import { loginLimiter } from "../middleware/loginLimiter";
 import { protect } from "../middleware/auth.middleware";
 
 const router = Router();
 
+/* ================= AUTH ================= */
+
 router.post("/register", register);
 
-/* LOGIN WITH RATE LIMITER */
+/* 🔐 LOGIN */
 
 router.post("/login", loginLimiter, login);
-
-router.post("/refresh", refreshAccessToken);
-
-router.get("/verify-email", verifyEmail);
 
 /* 🔐 CURRENT USER */
 
 router.get("/me", protect, getMe);
 
-/* NEW ROUTES */
+/* ================= EMAIL ================= */
+
+router.get("/verify-email", verifyEmail);
 
 router.post("/resend-verification", resendVerificationEmail);
-router.post("/logout", logout);
 
-/* PASSWORD RESET ROUTES */
+/* ================= SESSION ================= */
+
+router.post("/logout", protect, logout);
+
+/* ================= PASSWORD ================= */
 
 router.post("/forgot-password", forgotPassword);
+
 router.post("/reset-password", resetPassword);
 
 export default router;

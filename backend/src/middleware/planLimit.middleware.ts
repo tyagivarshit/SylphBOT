@@ -7,7 +7,9 @@ type LimitType = "ai" | "message" | "followup";
 export const checkPlanLimit =
   (type: LimitType) =>
   async (req: Request, res: Response, next: NextFunction) => {
+
     try {
+
       const businessId = req.user?.businessId;
 
       if (!businessId) {
@@ -33,19 +35,21 @@ export const checkPlanLimit =
 
       const usage = await getOrCreateUsage(businessId);
 
-      // 🔥 AI LIMIT
-      if (
-        type === "ai" &&
-        usage.aiCallsUsed >= subscription.plan.maxAiCalls
-      ) {
-        return res.status(403).json({
-          message: "AI limit reached",
-        });
+      /* -----------------------------
+      AI (UNLIMITED)
+      ----------------------------- */
+
+      if (type === "ai") {
+        return next(); // AI unlimited
       }
 
-      // 🔥 MESSAGE LIMIT
+      /* -----------------------------
+      MESSAGE LIMIT
+      ----------------------------- */
+
       if (
         type === "message" &&
+        subscription.plan.maxMessages !== null &&
         usage.messagesUsed >= subscription.plan.maxMessages
       ) {
         return res.status(403).json({
@@ -53,9 +57,13 @@ export const checkPlanLimit =
         });
       }
 
-      // 🔥 FOLLOWUP LIMIT
+      /* -----------------------------
+      FOLLOWUP LIMIT
+      ----------------------------- */
+
       if (
         type === "followup" &&
+        subscription.plan.maxFollowups !== null &&
         usage.followupsUsed >= subscription.plan.maxFollowups
       ) {
         return res.status(403).json({
@@ -66,10 +74,13 @@ export const checkPlanLimit =
       next();
 
     } catch (error) {
+
       console.error("Plan Limit Middleware Error:", error);
 
       return res.status(500).json({
         message: "Server error",
       });
+
     }
+
   };

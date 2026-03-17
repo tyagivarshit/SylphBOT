@@ -1,7 +1,12 @@
 import prisma from "../config/prisma";
 import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
 
+/* ======================================
+KEY GENERATOR
+====================================== */
+
 const getKey = (businessId: string) => {
+
   const { month, year } = getCurrentMonthYear();
 
   return {
@@ -9,12 +14,17 @@ const getKey = (businessId: string) => {
     month,
     year,
   };
+
 };
 
-// ✅ Atomic get-or-create (race condition safe)
+/* ======================================
+GET OR CREATE USAGE (RACE SAFE)
+====================================== */
+
 export const getOrCreateUsage = async (
   businessId: string
 ) => {
+
   const key = getKey(businessId);
 
   return prisma.usage.upsert({
@@ -29,18 +39,23 @@ export const getOrCreateUsage = async (
       followupsUsed: 0,
     },
   });
+
 };
 
-// 🔥 Generic increment function
+/* ======================================
+GENERIC INCREMENT
+====================================== */
+
 const incrementUsage = async (
   businessId: string,
   field: "aiCallsUsed" | "messagesUsed" | "followupsUsed"
 ) => {
-  const key = getKey(businessId);
+
+  const usage = await getOrCreateUsage(businessId);
 
   await prisma.usage.update({
     where: {
-      businessId_month_year: key,
+      id: usage.id,
     },
     data: {
       [field]: {
@@ -48,17 +63,33 @@ const incrementUsage = async (
       },
     },
   });
+
 };
 
-// ✅ Specific helpers
+/* ======================================
+SPECIFIC HELPERS
+====================================== */
+
 export const incrementAiUsage = async (
   businessId: string
-) => incrementUsage(businessId, "aiCallsUsed");
+) => {
+
+  await incrementUsage(businessId, "aiCallsUsed");
+
+};
 
 export const incrementMessageUsage = async (
   businessId: string
-) => incrementUsage(businessId, "messagesUsed");
+) => {
+
+  await incrementUsage(businessId, "messagesUsed");
+
+};
 
 export const incrementFollowupUsage = async (
   businessId: string
-) => incrementUsage(businessId, "followupsUsed");
+) => {
+
+  await incrementUsage(businessId, "followupsUsed");
+
+};

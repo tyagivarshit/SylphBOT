@@ -6,36 +6,54 @@ FEATURE TYPES
 --------------------------------------------------- */
 
 type Feature =
-  | "COMMENT_AUTOMATION"
-  | "AI_CHAT"
+  | "INSTAGRAM_DM"
+  | "INSTAGRAM_COMMENT_AUTOMATION"
+  | "COMMENT_TO_DM"
+  | "REEL_AUTOMATION_CONTROL"
+  | "WHATSAPP_AUTOMATION"
   | "CRM"
   | "FOLLOWUPS"
-  | "BOOKING";
+  | "CUSTOM_FOLLOWUPS"
+  | "AI_BOOKING_SCHEDULING";
 
 /* ---------------------------------------------------
 PLAN → FEATURE MAP
 --------------------------------------------------- */
 
 const planFeatures: Record<string, Feature[]> = {
+
   BASIC: [
-    "COMMENT_AUTOMATION",
-    "AI_CHAT",
+    "INSTAGRAM_DM",
+    "INSTAGRAM_COMMENT_AUTOMATION",
+    "COMMENT_TO_DM",
+    "REEL_AUTOMATION_CONTROL"
   ],
 
   PRO: [
-    "COMMENT_AUTOMATION",
-    "AI_CHAT",
+    "INSTAGRAM_DM",
+    "INSTAGRAM_COMMENT_AUTOMATION",
+    "COMMENT_TO_DM",
+    "REEL_AUTOMATION_CONTROL",
+
+    "WHATSAPP_AUTOMATION",
     "CRM",
     "FOLLOWUPS",
+    "CUSTOM_FOLLOWUPS"
   ],
 
-  ENTERPRISE: [
-    "COMMENT_AUTOMATION",
-    "AI_CHAT",
+  ELITE: [
+    "INSTAGRAM_DM",
+    "INSTAGRAM_COMMENT_AUTOMATION",
+    "COMMENT_TO_DM",
+    "REEL_AUTOMATION_CONTROL",
+
+    "WHATSAPP_AUTOMATION",
     "CRM",
     "FOLLOWUPS",
-    "BOOKING",
-  ],
+    "CUSTOM_FOLLOWUPS",
+
+    "AI_BOOKING_SCHEDULING"
+  ]
 
 };
 

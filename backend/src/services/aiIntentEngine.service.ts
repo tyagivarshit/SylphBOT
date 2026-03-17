@@ -207,9 +207,18 @@ const getPaymentLink = async (businessId: string) => {
     include: { plan: true },
   });
 
-  if (!subscription?.plan?.priceId) return null;
+  if (!subscription?.plan) return null;
 
-  return `https://buy.stripe.com/${subscription.plan.priceId}`;
+  const currency = subscription.currency || "USD";
+
+  const priceId =
+    currency === "INR"
+      ? subscription.plan.priceIdINR
+      : subscription.plan.priceIdUSD;
+
+  if (!priceId) return null;
+
+  return `https://buy.stripe.com/${priceId}`;
 
 };
 

@@ -64,19 +64,29 @@ expiresAt:expiry
 }
 })
 
-/* set cookies */
+/* =============================
+PRODUCTION READY COOKIES
+============================= */
+
+const isProd = process.env.NODE_ENV === "production"
+
+/* access token */
 
 res.cookie("accessToken", accessToken, {
 httpOnly:true,
-secure:process.env.NODE_ENV==="production",
-sameSite:"lax",
+secure:isProd,
+sameSite:isProd ? "none" : "lax",
+path:"/",
 maxAge:15*60*1000
 })
 
+/* refresh token */
+
 res.cookie("refreshToken", refreshToken, {
 httpOnly:true,
-secure:process.env.NODE_ENV==="production",
-sameSite:"lax",
+secure:isProd,
+sameSite:isProd ? "none" : "lax",
+path:"/",
 maxAge:7*24*60*60*1000
 })
 

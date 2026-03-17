@@ -1,10 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { redis } from "../config/redis";
 
-const WINDOW = 60; // seconds
-const MAX_ATTEMPTS = 5;
-
-/* ================= CHECK LIMIT ================= */
+const WINDOW = 60;
+const MAX_ATTEMPTS = process.env.NODE_ENV === "production" ? 5 : 1000;
 
 export const loginLimiter = async (
   req: Request,
@@ -12,6 +10,12 @@ export const loginLimiter = async (
   next: NextFunction
 ) => {
   try {
+
+    /* DEV MODE → SKIP LIMITER */
+
+    if (process.env.NODE_ENV !== "production") {
+      return next();
+    }
 
     const email =
       req.body?.email?.toLowerCase()?.trim() || "unknown";
@@ -38,32 +42,7 @@ export const loginLimiter = async (
   } catch (error) {
 
     console.error("Login limiter error:", error);
-
     next();
 
   }
-};
-
-/* ================= RECORD FAILED LOGIN ================= */
-
-export const recordFailedLogin = async (email: string) => {
-
-  const key = `login:limit:${email}`;
-
-  const attempts = await redis.incr(key);
-
-  if (attempts === 1) {
-    await redis.expire(key, WINDOW);
-  }
-
-};
-
-/* ================= RESET LIMITER ================= */
-
-export const resetLoginLimiter = async (email: string) => {
-
-  const key = `login:limit:${email}`;
-
-  await redis.del(key);
-
 };

@@ -4,21 +4,33 @@ import { protect } from "../middleware/auth.middleware";
 
 const router = Router();
 
-/* ============================= */
-/* CHECKOUT (BUY PLAN) */
-/* ============================= */
+/* ======================================
+GET CURRENT BILLING
+====================================== */
+
+router.get("/", protect, BillingController.getBilling);
+
+/* ======================================
+CHECKOUT
+====================================== */
 
 router.post("/checkout", protect, BillingController.checkout);
 
-/* ============================= */
-/* BILLING PORTAL (UPGRADE / DOWNGRADE / CARD UPDATE) */
-/* ============================= */
+/* ======================================
+UPGRADE PLAN
+====================================== */
+
+router.post("/upgrade", protect, BillingController.upgradePlan);
+
+/* ======================================
+BILLING PORTAL
+====================================== */
 
 router.post("/portal", protect, BillingController.createPortal);
 
-/* ============================= */
-/* CANCEL SUBSCRIPTION */
-/* ============================= */
+/* ======================================
+CANCEL SUBSCRIPTION
+====================================== */
 
 router.post("/cancel", protect, BillingController.cancelSubscription);
 

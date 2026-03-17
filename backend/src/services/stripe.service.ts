@@ -1,84 +1,254 @@
 import Stripe from "stripe";
 import { env } from "../config/env";
-import prisma from "../config/prisma"; // ✅ added
+import prisma from "../config/prisma";
+import { Request } from "express";
 
-if (!env.STRIPE_SECRET_KEY) {
-  throw new Error("Missing STRIPE_SECRET_KEY");
-}
+/* ============================= */
+/* STRIPE INIT */
+/* ============================= */
 
-export const stripe = new Stripe(env.STRIPE_SECRET_KEY, {});
+export const stripe = new Stripe(env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-10-16" as any,
+});
 
-// ✅ stricter typing
-const PRICE_MAP: Record<"BASIC" | "PRO" | "ENTERPRISE", string | undefined> = {
-  BASIC: env.STRIPE_PRICE_ID_BASIC,
-  PRO: env.STRIPE_PRICE_ID_PRO,
-  ENTERPRISE: env.STRIPE_PRICE_ID_ENTERPRISE,
+/* ============================= */
+/* TYPES */
+/* ============================= */
+
+type Currency = "INR" | "USD";
+type Billing = "monthly" | "yearly";
+type Plan = "BASIC" | "PRO" | "ELITE";
+
+/* ============================= */
+/* PRICE MAP */
+/* ============================= */
+
+const PRICE_MAP = {
+  BASIC: {
+    INR: {
+      monthly: {
+        normal: env.STRIPE_BASIC_INR_MONTHLY!,
+        early: env.STRIPE_BASIC_INR_MONTHLY_EARLY!,
+      },
+      yearly: {
+        normal: env.STRIPE_BASIC_INR_YEARLY!,
+        early: env.STRIPE_BASIC_INR_YEARLY_EARLY!,
+      },
+    },
+    USD: {
+      monthly: {
+        normal: env.STRIPE_BASIC_USD_MONTHLY!,
+        early: env.STRIPE_BASIC_USD_MONTHLY_EARLY!,
+      },
+      yearly: {
+        normal: env.STRIPE_BASIC_USD_YEARLY!,
+        early: env.STRIPE_BASIC_USD_YEARLY_EARLY!,
+      },
+    },
+  },
+
+  PRO: {
+    INR: {
+      monthly: {
+        normal: env.STRIPE_PRO_INR_MONTHLY!,
+        early: env.STRIPE_PRO_INR_MONTHLY_EARLY!,
+      },
+      yearly: {
+        normal: env.STRIPE_PRO_INR_YEARLY!,
+        early: env.STRIPE_PRO_INR_YEARLY_EARLY!,
+      },
+    },
+    USD: {
+      monthly: {
+        normal: env.STRIPE_PRO_USD_MONTHLY!,
+        early: env.STRIPE_PRO_USD_MONTHLY_EARLY!,
+      },
+      yearly: {
+        normal: env.STRIPE_PRO_USD_YEARLY!,
+        early: env.STRIPE_PRO_USD_YEARLY_EARLY!,
+      },
+    },
+  },
+
+  ELITE: {
+    INR: {
+      monthly: {
+        normal: env.STRIPE_ELITE_INR_MONTHLY!,
+        early: env.STRIPE_ELITE_INR_MONTHLY_EARLY!,
+      },
+      yearly: {
+        normal: env.STRIPE_ELITE_INR_YEARLY!,
+        early: env.STRIPE_ELITE_INR_YEARLY_EARLY!,
+      },
+    },
+    USD: {
+      monthly: {
+        normal: env.STRIPE_ELITE_USD_MONTHLY!,
+        early: env.STRIPE_ELITE_USD_MONTHLY_EARLY!,
+      },
+      yearly: {
+        normal: env.STRIPE_ELITE_USD_YEARLY!,
+        early: env.STRIPE_ELITE_USD_YEARLY_EARLY!,
+      },
+    },
+  },
+} as const;
+
+/* ============================= */
+/* EARLY USER */
+/* ============================= */
+
+const isEarlyUser = async () => {
+  const count = await prisma.subscription.count({
+    where: { status: "ACTIVE" },
+  });
+  return count < 20;
 };
 
+/* ============================= */
+/* GEO DETECTION */
+/* ============================= */
+
+const detectCurrency = (req: Request): Currency => {
+  const country =
+    req.headers["x-country"] ||
+    req.headers["cf-ipcountry"] ||
+    req.headers["x-vercel-ip-country"];
+
+  return country === "IN" ? "INR" : "USD";
+};
+
+/* ============================= */
+/* GET PRICE */
+/* ============================= */
+
+const getPriceId = async (
+  plan: Plan,
+  billing: Billing,
+  currency: Currency
+): Promise<string> => {
+
+  const early = await isEarlyUser();
+
+  const price =
+    PRICE_MAP[plan][currency][billing][
+      early ? "early" : "normal"
+    ];
+
+  if (!price) throw new Error("Price ID not found");
+
+  return price;
+};
+
+/* ============================= */
+/* CREATE CHECKOUT */
+/* ============================= */
+
 export const createCheckoutSession = async (
-  customerEmail: string,
+  email: string,
   businessId: string,
-  plan: "BASIC" | "PRO" | "ENTERPRISE"
+  plan: Plan,
+  billing: Billing,
+  req: Request,
+  currency?: Currency
 ) => {
-  // ✅ Strict plan validation
-  if (!["BASIC", "PRO", "ENTERPRISE"].includes(plan)) {
-    throw new Error("Invalid plan selected");
-  }
 
-  const priceId = PRICE_MAP[plan];
+  const detectedCurrency = detectCurrency(req);
 
-  if (!priceId) {
-    throw new Error("Invalid or missing price ID");
-  }
-
-  // ✅ Try to reuse existing Stripe customer
-  const existingSubscription = await prisma.subscription.findUnique({
+  const existingSub = await prisma.subscription.findUnique({
     where: { businessId },
   });
 
-  let stripeCustomerId = existingSubscription?.stripeCustomerId || null;
+  let finalCurrency: Currency =
+    currency ||
+    (existingSub?.currency as Currency) ||
+    detectedCurrency;
 
-  // ✅ Create Stripe customer only if not exists
-  if (!stripeCustomerId) {
+  /* ============================= */
+  /* 🔥 CURRENCY LOCK (FINAL FIX) */
+  /* ============================= */
+
+  if (
+    existingSub?.currency &&
+    existingSub.currency !== detectedCurrency
+  ) {
+    throw new Error(
+      "Currency cannot be changed once subscription is started"
+    );
+  }
+
+  /* ============================= */
+  /* CUSTOMER LOGIC */
+  /* ============================= */
+
+  let customerId: string;
+
+  if (existingSub?.stripeCustomerId) {
+    customerId = existingSub.stripeCustomerId;
+  } else {
     const customer = await stripe.customers.create({
-      email: customerEmail,
+      email,
       metadata: { businessId },
     });
 
-    stripeCustomerId = customer.id;
-
-    // store customer id if subscription row already exists
-    if (existingSubscription) {
-      await prisma.subscription.update({
-        where: { businessId },
-        data: { stripeCustomerId },
-      });
-    }
+    customerId = customer.id;
   }
 
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: "subscription",
-      payment_method_types: ["card"],
-      customer: stripeCustomerId, // ✅ using customer instead of customer_email
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      metadata: {
-        businessId,
-        plan,
+  /* ============================= */
+  /* PRICE */
+  /* ============================= */
+
+  const priceId = await getPriceId(plan, billing, finalCurrency);
+
+  /* ============================= */
+  /* CHECKOUT */
+  /* ============================= */
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+
+    customer: customerId,
+
+    line_items: [
+      {
+        price: priceId,
+        quantity: 1,
       },
-      success_url: `${env.FRONTEND_URL}/billing/success`,
-      cancel_url: `${env.FRONTEND_URL}/billing/cancel`,
+    ],
+
+    automatic_tax: {
+      enabled: true,
     },
-    {
-      // ✅ Idempotency key prevents duplicate sessions
-      idempotencyKey: `${businessId}-${plan}`,
-    }
-  );
+
+    metadata: {
+      businessId,
+      plan,
+      billing,
+      currency: finalCurrency,
+    },
+
+    success_url: `${env.FRONTEND_URL}/billing/success`,
+    cancel_url: `${env.FRONTEND_URL}/billing`,
+  });
+
+  /* ============================= */
+  /* SAVE CUSTOMER + CURRENCY */
+  /* ============================= */
+
+  await prisma.subscription.upsert({
+    where: { businessId },
+    update: {
+      stripeCustomerId: customerId,
+      currency: finalCurrency,
+    },
+    create: {
+      businessId,
+      planId: "" as any,
+      stripeCustomerId: customerId,
+      currency: finalCurrency,
+      status: "INACTIVE",
+    },
+  });
 
   return session;
 };

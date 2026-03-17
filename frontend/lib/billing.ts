@@ -1,52 +1,75 @@
-import { getToken } from "./token"
-
 const API = process.env.NEXT_PUBLIC_API_URL
 
-/* ===============================
-   GET BILLING
-================================ */
+/* ======================================
+CHECKOUT
+====================================== */
 
-export async function getBilling(){
+export const createCheckout = async (
+  plan: string,
+  billing: "monthly" | "yearly"
+) => {
 
-  const token = getToken()
+  try {
 
-  const res = await fetch(`${API}/api/billing`,{
-    headers:{
-      "Content-Type":"application/json",
-      Authorization:`Bearer ${token}`
+    const res = await fetch(`${API}/api/billing/checkout`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ plan, billing }),
+    })
+
+    if (!res.ok) {
+      throw new Error("Checkout failed")
     }
-  })
 
-  if(!res.ok){
-    throw new Error("Failed to fetch billing")
+    return await res.json()
+
+  } catch (error) {
+
+    console.error("Checkout API error:", error)
+
+    return {
+      success: false,
+      message: "Checkout failed",
+    }
   }
-
-  return res.json()
-
 }
 
+/* ======================================
+UPGRADE PLAN
+====================================== */
 
-/* ===============================
-   CREATE STRIPE CHECKOUT
-================================ */
+export const upgradePlan = async (
+  plan: string,
+  billing: "monthly" | "yearly"
+) => {
 
-export async function createCheckout(plan:string){
+  try {
 
-  const token = getToken()
+    const res = await fetch(`${API}/api/billing/upgrade`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ plan, billing }),
+    })
 
-  const res = await fetch(`${API}/api/billing/checkout`,{
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json",
-      Authorization:`Bearer ${token}`
-    },
-    body:JSON.stringify({ plan })
-  })
+    if (!res.ok) {
+      throw new Error("Upgrade failed")
+    }
 
-  if(!res.ok){
-    throw new Error("Failed to create checkout")
+    return await res.json()
+
+  } catch (error) {
+
+    console.error("Upgrade API error:", error)
+
+    return {
+      success: false,
+      message: "Upgrade failed",
+    }
   }
-
-  return res.json()
-
 }

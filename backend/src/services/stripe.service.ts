@@ -2,6 +2,8 @@ import Stripe from "stripe";
 import { env } from "../config/env";
 import prisma from "../config/prisma";
 import { Request } from "express";
+import { applyCoupon } from "./coupon.service";
+import { getTaxConfig } from "./tax.service";
 
 /* ============================= */
 /* STRIPE INIT */
@@ -150,7 +152,8 @@ export const createCheckoutSession = async (
   plan: Plan,
   billing: Billing,
   req: Request,
-  currency?: Currency
+  currency?: Currency,
+  couponCode?: string
 ) => {
 
   const detectedCurrency = detectCurrency(req);
@@ -165,7 +168,7 @@ export const createCheckoutSession = async (
     detectedCurrency;
 
   /* ============================= */
-  /* 🔥 CURRENCY LOCK (FINAL FIX) */
+  /* 🔥 CURRENCY LOCK */
   /* ============================= */
 
   if (
@@ -178,7 +181,7 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
-  /* CUSTOMER LOGIC */
+  /* CUSTOMER */
   /* ============================= */
 
   let customerId: string;
@@ -201,6 +204,17 @@ export const createCheckoutSession = async (
   const priceId = await getPriceId(plan, billing, finalCurrency);
 
   /* ============================= */
+  /* COUPON */
+  /* ============================= */
+
+  let discounts;
+
+  if (couponCode) {
+    const couponId = await applyCoupon(couponCode);
+    discounts = [{ coupon: couponId }];
+  }
+
+  /* ============================= */
   /* CHECKOUT */
   /* ============================= */
 
@@ -216,13 +230,19 @@ export const createCheckoutSession = async (
       },
     ],
 
-    automatic_tax: {
-      enabled: true,
+    ...getTaxConfig(finalCurrency),
+
+    discounts,
+
+    subscription_data: {
+      trial_period_days: existingSub?.trialUsed ? undefined : 7,
+      proration_behavior: "create_prorations",
     },
 
     metadata: {
       businessId,
       plan,
+      planType: plan,
       billing,
       currency: finalCurrency,
     },
@@ -232,7 +252,7 @@ export const createCheckoutSession = async (
   });
 
   /* ============================= */
-  /* SAVE CUSTOMER + CURRENCY */
+  /* SAVE */
   /* ============================= */
 
   await prisma.subscription.upsert({
@@ -240,12 +260,14 @@ export const createCheckoutSession = async (
     update: {
       stripeCustomerId: customerId,
       currency: finalCurrency,
+      billingCycle: billing,
     },
     create: {
       businessId,
       planId: "" as any,
       stripeCustomerId: customerId,
       currency: finalCurrency,
+      billingCycle: billing,
       status: "INACTIVE",
     },
   });

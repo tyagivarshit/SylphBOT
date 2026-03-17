@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createCheckout, upgradePlan } from "@/lib/billing"
+import PaymentHistory from "@/components/billing/PaymentHistory"
 
 type Currency = "INR" | "USD"
 
@@ -10,8 +11,11 @@ export default function BillingPage(){
 const [loading,setLoading] = useState<string | null>(null)
 const [billing,setBilling] = useState<"monthly"|"yearly">("monthly")
 const [currency,setCurrency] = useState<Currency>("INR")
-const [lockedCurrency,setLockedCurrency] = useState<Currency | null>(null) // 🔥 NEW
+const [lockedCurrency,setLockedCurrency] = useState<Currency | null>(null)
 const [isEarly,setIsEarly] = useState(false)
+
+const [subscription,setSubscription] = useState<any>(null)
+const [invoices,setInvoices] = useState<any[]>([])
 
 /* ================= GEO DETECTION ================= */
 
@@ -28,18 +32,27 @@ fetch("https://ipapi.co/json/")
   })
   .catch(()=>setCurrency("INR"))
 
-/* MOCK early user */
 setIsEarly(true)
 
-/* 🔥 FETCH CURRENT SUB (currency lock) */
+/* ✅ SINGLE API (SUB + INVOICES) */
 
 fetch("/api/billing")
   .then(res=>res.json())
   .then(data=>{
+
+    if(data?.subscription){
+      setSubscription(data.subscription)
+    }
+
     if(data?.subscription?.currency){
       setLockedCurrency(data.subscription.currency)
-      setCurrency(data.subscription.currency) // 🔥 override geo
+      setCurrency(data.subscription.currency)
     }
+
+    if(data?.invoices){
+      setInvoices(data.invoices)
+    }
+
   })
   .catch(()=>{})
 
@@ -94,8 +107,6 @@ try{
 
 setLoading(plan)
 
-/* 🔥 BLOCK UI IF CURRENCY LOCKED */
-
 if(lockedCurrency && lockedCurrency !== currency){
   alert("Currency cannot be changed once subscribed")
   return
@@ -117,8 +128,6 @@ window.location.href = checkout.url
 }catch(err:any){
 
 console.error(err)
-
-/* 🔥 HANDLE BACKEND ERROR */
 
 if(err?.response?.data?.message){
   alert(err.response.data.message)
@@ -147,12 +156,6 @@ return(
 Billing
 </h1>
 
-<p className="text-sm text-gray-700 mt-1">
-Flexible pricing for your business
-</p>
-
-{/* 🔥 SHOW LOCK MESSAGE */}
-
 {lockedCurrency && (
 <p className="text-xs text-orange-600 mt-1">
 Currency locked to {lockedCurrency}
@@ -160,8 +163,6 @@ Currency locked to {lockedCurrency}
 )}
 
 </div>
-
-{/* TOGGLE */}
 
 <div className="flex bg-gray-100 rounded-lg p-1 text-sm">
 
@@ -205,6 +206,8 @@ const original = billing==="monthly"
 ? data.monthly
 : data.yearly
 
+const isCurrent = subscription?.plan?.name === plan.id
+
 return(
 
 <div
@@ -219,6 +222,12 @@ className="bg-white rounded-xl p-6 flex flex-col justify-between border border-g
 <h2 className="text-lg font-semibold text-gray-950">
 {plan.name}
 </h2>
+
+{isCurrent && (
+<span className="text-xs text-green-600 font-semibold">
+Current Plan
+</span>
+)}
 
 <div className="mt-2">
 
@@ -267,11 +276,12 @@ className="bg-white rounded-xl p-6 flex flex-col justify-between border border-g
 
 <button
 onClick={()=>handleUpgrade(plan.id)}
-disabled={loading===plan.id}
+disabled={loading===plan.id || isCurrent}
 className="mt-6 w-full text-sm font-medium py-2 rounded-lg transition bg-blue-600 hover:bg-blue-700 text-white"
 >
 
-{loading===plan.id ? "Processing..." : "Get Started"}
+{isCurrent ? "Current Plan" :
+loading===plan.id ? "Processing..." : "Get Started"}
 
 </button>
 
@@ -282,6 +292,10 @@ className="mt-6 w-full text-sm font-medium py-2 rounded-lg transition bg-blue-60
 })}
 
 </div>
+
+{/* PAYMENT HISTORY */}
+
+<PaymentHistory invoices={invoices} />
 
 </div>
 

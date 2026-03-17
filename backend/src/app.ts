@@ -3,7 +3,6 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import cookieParser from "cookie-parser";
-import csrf from "csurf";
 import prisma from "./config/prisma";
 
 import authRoutes from "./routes/auth.routes";
@@ -13,7 +12,7 @@ import aiRoutes from "./routes/ai.routes";
 import whatsappWebhook from "./routes/whatsapp.webhook";
 import instagramWebhook from "./routes/instagram.webhook";
 import billingRoutes from "./routes/billing.routes";
-import stripeWebhookRoutes from "./routes/stripeWebhook.routes"; // ✅ FIXED
+import stripeWebhookRoutes from "./routes/stripeWebhook.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 
 /* 🟢 EXISTING */
@@ -48,9 +47,7 @@ const app = express();
 app.set("trust proxy", 1);
 
 app.use(helmet());
-
 app.use(compression());
-
 app.use(globalLimiter);
 
 /* ============================= */
@@ -71,25 +68,13 @@ app.use(
 );
 
 /* ============================= */
-/* CSRF PROTECTION */
-/* ============================= */
-
-const csrfProtection = csrf({
-  cookie: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-  },
-});
-
-/* ============================= */
-/* STRIPE WEBHOOK (RAW BODY) */
+/* 🔥 STRIPE WEBHOOK (RAW BODY) */
 /* ============================= */
 
 app.use(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
-  stripeWebhookRoutes // ✅ FIXED (router)
+  stripeWebhookRoutes
 );
 
 /* ============================= */

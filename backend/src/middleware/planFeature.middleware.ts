@@ -79,6 +79,8 @@ export const requireFeature =
         where: { businessId },
         include: { plan: true },
       });
+      console.log("SUBSCRIPTION DEBUG:", subscription)
+console.log("PLAN DEBUG:", subscription?.plan)
 
       if (!subscription || !subscription.plan) {
         return res.status(403).json({
@@ -97,11 +99,11 @@ export const requireFeature =
       }
 
       /* -----------------------------
-      TRIAL EXPIRY CHECK
+      TRIAL EXPIRY CHECK (FIXED)
       ----------------------------- */
 
       if (
-        subscription.plan.name === "FREE_TRIAL" &&
+        subscription.isTrial &&
         subscription.currentPeriodEnd &&
         new Date() > subscription.currentPeriodEnd
       ) {
@@ -110,9 +112,13 @@ export const requireFeature =
         });
       }
 
-      const planName = subscription.plan.name;
+      /* -----------------------------
+      PLAN TYPE BASED CHECK (FIXED)
+      ----------------------------- */
 
-      const allowedFeatures = planFeatures[planName];
+      const planType = subscription.plan.type; // ✅ FIX
+
+      const allowedFeatures = planFeatures[planType];
 
       if (!allowedFeatures) {
         return res.status(403).json({

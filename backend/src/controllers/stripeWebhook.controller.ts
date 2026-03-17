@@ -64,9 +64,10 @@ export const stripeWebhook = async (
     }
 
     await prisma.stripeEvent.create({
-      data: { eventId: event.id,
+      data: {
+        eventId: event.id,
         type: event.type
-       }
+      }
     })
 
     switch (event.type) {
@@ -80,26 +81,63 @@ export const stripeWebhook = async (
         const session = event.data.object as Stripe.Checkout.Session
 
         const businessId = session.metadata?.businessId
-        const planName = session.metadata?.plan
+        const planType = session.metadata?.planType
+        const currency = session.metadata?.currency
 
         const subscriptionId = getSubscriptionId(
           session.subscription as any
         )
 
-        if (!businessId || !planName || !subscriptionId) break
+        if (!businessId || !subscriptionId) break
 
-        const plan = await prisma.plan.findUnique({
-          where: { name: planName }
-        })
-
-        if (!plan) break
+        /* =============================
+        🔥 FETCH STRIPE SUB
+        ============================= */
 
         const stripeSub = await stripe.subscriptions.retrieve(subscriptionId)
+
+        const priceId = stripeSub.items.data[0]?.price.id
+
+        /* =============================
+        🔥 FIND PLAN (PRICE FIRST)
+        ============================= */
+
+        let plan = await prisma.plan.findFirst({
+          where: {
+            OR: [
+              { priceIdINR: priceId },
+              { priceIdUSD: priceId }
+            ]
+          }
+        })
+
+        /* =============================
+        🔁 FALLBACK TO TYPE
+        ============================= */
+
+        if (!plan && planType) {
+          plan = await prisma.plan.findFirst({
+            where: { type: planType }
+          })
+        }
+
+        if (!plan) {
+          console.error("Plan not found (priceId/type):", priceId, planType)
+          break
+        }
+
+        /* =============================
+        PERIOD END
+        ============================= */
 
         const periodEnd =
           (stripeSub as any).current_period_end
             ? new Date((stripeSub as any).current_period_end * 1000)
             : null
+
+        /* =============================
+        UPSERT SUBSCRIPTION
+        ============================= */
 
         await prisma.subscription.upsert({
 
@@ -116,6 +154,8 @@ export const stripeWebhook = async (
 
             planId: plan.id,
 
+            currency,
+
             status:
               stripeSub.status === "active" ||
               stripeSub.status === "trialing"
@@ -124,7 +164,9 @@ export const stripeWebhook = async (
 
             currentPeriodEnd: periodEnd,
 
-            isTrial: stripeSub.status === "trialing"
+            isTrial: stripeSub.status === "trialing",
+
+            trialUsed: true
           },
 
           create: {
@@ -140,6 +182,8 @@ export const stripeWebhook = async (
                 ? stripeSub.customer
                 : null,
 
+            currency,
+
             status:
               stripeSub.status === "active" ||
               stripeSub.status === "trialing"
@@ -150,7 +194,7 @@ export const stripeWebhook = async (
 
             isTrial: stripeSub.status === "trialing",
 
-            trialUsed: stripeSub.status === "trialing"
+            trialUsed: true
           }
         })
 
@@ -208,7 +252,7 @@ export const stripeWebhook = async (
           },
 
           data: {
-            status: "INACTIVE"
+            status: "CANCELLED"
           }
         })
 

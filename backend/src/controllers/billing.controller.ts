@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import { stripe, createCheckoutSession } from "../services/stripe.service";
 import { env } from "../config/env";
 import geoip from "geoip-lite";
+import { getInvoices } from "../services/invoice.service"; // ✅ FIX
 
 /* ====================================== */
 /* USER CONTEXT */
@@ -47,14 +48,6 @@ function getCurrency(req: Request) {
 }
 
 /* ====================================== */
-/* 💰 TAX */
-/* ====================================== */
-
-function getTaxRate(currency: string) {
-  return currency === "INR" ? 0.18 : 0.1;
-}
-
-/* ====================================== */
 /* CONTROLLER */
 /* ====================================== */
 
@@ -69,6 +62,7 @@ export class BillingController {
 
       const { businessId } = await getUserContext(req);
 
+      // ✅ FIX: subscription define kiya
       const subscription = await prisma.subscription.findUnique({
         where: { businessId },
         include: { plan: true },
@@ -76,10 +70,18 @@ export class BillingController {
 
       const currency = getCurrency(req);
 
+      let invoices: any[] = [];
+
+      // ✅ FIX: safe access
+      if (subscription?.stripeCustomerId) {
+        invoices = await getInvoices(subscription.stripeCustomerId);
+      }
+
       return res.json({
         success: true,
         subscription,
         currency,
+        invoices,
       });
 
     } catch (error) {
@@ -101,7 +103,7 @@ export class BillingController {
   static async checkout(req: Request, res: Response) {
     try {
 
-      const { plan, billing } = req.body;
+      const { plan, billing, coupon } = req.body;
 
       if (!plan || !billing) {
         return res.status(400).json({
@@ -113,7 +115,6 @@ export class BillingController {
       const { businessId, email } = await getUserContext(req);
 
       const currency = getCurrency(req);
-      const taxRate = getTaxRate(currency);
 
       const session = await createCheckoutSession(
         email,
@@ -121,7 +122,8 @@ export class BillingController {
         plan,
         billing,
         req,
-        currency
+        currency,
+        coupon
       );
 
       return res.json({
@@ -138,8 +140,6 @@ export class BillingController {
         });
       }
 
-      /* 🔥 CURRENCY LOCK ERROR HANDLE */
-
       if (error.message?.includes("Currency cannot be changed")) {
         return res.status(400).json({
           success: false,
@@ -151,7 +151,7 @@ export class BillingController {
 
       return res.status(500).json({
         success: false,
-        message: "Checkout failed",
+        message: error.message || "Checkout failed",
       });
 
     }
@@ -257,7 +257,7 @@ export class BillingController {
   static async upgradePlan(req: Request, res: Response) {
     try {
 
-      const { plan, billing } = req.body;
+      const { plan, billing, coupon } = req.body;
 
       if (!plan || !billing) {
         return res.status(400).json({
@@ -269,7 +269,6 @@ export class BillingController {
       const { businessId, email } = await getUserContext(req);
 
       const currency = getCurrency(req);
-      const taxRate = getTaxRate(currency);
 
       const session = await createCheckoutSession(
         email,
@@ -277,7 +276,8 @@ export class BillingController {
         plan,
         billing,
         req,
-        currency
+        currency,
+        coupon
       );
 
       return res.json({
@@ -294,8 +294,6 @@ export class BillingController {
         });
       }
 
-      /* 🔥 CURRENCY LOCK ERROR HANDLE */
-
       if (error.message?.includes("Currency cannot be changed")) {
         return res.status(400).json({
           success: false,
@@ -307,7 +305,7 @@ export class BillingController {
 
       return res.status(500).json({
         success: false,
-        message: "Upgrade failed",
+        message: error.message || "Upgrade failed",
       });
 
     }

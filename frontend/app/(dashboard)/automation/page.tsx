@@ -8,11 +8,21 @@ return(
 
 <div className="space-y-6">
 
-<h1 className="text-lg font-semibold text-gray-900">
-Automation
-</h1>
+  {/* HEADER */}
+  <div>
 
-<AutomationList/>
+    <h1 className="text-lg font-semibold text-gray-900">
+      Automation
+    </h1>
+
+    <p className="text-sm text-gray-500 mt-1">
+      Create and manage your Instagram automations
+    </p>
+
+  </div>
+
+  {/* 🔽 LIST (button wapas yahi handle karega) */}
+  <AutomationList/>
 
 </div>
 

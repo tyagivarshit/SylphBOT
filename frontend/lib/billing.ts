@@ -20,19 +20,27 @@ export const createCheckout = async (
       body: JSON.stringify({ plan, billing }),
     })
 
-    if (!res.ok) {
-      throw new Error("Checkout failed")
+    const data = await res.json()
+
+    /* ✅ BETTER ERROR HANDLING */
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.message || "Checkout failed")
     }
 
-    return await res.json()
+    /* ✅ IMPORTANT: Stripe redirect URL */
+    if (!data?.url) {
+      throw new Error("No checkout URL received")
+    }
 
-  } catch (error) {
+    return data
+
+  } catch (error: any) {
 
     console.error("Checkout API error:", error)
 
     return {
       success: false,
-      message: "Checkout failed",
+      message: error.message || "Checkout failed",
     }
   }
 }
@@ -57,19 +65,22 @@ export const upgradePlan = async (
       body: JSON.stringify({ plan, billing }),
     })
 
-    if (!res.ok) {
-      throw new Error("Upgrade failed")
+    const data = await res.json()
+
+    /* ✅ SAME FIX */
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.message || "Upgrade failed")
     }
 
-    return await res.json()
+    return data
 
-  } catch (error) {
+  } catch (error: any) {
 
     console.error("Upgrade API error:", error)
 
     return {
       success: false,
-      message: "Upgrade failed",
+      message: error.message || "Upgrade failed",
     }
   }
 }

@@ -14,34 +14,33 @@ const [open,setOpen] = useState(false)
 
 return(
 
-<div className="flex h-screen bg-gray-50 overflow-hidden">
+<div className="h-screen flex flex-col bg-gray-50">
 
-  {/* Sidebar */}
+  {/* 🔥 TOPBAR (FULL WIDTH) */}
+  <Topbar setOpen={setOpen} />
 
-  <Sidebar open={open} setOpen={setOpen} />
+  {/* 🔥 MAIN BODY */}
+  <div className="flex flex-1 overflow-hidden">
 
-  {/* Main Layout */}
+    {/* 🔥 SIDEBAR (NOW BELOW TOPBAR) */}
+    <Sidebar open={open} setOpen={setOpen} />
 
-  <div className="flex flex-col flex-1 min-w-0">
+    {/* 🔥 MAIN CONTENT */}
+    <div className="flex flex-col flex-1 min-w-0">
 
-    {/* Topbar */}
+      <main className="flex-1 overflow-y-auto">
 
-    <Topbar setOpen={setOpen} />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
+          {children}
+        </div>
 
-    {/* Page Content */}
+      </main>
 
-    <main className="flex-1 overflow-y-auto">
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
-
-        {children}
-
-      </div>
-
-    </main>
+    </div>
 
   </div>
 
 </div>
+
 )
 }

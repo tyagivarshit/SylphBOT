@@ -8,12 +8,12 @@ const router = Router();
 router.use(protect);
 
 /* ------------------------------
-CRM FEATURES (PRO PLAN+)
+CRM FEATURES (SOFT CHECK)
 ------------------------------ */
 
 router.get(
   "/stats",
-  requireFeature("CRM"),
+  requireFeature("CRM"), // ✅ now soft (no 403)
   DashboardController.getStats
 );
 
@@ -36,7 +36,7 @@ router.patch(
 );
 
 /* ------------------------------
-ACTIVE CONVERSATIONS (NEW)
+ACTIVE CONVERSATIONS
 ------------------------------ */
 
 router.get(

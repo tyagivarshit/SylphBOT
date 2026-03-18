@@ -1,12 +1,15 @@
 "use client"
 
 import AnalyticsLayout from "@/components/analytics/AnalyticsLayout"
+import FeatureGate from "@/components/FeatureGate" // ✅ ADD
 
 export default function AnalyticsPage(){
 
 return(
 
 <div className="space-y-6">
+
+{/* ===== HEADER ===== */}
 
 <div>
 
@@ -20,7 +23,11 @@ Deep insights into leads, conversations and conversions
 
 </div>
 
-<AnalyticsLayout/>
+{/* 🔒 FULL LOCK (HIGH VALUE FEATURE) */}
+
+<FeatureGate feature="CRM">
+  <AnalyticsLayout/>
+</FeatureGate>
 
 </div>
 

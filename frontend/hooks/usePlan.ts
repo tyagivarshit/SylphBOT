@@ -1,49 +1,32 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 
-/* ✅ TYPE DEFINE */
-type PlanType = "BASIC" | "PRO" | "ELITE"
-type StatusType = "ACTIVE" | "INACTIVE" | "CANCELLED" | "PAST_DUE"
+const fetchBilling = async () => {
+  const res = await fetch("/api/billing", {
+    credentials: "include",
+  })
 
-export function usePlan(){
+  if (!res.ok) throw new Error("Failed")
 
-  /* ✅ TYPE FIX */
-  const [plan,setPlan] = useState<PlanType>("BASIC")
-  const [status,setStatus] = useState<StatusType>("INACTIVE")
-  const [loading,setLoading] = useState(true)
+  return res.json()
+}
 
-  useEffect(()=>{
+export function usePlan() {
 
-    const fetchBilling = async ()=>{
+  const { data, isLoading } = useQuery({
+    queryKey: ["billing"],
+    queryFn: fetchBilling,
 
-      try{
-        const res = await fetch("/api/billing", {
-          credentials: "include"
-        })
+    /* 🔥 BONUS ADD HERE */
+    staleTime: 1000 * 60 * 5, // 5 min cache
+    refetchOnWindowFocus: false, // ❌ tab switch pe API call band
+    retry: 1
+  })
 
-        const data = await res.json()
-
-        if(data?.subscription){
-
-          /* ✅ SAFE TYPE CAST */
-          const planType = data.subscription.plan?.type as PlanType
-          const subStatus = data.subscription.status as StatusType
-
-          setPlan(planType || "BASIC")
-          setStatus(subStatus || "INACTIVE")
-        }
-
-      }catch(e){
-        console.error(e)
-      }finally{
-        setLoading(false)
-      }
-    }
-
-    fetchBilling()
-
-  },[])
-
-  return { plan, status, loading }
+  return {
+    plan: data?.subscription?.plan?.type || "BASIC",
+    status: data?.subscription?.status || "INACTIVE",
+    loading: isLoading,
+  }
 }

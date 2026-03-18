@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { redis } from "../config/redis";
 
-const WINDOW = 60;
-const MAX_ATTEMPTS = process.env.NODE_ENV === "production" ? 5 : 1000;
+const WINDOW = 60 * 15; // 15 min
+const MAX_ATTEMPTS = 5;
 
 export const loginLimiter = async (
   req: Request,
@@ -11,38 +11,33 @@ export const loginLimiter = async (
 ) => {
   try {
 
-    /* DEV MODE → SKIP LIMITER */
+    const email = req.body?.email?.toLowerCase().trim() || "unknown";
+    const ip = req.ip;
 
-    if (process.env.NODE_ENV !== "production") {
-      return next();
-    }
+    const key = `login:limit:${email}:${ip}`;
+    const now = Date.now();
 
-    const email =
-      req.body?.email?.toLowerCase()?.trim() || "unknown";
+    /* 🔥 remove old attempts */
+    await redis.zremrangebyscore(key, 0, now - WINDOW * 1000);
 
-    const key = `login:limit:${email}`;
+    /* 🔥 count attempts in window */
+    const attempts = await redis.zcard(key);
 
-    const attempts = await redis.get(key);
-    const ttl = await redis.ttl(key);
+    if (attempts >= MAX_ATTEMPTS) {
 
-    if (attempts && Number(attempts) >= MAX_ATTEMPTS) {
-
-      res.setHeader("Retry-After", ttl > 0 ? ttl : WINDOW);
+      const ttl = await redis.ttl(key);
 
       return res.status(429).json({
         success: false,
-        message: "Too many login attempts. Please wait before trying again.",
-        retryAfter: ttl > 0 ? ttl : WINDOW
+        message: "Too many failed attempts. Try again later.",
+        retryAfter: ttl > 0 ? ttl : WINDOW,
       });
-
     }
 
     next();
 
   } catch (error) {
-
-    console.error("Login limiter error:", error);
+    console.error("Limiter error:", error);
     next();
-
   }
 };

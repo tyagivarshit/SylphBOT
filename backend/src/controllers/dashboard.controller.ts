@@ -7,10 +7,8 @@ import { DashboardService } from "../services/dashboard.service";
 ====================================== */
 async function getBusinessId(req: Request): Promise<string | null> {
 
-  // 1️⃣ Try from token first
   let businessId = req.user?.businessId || null;
 
-  // 2️⃣ Fallback: fetch from DB if token missing businessId
   if (!businessId && req.user?.id) {
 
     const business = await prisma.business.findFirst({
@@ -41,6 +39,18 @@ export class DashboardController {
         return res.status(401).json({
           success: false,
           message: "Unauthorized",
+        });
+      }
+
+      // 🔥 SAFE MODE
+      if ((req as any).featureDenied) {
+        return res.status(200).json({
+          success: true,
+          limited: true,
+          data: {
+            totalLeads: 0,
+            conversions: 0
+          }
         });
       }
 
@@ -79,6 +89,14 @@ export class DashboardController {
         });
       }
 
+      if ((req as any).featureDenied) {
+        return res.status(200).json({
+          success: true,
+          limited: true,
+          data: []
+        });
+      }
+
       const growth = await DashboardService.getLeadsGrowth(businessId);
 
       return res.status(200).json({
@@ -111,6 +129,19 @@ export class DashboardController {
         return res.status(401).json({
           success: false,
           message: "Unauthorized",
+        });
+      }
+
+      if ((req as any).featureDenied) {
+        return res.status(200).json({
+          success: true,
+          limited: true,
+          data: [],
+          pagination: {
+            total: 0,
+            page: 1,
+            pages: 1
+          }
         });
       }
 
@@ -163,6 +194,14 @@ export class DashboardController {
         return res.status(401).json({
           success: false,
           message: "Unauthorized",
+        });
+      }
+
+      if ((req as any).featureDenied) {
+        return res.status(200).json({
+          success: true,
+          limited: true,
+          data: null
         });
       }
 
@@ -220,6 +259,14 @@ export class DashboardController {
         });
       }
 
+      if ((req as any).featureDenied) {
+        return res.status(200).json({
+          success: true,
+          limited: true,
+          data: null
+        });
+      }
+
       const id = req.params.id as string;
       const { stage } = req.body;
 
@@ -266,6 +313,14 @@ export class DashboardController {
         return res.status(401).json({
           success: false,
           message: "Unauthorized",
+        });
+      }
+
+      if ((req as any).featureDenied) {
+        return res.status(200).json({
+          success: true,
+          limited: true,
+          data: []
         });
       }
 

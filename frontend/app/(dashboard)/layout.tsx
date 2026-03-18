@@ -1,8 +1,27 @@
 "use client"
 
-import { ReactNode } from "react"
+import { ReactNode, createContext, useContext, useState } from "react"
 import DashboardLayout from "@/components/layout/DashboardLayout"
 import useAuthGuard from "@/hooks/useAuthGuard"
+import UpgradeModal from "@/components/UpgradeModal"
+
+/* ======================================
+GLOBAL CONTEXT (🔥 NEW)
+====================================== */
+
+const UpgradeContext = createContext<{
+  openUpgrade: () => void
+} | null>(null)
+
+export const useUpgrade = () => {
+  const ctx = useContext(UpgradeContext)
+  if (!ctx) throw new Error("useUpgrade must be used inside provider")
+  return ctx
+}
+
+/* ======================================
+LAYOUT
+====================================== */
 
 export default function DashboardRootLayout({
   children,
@@ -11,6 +30,8 @@ export default function DashboardRootLayout({
 }) {
 
   const loading = useAuthGuard()
+
+  const [open,setOpen] = useState(false)
 
   /* while checking session */
 
@@ -22,12 +43,21 @@ export default function DashboardRootLayout({
     )
   }
 
-  /* authenticated */
-
   return (
-    <DashboardLayout>
-      {children}
-    </DashboardLayout>
+
+    <UpgradeContext.Provider value={{
+      openUpgrade: ()=>setOpen(true) // ✅ GLOBAL TRIGGER
+    }}>
+
+      <DashboardLayout>
+        {children}
+      </DashboardLayout>
+
+      {/* 🔥 GLOBAL MODAL (IMPORTANT) */}
+      <UpgradeModal open={open} setOpen={setOpen} />
+
+    </UpgradeContext.Provider>
+
   )
 
 }

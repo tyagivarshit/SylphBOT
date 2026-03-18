@@ -1,6 +1,7 @@
 "use client"
 
 import KnowledgeList from "@/components/knowledgeBase/KnowledgeList"
+import FeatureGate from "@/components/FeatureGate" // ✅ ADD
 
 export default function KnowledgeBasePage(){
 
@@ -22,9 +23,11 @@ Train your AI with business knowledge and documents
 
 </div>
 
-{/* KNOWLEDGE LIST */}
+{/* 🔒 FULL LOCK */}
 
-<KnowledgeList/>
+<FeatureGate feature="CUSTOM_FOLLOWUPS">
+  <KnowledgeList/>
+</FeatureGate>
 
 </div>
 

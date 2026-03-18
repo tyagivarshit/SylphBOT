@@ -100,15 +100,28 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false });
     }
 
+    const key = `login:limit:${email}:${req.ip}`; // ✅ SMART LIMITER KEY
+
     const user = await prisma.user.findUnique({ where: { email } });
 
+    /* ❌ INVALID LOGIN */
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(400).json({ success: false, message: "Invalid credentials" });
+
+      await redis.incr(key);
+      await redis.expire(key, 60 * 15);
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid credentials"
+      });
     }
 
     if (!user.isVerified) {
       return res.status(403).json({ success: false, message: "Verify email first" });
     }
+
+    /* ✅ SUCCESS → RESET LIMITER */
+    await redis.del(key);
 
     const business = await prisma.business.findFirst({
       where: { ownerId: user.id },

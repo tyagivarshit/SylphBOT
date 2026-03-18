@@ -79,58 +79,47 @@ export const requireFeature =
         where: { businessId },
         include: { plan: true },
       });
-      console.log("SUBSCRIPTION DEBUG:", subscription)
-console.log("PLAN DEBUG:", subscription?.plan)
+
+      console.log("SUBSCRIPTION DEBUG:", subscription);
+      console.log("PLAN DEBUG:", subscription?.plan);
+
+      /* 🔥 SAFE MODE: NO 403 SPAM */
 
       if (!subscription || !subscription.plan) {
-        return res.status(403).json({
-          message: "No active subscription",
-        });
+        (req as any).featureDenied = true;
+        return next();
       }
-
-      /* -----------------------------
-      STATUS CHECK
-      ----------------------------- */
 
       if (subscription.status !== "ACTIVE") {
-        return res.status(403).json({
-          message: "Subscription inactive",
-        });
+        (req as any).featureDenied = true;
+        return next();
       }
-
-      /* -----------------------------
-      TRIAL EXPIRY CHECK (FIXED)
-      ----------------------------- */
 
       if (
         subscription.isTrial &&
         subscription.currentPeriodEnd &&
         new Date() > subscription.currentPeriodEnd
       ) {
-        return res.status(403).json({
-          message: "Trial expired. Please upgrade.",
-        });
+        (req as any).featureDenied = true;
+        return next();
       }
 
-      /* -----------------------------
-      PLAN TYPE BASED CHECK (FIXED)
-      ----------------------------- */
-
-      const planType = subscription.plan.type; // ✅ FIX
+      const planType = subscription.plan.type;
 
       const allowedFeatures = planFeatures[planType];
 
       if (!allowedFeatures) {
-        return res.status(403).json({
-          message: "Invalid subscription plan",
-        });
+        (req as any).featureDenied = true;
+        return next();
       }
 
       if (!allowedFeatures.includes(feature)) {
-        return res.status(403).json({
-          message: "Feature not available in your plan",
-        });
+        (req as any).featureDenied = true;
+        return next();
       }
+
+      /* ✅ ACCESS GRANTED */
+      (req as any).featureDenied = false;
 
       next();
 

@@ -120,12 +120,19 @@ router.post("/", async (req: any, res: Response) => {
 
     const change = entry?.changes?.[0];
 
-    if (change?.value?.item === "comment") {
+    if (change?.field === "comments") {
 
       const commentText = change.value.comment?.text;
       const instagramUserId = change.value.from?.id;
       const reelId = change.value.media?.id;
       const pageId = change.value.id;
+      console.log("🔥 COMMENT EVENT:", {
+    commentText,
+    instagramUserId,
+    reelId,
+    pageId
+  });
+
 
       if (!commentText || !instagramUserId || !reelId) {
         return res.sendStatus(200);

@@ -8,21 +8,29 @@ return(
 
 <div className="space-y-6">
 
-  {/* HEADER */}
-  <div>
+{/* HEADER */}
 
-    <h1 className="text-lg font-semibold text-gray-900">
-      Automation
-    </h1>
+<div className="flex items-center justify-between">
 
-    <p className="text-sm text-gray-500 mt-1">
-      Create and manage your Instagram automations
-    </p>
+<div>
+  <h1 className="text-lg font-semibold text-gray-900">
+    Automation
+  </h1>
 
-  </div>
+  <p className="text-sm text-gray-500 mt-1">
+    Create and manage your Instagram automations
+  </p>
+</div>
 
-  {/* 🔽 LIST (button wapas yahi handle karega) */}
+{/* FUTURE: stats / toggle */}
+
+</div>
+
+{/* LIST */}
+
+<div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
   <AutomationList/>
+</div>
 
 </div>
 

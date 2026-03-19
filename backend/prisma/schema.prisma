@@ -289,6 +289,7 @@ model CommentTrigger {
   replyText  String
 
   aiPrompt   String?
+  dmText String?
 
   isActive   Boolean  @default(true)
 

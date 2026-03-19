@@ -42,7 +42,7 @@ export const createCommentTrigger = async (
       });
     }
 
-    const { clientId, reelId, keyword, replyText } = req.body;
+    const { clientId, reelId, keyword, replyText, dmText } = req.body;
 
     if (!clientId || !reelId || !keyword || !replyText) {
       return res.status(400).json({
@@ -72,6 +72,7 @@ export const createCommentTrigger = async (
         reelId,
         keyword: keyword.toLowerCase().trim(),
         replyText,
+        dmText: dmText || null,
         isActive: true,
       },
     });
@@ -94,7 +95,7 @@ export const createCommentTrigger = async (
 };
 
 /* ---------------------------------------------------
-GET TRIGGERS
+GET TRIGGERS (ALL - ACTIVE + PAUSED)
 --------------------------------------------------- */
 
 export const getCommentTriggers = async (
@@ -123,7 +124,6 @@ export const getCommentTriggers = async (
     const triggers = await prisma.commentTrigger.findMany({
       where: {
         businessId,
-        isActive: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -145,7 +145,7 @@ export const getCommentTriggers = async (
 };
 
 /* ---------------------------------------------------
-DELETE TRIGGER
+DELETE TRIGGER (SOFT DELETE)
 --------------------------------------------------- */
 
 export const deleteCommentTrigger = async (
@@ -203,6 +203,71 @@ export const deleteCommentTrigger = async (
 
     return res.status(500).json({
       message: "Failed to delete trigger",
+    });
+
+  }
+
+};
+
+/* ---------------------------------------------------
+TOGGLE TRIGGER (ACTIVE / PAUSED)
+--------------------------------------------------- */
+
+export const toggleCommentTrigger = async (
+  req: Request,
+  res: Response
+) => {
+
+  try {
+
+    const userId = req.user?.id;
+    const id = req.params.id as string;
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const businessId = await getBusinessId(userId);
+
+    if (!businessId) {
+      return res.status(404).json({
+        message: "Business not found",
+      });
+    }
+
+    const trigger = await prisma.commentTrigger.findFirst({
+      where: {
+        id,
+        businessId,
+      },
+    });
+
+    if (!trigger) {
+      return res.status(404).json({
+        message: "Trigger not found",
+      });
+    }
+
+    const updated = await prisma.commentTrigger.update({
+      where: { id },
+      data: {
+        isActive: !trigger.isActive,
+      },
+    });
+
+    return res.json({
+      success: true,
+      trigger: updated,
+    });
+
+  } catch (error) {
+
+    console.error("Toggle trigger error:", error);
+
+    return res.status(500).json({
+      message: "Failed to toggle trigger",
     });
 
   }

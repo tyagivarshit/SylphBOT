@@ -1,31 +1,58 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import AutomationCard from "./AutomationCard"
 import CreateAutomationModal from "./CreateAutomationModal"
 
 export default function AutomationList(){
 
 const [open,setOpen] = useState(false)
+const [automations,setAutomations] = useState<any[]>([])
+const [loading,setLoading] = useState(true)
+const [error,setError] = useState("")
 
-const automations = [
-{
-id:"1",
-name:"Instagram DM Funnel",
-status:"ACTIVE",
-triggers:120
-},
-{
-id:"2",
-name:"WhatsApp Lead Followup",
-status:"PAUSED",
-triggers:54
+/* ---------------- FETCH AUTOMATIONS ---------------- */
+
+const fetchAutomations = async () => {
+
+  try{
+
+    setLoading(true)
+    setError("")
+
+    const res = await fetch("/api/automation/flows")
+
+    if(!res.ok) throw new Error("Failed to fetch")
+
+    const data = await res.json()
+
+    setAutomations(data || [])
+
+  }catch(err:any){
+
+    setError("Failed to load automations")
+
+  }finally{
+
+    setLoading(false)
+
+  }
+
 }
-]
+
+/* ---------------- INIT ---------------- */
+
+useEffect(()=>{
+  fetchAutomations()
+},[])
+
+/* ---------------- UI ---------------- */
 
 return(
 
 <div className="space-y-4">
+
+{/* HEADER */}
 
 <div className="flex justify-between items-center">
 
@@ -35,24 +62,68 @@ Your Automations
 
 <button
 onClick={()=>setOpen(true)}
-className="bg-blue-600 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-700"
+className="bg-blue-600 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-700 transition"
 
 >
-
-Create Automation </button>
+Create Automation
+</button>
 
 </div>
 
+{/* LOADING */}
+
+{loading && (
+  <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+    {Array.from({length:3}).map((_,i)=>(
+      <div
+        key={i}
+        className="h-24 bg-white border border-gray-200 rounded-xl animate-pulse"
+      />
+    ))}
+  </div>
+)}
+
+{/* ERROR */}
+
+{error && (
+  <div className="text-sm text-red-500">
+    {error}
+  </div>
+)}
+
+{/* EMPTY */}
+
+{!loading && automations.length === 0 && (
+  <div className="text-sm text-gray-500 border border-dashed border-gray-300 rounded-lg p-6 text-center">
+    No automations yet. Create your first one 🚀
+  </div>
+)}
+
+{/* LIST */}
+
+{!loading && automations.length > 0 && (
+
 <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
 
-{automations.map((a)=>( <AutomationCard key={a.id} automation={a}/>
+{automations.map((a)=>(
+  <AutomationCard
+    key={a.id}
+    automation={a}
+  />
 ))}
 
 </div>
 
+)}
+
+{/* MODAL */}
+
 <CreateAutomationModal
 open={open}
-onClose={()=>setOpen(false)}
+onClose={()=>{
+  setOpen(false)
+  fetchAutomations() // 🔥 auto refresh after create
+}}
 />
 
 </div>

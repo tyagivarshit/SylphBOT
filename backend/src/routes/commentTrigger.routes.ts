@@ -3,38 +3,44 @@ import {
   createCommentTrigger,
   getCommentTriggers,
   deleteCommentTrigger,
+  toggleCommentTrigger, // ✅ ADD
 } from "../controllers/commentTrigger.controller";
+
 import { protect } from "../middleware/auth.middleware";
 import { requireFeature } from "../middleware/planFeature.middleware";
 
 const router = Router();
 
-/* ------------------------------
-AUTH
------------------------------- */
+/* ---------------- AUTH ---------------- */
 
 router.use(protect);
 
-/* ------------------------------
-COMMENT AUTOMATION (BASIC PLAN)
------------------------------- */
+/* ---------------- ROUTES ---------------- */
 
 router.post(
   "/",
-  requireFeature("COMMENT_AUTOMATION"),
+  requireFeature("INSTAGRAM_COMMENT_AUTOMATION"),
   createCommentTrigger
 );
 
 router.get(
   "/",
-  requireFeature("COMMENT_AUTOMATION"),
+  requireFeature("INSTAGRAM_COMMENT_AUTOMATION"),
   getCommentTriggers
 );
 
 router.delete(
   "/:id",
-  requireFeature("COMMENT_AUTOMATION"),
+  requireFeature("INSTAGRAM_COMMENT_AUTOMATION"),
   deleteCommentTrigger
+);
+
+/* 🔥 TOGGLE ROUTE (NEW) */
+
+router.patch(
+  "/:id/toggle",
+  requireFeature("INSTAGRAM_COMMENT_AUTOMATION"),
+  toggleCommentTrigger
 );
 
 export default router;

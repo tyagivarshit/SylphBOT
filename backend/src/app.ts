@@ -21,6 +21,7 @@ import messageRoutes from "./routes/message.routes";
 
 /* 🟢 NEW */
 import automationRoutes from "./routes/automation.routes";
+import instagramRoutes from "./routes/instagram.routes"; // 🔥 NEW
 import { monitoringMiddleware } from "./middleware/monitoring.middleware";
 
 /* 🟢 KNOWLEDGE BASE */
@@ -119,7 +120,7 @@ app.get("/", (req, res) => {
 
 /* AUTH */
 
-app.use("/api/auth",authRoutes);
+app.use("/api/auth", authRoutes);
 
 /* GOOGLE AUTH */
 
@@ -151,7 +152,11 @@ app.use("/api/messages", messageRoutes);
 
 /* AUTOMATION FLOWS */
 
-app.use("/api/automations", automationRoutes);
+app.use("/api/automation", automationRoutes);
+
+/* 🔥 INSTAGRAM MEDIA (NEW FEATURE) */
+
+app.use("/api/instagram", instagramRoutes);
 
 /* KNOWLEDGE BASE */
 

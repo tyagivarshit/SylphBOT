@@ -1,6 +1,6 @@
 "use client"
 
-export default function KnowledgeCard({ item }: any){
+export default function KnowledgeCard({ item, onDelete }: any){
 
 return(
 
@@ -13,10 +13,14 @@ return(
 </h3>
 
 <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
-{item.type}
+{item.sourceType || "TEXT"}
 </span>
 
 </div>
+
+<p className="text-xs text-gray-500 mt-2 line-clamp-2">
+{item.content}
+</p>
 
 <div className="flex gap-3 mt-4">
 
@@ -24,7 +28,10 @@ return(
 Edit
 </button>
 
-<button className="text-xs text-red-500 hover:underline">
+<button 
+onClick={()=>onDelete(item.id)}
+className="text-xs text-red-500 hover:underline"
+>
 Delete
 </button>
 

@@ -80,6 +80,7 @@ router.get("/", (req: Request, res: Response) => {
 /* --------------------------------------------------- */
 
 router.post("/", async (req: any, res: Response) => {
+  console.log("🔥 RAW BODY:", JSON.stringify(req.body, null, 2));
 
   console.log("🔥 INSTAGRAM WEBHOOK HIT");
 
@@ -118,53 +119,49 @@ router.post("/", async (req: any, res: Response) => {
     COMMENT AUTOMATION
     --------------------------------------------------- */
 
-    const change = entry?.changes?.[0];
+    for (const change of entry?.changes || []) {
 
-    if (change?.field === "comments") {
+  if (change.field === "comments") {
 
-      const commentText = change.value.comment?.text;
-      const instagramUserId = change.value.from?.id;
-      const reelId = change.value.media?.id;
-      const pageId = change.value.id;
-      console.log("🔥 COMMENT EVENT:", {
-    commentText,
-    instagramUserId,
-    reelId,
-    pageId
-  });
+    const commentText = change.value.comment?.text;
+    const instagramUserId = change.value.from?.id;
+    const reelId = change.value.media?.id;
+    const pageId = change.value.id;
 
+    console.log("🔥 COMMENT EVENT:", {
+      commentText,
+      instagramUserId,
+      reelId,
+      pageId
+    });
 
-      if (!commentText || !instagramUserId || !reelId) {
-        return res.sendStatus(200);
-      }
-
-      const client = await prisma.client.findFirst({
-        where: {
-          platform: "INSTAGRAM",
-          pageId,
-          isActive: true,
-        },
-      });
-
-      if (!client) {
-
-        log("Client not found for comment automation");
-
-        return res.sendStatus(200);
-
-      }
-
-      await handleCommentAutomation({
-        businessId: client.businessId,
-        clientId: client.id,
-        instagramUserId,
-        reelId,
-        commentText,
-      });
-
-      return res.sendStatus(200);
-
+    if (!commentText || !instagramUserId || !reelId) {
+      continue;
     }
+
+    const client = await prisma.client.findFirst({
+      where: {
+        platform: "INSTAGRAM",
+        pageId,
+        isActive: true,
+      },
+    });
+
+    if (!client) {
+      log("Client not found for comment automation");
+      continue;
+    }
+
+    await handleCommentAutomation({
+      businessId: client.businessId,
+      clientId: client.id,
+      instagramUserId,
+      reelId,
+      commentText,
+    });
+
+  }
+}
 
     /* ---------------------------------------------------
     MESSAGE DETECTION

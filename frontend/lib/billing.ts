@@ -5,44 +5,46 @@ CHECKOUT
 ====================================== */
 
 export const createCheckout = async (
-  plan: string,
-  billing: "monthly" | "yearly"
+plan: string,
+billing: "monthly" | "yearly"
 ) => {
 
-  try {
+try {
 
-    const res = await fetch(`${API}/api/billing/checkout`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ plan, billing }),
-    })
+const res = await fetch(`${API}/api/billing/checkout`, {
+  method: "POST",
+  credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ plan, billing }),
+})
 
-    const data = await res.json()
+const data = await res.json()
 
-    /* ✅ BETTER ERROR HANDLING */
-    if (!res.ok || !data?.success) {
-      throw new Error(data?.message || "Checkout failed")
-    }
+if (!res.ok || !data?.success) {
+  throw new Error(data?.message || "Checkout failed")
+}
 
-    /* ✅ IMPORTANT: Stripe redirect URL */
-    if (!data?.url) {
-      throw new Error("No checkout URL received")
-    }
+if (!data?.url) {
+  throw new Error("No checkout URL received")
+}
 
-    return data
+/* 🔥 AUTO REDIRECT */
+window.location.href = data.url
 
-  } catch (error: any) {
+return data
 
-    console.error("Checkout API error:", error)
+} catch (error: any) {
 
-    return {
-      success: false,
-      message: error.message || "Checkout failed",
-    }
-  }
+console.error("Checkout API error:", error)
+
+return {
+  success: false,
+  message: error.message || "Checkout failed",
+}
+
+}
 }
 
 /* ======================================
@@ -50,37 +52,45 @@ UPGRADE PLAN
 ====================================== */
 
 export const upgradePlan = async (
-  plan: string,
-  billing: "monthly" | "yearly"
+plan: string,
+billing: "monthly" | "yearly"
 ) => {
 
-  try {
+try {
 
-    const res = await fetch(`${API}/api/billing/upgrade`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ plan, billing }),
-    })
+const res = await fetch(`${API}/api/billing/upgrade`, {
+  method: "POST",
+  credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ plan, billing }),
+})
 
-    const data = await res.json()
+const data = await res.json()
 
-    /* ✅ SAME FIX */
-    if (!res.ok || !data?.success) {
-      throw new Error(data?.message || "Upgrade failed")
-    }
+if (!res.ok || !data?.success) {
+  throw new Error(data?.message || "Upgrade failed")
+}
 
-    return data
+if (!data?.url) {
+  throw new Error("No checkout URL received")
+}
 
-  } catch (error: any) {
+/* 🔥 IMPORTANT FIX */
+// Trial user ho ya paid → always go to checkout
+window.location.href = data.url
 
-    console.error("Upgrade API error:", error)
+return data
 
-    return {
-      success: false,
-      message: error.message || "Upgrade failed",
-    }
-  }
+} catch (error: any) {
+
+console.error("Upgrade API error:", error)
+
+return {
+  success: false,
+  message: error.message || "Upgrade failed",
+}
+
+}
 }

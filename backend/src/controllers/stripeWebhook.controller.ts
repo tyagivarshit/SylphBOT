@@ -30,6 +30,8 @@ export const stripeWebhook = async (
   res: Response
 ) => {
 
+  console.log("🔥 WEBHOOK HIT")
+
   const sig = req.headers["stripe-signature"] as string
 
   let event: Stripe.Event
@@ -41,6 +43,8 @@ export const stripeWebhook = async (
       sig,
       env.STRIPE_WEBHOOK_SECRET
     )
+
+    console.log("🔥 EVENT:", event.type)
 
   } catch (err) {
 
@@ -80,9 +84,11 @@ export const stripeWebhook = async (
 
         const session = event.data.object as Stripe.Checkout.Session
 
+        console.log("🔥 SESSION METADATA:", session.metadata) // ✅ DEBUG
+
         const businessId = session.metadata?.businessId
-        const planType = session.metadata?.planType
-        const currency = session.metadata?.currency
+        const planType = session.metadata?.plan
+        const currency = session.metadata?.currency || "INR"
 
         const subscriptionId = getSubscriptionId(
           session.subscription as any
@@ -90,60 +96,37 @@ export const stripeWebhook = async (
 
         if (!businessId || !subscriptionId) break
 
-        /* =============================
-        🔥 FETCH STRIPE SUB
-        ============================= */
-
         const stripeSub = await stripe.subscriptions.retrieve(subscriptionId)
 
-        const priceId = stripeSub.items.data[0]?.price.id
+        /* 🔥 FIXED PLAN DETECTION */
+        let plan = null
 
-        /* =============================
-        🔥 FIND PLAN (PRICE FIRST)
-        ============================= */
-
-        let plan = await prisma.plan.findFirst({
-          where: {
-            OR: [
-              { priceIdINR: priceId },
-              { priceIdUSD: priceId }
-            ]
-          }
-        })
-
-        /* =============================
-        🔁 FALLBACK TO TYPE
-        ============================= */
-
-        if (!plan && planType) {
+        if (planType) {
           plan = await prisma.plan.findFirst({
-            where: { type: planType }
+            where: {
+              OR: [
+                { name: planType },
+                { type: planType }
+              ]
+            }
           })
         }
 
         if (!plan) {
-          console.error("Plan not found (priceId/type):", priceId, planType)
+          console.error("❌ Plan not found:", planType)
           break
         }
-
-        /* =============================
-        PERIOD END
-        ============================= */
 
         const periodEnd =
           (stripeSub as any).current_period_end
             ? new Date((stripeSub as any).current_period_end * 1000)
             : null
 
-        /* =============================
-        UPSERT SUBSCRIPTION
-        ============================= */
-
-        await prisma.subscription.upsert({
+        await prisma.subscription.updateMany({
 
           where: { businessId },
 
-          update: {
+          data: {
 
             stripeSubscriptionId: stripeSub.id,
 
@@ -164,39 +147,13 @@ export const stripeWebhook = async (
 
             currentPeriodEnd: periodEnd,
 
+            /* 🔥 TRIAL → PAID FIX */
             isTrial: stripeSub.status === "trialing",
-
-            trialUsed: true
-          },
-
-          create: {
-
-            businessId,
-
-            planId: plan.id,
-
-            stripeSubscriptionId: stripeSub.id,
-
-            stripeCustomerId:
-              typeof stripeSub.customer === "string"
-                ? stripeSub.customer
-                : null,
-
-            currency,
-
-            status:
-              stripeSub.status === "active" ||
-              stripeSub.status === "trialing"
-                ? "ACTIVE"
-                : "INACTIVE",
-
-            currentPeriodEnd: periodEnd,
-
-            isTrial: stripeSub.status === "trialing",
-
             trialUsed: true
           }
         })
+
+        console.log("✅ PLAN UPDATED:", plan.name)
 
         break
       }

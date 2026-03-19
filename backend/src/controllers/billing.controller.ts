@@ -3,32 +3,32 @@ import prisma from "../config/prisma";
 import { stripe, createCheckoutSession } from "../services/stripe.service";
 import { env } from "../config/env";
 import geoip from "geoip-lite";
-import { getInvoices } from "../services/invoice.service"; // ✅ FIX
+import { getInvoices } from "../services/invoice.service";
 
 /* ====================================== */
 /* USER CONTEXT */
 /* ====================================== */
 
 async function getUserContext(req: Request) {
-  const userId = req.user?.id;
-  const businessId = req.user?.businessId;
+const userId = req.user?.id;
+const businessId = req.user?.businessId;
 
-  if (!userId || !businessId) {
-    throw new Error("Unauthorized");
-  }
+if (!userId || !businessId) {
+throw new Error("Unauthorized");
+}
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
+const user = await prisma.user.findUnique({
+where: { id: userId },
+});
 
-  if (!user) {
-    throw new Error("Unauthorized");
-  }
+if (!user) {
+throw new Error("Unauthorized");
+}
 
-  return {
-    businessId,
-    email: user.email,
-  };
+return {
+businessId,
+email: user.email,
+};
 }
 
 /* ====================================== */
@@ -36,15 +36,15 @@ async function getUserContext(req: Request) {
 /* ====================================== */
 
 function getCurrency(req: Request) {
-  const ip =
-    (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-    req.socket.remoteAddress ||
-    "";
+const ip =
+(req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
+req.socket.remoteAddress ||
+"";
 
-  const geo = geoip.lookup(ip);
-  const country = geo?.country || "IN";
+const geo = geoip.lookup(ip);
+const country = geo?.country || "IN";
 
-  return country === "IN" ? "INR" : "USD";
+return country === "IN" ? "INR" : "USD";
 }
 
 /* ====================================== */
@@ -53,262 +53,276 @@ function getCurrency(req: Request) {
 
 export class BillingController {
 
-  /* ====================================== */
-  /* GET BILLING */
-  /* ====================================== */
+/* ====================================== */
+/* GET BILLING */
+/* ====================================== */
 
-  static async getBilling(req: Request, res: Response) {
-    try {
+static async getBilling(req: Request, res: Response) {
+try {
 
-      const { businessId } = await getUserContext(req);
+  const { businessId } = await getUserContext(req);
 
-      // ✅ FIX: subscription define kiya
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
-        include: { plan: true },
-      });
+  const subscription = await prisma.subscription.findUnique({
+    where: { businessId },
+    include: { plan: true },
+  });
 
-      const currency = getCurrency(req);
+  const currency = getCurrency(req);
 
-      let invoices: any[] = [];
+  let invoices: any[] = [];
 
-      // ✅ FIX: safe access
-      if (subscription?.stripeCustomerId) {
-        invoices = await getInvoices(subscription.stripeCustomerId);
-      }
-
-      return res.json({
-        success: true,
-        subscription,
-        currency,
-        invoices,
-      });
-
-    } catch (error) {
-
-      console.error("Billing fetch error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch billing",
-      });
-
-    }
+  if (subscription?.stripeCustomerId) {
+    invoices = await getInvoices(subscription.stripeCustomerId);
   }
 
-  /* ====================================== */
-  /* CHECKOUT */
-  /* ====================================== */
+  return res.json({
+    success: true,
+    subscription,
+    currency,
+    invoices,
+  });
 
-  static async checkout(req: Request, res: Response) {
-    try {
+} catch (error) {
 
-      const { plan, billing, coupon } = req.body;
+  console.error("Billing fetch error:", error);
 
-      if (!plan || !billing) {
-        return res.status(400).json({
-          success: false,
-          message: "Plan & billing required",
-        });
-      }
+  return res.status(500).json({
+    success: false,
+    message: "Failed to fetch billing",
+  });
 
-      const { businessId, email } = await getUserContext(req);
+}
 
-      const currency = getCurrency(req);
+}
 
-      const session = await createCheckoutSession(
-        email,
-        businessId,
-        plan,
-        billing,
-        req,
-        currency,
-        coupon
-      );
+/* ====================================== */
+/* CHECKOUT */
+/* ====================================== */
 
-      return res.json({
-        success: true,
-        url: session.url,
-      });
+static async checkout(req: Request, res: Response) {
+try {
 
-    } catch (error: any) {
+  const { plan, billing, coupon } = req.body;
 
-      if (error.message === "Unauthorized") {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if (error.message?.includes("Currency cannot be changed")) {
-        return res.status(400).json({
-          success: false,
-          message: "Currency cannot be changed once subscribed",
-        });
-      }
-
-      console.error("Checkout error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Checkout failed",
-      });
-
-    }
+  if (!plan || !billing) {
+    return res.status(400).json({
+      success: false,
+      message: "Plan & billing required",
+    });
   }
 
-  /* ====================================== */
-  /* BILLING PORTAL */
-  /* ====================================== */
+  const { businessId, email } = await getUserContext(req);
 
-  static async createPortal(req: Request, res: Response) {
-    try {
+  const currency = getCurrency(req);
 
-      const { businessId } = await getUserContext(req);
+  const session = await createCheckoutSession(
+    email,
+    businessId,
+    plan,
+    billing,
+    req,
+    currency,
+    coupon
+  );
 
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
-      });
+  return res.json({
+    success: true,
+    url: session.url,
+  });
 
-      if (!subscription?.stripeCustomerId) {
-        return res.status(400).json({
-          success: false,
-          message: "No customer found",
-        });
-      }
+} catch (error: any) {
 
-      const session = await stripe.billingPortal.sessions.create({
-        customer: subscription.stripeCustomerId,
-        return_url: `${env.FRONTEND_URL}/billing`,
-      });
-
-      return res.json({
-        success: true,
-        url: session.url,
-      });
-
-    } catch (error) {
-
-      console.error("Portal error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Portal failed",
-      });
-
-    }
+  if (error.message === "Unauthorized") {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized",
+    });
   }
 
-  /* ====================================== */
-  /* CANCEL SUBSCRIPTION */
-  /* ====================================== */
-
-  static async cancelSubscription(req: Request, res: Response) {
-    try {
-
-      const { businessId } = await getUserContext(req);
-
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
-      });
-
-      if (!subscription?.stripeSubscriptionId) {
-        return res.status(400).json({
-          success: false,
-          message: "No subscription found",
-        });
-      }
-
-      await stripe.subscriptions.update(
-        subscription.stripeSubscriptionId,
-        {
-          cancel_at_period_end: true,
-        }
-      );
-
-      await prisma.subscription.update({
-        where: { businessId },
-        data: {
-          status: "CANCELLED",
-        },
-      });
-
-      return res.json({
-        success: true,
-        message: "Subscription will cancel at period end",
-      });
-
-    } catch (error) {
-
-      console.error("Cancel error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Cancel failed",
-      });
-
-    }
+  if (error.message?.includes("Currency cannot be changed")) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
   }
 
-  /* ====================================== */
-  /* UPGRADE PLAN */
-  /* ====================================== */
+  console.error("Checkout error:", error);
 
-  static async upgradePlan(req: Request, res: Response) {
-    try {
+  return res.status(500).json({
+    success: false,
+    message: error.message || "Checkout failed",
+  });
 
-      const { plan, billing, coupon } = req.body;
+}
 
-      if (!plan || !billing) {
-        return res.status(400).json({
-          success: false,
-          message: "Plan & billing required",
-        });
-      }
+}
 
-      const { businessId, email } = await getUserContext(req);
+/* ====================================== */
+/* BILLING PORTAL */
+/* ====================================== */
 
-      const currency = getCurrency(req);
+static async createPortal(req: Request, res: Response) {
+try {
 
-      const session = await createCheckoutSession(
-        email,
-        businessId,
-        plan,
-        billing,
-        req,
-        currency,
-        coupon
-      );
 
-      return res.json({
-        success: true,
-        url: session.url,
-      });
+  const { businessId } = await getUserContext(req);
 
-    } catch (error: any) {
+  const subscription = await prisma.subscription.findUnique({
+    where: { businessId },
+  });
 
-      if (error.message === "Unauthorized") {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if (error.message?.includes("Currency cannot be changed")) {
-        return res.status(400).json({
-          success: false,
-          message: "Currency cannot be changed once subscribed",
-        });
-      }
-
-      console.error("Upgrade error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Upgrade failed",
-      });
-
-    }
+  if (!subscription?.stripeCustomerId) {
+    return res.status(400).json({
+      success: false,
+      message: "No customer found",
+    });
   }
+
+  const session = await stripe.billingPortal.sessions.create({
+    customer: subscription.stripeCustomerId,
+    return_url: `${env.FRONTEND_URL}/billing`,
+  });
+
+  return res.json({
+    success: true,
+    url: session.url,
+  });
+
+} catch (error) {
+
+  console.error("Portal error:", error);
+
+  return res.status(500).json({
+    success: false,
+    message: "Portal failed",
+  });
+
+}
+
+}
+
+/* ====================================== */
+/* CANCEL SUBSCRIPTION */
+/* ====================================== */
+
+static async cancelSubscription(req: Request, res: Response) {
+try {
+
+  const { businessId } = await getUserContext(req);
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { businessId },
+  });
+
+  if (!subscription?.stripeSubscriptionId) {
+    return res.status(400).json({
+      success: false,
+      message: "No active paid subscription found",
+    });
+  }
+
+  await stripe.subscriptions.update(
+    subscription.stripeSubscriptionId,
+    {
+      cancel_at_period_end: true,
+    }
+  );
+
+  await prisma.subscription.update({
+    where: { businessId },
+    data: {
+      status: "CANCELLED",
+    },
+  });
+
+  return res.json({
+    success: true,
+    message: "Subscription will cancel at period end",
+  });
+
+} catch (error) {
+
+  console.error("Cancel error:", error);
+
+  return res.status(500).json({
+    success: false,
+    message: "Cancel failed",
+  });
+
+}
+
+}
+
+/* ====================================== */
+/* UPGRADE PLAN */
+/* ====================================== */
+
+static async upgradePlan(req: Request, res: Response) {
+try {
+
+  const { plan, billing, coupon } = req.body;
+
+  if (!plan || !billing) {
+    return res.status(400).json({
+      success: false,
+      message: "Plan & billing required",
+    });
+  }
+
+  const { businessId, email } = await getUserContext(req);
+
+  const currency = getCurrency(req);
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { businessId },
+  });
+
+  /* 🔥 IMPORTANT FIX */
+  const isTrialUser =
+    subscription?.isTrial &&
+    !subscription?.stripeSubscriptionId;
+
+  const session = await createCheckoutSession(
+    email,
+    businessId,
+    plan,
+    billing,
+    req,
+    currency,
+    coupon
+  );
+
+  return res.json({
+    success: true,
+    url: session.url,
+    isTrialUser,
+  });
+
+} catch (error: any) {
+
+  if (error.message === "Unauthorized") {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized",
+    });
+  }
+
+  if (error.message?.includes("Currency cannot be changed")) {
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+
+  console.error("Upgrade error:", error);
+
+  return res.status(500).json({
+    success: false,
+    message: error.message || "Upgrade failed",
+  });
+
+}
+
+}
 
 }

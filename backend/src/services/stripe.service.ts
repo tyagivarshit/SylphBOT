@@ -172,11 +172,12 @@ export const createCheckoutSession = async (
   /* ============================= */
 
   if (
-    existingSub?.currency &&
-    existingSub.currency !== detectedCurrency
+    existingSub?.stripeSubscriptionId &&
+    existingSub.currency &&
+    existingSub.currency !== finalCurrency
   ) {
     throw new Error(
-      "Currency cannot be changed once subscription is started"
+      "Currency cannot be changed for active paid subscription"
     );
   }
 
@@ -215,6 +216,13 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
+  /* TRIAL LOGIC */
+  /* ============================= */
+
+  const isTrialEligible =
+    existingSub?.isTrial && !existingSub?.trialUsed;
+
+  /* ============================= */
   /* CHECKOUT */
   /* ============================= */
 
@@ -230,19 +238,23 @@ export const createCheckoutSession = async (
       },
     ],
 
+    customer_update: {
+      address: "auto",
+    },
+
+    billing_address_collection: "required",
+
     ...getTaxConfig(finalCurrency),
 
     discounts,
 
     subscription_data: {
-      trial_period_days: existingSub?.trialUsed ? undefined : 7,
-      proration_behavior: "create_prorations",
+      trial_period_days: isTrialEligible ? 7 : undefined,
     },
 
     metadata: {
       businessId,
       plan,
-      planType: plan,
       billing,
       currency: finalCurrency,
     },
@@ -252,19 +264,39 @@ export const createCheckoutSession = async (
   });
 
   /* ============================= */
+  /* 🔥 FIX: PLAN REQUIRED */
+  /* ============================= */
+
+  let freePlan = await prisma.plan.findFirst({
+    where: { name: "FREE_TRIAL" },
+  });
+
+  if (!freePlan) {
+    freePlan = await prisma.plan.findFirst({
+      where: { type: "FREE" },
+    });
+  }
+
+  if (!freePlan) {
+    throw new Error("Free plan not found in DB");
+  }
+
+  /* ============================= */
   /* SAVE */
   /* ============================= */
 
   await prisma.subscription.upsert({
     where: { businessId },
+
     update: {
       stripeCustomerId: customerId,
       currency: finalCurrency,
       billingCycle: billing,
     },
+
     create: {
       businessId,
-      planId: "" as any,
+      planId: freePlan.id,
       stripeCustomerId: customerId,
       currency: finalCurrency,
       billingCycle: billing,

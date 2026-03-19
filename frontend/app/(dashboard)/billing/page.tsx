@@ -22,39 +22,39 @@ const [invoices,setInvoices] = useState<any[]>([])
 useEffect(()=>{
 
 fetch("https://ipapi.co/json/")
-  .then(res=>res.json())
-  .then(data=>{
-    if(data.country === "IN"){
-      setCurrency("INR")
-    }else{
-      setCurrency("USD")
-    }
-  })
-  .catch(()=>setCurrency("INR"))
+.then(res=>res.json())
+.then(data=>{
+if(data.country === "IN"){
+setCurrency("INR")
+}else{
+setCurrency("USD")
+}
+})
+.catch(()=>setCurrency("INR"))
 
 setIsEarly(true)
 
-/* ✅ SINGLE API (SUB + INVOICES) */
+/* ================= FETCH BILLING ================= */
 
 fetch("/api/billing")
-  .then(res=>res.json())
-  .then(data=>{
+.then(res=>res.json())
+.then(data=>{
 
-    if(data?.subscription){
-      setSubscription(data.subscription)
-    }
+if(data?.subscription){
+  setSubscription(data.subscription)
+}
 
-    if(data?.subscription?.currency){
-      setLockedCurrency(data.subscription.currency)
-      setCurrency(data.subscription.currency)
-    }
+if(data?.subscription?.currency){
+  setLockedCurrency(data.subscription.currency)
+  setCurrency(data.subscription.currency)
+}
 
-    if(data?.invoices){
-      setInvoices(data.invoices)
-    }
+if(data?.invoices){
+  setInvoices(data.invoices)
+}
 
-  })
-  .catch(()=>{})
+})
+.catch(()=>{})
 
 },[])
 
@@ -108,8 +108,8 @@ try{
 setLoading(plan)
 
 if(lockedCurrency && lockedCurrency !== currency){
-  alert("Currency cannot be changed once subscribed")
-  return
+alert("Currency cannot be changed once subscribed")
+return
 }
 
 const upgrade = await upgradePlan(plan,billing)
@@ -130,9 +130,9 @@ window.location.href = checkout.url
 console.error(err)
 
 if(err?.response?.data?.message){
-  alert(err.response.data.message)
+alert(err.response.data.message)
 }else{
-  alert("Something went wrong")
+alert("Something went wrong")
 }
 
 }finally{
@@ -155,13 +155,6 @@ return(
 <h1 className="text-2xl font-semibold text-gray-950">
 Billing
 </h1>
-
-{lockedCurrency && (
-<p className="text-xs text-orange-600 mt-1">
-Currency locked to {lockedCurrency}
-</p>
-)}
-
 </div>
 
 <div className="flex bg-gray-100 rounded-lg p-1 text-sm">
@@ -171,24 +164,24 @@ onClick={()=>setBilling("monthly")}
 className={`px-4 py-1 rounded-md ${
 billing==="monthly" ? "bg-white shadow text-black" : "text-gray-600"
 }`}
+
 >
-Monthly
-</button>
+
+Monthly </button>
 
 <button
 onClick={()=>setBilling("yearly")}
 className={`px-4 py-1 rounded-md ${
 billing==="yearly" ? "bg-white shadow text-black" : "text-gray-600"
 }`}
+
 >
-Yearly (Save 20%)
-</button>
+
+Yearly (Save 20%) </button>
 
 </div>
 
 </div>
-
-{/* PLANS */}
 
 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
 
@@ -223,15 +216,14 @@ className="bg-white rounded-xl p-6 flex flex-col justify-between border border-g
 {plan.name}
 </h2>
 
-{isCurrent && (
-<span className="text-xs text-green-600 font-semibold">
-Current Plan
-</span>
+{isCurrent && ( <span className="text-xs text-green-600 font-semibold">
+Current Plan </span>
 )}
 
 <div className="mt-2">
 
 {isEarly && (
+
 <p className="text-xs text-gray-500 line-through">
 {currency==="INR" ? "₹" : "$"}{original}
 </p>
@@ -249,10 +241,8 @@ Current Plan
 
 </div>
 
-{isEarly && (
-<span className="text-xs text-green-600 font-semibold">
-🔥 Early Access Offer
-</span>
+{isEarly && ( <span className="text-xs text-green-600 font-semibold">
+🔥 Early Access Offer </span>
 )}
 
 </div>
@@ -278,6 +268,7 @@ Current Plan
 onClick={()=>handleUpgrade(plan.id)}
 disabled={loading===plan.id || isCurrent}
 className="mt-6 w-full text-sm font-medium py-2 rounded-lg transition bg-blue-600 hover:bg-blue-700 text-white"
+
 >
 
 {isCurrent ? "Current Plan" :
@@ -292,8 +283,6 @@ loading===plan.id ? "Processing..." : "Get Started"}
 })}
 
 </div>
-
-{/* PAYMENT HISTORY */}
 
 <PaymentHistory invoices={invoices} />
 

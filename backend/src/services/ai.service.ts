@@ -14,8 +14,8 @@ import {
 /* SUMMARY ENGINE */
 import { generateConversationSummary } from "./conversationSummary.service";
 
-/* KNOWLEDGE SEARCH */
-import { searchKnowledge } from "./knowledgeSearch.service";
+/* ✅ RAG SERVICE */
+import { generateRAGReply } from "./rag.service";
 
 const openai = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
@@ -34,15 +34,11 @@ const isSystemMessage = (message: string) => {
 
   const msg = message.toLowerCase();
 
-  if (
+  return (
     msg.includes("please wait a moment") ||
     msg.includes("moment before sending") ||
     msg.includes("try again later")
-  ) {
-    return true;
-  }
-
-  return false;
+  );
 
 };
 
@@ -51,10 +47,7 @@ const isSystemMessage = (message: string) => {
 const checkAIAbuse = async (leadId: string, message: string) => {
 
   const recentMessages = await prisma.message.findMany({
-    where: {
-      leadId,
-      sender: "USER",
-    },
+    where: { leadId, sender: "USER" },
     orderBy: { createdAt: "desc" },
     take: 5,
   });
@@ -74,10 +67,7 @@ const checkAIAbuse = async (leadId: string, message: string) => {
   }
 
   const aiMessages = await prisma.message.count({
-    where: {
-      leadId,
-      sender: "AI",
-    },
+    where: { leadId, sender: "AI" },
   });
 
   if (aiMessages >= 500) {
@@ -122,7 +112,6 @@ const checkUsage = async (businessId: string) => {
   });
 
   if (!usage) {
-
     usage = await prisma.usage.create({
       data: {
         businessId,
@@ -133,7 +122,6 @@ const checkUsage = async (businessId: string) => {
         followupsUsed: 0,
       },
     });
-
   }
 
   if (usage.aiCallsUsed >= subscription.plan.maxAiCalls) {
@@ -221,19 +209,29 @@ export const generateAIReply = async ({
   console.log("AI SERVICE START", { businessId, leadId });
 
   try {
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId }
+    });
 
-    /* EMPTY MESSAGE PROTECTION */
+    if (lead?.isHumanActive) {
+      console.log("🛑 AI BLOCKED (Human active)");
+      return "";
+    }
+
+    /* EMPTY MESSAGE */
 
     if (!message || !message.trim()) {
       return "Thanks for reaching out!";
     }
 
-    /* SYSTEM MESSAGE PROTECTION */
+    /* SYSTEM MESSAGE BLOCK */
 
     if (isSystemMessage(message)) {
       console.log("System message blocked:", message);
       return "";
     }
+
+    /* ABUSE CHECK */
 
     const abuseCheck = await checkAIAbuse(leadId, message);
 
@@ -248,6 +246,8 @@ export const generateAIReply = async ({
       }
 
     }
+
+    /* USAGE CHECK */
 
     const usageCheck = await checkUsage(businessId);
 
@@ -269,6 +269,8 @@ export const generateAIReply = async ({
 
     const planName = usageCheck.plan || "FREE_TRIAL";
 
+    /* 🔥 PRO / ENTERPRISE → FUNNEL AI */
+
     if (planName === "PRO" || planName === "ENTERPRISE") {
 
       const reply = await generateAIFunnelReply({
@@ -283,6 +285,8 @@ export const generateAIReply = async ({
 
     }
 
+    /* CLIENT CHECK */
+
     const client = await prisma.client.findFirst({
       where: {
         businessId,
@@ -294,79 +298,37 @@ export const generateAIReply = async ({
       return "No active client found.";
     }
 
-    const memoryContext = await buildMemoryContext(leadId);
+    /* MEMORY LOAD (for future expansion / logging) */
 
-    const knowledgeResults = await searchKnowledge(
+    await buildMemoryContext(leadId);
+
+    /* 🔥 RAG v2 CALL (WITH PERSONALIZATION) */
+
+    const reply = await generateRAGReply(
       businessId,
-      message
+      message,
+      leadId
     );
 
-    const knowledgeText = knowledgeResults
-      .map(k => `${k.title}: ${k.content}`)
-      .join("\n");
-
-    const systemPrompt = `
-You are a helpful AI assistant for a business.
-
-Business Information:
-${client.businessInfo || "Not provided"}
-
-Pricing Information:
-${client.pricingInfo || "Ask admin for pricing"}
-
-FAQ Knowledge:
-${client.faqKnowledge || "No FAQ knowledge provided"}
-
-Sales Instructions:
-${client.salesInstructions || "Be helpful and guide the customer"}
-
-Knowledge Base:
-${knowledgeText || "No additional knowledge provided"}
-
-Communication Style:
-${client.aiTone || "Professional"}
-
-Customer Memory:
-${memoryContext.memory}
-
-Conversation Summary:
-${memoryContext.summary}
-
-Rules:
-- Use only provided business information
-- Never invent pricing
-- Follow the sales instructions if provided
-- Use FAQ knowledge when relevant
-- Use knowledge base if relevant
-- Be concise and helpful
-`;
-
-    const prompt = [
-      { role: "system", content: systemPrompt },
-      ...memoryContext.conversation,
-      { role: "user", content: message },
-    ];
-
-    const response = await openai.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: prompt as any,
-    });
-
-    const reply =
-      response.choices?.[0]?.message?.content?.trim() ||
-      "Thanks for reaching out!";
+    /* SAVE AI MESSAGE */
 
     await prisma.message.create({
       data: {
         leadId,
-        content: reply,
+        content: reply || "Thanks for reaching out!",
         sender: "AI",
       },
     });
 
+    /* USAGE UPDATE */
+
     await incrementUsage(businessId);
 
+    /* MEMORY UPDATE */
+
     await updateMemory(leadId, message);
+
+    /* SUMMARY EVERY 10 MSG */
 
     const messageCount = await prisma.message.count({
       where: { leadId },
@@ -375,6 +337,8 @@ Rules:
     if (messageCount % 10 === 0) {
       await generateConversationSummary(leadId);
     }
+
+    /* DATA EXTRACTION + STAGE */
 
     await extractLeadData(leadId, message);
     await updateStage(leadId, message);

@@ -11,19 +11,20 @@ export const testAI = async (req: CustomRequest, res: Response) => {
 
     const { message } = req.body;
 
-    // Message validation
-    if (!message) {
+    /* ================= VALIDATION ================= */
+
+    if (!message || !message.trim()) {
       return res.status(400).json({ message: "Message required" });
     }
 
-    // Get logged user id safely
-    const userId = req.user?.userId;
+    const userId = req.user?.id; // ✅ FIXED
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Get business of logged user
+    /* ================= BUSINESS FETCH ================= */
+
     const business = await prisma.business.findFirst({
       where: {
         ownerId: userId
@@ -34,7 +35,8 @@ export const testAI = async (req: CustomRequest, res: Response) => {
       return res.status(404).json({ message: "Business not found" });
     }
 
-    // Create dummy lead (schema requires platform)
+    /* ================= CREATE TEST LEAD ================= */
+
     const lead = await prisma.lead.create({
       data: {
         businessId: business.id,
@@ -43,24 +45,28 @@ export const testAI = async (req: CustomRequest, res: Response) => {
       }
     });
 
-    // Generate AI reply
+    /* ================= GENERATE AI ================= */
+
     const reply = await generateAIReply({
       businessId: business.id,
       leadId: lead.id,
       message
     });
 
-    // Return response
+    /* ================= RESPONSE ================= */
+
     return res.json({
+      success: true,
       aiReply: reply,
       leadId: lead.id
     });
 
   } catch (error: any) {
 
-    console.error("AI Test Error:", error);
+    console.error("🚨 AI Test Error:", error);
 
     return res.status(500).json({
+      success: false,
       message: "AI test failed",
       error: error.message
     });

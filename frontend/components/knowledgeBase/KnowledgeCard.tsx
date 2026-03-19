@@ -1,6 +1,6 @@
 "use client"
 
-export default function KnowledgeCard({ item, onDelete }: any){
+export default function KnowledgeCard({ item, onDelete, onEdit }: any){
 
 return(
 
@@ -24,7 +24,10 @@ return(
 
 <div className="flex gap-3 mt-4">
 
-<button className="text-xs text-blue-600 hover:underline">
+<button 
+onClick={()=>onEdit(item)}
+className="text-xs text-blue-600 hover:underline"
+>
 Edit
 </button>
 

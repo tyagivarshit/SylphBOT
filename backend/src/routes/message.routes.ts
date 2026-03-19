@@ -1,16 +1,33 @@
 import { Router } from "express";
 import { protect } from "../middleware/auth.middleware";
-import { sendManualMessage, markConversationRead } from "../controllers/message.controller";
+import { 
+  sendManualMessage, 
+  markConversationRead,
+  getMessages,
+  deleteMessage
+} from "../controllers/message.controller";
 
 const router = Router();
 
 router.use(protect);
 
 /* ======================================
-SEND MANUAL MESSAGE FROM DASHBOARD
+GET MESSAGES (LOAD CHAT)
+====================================== */
+
+router.get("/:leadId", getMessages);
+
+/* ======================================
+SEND MANUAL MESSAGE
 ====================================== */
 
 router.post("/send", sendManualMessage);
+
+/* ======================================
+DELETE / UNSEND MESSAGE 🔥
+====================================== */
+
+router.delete("/:messageId", deleteMessage);
 
 /* ======================================
 MARK CONVERSATION AS READ

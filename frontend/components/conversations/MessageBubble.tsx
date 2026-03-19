@@ -1,43 +1,64 @@
 "use client"
 
-export default function MessageBubble({ message }: any){
+export default function MessageBubble({ message, onDelete }: any){
 
-const isUser = message.sender === "USER"
+  const isUser = message.sender === "USER"
+  const isDeleted = message.content === "This message was deleted"
 
-return(
+  return(
 
-<div className={`flex ${isUser ? "" : "justify-end"}`}>
+    <div className={`flex ${isUser ? "justify-start" : "justify-end"} group`}>
 
-<div
-className={`px-4 py-2.5 rounded-xl text-sm max-w-[75%] break-words shadow-sm ${
-isUser
-? "bg-white border border-gray-200 text-gray-800"
-: "bg-blue-600 text-white"
-}`}
->
+      <div
+        onDoubleClick={()=>onDelete && onDelete(message.id)}
+        className={`relative px-4 py-2.5 rounded-2xl text-sm max-w-[75%] break-words shadow-sm transition ${
+          isUser
+            ? "bg-white border border-gray-200 text-gray-900"
+            : "bg-blue-600 text-white"
+        }`}
+      >
 
-<div className="leading-relaxed">
-{message.text}
-</div>
+        {/* MESSAGE TEXT */}
 
-{message.time && (
+        <div className={`leading-relaxed ${
+          isDeleted ? "italic text-gray-500" : ""
+        }`}>
+          {isDeleted ? "🚫 Message deleted" : message.text}
+        </div>
 
-<div
-className={`text-[10px] mt-1 ${
-isUser
-? "text-gray-400"
-: "text-blue-200 text-right"
-}`}
->
-{message.time}
-</div>
+        {/* TIME + STATUS */}
 
-)}
+        <div className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
+          isUser ? "text-gray-600" : "text-blue-100"
+        }`}>
 
-</div>
+          {message.createdAt && (
+            <span>
+              {new Date(message.createdAt).toLocaleTimeString([],{
+                hour:"2-digit",
+                minute:"2-digit"
+              })}
+            </span>
+          )}
 
-</div>
+          {!isUser && !isDeleted && (
+            <span className="text-[9px] opacity-80">✓</span>
+          )}
 
-)
+        </div>
+
+        {/* DELETE TOOLTIP */}
+
+        {!isDeleted && (
+          <div className="absolute -top-6 right-0 text-[10px] text-gray-500 opacity-0 group-hover:opacity-100 transition whitespace-nowrap">
+            Double click to delete
+          </div>
+        )}
+
+      </div>
+
+    </div>
+
+  )
 
 }

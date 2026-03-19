@@ -5,6 +5,42 @@ import { useState } from "react"
 export default function BusinessInfoForm(){
 
 const [info,setInfo] = useState("")
+const [loading,setLoading] = useState(false)
+
+const handleSave = async () => {
+
+  if(!info.trim()) return alert("Please enter business info")
+
+  try{
+
+    setLoading(true)
+
+    const res = await fetch("/api/training/business",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body: JSON.stringify({ content: info })
+    })
+
+    const data = await res.json()
+
+    if(!res.ok){
+      throw new Error(data.message || "Failed")
+    }
+
+    alert("✅ Business info saved")
+
+  }catch(err:any){
+
+    console.error(err)
+    alert("❌ Failed to save")
+
+  }finally{
+    setLoading(false)
+  }
+
+}
 
 return(
 
@@ -22,8 +58,12 @@ className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-
 rows={6}
 />
 
-<button className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">
-Save
+<button
+onClick={handleSave}
+disabled={loading}
+className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+>
+{loading ? "Saving..." : "Save"}
 </button>
 
 </div>

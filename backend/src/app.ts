@@ -21,11 +21,17 @@ import messageRoutes from "./routes/message.routes";
 
 /* 🟢 NEW */
 import automationRoutes from "./routes/automation.routes";
-import instagramRoutes from "./routes/instagram.routes"; // 🔥 NEW
+import instagramRoutes from "./routes/instagram.routes"; 
 import { monitoringMiddleware } from "./middleware/monitoring.middleware";
 
 /* 🟢 KNOWLEDGE BASE */
 import knowledgeRoutes from "./routes/knowledge.routes";
+
+/* 🔥 AI TRAINING */
+import trainingRoutes from "./routes/training.routes";
+
+/* 🔥 LEAD CONTROL (NEW) */
+import leadRoutes from "./routes/lead.routes";
 
 import {
   authLimiter,
@@ -119,48 +125,43 @@ app.get("/", (req, res) => {
 });
 
 /* AUTH */
-
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
 
 /* GOOGLE AUTH */
-
 app.use("/api/auth", googleAuthRoutes);
 
 /* CLIENTS */
-
 app.use("/api/clients", clientRoutes);
 
 /* AI */
-
 app.use("/api/ai", aiLimiter, aiRoutes);
 
 /* BILLING */
-
 app.use("/api/billing", billingRoutes);
 
 /* DASHBOARD */
-
 app.use("/api/dashboard", dashboardRoutes);
 
 /* COMMENT AUTOMATION */
-
 app.use("/api/comment-triggers", commentTriggerRoutes);
 
 /* MESSAGE SYSTEM */
-
 app.use("/api/messages", messageRoutes);
 
 /* AUTOMATION FLOWS */
-
 app.use("/api/automation", automationRoutes);
 
-/* 🔥 INSTAGRAM MEDIA (NEW FEATURE) */
-
+/* 🔥 INSTAGRAM MEDIA */
 app.use("/api/instagram", instagramRoutes);
 
 /* KNOWLEDGE BASE */
-
 app.use("/api/knowledge", knowledgeRoutes);
+
+/* 🔥 AI TRAINING */
+app.use("/api/training", trainingRoutes);
+
+/* 🔥 HUMAN / AI TOGGLE */
+app.use("/api/leads", leadRoutes);
 
 /* ============================= */
 /* HEALTH */

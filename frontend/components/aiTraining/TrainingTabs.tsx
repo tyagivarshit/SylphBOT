@@ -3,7 +3,7 @@
 import { useState } from "react"
 import BusinessInfoForm from "./BusinessInfoForm"
 import FAQForm from "./FAQForm"
-import KnowledgeBaseManager from "./KnowledgeBaseManager"
+import AISettingsForm from "./AISettingsForm"
 
 export default function TrainingTabs(){
 
@@ -24,10 +24,9 @@ tab==="business"
 ? "border-b-2 border-blue-600 text-blue-600 font-medium"
 : "text-gray-600"
 }`}
-
 >
-
-Business Info </button>
+Business Info
+</button>
 
 <button
 onClick={()=>setTab("faq")}
@@ -36,22 +35,20 @@ tab==="faq"
 ? "border-b-2 border-blue-600 text-blue-600 font-medium"
 : "text-gray-600"
 }`}
-
 >
-
-FAQs </button>
+FAQs
+</button>
 
 <button
-onClick={()=>setTab("knowledge")}
+onClick={()=>setTab("settings")}
 className={`px-4 py-3 text-sm ${
-tab==="knowledge"
+tab==="settings"
 ? "border-b-2 border-blue-600 text-blue-600 font-medium"
 : "text-gray-600"
 }`}
-
 >
-
-Knowledge Base </button>
+AI Settings
+</button>
 
 </div>
 
@@ -60,10 +57,8 @@ Knowledge Base </button>
 <div className="p-6">
 
 {tab==="business" && <BusinessInfoForm/>}
-
 {tab==="faq" && <FAQForm/>}
-
-{tab==="knowledge" && <KnowledgeBaseManager/>}
+{tab==="settings" && <AISettingsForm/>}
 
 </div>
 

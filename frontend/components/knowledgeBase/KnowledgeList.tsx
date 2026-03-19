@@ -8,6 +8,7 @@ import { api } from "@/lib/api"
 export default function KnowledgeList(){
 
 const [open,setOpen] = useState(false)
+const [selected,setSelected] = useState<any>(null)
 const [knowledge,setKnowledge] = useState<any[]>([])
 const [loading,setLoading] = useState(false)
 
@@ -18,7 +19,6 @@ const [loading,setLoading] = useState(false)
 const fetchKnowledge = async () => {
 
   try{
-
     setLoading(true)
 
     const res = await api.get("/knowledge")
@@ -47,13 +47,31 @@ const handleDelete = async (id: string) => {
 
     await api.delete(`/knowledge/${id}`)
 
-    /* OPTIMISTIC UPDATE */
     setKnowledge(prev => prev.filter(item => item.id !== id))
 
   }catch(err){
     console.error("Delete error:", err)
   }
 
+}
+
+/* ============================= */
+/* EDIT HANDLER */
+/* ============================= */
+
+const handleEdit = (item: any) => {
+  setSelected(item)
+  setOpen(true)
+}
+
+/* ============================= */
+/* CLOSE MODAL */
+/* ============================= */
+
+const handleClose = () => {
+  setOpen(false)
+  setSelected(null)
+  fetchKnowledge()
 }
 
 return(
@@ -67,7 +85,10 @@ Knowledge Entries
 </h2>
 
 <button
-onClick={()=>setOpen(true)}
+onClick={()=>{
+  setSelected(null)
+  setOpen(true)
+}}
 className="bg-blue-600 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-700"
 >
 Add Knowledge
@@ -89,6 +110,7 @@ Add Knowledge
         key={item.id} 
         item={item} 
         onDelete={handleDelete}
+        onEdit={handleEdit}
       />
     ))}
 
@@ -97,10 +119,8 @@ Add Knowledge
 
 <CreateKnowledgeModal
 open={open}
-onClose={()=>{
-  setOpen(false)
-  fetchKnowledge() // 🔥 auto refresh after create
-}}
+onClose={handleClose}
+selected={selected}
 />
 
 </div>

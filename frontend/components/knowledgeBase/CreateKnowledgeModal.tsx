@@ -1,22 +1,36 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { api } from "@/lib/api"
 
-export default function CreateKnowledgeModal({ open,onClose }: any){
+export default function CreateKnowledgeModal({ open, onClose, selected }: any){
 
 const [title,setTitle] = useState("")
 const [content,setContent] = useState("")
 const [loading,setLoading] = useState(false)
 const [error,setError] = useState("")
 
+/* ============================= */
+/* PREFILL (EDIT MODE) */
+/* ============================= */
+
+useEffect(()=>{
+  if(selected){
+    setTitle(selected.title || "")
+    setContent(selected.content || "")
+  }else{
+    setTitle("")
+    setContent("")
+  }
+},[selected])
+
 if(!open) return null
 
 /* ============================= */
-/* CREATE KNOWLEDGE */
+/* CREATE / UPDATE */
 /* ============================= */
 
-const handleCreate = async () => {
+const handleSubmit = async () => {
 
   if(!title || !content){
     setError("Title and content are required")
@@ -28,19 +42,27 @@ const handleCreate = async () => {
     setLoading(true)
     setError("")
 
-    await api.post("/knowledge",{
-      title,
-      content
-    })
+    if(selected){
+      /* 🔥 UPDATE */
+      await api.put(`/knowledge/${selected.id}`,{
+        title,
+        content
+      })
+    }else{
+      /* 🔥 CREATE */
+      await api.post("/knowledge",{
+        title,
+        content
+      })
+    }
 
-    /* RESET */
     setTitle("")
     setContent("")
 
     onClose()
 
   }catch(err:any){
-    console.error("Create error:", err)
+    console.error("Error:", err)
     setError(err?.response?.data?.message || "Something went wrong")
   }finally{
     setLoading(false)
@@ -55,10 +77,8 @@ return(
 <div className="bg-white rounded-xl w-full max-w-md p-6 shadow-lg space-y-4">
 
 <h2 className="text-base font-semibold text-gray-900">
-Add Knowledge
+{selected ? "Edit Knowledge" : "Add Knowledge"}
 </h2>
-
-{/* ERROR */}
 
 {error && (
   <p className="text-sm text-red-500">{error}</p>
@@ -106,11 +126,11 @@ Cancel
 </button>
 
 <button
-onClick={handleCreate}
+onClick={handleSubmit}
 disabled={loading}
 className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
 >
-{loading ? "Saving..." : "Save"}
+{loading ? "Saving..." : selected ? "Update" : "Save"}
 </button>
 
 </div>

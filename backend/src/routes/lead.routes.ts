@@ -1,13 +1,9 @@
 import { Router } from "express";
-import { testAI } from "../controllers/ai.controller";
 import { protect } from "../middleware/auth.middleware";
+import { toggleHumanControl } from "../controllers/lead.controller";
 
 const router = Router();
 
-router.post(
-  "/test",
-  protect,
-  testAI
-);
+router.post("/toggle-human", protect, toggleHumanControl);
 
 export default router;

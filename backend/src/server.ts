@@ -17,6 +17,14 @@ import * as Sentry from "@sentry/node";
 import "./workers/ai.worker";
 import "./workers/funnel.worker";
 
+/* 🔥 SAFE CRON LOADER */
+try {
+  require("./cron/cron.runner");
+  console.log("🧹 Cron runner started");
+} catch (err) {
+  console.error("❌ Cron failed to start:", err);
+}
+
 const PORT = process.env.PORT || 5000;
 
 console.log("🚨 THIS IS SYLPH BACKEND 🚨");
@@ -54,9 +62,7 @@ initSocket(server);
 /* ============================= */
 
 server.listen(PORT, async () => {
-
   console.log(`🚀 Server running on port ${PORT}`);
-
 });
 
 /* ============================= */
@@ -64,11 +70,9 @@ server.listen(PORT, async () => {
 /* ============================= */
 
 const shutdown = async () => {
-
   console.log("🛑 Shutting down server...");
 
   try {
-
     await prisma.$disconnect();
 
     server.close(() => {
@@ -77,13 +81,10 @@ const shutdown = async () => {
     });
 
   } catch (error) {
-
     console.error("Shutdown error:", error);
     Sentry.captureException(error);
     process.exit(1);
-
   }
-
 };
 
 process.on("SIGINT", shutdown);
@@ -94,15 +95,11 @@ process.on("SIGTERM", shutdown);
 /* ============================= */
 
 process.on("uncaughtException", (err) => {
-
   console.error("🚨 Uncaught Exception:", err);
   Sentry.captureException(err);
-
 });
 
 process.on("unhandledRejection", (reason) => {
-
   console.error("🚨 Unhandled Promise Rejection:", reason);
   Sentry.captureException(reason);
-
 });

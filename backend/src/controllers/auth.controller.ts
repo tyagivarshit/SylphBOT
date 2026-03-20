@@ -4,343 +4,416 @@ import crypto from "crypto";
 import prisma from "../config/prisma";
 import { redis } from "../config/redis";
 import {
-generateAccessToken,
-generateRefreshToken,
+  generateAccessToken,
+  generateRefreshToken,
 } from "../utils/generateToken";
 import { sendVerificationEmail } from "../services/email.service";
 
 const isProd = process.env.NODE_ENV === "production";
 
+/* 🔥 TYPE SAFE */
+type AuthRequest = Request & {
+  user: {
+    id: string;
+    role: string;
+    businessId: string;
+  };
+};
+
+/* 🔥 SAFE IP (NO TS ERROR + PRODUCTION READY) */
+const getIP = (req: Request) =>
+  (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+  req.socket.remoteAddress ||
+  "unknown";
+
+/* 🔥 GLOBAL RATE LIMIT */
+const checkGlobalLimit = async (ip: string) => {
+  const key = `global:${ip}`;
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, 60);
+
+  if (count > 60) {
+    throw new Error("RATE_LIMIT");
+  }
+};
+
 /* ================= REGISTER ================= */
 
 export const register = async (req: Request, res: Response) => {
-try {
-const name = req.body.name?.trim();
-const email = req.body.email?.toLowerCase().trim();
-const password = req.body.password; 
+  try {
+    const ip = getIP(req);
+    await checkGlobalLimit(ip);
 
-if (!name || !email || !password) {
-  return res.status(400).json({ success: false, message: "All fields required" });
-}
+    const name = req.body.name?.trim();
+    const email = req.body.email?.toLowerCase().trim();
+    const password = req.body.password;
 
-const exists = await prisma.user.findUnique({ where: { email } });
-if (exists) {
-  return res.status(400).json({ success: false, message: "Email already exists" });
-}
+    if (!name || !email || !password || password.length < 6) {
+      return res.status(400).json({ success: false });
+    }
 
-const hashed = await bcrypt.hash(password, 12);
+    const hashed = await bcrypt.hash(password, 12);
+    const verifyToken = crypto.randomBytes(32).toString("hex");
 
-const verifyToken = crypto.randomBytes(32).toString("hex");
+    await prisma.$transaction(async (tx) => {
+      const exists = await tx.user.findUnique({ where: { email } });
+      if (exists) throw new Error("EMAIL_EXISTS");
 
-const user = await prisma.user.create({
-  data: {
-    name,
-    email,
-    password: hashed,
-    verifyToken,
-    verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
-  },
-});
+      const user = await tx.user.create({
+        data: {
+          name,
+          email,
+          password: hashed,
+          verifyToken,
+          verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
 
-const business = await prisma.business.create({
-  data: {
-    name: `${name}'s Business`,
-    ownerId: user.id,
-  },
-});
+      const business = await tx.business.create({
+        data: {
+          name: `${name}'s Business`,
+          ownerId: user.id,
+        },
+      });
 
-/* 🔥 SAFE PLAN FETCH */
-const trialPlan = await prisma.plan.findUnique({
-  where: { name: "FREE_TRIAL" },
-});
+      const trialPlan = await tx.plan.findUnique({
+        where: { name: "FREE_TRIAL" },
+      });
 
-if (!trialPlan) {
-  return res.status(500).json({
-    success: false,
-    message: "FREE_TRIAL plan not found in DB",
-  });
-}
+      if (!trialPlan) throw new Error("PLAN_NOT_FOUND");
 
-/* 🔥 CLEAR TRIAL SUBSCRIPTION */
-await prisma.subscription.create({
-  data: {
-    businessId: business.id,
-    planId: trialPlan.id,
-    status: "ACTIVE",
-    isTrial: true,
-    trialUsed: true,
-    currency: "INR",
-    currentPeriodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-  },
-});
+      await tx.subscription.create({
+        data: {
+          businessId: business.id,
+          planId: trialPlan.id,
+          status: "ACTIVE",
+          isTrial: true,
+          trialUsed: true,
+          currentPeriodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
 
-await prisma.usage.create({
-  data: {
-    businessId: business.id,
-    month: new Date().getMonth() + 1,
-    year: new Date().getFullYear(),
-    aiCallsUsed: 0,
-    messagesUsed: 0,
-    followupsUsed: 0,
-  },
-});
+      await tx.usage.create({
+        data: {
+          businessId: business.id,
+          month: new Date().getMonth() + 1,
+          year: new Date().getFullYear(),
+        },
+      });
+    });
 
-const link = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verifyToken}`;
-await sendVerificationEmail(email, link);
+    const link = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verifyToken}`;
+    await sendVerificationEmail(email, link);
 
-return res.status(201).json({
-  success: true,
-  message: "Registered. Verify email.",
-});
+    return res.status(201).json({ success: true });
 
-} catch (e) {
-console.error(e);
-return res.status(500).json({ success: false, message: "Registration failed" });
-}
+  } catch (e: any) {
+    if (e.message === "EMAIL_EXISTS") {
+      return res.status(400).json({ success: false });
+    }
+    if (e.message === "RATE_LIMIT") {
+      return res.status(429).json({ success: false });
+    }
+    return res.status(500).json({ success: false });
+  }
 };
 
 /* ================= LOGIN ================= */
 
 export const login = async (req: Request, res: Response) => {
-try {
-const email = req.body.email?.toLowerCase().trim();
-const password = req.body.password;
+  try {
+    const ip = getIP(req);
+    await checkGlobalLimit(ip);
 
-if (!email || !password) {
-  return res.status(400).json({ success: false });
-}
+    const email = req.body.email?.toLowerCase().trim();
+    const password = req.body.password;
 
-const key = `login:limit:${email}:${req.ip}`;
+    if (!email || !password) {
+      return res.status(400).json({ success: false });
+    }
 
-const user = await prisma.user.findUnique({ where: { email } });
+    const key = `login:limit:${email}:${ip}`;
 
-/* ❌ INVALID LOGIN */
-if (!user || !(await bcrypt.compare(password, user.password))) {
-  await redis.incr(key);
-  await redis.expire(key, 60 * 15);
+    const user = await prisma.user.findUnique({ where: { email } });
 
-  return res.status(400).json({
-    success: false,
-    message: "Invalid credentials"
-  });
-}
+    if (
+      !user ||
+      !user.isActive ||
+      !user.isVerified ||
+      !(await bcrypt.compare(password, user.password))
+    ) {
+      await redis.incr(key);
+      await redis.expire(key, 60 * 15);
+      return res.status(400).json({ success: false });
+    }
 
-if (!user.isVerified) {
-  return res.status(403).json({ success: false, message: "Verify email first" });
-}
+    await redis.del(key);
 
-/* ✅ SUCCESS → RESET LIMITER */
-await redis.del(key);
+    const business = await prisma.business.findFirst({
+      where: { ownerId: user.id },
+    });
 
-const business = await prisma.business.findFirst({
-  where: { ownerId: user.id },
-});
+    if (!business) {
+      return res.status(500).json({ success: false });
+    }
 
-const accessToken = generateAccessToken(user.id, user.role, business!.id);
-const refreshToken = generateRefreshToken(user.id);
+    const accessToken = generateAccessToken(
+      user.id,
+      user.role,
+      business.id,
+      user.tokenVersion
+    );
 
-await prisma.refreshToken.create({
-  data: {
-    token: refreshToken,
-    userId: user.id,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-  },
-});
+    const refreshToken = generateRefreshToken(
+      user.id,
+      user.tokenVersion
+    );
 
-res.cookie("accessToken", accessToken, {
-  httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? "none" : "lax",
-  maxAge: 60 * 60 * 1000,
-  path: "/",
-});
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        userAgent: req.headers["user-agent"],
+        ip,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
 
-res.cookie("refreshToken", refreshToken, {
-  httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? "none" : "lax",
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: "/",
-});
+    console.log("LOGIN_SUCCESS", { userId: user.id, ip });
 
-return res.json({ success: true });
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 15 * 60 * 1000,
+      path: "/",
+    });
 
-} catch (e) {
-console.error(e);
-return res.status(500).json({ success: false });
-}
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/",
+    });
+
+    return res.json({ success: true });
+
+  } catch (e: any) {
+    if (e.message === "RATE_LIMIT") {
+      return res.status(429).json({ success: false });
+    }
+    return res.status(500).json({ success: false });
+  }
 };
 
 /* ================= GET ME ================= */
 
-export const getMe = async (req: Request, res: Response) => {
-try {
-if (!req.user) {
-return res.status(401).json({ success: false });
-}
+export const getMe = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, name: true, email: true, role: true },
+    });
 
-const user = await prisma.user.findUnique({
-  where: { id: req.user.id },
-  select: { id: true, name: true, email: true, role: true },
-});
+    if (!user) {
+      return res.status(401).json({ success: false });
+    }
 
-return res.json({ success: true, user });
+    return res.json({ success: true, user });
 
-} catch {
-return res.status(500).json({ success: false });
-}
+  } catch {
+    return res.status(500).json({ success: false });
+  }
 };
 
 /* ================= LOGOUT ================= */
 
-export const logout = async (req: Request, res: Response) => {
-try {
-const token = req.cookies.refreshToken;
+export const logout = async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { tokenVersion: { increment: 1 } },
+    });
 
-if (token) {
-  await prisma.refreshToken.deleteMany({ where: { token } });
-}
+    await prisma.refreshToken.deleteMany({
+      where: { userId: req.user.id },
+    });
 
-res.clearCookie("accessToken");
-res.clearCookie("refreshToken");
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
 
-return res.json({ success: true });
+    return res.json({ success: true });
 
-} catch {
-return res.status(500).json({ success: false });
-}
+  } catch {
+    return res.status(500).json({ success: false });
+  }
 };
 
 /* ================= VERIFY EMAIL ================= */
 
 export const verifyEmail = async (req: Request, res: Response) => {
-try {
-const token = req.query.token as string;
+  try {
+    const ip = getIP(req);
+    await checkGlobalLimit(ip);
 
-const user = await prisma.user.findFirst({
-  where: {
-    verifyToken: token,
-    verifyTokenExpiry: { gt: new Date() },
-  },
-});
+    const token = req.body.token;
 
-if (!user) {
-  return res.status(400).json({ success: false });
-}
+    const user = await prisma.user.findFirst({
+      where: {
+        verifyToken: token,
+        verifyTokenExpiry: { gt: new Date() },
+      },
+    });
 
-await prisma.user.update({
-  where: { id: user.id },
-  data: {
-    isVerified: true,
-    verifyToken: null,
-    verifyTokenExpiry: null,
-  },
-});
+    if (!user) {
+      return res.status(400).json({ success: false });
+    }
 
-return res.json({ success: true });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isVerified: true,
+        verifyToken: null,
+        verifyTokenExpiry: null,
+      },
+    });
 
-} catch {
-return res.status(500).json({ success: false });
-}
+    return res.json({ success: true });
+
+  } catch (e: any) {
+    if (e.message === "RATE_LIMIT") {
+      return res.status(429).json({ success: false });
+    }
+    return res.status(500).json({ success: false });
+  }
 };
 
 /* ================= RESEND ================= */
 
 export const resendVerificationEmail = async (req: Request, res: Response) => {
-try {
-const email = req.body.email?.toLowerCase().trim();
+  try {
+    const ip = getIP(req);
+    await checkGlobalLimit(ip);
 
-const user = await prisma.user.findUnique({ where: { email } });
+    const email = req.body.email?.toLowerCase().trim();
 
-if (!user || user.isVerified) {
-  return res.status(400).json({ success: false });
-}
+    const user = await prisma.user.findUnique({ where: { email } });
 
-const token = crypto.randomBytes(32).toString("hex");
+    if (!user || user.isVerified) {
+      return res.status(400).json({ success: false });
+    }
 
-await prisma.user.update({
-  where: { id: user.id },
-  data: {
-    verifyToken: token,
-    verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
-  },
-});
+    const token = crypto.randomBytes(32).toString("hex");
 
-const link = `${process.env.FRONTEND_URL}/auth/verify-email?token=${token}`;
-await sendVerificationEmail(email, link);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        verifyToken: token,
+        verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+    });
 
-return res.json({ success: true });
+    const link = `${process.env.FRONTEND_URL}/auth/verify-email?token=${token}`;
+    await sendVerificationEmail(email, link);
 
-} catch {
-return res.status(500).json({ success: false });
-}
+    return res.json({ success: true });
+
+  } catch (e: any) {
+    if (e.message === "RATE_LIMIT") {
+      return res.status(429).json({ success: false });
+    }
+    return res.status(500).json({ success: false });
+  }
 };
 
 /* ================= FORGOT PASSWORD ================= */
 
 export const forgotPassword = async (req: Request, res: Response) => {
-try {
-const email = req.body.email?.toLowerCase().trim();
+  try {
+    const ip = getIP(req);
+    await checkGlobalLimit(ip);
 
-const user = await prisma.user.findUnique({ where: { email } });
+    const email = req.body.email?.toLowerCase().trim();
 
-if (!user) {
-  return res.json({ success: true });
-}
+    const user = await prisma.user.findUnique({ where: { email } });
 
-const raw = crypto.randomBytes(32).toString("hex");
-const hashed = crypto.createHash("sha256").update(raw).digest("hex");
+    if (!user) {
+      return res.json({ success: true });
+    }
 
-await prisma.user.update({
-  where: { id: user.id },
-  data: {
-    resetToken: hashed,
-    resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
-  },
-});
+    const raw = crypto.randomBytes(32).toString("hex");
+    const hashed = crypto.createHash("sha256").update(raw).digest("hex");
 
-const link = `${process.env.FRONTEND_URL}/auth/reset-password?token=${raw}`;
-await sendVerificationEmail(email, link);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken: hashed,
+        resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
 
-return res.json({ success: true });
+    const link = `${process.env.FRONTEND_URL}/auth/reset-password?token=${raw}`;
+    await sendVerificationEmail(email, link);
 
-} catch {
-return res.status(500).json({ success: false });
-}
+    return res.json({ success: true });
+
+  } catch (e: any) {
+    if (e.message === "RATE_LIMIT") {
+      return res.status(429).json({ success: false });
+    }
+    return res.status(500).json({ success: false });
+  }
 };
 
 /* ================= RESET PASSWORD ================= */
 
 export const resetPassword = async (req: Request, res: Response) => {
-try {
-const { token, password } = req.body;
-const hashed = crypto.createHash("sha256").update(token).digest("hex");
+  try {
+    const ip = getIP(req);
+    await checkGlobalLimit(ip);
 
-const user = await prisma.user.findFirst({
-  where: {
-    resetToken: hashed,
-    resetTokenExpiry: { gt: new Date() },
-  },
-});
+    const { token, password } = req.body;
 
-if (!user) {
-  return res.status(400).json({ success: false });
-}
+    if (!token || !password || password.length < 6) {
+      return res.status(400).json({ success: false });
+    }
 
-const newPass = await bcrypt.hash(password, 12);
+    const hashed = crypto.createHash("sha256").update(token).digest("hex");
 
-await prisma.user.update({
-  where: { id: user.id },
-  data: {
-    password: newPass,
-    resetToken: null,
-    resetTokenExpiry: null,
-  },
-});
+    const user = await prisma.user.findFirst({
+      where: {
+        resetToken: hashed,
+        resetTokenExpiry: { gt: new Date() },
+      },
+    });
 
-return res.json({ success: true });
+    if (!user) {
+      return res.status(400).json({ success: false });
+    }
 
-} catch {
-return res.status(500).json({ success: false });
-}
+    const newPass = await bcrypt.hash(password, 12);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: newPass,
+        resetToken: null,
+        resetTokenExpiry: null,
+        tokenVersion: { increment: 1 },
+      },
+    });
+
+    await prisma.refreshToken.deleteMany({
+      where: { userId: user.id },
+    });
+
+    return res.json({ success: true });
+
+  } catch (e: any) {
+    if (e.message === "RATE_LIMIT") {
+      return res.status(429).json({ success: false });
+    }
+    return res.status(500).json({ success: false });
+  }
 };

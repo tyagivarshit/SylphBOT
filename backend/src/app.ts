@@ -32,6 +32,7 @@ import trainingRoutes from "./routes/training.routes";
 
 /* 🔥 LEAD CONTROL (NEW) */
 import leadRoutes from "./routes/lead.routes";
+import analyticsRoutes from "./routes/analytics.routes";
 
 import {
   authLimiter,
@@ -162,6 +163,8 @@ app.use("/api/training", trainingRoutes);
 
 /* 🔥 HUMAN / AI TOGGLE */
 app.use("/api/leads", leadRoutes);
+
+app.use("/api/analytics", analyticsRoutes);
 
 /* ============================= */
 /* HEALTH */

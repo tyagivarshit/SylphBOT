@@ -17,10 +17,13 @@ const [email,setEmail] = useState("");
 const [password,setPassword] = useState("");
 const [loading,setLoading] = useState(false);
 const [showPassword,setShowPassword] = useState(false);
+const [checked,setChecked] = useState(false); // 🔥 added
 
-/* ================= SESSION CHECK ================= */
+/* ================= SESSION CHECK (FIXED) ================= */
 
 useEffect(()=>{
+
+if(checked) return; // 🔥 prevent multiple calls
 
 const checkSession = async()=>{
 
@@ -39,11 +42,15 @@ router.replace("/dashboard")
 
 }catch{}
 
+finally{
+setChecked(true); // 🔥 mark done
+}
+
 }
 
 checkSession()
 
-},[router])
+},[checked,router])
 
 /* ================= EMAIL VALIDATION ================= */
 
@@ -93,11 +100,11 @@ setLoading(false);
 
 };
 
-/* ================= GOOGLE LOGIN ================= */
+/* ================= GOOGLE LOGIN (FIXED) ================= */
 
 const handleGoogleLogin = ()=>{
 
-const API = process.env.NEXT_PUBLIC_API_URL;
+const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, ""); // 🔥 safe normalize
 
 if(!API){
 toast.error("API URL not configured");

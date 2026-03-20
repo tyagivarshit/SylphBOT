@@ -1,120 +1,100 @@
-const API = process.env.NEXT_PUBLIC_API_URL;
+const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 
-export async function loginUser(email: string, password: string) {
-
-  const res = await fetch(`${API}/api/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    credentials: "include",
-    body: JSON.stringify({
-      email,
-      password
-    })
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data?.message || "Login failed");
+/* 🔥 SAFE FETCH WRAPPER (timeout + errors + env check) */
+async function safeFetch(url: string, options: RequestInit = {}) {
+  if (!API) {
+    throw new Error("API not configured");
   }
 
-  return data;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      credentials: "include",
+      signal: controller.signal,
+    });
+
+    const contentType = res.headers.get("content-type");
+
+    let data: any = null;
+
+    if (contentType?.includes("application/json")) {
+      data = await res.json();
+    } else {
+      data = { message: "Invalid server response" };
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.message || "Request failed");
+    }
+
+    return data;
+
+  } catch (err: any) {
+
+    if (err.name === "AbortError") {
+      throw new Error("Request timeout");
+    }
+
+    throw new Error(err?.message || "Network error");
+
+  } finally {
+    clearTimeout(timeout);
+  }
 }
+
+/* ================= LOGIN ================= */
+
+export async function loginUser(email: string, password: string) {
+  return safeFetch(`${API}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+/* ================= REGISTER ================= */
 
 export async function registerUser(
   name: string,
   email: string,
   password: string
 ) {
-
-  const res = await fetch(`${API}/api/auth/register`, {
+  return safeFetch(`${API}/api/auth/register`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    credentials: "include",
-    body: JSON.stringify({
-      name,
-      email,
-      password
-    })
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, password }),
   });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data?.message || "Registration failed");
-  }
-
-  return data;
 }
 
+/* ================= VERIFY EMAIL ================= */
+
 export async function verifyEmail(token: string) {
-
-  const res = await fetch(
-    `${API}/api/auth/verify-email?token=${token}`,
-    {
-      credentials: "include"
-    }
+  return safeFetch(
+    `${API}/api/auth/verify-email?token=${encodeURIComponent(token)}`
   );
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data?.message || "Verification failed");
-  }
-
-  return data;
 }
 
 /* ================= RESEND VERIFICATION ================= */
 
 export async function resendVerification(email: string) {
-
-  const res = await fetch(`${API}/api/auth/resend-verification`, {
+  return safeFetch(`${API}/api/auth/resend-verification`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    credentials: "include",
-    body: JSON.stringify({
-      email
-    })
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
   });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data?.message || "Failed to resend verification email");
-  }
-
-  return data;
 }
 
 /* ================= FORGOT PASSWORD ================= */
 
 export async function forgotPassword(email: string) {
-
-  const res = await fetch(`${API}/api/auth/forgot-password`, {
+  return safeFetch(`${API}/api/auth/forgot-password`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    credentials: "include",
-    body: JSON.stringify({
-      email
-    })
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
   });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data?.message || "Failed to send reset link");
-  }
-
-  return data;
 }
 
 /* ================= RESET PASSWORD ================= */
@@ -123,24 +103,9 @@ export async function resetPassword(
   token: string,
   password: string
 ) {
-
-  const res = await fetch(`${API}/api/auth/reset-password`, {
+  return safeFetch(`${API}/api/auth/reset-password`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    credentials: "include",
-    body: JSON.stringify({
-      token,
-      password
-    })
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
   });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data?.message || "Password reset failed");
-  }
-
-  return data;
 }

@@ -19,6 +19,7 @@ const [password,setPassword] = useState("")
 const [loading,setLoading] = useState(false)
 const [showPassword,setShowPassword] = useState(false)
 const [emailSent,setEmailSent] = useState(false)
+const [resendLoading,setResendLoading] = useState(false) // 🔥 added
 
 /* ================= EMAIL VALIDATION ================= */
 
@@ -35,7 +36,7 @@ if(e) e.preventDefault()
 if(loading) return
 
 const cleanName = name.trim()
-const cleanEmail = email.trim()
+const cleanEmail = email.trim().toLowerCase() // 🔥 normalize
 
 if(!cleanName || !cleanEmail || !password){
 toast.error("Fill all fields")
@@ -64,11 +65,12 @@ setEmailSent(true)
 
 }catch(err:any){
 
-const message =
-err?.message ||
-"Server error"
-
-toast.error(message)
+/* 🔥 duplicate account handling */
+if(err?.message?.toLowerCase().includes("exists")){
+toast.error("Account already exists. Try login or Google sign-in")
+}else{
+toast.error(err?.message || "Server error")
+}
 
 }finally{
 
@@ -78,7 +80,7 @@ setLoading(false)
 
 }
 
-/* ================= RESEND EMAIL ================= */
+/* ================= RESEND EMAIL (RATE LIMITED) ================= */
 
 const handleResendVerification = async ()=>{
 
@@ -87,15 +89,25 @@ toast.error("Enter email first")
 return
 }
 
+if(resendLoading) return // 🔥 prevent spam
+
 try{
+
+setResendLoading(true)
 
 await resendVerification(email)
 
 toast.success("Verification email sent again")
 
+/* 🔥 cooldown 30s */
+setTimeout(()=>{
+setResendLoading(false)
+},30000)
+
 }catch(err:any){
 
 toast.error(err?.message || "Failed to resend email")
+setResendLoading(false)
 
 }
 
@@ -105,7 +117,7 @@ toast.error(err?.message || "Failed to resend email")
 
 const handleGoogleRegister = ()=>{
 
-const API = process.env.NEXT_PUBLIC_API_URL
+const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/,"") // 🔥 safe normalize
 
 if(!API){
 toast.error("API URL not configured")
@@ -174,9 +186,10 @@ Click the link in your email to activate your account.
 
 <button
 onClick={handleResendVerification}
-className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition"
+disabled={resendLoading} // 🔥 disable spam
+className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition disabled:opacity-70"
 >
-Resend verification email
+{resendLoading ? "Wait 30s..." : "Resend verification email"}
 </button>
 
 <p className="text-xs text-gray-500 mt-4">
@@ -356,5 +369,4 @@ Login
 </div>
 
 )
-
 }

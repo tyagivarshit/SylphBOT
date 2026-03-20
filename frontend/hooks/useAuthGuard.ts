@@ -1,51 +1,23 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/useAuth" // 🔥 use global context
 
 export default function useAuthGuard(){
 
   const router = useRouter()
-  const [loading,setLoading] = useState(true)
+  const { user, loading } = useAuth()
 
   useEffect(()=>{
 
-    let mounted = true
+    if(loading) return // 🔥 wait for auth load
 
-    const checkAuth = async()=>{
-
-      try{
-
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
-          {
-            credentials:"include",
-            cache:"no-store"
-          }
-        )
-
-        if(!res.ok){
-          router.replace("/auth/login")
-          return
-        }
-
-        if(mounted){
-          setLoading(false)
-        }
-
-      }catch{
-        router.replace("/auth/login")
-      }
-
+    if(!user){
+      router.replace("/auth/login")
     }
 
-    checkAuth()
-
-    return ()=>{
-      mounted = false
-    }
-
-  },[router])
+  },[user,loading,router])
 
   return loading
 

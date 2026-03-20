@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { verifyEmail } from "@/lib/auth"
+import { verifyEmail, resendVerification } from "@/lib/auth"
+import toast from "react-hot-toast"
 
 export default function VerifyEmailPage() {
 
@@ -11,6 +12,8 @@ const params = useSearchParams()
 
 const [status,setStatus] = useState<"loading"|"success"|"error">("loading")
 const [message,setMessage] = useState("")
+const [resendLoading,setResendLoading] = useState(false)
+const [email,setEmail] = useState("") // 🔥 for resend
 
 useEffect(()=>{
 
@@ -37,8 +40,16 @@ setMessage("Your email has been successfully verified.")
 
 }catch(err:any){
 
+/* 🔥 better UX handling */
+if(err?.message?.toLowerCase().includes("expired")){
+setMessage("Verification link expired. You can request a new one.")
+}else if(err?.message?.toLowerCase().includes("invalid")){
+setMessage("Invalid or already used link.")
+}else{
+setMessage("Verification failed")
+}
+
 setStatus("error")
-setMessage(err?.message || "Verification failed")
 
 }
 
@@ -47,6 +58,35 @@ setMessage(err?.message || "Verification failed")
 runVerification()
 
 },[params])
+
+/* 🔥 RESEND (COOLDOWN) */
+const handleResend = async()=>{
+
+if(!email){
+toast.error("Enter your email")
+return
+}
+
+if(resendLoading) return
+
+try{
+
+setResendLoading(true)
+
+await resendVerification(email)
+
+toast.success("Verification email sent")
+
+setTimeout(()=>{
+setResendLoading(false)
+},30000)
+
+}catch{
+toast.error("Try again later")
+setResendLoading(false)
+}
+
+}
 
 return(
 
@@ -61,13 +101,9 @@ return(
 <div className="w-14 h-14 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin"/>
 </div>
 
-<h1 className="text-xl sm:text-2xl font-bold text-gray-900">
+<h1 className="text-xl font-bold text-gray-900">
 Verifying Email...
 </h1>
-
-<p className="text-gray-500 mt-3 text-sm">
-Please wait while we verify your email.
-</p>
 </>
 
 )}
@@ -75,41 +111,18 @@ Please wait while we verify your email.
 {status === "success" && (
 
 <>
-<div className="flex justify-center mb-6">
-
-<div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-green-100 flex items-center justify-center">
-
-<svg
-className="w-7 h-7 sm:w-8 sm:h-8 text-green-600"
-fill="none"
-stroke="currentColor"
-strokeWidth="3"
-viewBox="0 0 24 24"
->
-
-<path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
-
-</svg>
-
-</div>
-
-</div>
-
-<h1 className="text-xl sm:text-2xl font-bold text-gray-900">
+<h1 className="text-xl font-bold text-green-600">
 Email Verified 🎉
 </h1>
 
-<p className="text-gray-500 mt-3 text-sm">
-{message}
-</p>
+<p className="mt-3 text-sm">{message}</p>
 
 <Link
 href="/auth/login"
-className="mt-6 inline-block bg-blue-600 hover:bg-blue-700 text-white px-5 sm:px-6 py-2.5 sm:py-3 rounded-lg font-medium transition"
+className="mt-6 inline-block bg-blue-600 text-white px-5 py-2.5 rounded-lg"
 >
 Go to Login
 </Link>
-
 </>
 
 )}
@@ -117,41 +130,35 @@ Go to Login
 {status === "error" && (
 
 <>
-<div className="flex justify-center mb-6">
-
-<div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-red-100 flex items-center justify-center">
-
-<svg
-className="w-7 h-7 sm:w-8 sm:h-8 text-red-600"
-fill="none"
-stroke="currentColor"
-strokeWidth="3"
-viewBox="0 0 24 24"
->
-
-<path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
-
-</svg>
-
-</div>
-
-</div>
-
-<h1 className="text-xl sm:text-2xl font-bold text-gray-900">
+<h1 className="text-xl font-bold text-red-600">
 Verification Failed
 </h1>
 
-<p className="text-gray-500 mt-3 text-sm">
-{message}
-</p>
+<p className="mt-3 text-sm">{message}</p>
+
+{/* 🔥 RESEND UI */}
+<input
+type="email"
+placeholder="Enter your email"
+value={email}
+onChange={(e)=>setEmail(e.target.value)}
+className="w-full mt-4 border px-3 py-2 rounded-lg"
+/>
+
+<button
+onClick={handleResend}
+disabled={resendLoading}
+className="mt-3 w-full bg-blue-600 text-white py-2 rounded-lg disabled:opacity-70"
+>
+{resendLoading ? "Wait 30s..." : "Resend verification"}
+</button>
 
 <Link
 href="/auth/login"
-className="mt-6 inline-block bg-blue-600 hover:bg-blue-700 text-white px-5 sm:px-6 py-2.5 sm:py-3 rounded-lg font-medium transition"
+className="mt-4 block text-blue-600 text-sm"
 >
 Back to Login
 </Link>
-
 </>
 
 )}

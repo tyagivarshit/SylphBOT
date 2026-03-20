@@ -1,8 +1,12 @@
-import { Request, Response } from "express"
-import Stripe from "stripe"
-import { stripe } from "../services/stripe.service"
-import prisma from "../config/prisma"
-import { env } from "../config/env"
+import { Request, Response } from "express";
+import Stripe from "stripe";
+import { stripe } from "../services/stripe.service";
+import prisma from "../config/prisma";
+import { env } from "../config/env";
+import { getPlanFromPrice } from "../config/stripe.price.map";
+import Redis from "ioredis";
+
+const redis = new Redis(process.env.REDIS_URL!);
 
 /* ======================================
 HELPER
@@ -11,14 +15,9 @@ HELPER
 function getSubscriptionId(
   subscription: string | Stripe.Subscription | null | undefined
 ): string | null {
-
-  if (!subscription) return null
-
-  if (typeof subscription === "string") {
-    return subscription
-  }
-
-  return subscription.id
+  if (!subscription) return null;
+  if (typeof subscription === "string") return subscription;
+  return subscription.id;
 }
 
 /* ======================================
@@ -30,27 +29,19 @@ export const stripeWebhook = async (
   res: Response
 ) => {
 
-  console.log("🔥 WEBHOOK HIT")
+  const sig = req.headers["stripe-signature"] as string;
 
-  const sig = req.headers["stripe-signature"] as string
-
-  let event: Stripe.Event
+  let event: Stripe.Event;
 
   try {
-
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
       env.STRIPE_WEBHOOK_SECRET
-    )
-
-    console.log("🔥 EVENT:", event.type)
-
+    );
   } catch (err) {
-
-    console.error("Stripe signature verification failed")
-
-    return res.status(400).send("Webhook Error")
+    console.error("❌ Stripe signature failed");
+    return res.status(400).send("Webhook Error");
   }
 
   try {
@@ -60,19 +51,19 @@ export const stripeWebhook = async (
     ====================================== */
 
     const existingEvent = await prisma.stripeEvent.findUnique({
-      where: { eventId: event.id }
-    })
+      where: { eventId: event.id },
+    });
 
     if (existingEvent) {
-      return res.json({ received: true })
+      return res.json({ received: true });
     }
 
     await prisma.stripeEvent.create({
       data: {
         eventId: event.id,
-        type: event.type
-      }
-    })
+        type: event.type,
+      },
+    });
 
     switch (event.type) {
 
@@ -82,80 +73,90 @@ export const stripeWebhook = async (
 
       case "checkout.session.completed": {
 
-        const session = event.data.object as Stripe.Checkout.Session
+        const session = event.data.object as Stripe.Checkout.Session;
 
-        console.log("🔥 SESSION METADATA:", session.metadata) // ✅ DEBUG
-
-        const businessId = session.metadata?.businessId
-        const planType = session.metadata?.plan
-        const currency = session.metadata?.currency || "INR"
+        const businessId = session.metadata?.businessId;
+        const currency = session.metadata?.currency || "INR";
 
         const subscriptionId = getSubscriptionId(
           session.subscription as any
-        )
+        );
 
-        if (!businessId || !subscriptionId) break
+        if (!businessId || !subscriptionId) break;
 
-        const stripeSub = await stripe.subscriptions.retrieve(subscriptionId)
+        /* 🔥 SECURE PLAN FROM PRICE */
+        const lineItems = await stripe.checkout.sessions.listLineItems(
+          session.id,
+          { limit: 1 }
+        );
 
-        /* 🔥 FIXED PLAN DETECTION */
-        let plan = null
+        const priceId = lineItems.data[0]?.price?.id;
+        const planType = getPlanFromPrice(priceId);
 
-        if (planType) {
-          plan = await prisma.plan.findFirst({
-            where: {
-              OR: [
-                { name: planType },
-                { type: planType }
-              ]
-            }
-          })
+        if (!planType) {
+          console.error("❌ Unknown priceId:", priceId);
+          break;
         }
+
+        const plan = await prisma.plan.findFirst({
+          where: {
+            OR: [
+              { name: planType },
+              { type: planType },
+            ],
+          },
+        });
 
         if (!plan) {
-          console.error("❌ Plan not found:", planType)
-          break
+          console.error("❌ Plan not found:", planType);
+          break;
         }
+
+        const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
 
         const periodEnd =
           (stripeSub as any).current_period_end
             ? new Date((stripeSub as any).current_period_end * 1000)
-            : null
+            : null;
 
-        await prisma.subscription.updateMany({
-
+        /* 🔥 EVENT ORDER PROTECTION */
+        const existing = await prisma.subscription.findUnique({
           where: { businessId },
+        });
 
+        if (
+          existing?.currentPeriodEnd &&
+          periodEnd &&
+          existing.currentPeriodEnd > periodEnd
+        ) {
+          break;
+        }
+
+        await prisma.subscription.update({
+          where: { businessId },
           data: {
-
             stripeSubscriptionId: stripeSub.id,
-
             stripeCustomerId:
               typeof stripeSub.customer === "string"
                 ? stripeSub.customer
-                : null,
-
+                : stripeSub.customer?.id || null,
             planId: plan.id,
-
             currency,
-
             status:
               stripeSub.status === "active" ||
               stripeSub.status === "trialing"
                 ? "ACTIVE"
                 : "INACTIVE",
-
             currentPeriodEnd: periodEnd,
-
-            /* 🔥 TRIAL → PAID FIX */
             isTrial: stripeSub.status === "trialing",
-            trialUsed: true
-          }
-        })
+            trialUsed: true,
+          },
+        });
 
-        console.log("✅ PLAN UPDATED:", plan.name)
+        /* 🔥 CACHE INVALIDATION */
+        await redis.del(`sub:${businessId}`);
 
-        break
+        break;
       }
 
       /* ======================================
@@ -164,34 +165,43 @@ export const stripeWebhook = async (
 
       case "customer.subscription.updated": {
 
-        const sub = event.data.object as Stripe.Subscription
+        const sub = event.data.object as Stripe.Subscription;
 
         const periodEnd =
           (sub as any).current_period_end
             ? new Date((sub as any).current_period_end * 1000)
-            : null
+            : null;
 
-        await prisma.subscription.updateMany({
+        const existing = await prisma.subscription.findFirst({
+          where: { stripeSubscriptionId: sub.id },
+        });
 
-          where: {
-            stripeSubscriptionId: sub.id
-          },
+        if (
+          existing?.currentPeriodEnd &&
+          periodEnd &&
+          existing.currentPeriodEnd > periodEnd
+        ) {
+          break;
+        }
 
+        await prisma.subscription.update({
+          where: { stripeSubscriptionId: sub.id },
           data: {
-
             status:
               sub.status === "active" ||
               sub.status === "trialing"
                 ? "ACTIVE"
                 : "INACTIVE",
-
             currentPeriodEnd: periodEnd,
+            isTrial: sub.status === "trialing",
+          },
+        });
 
-            isTrial: sub.status === "trialing"
-          }
-        })
+        if (existing?.businessId) {
+          await redis.del(`sub:${existing.businessId}`);
+        }
 
-        break
+        break;
       }
 
       /* ======================================
@@ -200,20 +210,24 @@ export const stripeWebhook = async (
 
       case "customer.subscription.deleted": {
 
-        const sub = event.data.object as Stripe.Subscription
+        const sub = event.data.object as Stripe.Subscription;
 
-        await prisma.subscription.updateMany({
+        const existing = await prisma.subscription.findFirst({
+          where: { stripeSubscriptionId: sub.id },
+        });
 
-          where: {
-            stripeSubscriptionId: sub.id
-          },
-
+        await prisma.subscription.update({
+          where: { stripeSubscriptionId: sub.id },
           data: {
-            status: "CANCELLED"
-          }
-        })
+            status: "CANCELLED",
+          },
+        });
 
-        break
+        if (existing?.businessId) {
+          await redis.del(`sub:${existing.businessId}`);
+        }
+
+        break;
       }
 
       /* ======================================
@@ -222,26 +236,30 @@ export const stripeWebhook = async (
 
       case "invoice.payment_failed": {
 
-        const invoice = event.data.object as Stripe.Invoice
+        const invoice = event.data.object as Stripe.Invoice;
 
         const subscriptionId = getSubscriptionId(
           (invoice as any).subscription
-        )
+        );
 
-        if (!subscriptionId) break
+        if (!subscriptionId) break;
 
-        await prisma.subscription.updateMany({
+        const existing = await prisma.subscription.findFirst({
+          where: { stripeSubscriptionId: subscriptionId },
+        });
 
-          where: {
-            stripeSubscriptionId: subscriptionId
-          },
-
+        await prisma.subscription.update({
+          where: { stripeSubscriptionId: subscriptionId },
           data: {
-            status: "PAST_DUE"
-          }
-        })
+            status: "PAST_DUE",
+          },
+        });
 
-        break
+        if (existing?.businessId) {
+          await redis.del(`sub:${existing.businessId}`);
+        }
+
+        break;
       }
 
       /* ======================================
@@ -250,40 +268,45 @@ export const stripeWebhook = async (
 
       case "invoice.payment_succeeded": {
 
-        const invoice = event.data.object as Stripe.Invoice
+        const invoice = event.data.object as Stripe.Invoice;
 
         const subscriptionId = getSubscriptionId(
           (invoice as any).subscription
-        )
+        );
 
-        if (!subscriptionId) break
+        if (!subscriptionId) break;
 
-        await prisma.subscription.updateMany({
+        const existing = await prisma.subscription.findFirst({
+          where: { stripeSubscriptionId: subscriptionId },
+        });
 
-          where: {
-            stripeSubscriptionId: subscriptionId
-          },
-
+        await prisma.subscription.update({
+          where: { stripeSubscriptionId: subscriptionId },
           data: {
-            status: "ACTIVE"
-          }
-        })
+            status: "ACTIVE",
+          },
+        });
 
-        break
+        if (existing?.businessId) {
+          await redis.del(`sub:${existing.businessId}`);
+        }
+
+        break;
       }
 
       default:
-        console.log("Unhandled Stripe event:", event.type)
+        console.log("Unhandled event:", event.type);
     }
 
-    return res.json({ received: true })
+    return res.json({ received: true });
 
   } catch (error) {
 
-    console.error("Stripe webhook error:", error)
+    console.error("❌ Stripe webhook error:", error);
 
     return res.status(500).json({
-      message: "Webhook failed"
-    })
+      message: "Webhook failed",
+    });
+
   }
-}
+};

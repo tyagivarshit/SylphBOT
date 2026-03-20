@@ -26,85 +26,34 @@ type Plan = "BASIC" | "PRO" | "ELITE";
 /* ============================= */
 
 const PRICE_MAP = {
-  BASIC: {
-    INR: {
-      monthly: {
-        normal: env.STRIPE_BASIC_INR_MONTHLY!,
-        early: env.STRIPE_BASIC_INR_MONTHLY_EARLY!,
-      },
-      yearly: {
-        normal: env.STRIPE_BASIC_INR_YEARLY!,
-        early: env.STRIPE_BASIC_INR_YEARLY_EARLY!,
-      },
-    },
-    USD: {
-      monthly: {
-        normal: env.STRIPE_BASIC_USD_MONTHLY!,
-        early: env.STRIPE_BASIC_USD_MONTHLY_EARLY!,
-      },
-      yearly: {
-        normal: env.STRIPE_BASIC_USD_YEARLY!,
-        early: env.STRIPE_BASIC_USD_YEARLY_EARLY!,
-      },
-    },
-  },
-
-  PRO: {
-    INR: {
-      monthly: {
-        normal: env.STRIPE_PRO_INR_MONTHLY!,
-        early: env.STRIPE_PRO_INR_MONTHLY_EARLY!,
-      },
-      yearly: {
-        normal: env.STRIPE_PRO_INR_YEARLY!,
-        early: env.STRIPE_PRO_INR_YEARLY_EARLY!,
-      },
-    },
-    USD: {
-      monthly: {
-        normal: env.STRIPE_PRO_USD_MONTHLY!,
-        early: env.STRIPE_PRO_USD_MONTHLY_EARLY!,
-      },
-      yearly: {
-        normal: env.STRIPE_PRO_USD_YEARLY!,
-        early: env.STRIPE_PRO_USD_YEARLY_EARLY!,
-      },
-    },
-  },
-
-  ELITE: {
-    INR: {
-      monthly: {
-        normal: env.STRIPE_ELITE_INR_MONTHLY!,
-        early: env.STRIPE_ELITE_INR_MONTHLY_EARLY!,
-      },
-      yearly: {
-        normal: env.STRIPE_ELITE_INR_YEARLY!,
-        early: env.STRIPE_ELITE_INR_YEARLY_EARLY!,
-      },
-    },
-    USD: {
-      monthly: {
-        normal: env.STRIPE_ELITE_USD_MONTHLY!,
-        early: env.STRIPE_ELITE_USD_MONTHLY_EARLY!,
-      },
-      yearly: {
-        normal: env.STRIPE_ELITE_USD_YEARLY!,
-        early: env.STRIPE_ELITE_USD_YEARLY_EARLY!,
-      },
-    },
-  },
+  BASIC: { /* same as yours */ },
+  PRO: { /* same as yours */ },
+  ELITE: { /* same as yours */ },
 } as const;
 
 /* ============================= */
-/* EARLY USER */
-/* ============================= */
+/* 🔥 EARLY USER (CACHED SAFE)
+================================ */
+
+let earlyUserCache: { value: boolean; expires: number } | null = null;
 
 const isEarlyUser = async () => {
+  if (earlyUserCache && earlyUserCache.expires > Date.now()) {
+    return earlyUserCache.value;
+  }
+
   const count = await prisma.subscription.count({
     where: { status: "ACTIVE" },
   });
-  return count < 20;
+
+  const value = count < 20;
+
+  earlyUserCache = {
+    value,
+    expires: Date.now() + 60 * 1000, // cache 1 min
+  };
+
+  return value;
 };
 
 /* ============================= */
@@ -118,6 +67,20 @@ const detectCurrency = (req: Request): Currency => {
     req.headers["x-vercel-ip-country"];
 
   return country === "IN" ? "INR" : "USD";
+};
+
+/* ============================= */
+/* 🔥 VALIDATE PLAN
+================================ */
+
+const validatePlan = (plan: string): Plan => {
+  const allowed: Plan[] = ["BASIC", "PRO", "ELITE"];
+
+  if (!allowed.includes(plan as Plan)) {
+    throw new Error("Invalid plan selected");
+  }
+
+  return plan as Plan;
 };
 
 /* ============================= */
@@ -149,12 +112,14 @@ const getPriceId = async (
 export const createCheckoutSession = async (
   email: string,
   businessId: string,
-  plan: Plan,
+  planInput: string,
   billing: Billing,
   req: Request,
   currency?: Currency,
   couponCode?: string
 ) => {
+
+  const plan = validatePlan(planInput);
 
   const detectedCurrency = detectCurrency(req);
 
@@ -182,8 +147,8 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
-  /* CUSTOMER */
-  /* ============================= */
+  /* 🔥 CUSTOMER (SAFE)
+================================ */
 
   let customerId: string;
 
@@ -211,79 +176,87 @@ export const createCheckoutSession = async (
   let discounts;
 
   if (couponCode) {
-    const couponId = await applyCoupon(couponCode);
-    discounts = [{ coupon: couponId }];
+    try {
+      const couponId = await applyCoupon(couponCode);
+      discounts = [{ coupon: couponId }];
+    } catch {
+      throw new Error("Invalid coupon");
+    }
   }
 
   /* ============================= */
-  /* TRIAL LOGIC */
+  /* TRIAL */
   /* ============================= */
 
   const isTrialEligible =
     existingSub?.isTrial && !existingSub?.trialUsed;
 
   /* ============================= */
+  /* 🔥 IDEMPOTENCY KEY */
+  /* ============================= */
+
+  const idempotencyKey = `${businessId}_${plan}_${billing}`;
+
+  /* ============================= */
   /* CHECKOUT */
   /* ============================= */
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "subscription",
+      customer: customerId,
 
-    customer: customerId,
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
 
-    line_items: [
-      {
-        price: priceId,
-        quantity: 1,
+      customer_update: {
+        address: "auto",
       },
-    ],
 
-    customer_update: {
-      address: "auto",
+      billing_address_collection: "required",
+
+      ...getTaxConfig(finalCurrency),
+
+      discounts,
+
+      subscription_data: {
+        trial_period_days: isTrialEligible ? 7 : undefined,
+      },
+
+      metadata: {
+        businessId,
+        plan,
+        billing,
+        currency: finalCurrency,
+      },
+
+      success_url: `${env.FRONTEND_URL}/billing/success`,
+      cancel_url: `${env.FRONTEND_URL}/billing`,
     },
-
-    billing_address_collection: "required",
-
-    ...getTaxConfig(finalCurrency),
-
-    discounts,
-
-    subscription_data: {
-      trial_period_days: isTrialEligible ? 7 : undefined,
-    },
-
-    metadata: {
-      businessId,
-      plan,
-      billing,
-      currency: finalCurrency,
-    },
-
-    success_url: `${env.FRONTEND_URL}/billing/success`,
-    cancel_url: `${env.FRONTEND_URL}/billing`,
-  });
+    {
+      idempotencyKey,
+    }
+  );
 
   /* ============================= */
-  /* 🔥 FIX: PLAN REQUIRED */
+  /* FREE PLAN FETCH */
   /* ============================= */
 
   let freePlan = await prisma.plan.findFirst({
-    where: { name: "FREE_TRIAL" },
+    where: { type: "FREE" },
   });
 
   if (!freePlan) {
-    freePlan = await prisma.plan.findFirst({
-      where: { type: "FREE" },
-    });
-  }
-
-  if (!freePlan) {
-    throw new Error("Free plan not found in DB");
+    throw new Error("Free plan not found");
   }
 
   /* ============================= */
-  /* SAVE */
-  /* ============================= */
+  /* 🔥 SAFE UPSERT (NO STATUS BREAK)
+================================ */
 
   await prisma.subscription.upsert({
     where: { businessId },

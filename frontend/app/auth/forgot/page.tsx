@@ -11,18 +11,20 @@ export default function ForgotPage(){
 const [email,setEmail] = useState("")
 const [loading,setLoading] = useState(false)
 const [sent,setSent] = useState(false)
+const [cooldown,setCooldown] = useState(false) // 🔥 added
 
+/* 🔥 FIXED EMAIL VALIDATION */
 const validateEmail = (value:string)=>{
-return /^[^\s@]+@[^\s@]+.[^\s@]+$/.test(value)
+return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
 const handleReset = async(e?:React.FormEvent)=>{
 
 if(e) e.preventDefault()
 
-if(loading) return
+if(loading || cooldown) return // 🔥 prevent spam
 
-const cleanEmail = email.trim()
+const cleanEmail = email.trim().toLowerCase()
 
 if(!cleanEmail){
 toast.error("Enter your email")
@@ -40,13 +42,26 @@ setLoading(true)
 
 await forgotPassword(cleanEmail)
 
+/* 🔥 Always generic success (security) */
 setSent(true)
 
-toast.success("Reset link sent")
+toast.success("If email exists, reset link sent")
 
-}catch(err:any){
+/* 🔥 cooldown 30s */
+setCooldown(true)
+setTimeout(()=>{
+setCooldown(false)
+},30000)
 
-toast.error(err?.message || "Failed to send reset link")
+}catch{
+
+/* 🔥 don't leak info */
+toast.success("If email exists, reset link sent")
+
+setCooldown(true)
+setTimeout(()=>{
+setCooldown(false)
+},30000)
 
 }finally{
 
@@ -93,13 +108,20 @@ Check your email
 </h2>
 
 <p className="text-sm text-gray-500 mt-2">
-We sent a password reset link to your email.
-Please check your inbox.
+If an account exists, we sent a reset link.
 </p>
+
+<button
+onClick={handleReset}
+disabled={cooldown}
+className="mt-4 w-full bg-blue-600 text-white py-2.5 rounded-lg disabled:opacity-70"
+>
+{cooldown ? "Wait 30s..." : "Resend link"}
+</button>
 
 <Link
 href="/auth/login"
-className="inline-block mt-6 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition"
+className="inline-block mt-6 text-blue-600 text-sm font-medium"
 >
 Back to login
 </Link>
@@ -120,8 +142,6 @@ Forgot your password?
 <p className="text-sm text-gray-500 text-center">
 Enter your email and we'll send you a reset link
 </p>
-
-{/* Email */}
 
 <div>
 
@@ -148,19 +168,15 @@ className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
 
 </div>
 
-{/* Button */}
-
 <button
 type="submit"
-disabled={loading}
+disabled={loading || cooldown}
 className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-70"
 >
 
-{loading ? "Sending..." : "Send reset link"}
+{loading ? "Sending..." : cooldown ? "Wait 30s..." : "Send reset link"}
 
 </button>
-
-{/* Footer */}
 
 <p className="text-xs text-gray-500 text-center pt-2">
 
@@ -184,5 +200,4 @@ Login
 </div>
 
 )
-
 }

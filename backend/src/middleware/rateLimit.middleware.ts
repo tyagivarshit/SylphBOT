@@ -1,31 +1,53 @@
 import rateLimit from "express-rate-limit";
 
-/* 🔐 Strict limiter for auth routes */
+/* ======================================
+🔥 KEY GENERATOR (IMPORTANT)
+====================================== */
+
+const keyGenerator = (req: any) => {
+  return req.user?.businessId || req.ip;
+};
+
+/* ======================================
+🔐 AUTH LIMITER
+====================================== */
+
 export const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts per window per IP
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    message: "Too many login attempts. Please try again later.",
+    code: "TOO_MANY_ATTEMPTS",
+    message: "Too many login attempts. Try again later.",
   },
 });
 
-/* 🤖 AI route limiter */
+/* ======================================
+🤖 AI LIMITER
+====================================== */
+
 export const aiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 AI requests per minute
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    message: "Too many AI requests. Please slow down.",
+    code: "AI_RATE_LIMIT",
+    message: "Too many AI requests. Slow down.",
   },
 });
 
-/* 🌍 Global API limiter */
+/* ======================================
+🌍 GLOBAL LIMITER
+====================================== */
+
 export const globalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute
+  windowMs: 60 * 1000,
+  max: 100,
+  keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
 });

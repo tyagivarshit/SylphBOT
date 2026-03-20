@@ -1,109 +1,129 @@
-import { Request, Response } from "express"
-import passport from "passport"
-import prisma from "../config/prisma"
+import { Request, Response, NextFunction } from "express";
+import passport from "passport";
+import prisma from "../config/prisma";
+import crypto from "crypto";
 import {
-generateAccessToken,
-generateRefreshToken
-} from "../utils/generateToken"
+  generateAccessToken,
+  generateRefreshToken,
+} from "../utils/generateToken";
 
-export const googleAuth = passport.authenticate(
-"google",
-{ scope:["profile","email"] }
-)
+const isProd = process.env.NODE_ENV === "production";
 
-export const googleCallback = async (
-req:Request,
-res:Response
-)=>{
+/* 🔥 SAFE IP */
+const getIP = (req: Request) =>
+  (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+  req.socket.remoteAddress ||
+  "unknown";
 
-try{
+/* 🔥 GOOGLE INIT (STATE + WRAPPER) */
+export const googleAuth = (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const state = crypto.randomBytes(16).toString("hex");
 
-const user = req.user as any
+    res.cookie("oauth_state", state, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      maxAge: 10 * 60 * 1000,
+    });
 
-if(!user){
-return res.redirect(
-`${process.env.FRONTEND_URL}/auth/login`
-)
-}
+    passport.authenticate("google", {
+      scope: ["profile", "email"],
+      state,
+    })(req, res, next);
+  } catch {
+    return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+  }
+};
 
-let business = await prisma.business.findFirst({
-where:{ ownerId:user.id }
-})
+/* 🔥 CALLBACK (FULL HARDENED) */
+export const googleCallback = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as any;
 
-/* create business if missing */
+    /* 🔐 STATE CHECK (CSRF PROTECTION) */
+    const stateFromGoogle = req.query.state;
+    const stateFromCookie = req.cookies?.oauth_state;
 
-if(!business){
+    if (!stateFromGoogle || stateFromGoogle !== stateFromCookie) {
+      return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+    }
 
-business = await prisma.business.create({
-data:{
-name:`${user.name}'s Business`,
-ownerId:user.id
-}
-})
+    res.clearCookie("oauth_state");
 
-}
+    /* 🔐 USER VALIDATION */
+    if (!user || !user.id || !user.isActive) {
+      return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+    }
 
-/* create tokens */
+    /* 🔥 MULTI-TENANT SAFE (STRICT) */
+    let business = await prisma.business.findFirst({
+      where: { ownerId: user.id },
+    });
 
-const accessToken = generateAccessToken(
-user.id,
-user.role,
-business.id
-)
+    if (!business) {
+      business = await prisma.business.create({
+        data: {
+          name: `${user.name || "My"} Business`,
+          ownerId: user.id,
+        },
+      });
+    }
 
-const refreshToken = generateRefreshToken(user.id)
+    /* 🔐 TOKENS (WITH VERSION) */
+    const accessToken = generateAccessToken(
+      user.id,
+      user.role,
+      business.id,
+      user.tokenVersion
+    );
 
-const expiry = new Date()
-expiry.setDate(expiry.getDate()+7)
+    const refreshToken = generateRefreshToken(
+      user.id,
+      user.tokenVersion
+    );
 
-await prisma.refreshToken.create({
-data:{
-token:refreshToken,
-userId:user.id,
-expiresAt:expiry
-}
-})
+    const ip = getIP(req);
 
-/* =============================
-PRODUCTION READY COOKIES
-============================= */
+    /* 🔄 STORE SESSION (DEVICE + IP) */
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        userAgent: req.headers["user-agent"],
+        ip,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
 
-const isProd = process.env.NODE_ENV === "production"
+    /* 🔐 COOKIES */
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      path: "/",
+      maxAge: 15 * 60 * 1000,
+    });
 
-/* access token */
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
 
-res.cookie("accessToken", accessToken, {
-httpOnly:true,
-secure:isProd,
-sameSite:isProd ? "none" : "lax",
-path:"/",
-maxAge:15*60*1000
-})
+    /* 🔥 SECURITY LOG */
+    console.log("GOOGLE_LOGIN_SUCCESS", {
+      userId: user.id,
+      ip,
+    });
 
-/* refresh token */
+    return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
 
-res.cookie("refreshToken", refreshToken, {
-httpOnly:true,
-secure:isProd,
-sameSite:isProd ? "none" : "lax",
-path:"/",
-maxAge:7*24*60*60*1000
-})
+  } catch (error) {
+    console.error("Google Auth Error:", error);
 
-/* redirect dashboard */
-
-return res.redirect(
-`${process.env.FRONTEND_URL}/dashboard`
-)
-
-}catch(error){
-
-console.error("Google Auth Error:",error)
-
-return res.redirect(
-`${process.env.FRONTEND_URL}/auth/login`
-)
-
-}
-
-}
+    return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+  }
+};

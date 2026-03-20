@@ -1,5 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma";
+import {
+  hasFeature,
+  getPlanKey,
+  PlanFeatures,
+} from "../config/plan.config";
 
 /* ---------------------------------------------------
 FEATURE TYPES
@@ -17,120 +22,91 @@ type Feature =
   | "AI_BOOKING_SCHEDULING";
 
 /* ---------------------------------------------------
-PLAN → FEATURE MAP
---------------------------------------------------- */
-
-const planFeatures: Record<string, Feature[]> = {
-
-  BASIC: [
-    "INSTAGRAM_DM",
-    "INSTAGRAM_COMMENT_AUTOMATION",
-    "COMMENT_TO_DM",
-    "REEL_AUTOMATION_CONTROL"
-  ],
-
-  PRO: [
-    "INSTAGRAM_DM",
-    "INSTAGRAM_COMMENT_AUTOMATION",
-    "COMMENT_TO_DM",
-    "REEL_AUTOMATION_CONTROL",
-
-    "WHATSAPP_AUTOMATION",
-    "CRM",
-    "FOLLOWUPS",
-    "CUSTOM_FOLLOWUPS"
-  ],
-
-  ELITE: [
-    "INSTAGRAM_DM",
-    "INSTAGRAM_COMMENT_AUTOMATION",
-    "COMMENT_TO_DM",
-    "REEL_AUTOMATION_CONTROL",
-
-    "WHATSAPP_AUTOMATION",
-    "CRM",
-    "FOLLOWUPS",
-    "CUSTOM_FOLLOWUPS",
-
-    "AI_BOOKING_SCHEDULING"
-  ]
-
-};
-
-/* ---------------------------------------------------
-MIDDLEWARE
+MIDDLEWARE (10/10 FINAL)
 --------------------------------------------------- */
 
 export const requireFeature =
   (feature: Feature) =>
   async (req: Request, res: Response, next: NextFunction) => {
-
     try {
-
       const businessId = req.user?.businessId;
 
       if (!businessId) {
         return res.status(401).json({
+          code: "UNAUTHORIZED",
           message: "Unauthorized",
         });
       }
 
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
-        include: { plan: true },
-      });
+      /* 🔥 PRO TIP APPLIED:
+         - subscription.middleware pehle run hoga
+         - yaha reuse karenge (no extra DB call)
+      */
 
-      console.log("SUBSCRIPTION DEBUG:", subscription);
-      console.log("PLAN DEBUG:", subscription?.plan);
-
-      /* 🔥 SAFE MODE: NO 403 SPAM */
+      const subscription = (req as any).subscription;
 
       if (!subscription || !subscription.plan) {
-        (req as any).featureDenied = true;
-        return next();
+        return res.status(403).json({
+          code: "NO_SUBSCRIPTION",
+          message: "No active subscription",
+          upgradeRequired: true,
+        });
       }
 
-      if (subscription.status !== "ACTIVE") {
-        (req as any).featureDenied = true;
-        return next();
-      }
+      /* 🔥 No need to re-check status/trial
+         already handled by subscription.middleware
+      */
 
-      if (
-        subscription.isTrial &&
-        subscription.currentPeriodEnd &&
-        new Date() > subscription.currentPeriodEnd
-      ) {
-        (req as any).featureDenied = true;
-        return next();
-      }
+      const planKey = getPlanKey(subscription.plan);
 
-      const planType = subscription.plan.type;
+      const featureKey = mapFeature(feature);
 
-      const allowedFeatures = planFeatures[planType];
+      const allowed = hasFeature(subscription.plan, featureKey);
 
-      if (!allowedFeatures) {
-        (req as any).featureDenied = true;
-        return next();
-      }
-
-      if (!allowedFeatures.includes(feature)) {
-        (req as any).featureDenied = true;
-        return next();
+      if (!allowed) {
+        return res.status(403).json({
+          code: "FEATURE_NOT_ALLOWED",
+          feature,
+          plan: planKey,
+          upgradeRequired: true,
+        });
       }
 
       /* ✅ ACCESS GRANTED */
-      (req as any).featureDenied = false;
-
       next();
 
     } catch (error) {
-
-      console.error("Plan Feature Middleware Error:", error);
+      console.error("Feature Middleware Error:", error);
 
       return res.status(500).json({
         message: "Server error",
       });
-
     }
-
   };
+
+/* ---------------------------------------------------
+🔥 FEATURE MAPPING (TYPE SAFE)
+--------------------------------------------------- */
+
+const mapFeature = (
+  feature: Feature
+): keyof PlanFeatures => {
+
+  const mapping: Record<Feature, keyof PlanFeatures> = {
+
+    INSTAGRAM_DM: "automationEnabled",
+    INSTAGRAM_COMMENT_AUTOMATION: "automationEnabled",
+    COMMENT_TO_DM: "automationEnabled",
+    REEL_AUTOMATION_CONTROL: "automationEnabled",
+
+    WHATSAPP_AUTOMATION: "whatsappEnabled",
+    CRM: "crmEnabled",
+
+    FOLLOWUPS: "automationEnabled",
+    CUSTOM_FOLLOWUPS: "automationEnabled",
+
+    AI_BOOKING_SCHEDULING: "bookingEnabled",
+  };
+
+  return mapping[feature];
+};

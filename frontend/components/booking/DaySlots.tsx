@@ -1,61 +1,105 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import CreateSlotModal from "./CreateSlotModal"
+import { useEffect, useState } from "react";
+import axios from "axios";
+import CreateSlotModal from "./CreateSlotModal";
 
-export default function DaySlots(){
+export default function DaySlots({ onUpdate }: any) {
+  const [open, setOpen] = useState(false);
+  const [slots, setSlots] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-const [open,setOpen] = useState(false)
+  const businessId = "YOUR_BUSINESS_ID"; // TODO: replace
 
-const slots = [
-"10:00 AM",
-"11:30 AM",
-"2:00 PM",
-"4:30 PM"
-]
+  /* ============================================
+  FETCH SLOTS
+  ============================================ */
+  const fetchSlots = async () => {
+    try {
+      setLoading(true);
 
-return(
+      const res = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_URL}/availability/${businessId}`,
+        { withCredentials: true }
+      );
 
-<div className="bg-white border border-gray-200 rounded-xl p-5">
+      setSlots(res.data.availability || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-<div className="flex justify-between items-center mb-4">
+  useEffect(() => {
+    fetchSlots();
+  }, []);
 
-<h2 className="text-sm font-semibold text-gray-900">
-Available Slots
-</h2>
+  /* ============================================
+  FORMAT TIME
+  ============================================ */
+  const formatTime = (time: string) => {
+    const [h, m] = time.split(":");
+    const date = new Date();
+    date.setHours(Number(h), Number(m));
 
-<button
-onClick={()=>setOpen(true)}
-className="bg-blue-600 text-white text-xs px-3 py-1 rounded-lg"
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
->
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-sm font-semibold text-gray-900">
+          Available Slots
+        </h2>
 
-Add Slot </button>
+        <button
+          onClick={() => setOpen(true)}
+          className="bg-blue-600 text-white text-xs px-3 py-1 rounded-lg"
+        >
+          Add Slot
+        </button>
+      </div>
 
-</div>
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : slots.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          No slots available
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {slots.map((slot: any) => (
+            <div
+              key={slot.id}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 font-medium flex justify-between"
+            >
+              <span>
+                {formatTime(slot.startTime)} -{" "}
+                {formatTime(slot.endTime)}
+              </span>
 
-<div className="space-y-2">
+              {!slot.isActive && (
+                <span className="text-xs text-red-500">
+                  Inactive
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
-{slots.map((slot,i)=>(
-
-<div
-key={i}
-className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 font-medium"
->
-{slot}
-</div>
-
-))}
-
-</div>
-
-<CreateSlotModal
-open={open}
-onClose={()=>setOpen(false)}
-/>
-
-</div>
-
-)
-
+      <CreateSlotModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onSuccess={() => {
+          fetchSlots();
+          onUpdate?.();
+        }}
+      />
+    </div>
+  );
 }

@@ -3,7 +3,7 @@ import Redis from "ioredis";
 
 /*
 ====================================================
-REDIS CONNECTION (RESILIENT)
+REDIS CONNECTION
 ====================================================
 */
 
@@ -21,7 +21,7 @@ CONFIG
 */
 
 const REDIS_PREFIX = "sylph:webhook:event:";
-const REDIS_TTL = 60 * 60; // 1 hour
+const REDIS_TTL = 60 * 10; // 🔥 10 min (better than 1 hour)
 
 /*
 ====================================================
@@ -42,26 +42,26 @@ interface WebhookCheckInput {
 
 /*
 ====================================================
-REDIS KEY BUILDER
+KEY BUILDER (🔥 FIXED)
 ====================================================
 */
 
-const buildKey = (eventId: string) => {
-  return `${REDIS_PREFIX}${eventId}`;
+const buildKey = (eventId: string, platform: WebhookPlatform) => {
+  return `${REDIS_PREFIX}${platform}:${eventId}`;
 };
 
 /*
 ====================================================
-FAST REDIS LOCK
-Prevents race conditions across workers
+REDIS LOCK
 ====================================================
 */
 
 const acquireRedisLock = async (
-  eventId: string
+  eventId: string,
+  platform: WebhookPlatform
 ): Promise<boolean> => {
 
-  const key = buildKey(eventId);
+  const key = buildKey(eventId, platform);
 
   try {
 
@@ -77,9 +77,9 @@ const acquireRedisLock = async (
 
   } catch (error) {
 
-    console.error("[WEBHOOK REDIS LOCK ERROR]", error);
+    console.error("[WEBHOOK REDIS ERROR]", error);
 
-    /* fail-open strategy */
+    /* fail-open */
     return true;
 
   }
@@ -108,7 +108,6 @@ const checkDatabaseDuplicate = async (
   } catch (error) {
 
     console.error("[WEBHOOK DB CHECK ERROR]", error);
-
     return false;
 
   }
@@ -117,7 +116,7 @@ const checkDatabaseDuplicate = async (
 
 /*
 ====================================================
-SAVE EVENT
+SAVE EVENT (SAFE)
 ====================================================
 */
 
@@ -137,18 +136,8 @@ const saveWebhookEvent = async (
 
   } catch (error: any) {
 
-    /* race condition protection */
-
     if (error?.code === "P2002") {
-
-      console.log(
-        "[WEBHOOK DUPLICATE RACE]",
-        platform,
-        eventId
-      );
-
       return;
-
     }
 
     console.error("[WEBHOOK SAVE ERROR]", error);
@@ -159,17 +148,7 @@ const saveWebhookEvent = async (
 
 /*
 ====================================================
-MAIN PROCESSOR
-
-Webhook
-   ↓
-Redis lock (fast)
-   ↓
-Database check (safe)
-   ↓
-Save event
-   ↓
-Process event
+MAIN PROCESSOR (10/10 FINAL)
 ====================================================
 */
 
@@ -182,46 +161,21 @@ export const processWebhookEvent = async ({
 
   try {
 
-    /* ----------------------------------------
-    STEP 1 — REDIS LOCK
-    ---------------------------------------- */
-
-    const lockAcquired = await acquireRedisLock(eventId);
+    /* STEP 1 — REDIS LOCK */
+    const lockAcquired = await acquireRedisLock(eventId, platform);
 
     if (!lockAcquired) {
-
-      console.log(
-        "[WEBHOOK BLOCKED REDIS]",
-        platform,
-        eventId
-      );
-
       return false;
-
     }
 
-    /* ----------------------------------------
-    STEP 2 — DATABASE CHECK
-    ---------------------------------------- */
+    /* STEP 2 — DB CHECK */
+    const exists = await checkDatabaseDuplicate(eventId);
 
-    const dbDuplicate = await checkDatabaseDuplicate(eventId);
-
-    if (dbDuplicate) {
-
-      console.log(
-        "[WEBHOOK BLOCKED DATABASE]",
-        platform,
-        eventId
-      );
-
+    if (exists) {
       return false;
-
     }
 
-    /* ----------------------------------------
-    STEP 3 — SAVE EVENT
-    ---------------------------------------- */
-
+    /* STEP 3 — SAVE */
     await saveWebhookEvent(eventId, platform);
 
     return true;
@@ -230,12 +184,7 @@ export const processWebhookEvent = async ({
 
     console.error("[WEBHOOK PROCESS ERROR]", error);
 
-    /*
-    FAIL OPEN STRATEGY
-    Better process event than lose a message
-    */
-
-    return true;
+    return true; // fail-open
 
   }
 

@@ -1,8 +1,9 @@
 import prisma from "../config/prisma";
+import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
 
 /*
 =====================================================
-FETCH AVAILABLE SLOTS
+FETCH AVAILABLE SLOTS (ADVANCED - OPTIMIZED)
 =====================================================
 */
 
@@ -12,10 +13,6 @@ export const fetchAvailableSlots = async (
 ): Promise<Date[]> => {
 
   const dayOfWeek = date.getDay();
-
-  /* ------------------------------------------------
-  BUSINESS SLOT CONFIG
-  ------------------------------------------------ */
 
   const slots = await prisma.bookingSlot.findMany({
     where: {
@@ -29,10 +26,6 @@ export const fetchAvailableSlots = async (
   });
 
   if (!slots.length) return [];
-
-  /* ------------------------------------------------
-  EXISTING APPOINTMENTS
-  ------------------------------------------------ */
 
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
@@ -51,16 +44,17 @@ export const fetchAvailableSlots = async (
     },
     select: {
       startTime: true,
+      endTime: true,
     },
   });
 
-  const bookedTimes = new Set(
-    appointments.map((a) => a.startTime.toISOString())
-  );
+  /* 🔥 PERFORMANCE BOOST */
+  const appointmentRanges = appointments.map((a) => ({
+    start: a.startTime.getTime(),
+    end: a.endTime.getTime(),
+  }));
 
-  /* ------------------------------------------------
-  GENERATE SLOT LIST
-  ------------------------------------------------ */
+  const now = new Date();
 
   const availableSlots: Date[] = [];
 
@@ -74,6 +68,9 @@ export const fetchAvailableSlots = async (
       .split(":")
       .map(Number);
 
+    const slotDuration = slot.slotDuration || 30;
+    const bufferTime = slot.bufferTime || 0;
+
     let current = new Date(date);
     current.setHours(startHour, startMinute, 0, 0);
 
@@ -82,29 +79,35 @@ export const fetchAvailableSlots = async (
 
     while (current < end) {
 
-      const iso = current.toISOString();
+      const slotStart = new Date(current);
+      const slotEnd = new Date(
+        current.getTime() + slotDuration * 60000
+      );
 
-      if (!bookedTimes.has(iso)) {
+      const hasConflict = appointmentRanges.some((appt) => {
+        return (
+          slotStart.getTime() < appt.end &&
+          slotEnd.getTime() > appt.start
+        );
+      });
 
-        if (current > new Date()) {
-          availableSlots.push(new Date(current));
-        }
-
+      if (!hasConflict && slotStart.getTime() > now.getTime()) {
+        availableSlots.push(new Date(slotStart));
       }
 
-      current = new Date(current.getTime() + 30 * 60000);
-
+      current = new Date(
+        current.getTime() +
+          (slotDuration + bufferTime) * 60000
+      );
     }
-
   }
 
   return availableSlots;
-
 };
 
 /*
 =====================================================
-CREATE APPOINTMENT
+CREATE APPOINTMENT (TRANSACTION SAFE)
 =====================================================
 */
 
@@ -132,57 +135,99 @@ export const createNewAppointment = async (
     endTime,
   } = data;
 
-  /* ------------------------------------------------
-  DOUBLE BOOKING PROTECTION
-  ------------------------------------------------ */
+  return prisma.$transaction(async (tx) => {
 
-  const existing = await prisma.appointment.findFirst({
-    where: {
-      businessId,
-      startTime: new Date(startTime),
-      status: "BOOKED",
-    },
-  });
-
-  if (existing) {
-    throw new Error("Slot already booked");
-  }
-
-  /* ------------------------------------------------
-  CREATE APPOINTMENT
-  ------------------------------------------------ */
-
-  const appointment = await prisma.appointment.create({
-    data: {
-      businessId,
-      leadId,
-      name,
-      email,
-      phone,
-      startTime: new Date(startTime),
-      endTime: new Date(endTime),
-      status: "BOOKED",
-    },
-  });
-
-  /* ------------------------------------------------
-  UPDATE LEAD STAGE
-  ------------------------------------------------ */
-
-  if (leadId) {
-
-    await prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        stage: "BOOKED_CALL",
-        lastMessageAt: new Date(),
+    /* 🔥 STRONG CONFLICT CHECK (INSIDE TX) */
+    const existing = await tx.appointment.findFirst({
+      where: {
+        businessId,
+        status: "BOOKED",
+        AND: [
+          { startTime: { lt: endTime } },
+          { endTime: { gt: startTime } },
+        ],
       },
     });
 
-  }
+    if (existing) {
+      throw new Error("Slot already booked");
+    }
 
-  return appointment;
+    const appointment = await tx.appointment.create({
+      data: {
+        businessId,
+        leadId,
+        name,
+        email,
+        phone,
+        startTime,
+        endTime,
+        status: "BOOKED",
+      },
+    });
 
+    /* 🔥 SAFE LEAD UPDATE */
+    if (leadId) {
+      await tx.lead.update({
+        where: { id: leadId },
+        data: {
+          stage: "BOOKED_CALL",
+          lastMessageAt: new Date(),
+        },
+      });
+    }
+
+    return appointment;
+  });
+};
+
+/*
+=====================================================
+RESCHEDULE APPOINTMENT (SAFE)
+=====================================================
+*/
+
+export const rescheduleAppointment = async (
+  appointmentId: string,
+  newStart: Date,
+  newEnd: Date
+) => {
+
+  return prisma.$transaction(async (tx) => {
+
+    const appointment = await tx.appointment.findUnique({
+      where: { id: appointmentId },
+    });
+
+    if (!appointment) {
+      throw new Error("Appointment not found");
+    }
+
+    const conflict = await tx.appointment.findFirst({
+      where: {
+        businessId: appointment.businessId,
+        status: "BOOKED",
+        id: { not: appointmentId },
+        AND: [
+          { startTime: { lt: newEnd } },
+          { endTime: { gt: newStart } },
+        ],
+      },
+    });
+
+    if (conflict) {
+      throw new Error("New slot not available");
+    }
+
+    return tx.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        startTime: newStart,
+        endTime: newEnd,
+        status: "RESCHEDULED",
+      },
+    });
+  });
 };
 
 /*
@@ -195,13 +240,11 @@ export const cancelExistingAppointment = async (
   appointmentId: string
 ) => {
 
-  const appointment = await prisma.appointment.update({
+  return prisma.appointment.update({
     where: { id: appointmentId },
     data: {
       status: "CANCELLED",
     },
   });
-
-  return appointment;
 
 };

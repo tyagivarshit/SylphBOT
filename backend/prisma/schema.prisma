@@ -1,3 +1,31 @@
+/* ======================================
+ENUMS (ADD THIS)
+====================================== */
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  CANCELLED
+  PAST_DUE
+  TRIAL
+}
+
+enum Currency {
+  INR
+  USD
+}
+
+enum BillingCycle {
+  monthly
+  yearly
+}
+
+enum PlanType {
+  FREE
+  BASIC
+  PRO
+  ELITE
+}
 generator client {
   provider = "prisma-client-js"
 }
@@ -19,14 +47,18 @@ model User {
   role              String   @default("OWNER")
 
   isVerified        Boolean  @default(false)
+  isActive          Boolean  @default(true)
+
+  tokenVersion      Int      @default(0) // 🔥 CRITICAL
+
   verifyToken       String?
   verifyTokenExpiry DateTime?
 
-  businesses        Business[]
-  refreshTokens     RefreshToken[]
-
   resetToken        String?
   resetTokenExpiry  DateTime?
+
+  businesses        Business[]
+  refreshTokens     RefreshToken[]
 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -133,21 +165,22 @@ model Subscription {
   planId               String   @db.ObjectId
   plan                 Plan     @relation(fields: [planId], references: [id])
 
-  status               String   @default("INACTIVE")
+  status               SubscriptionStatus @default(INACTIVE)
 
   stripeCustomerId     String?
-  stripeSubscriptionId String?
+  stripeSubscriptionId String? @unique
 
   currentPeriodEnd     DateTime?
 
-  currency             String?   // INR / USD
-  billingCycle         String?   // monthly / yearly
+  currency             Currency?
+  billingCycle         BillingCycle?
 
   isTrial              Boolean @default(false)
   trialUsed            Boolean @default(false)
 
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+
 }
 
 /* =====================================================
@@ -397,12 +430,13 @@ model RefreshToken {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
 
   token      String   @unique
-
   userId     String   @db.ObjectId
   user       User     @relation(fields: [userId], references: [id])
 
-  expiresAt  DateTime
+  userAgent  String?
+  ip         String?
 
+  expiresAt  DateTime
   createdAt  DateTime @default(now())
 
   @@index([userId])
@@ -443,19 +477,23 @@ model CalendarConnection {
 }
 
 model BookingSlot {
-  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
 
-  businessId String   @db.ObjectId
-  business   Business @relation(fields: [businessId], references: [id])
+  businessId   String   @db.ObjectId
+  business     Business @relation(fields: [businessId], references: [id])
 
-  dayOfWeek  Int
-  startTime  String
-  endTime    String
+  dayOfWeek    Int
+  startTime    String
+  endTime      String
 
-  isActive   Boolean  @default(true)
+  slotDuration Int      @default(30)
+  bufferTime   Int      @default(0)
+  timezone     String   @default("UTC")
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  isActive     Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([businessId])
 }

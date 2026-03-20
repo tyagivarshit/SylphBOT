@@ -1,112 +1,123 @@
-"use client"
+"use client";
 
-import { useState } from "react"
+import { useState } from "react";
+import axios from "axios";
 
-export default function CreateSlotModal({open,onClose}:any){
+export default function CreateSlotModal({
+  open,
+  onClose,
+  onSuccess,
+}: any) {
+  const [date, setDate] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [loading, setLoading] = useState(false);
 
-const [month,setMonth] = useState("")
-const [date,setDate] = useState("")
-const [time,setTime] = useState("")
+  const businessId = "YOUR_BUSINESS_ID"; // replace later
 
-if(!open) return null
+  if (!open) return null;
 
-return(
+  /* ============================================
+  CREATE SLOT
+  ============================================ */
+  const handleCreate = async () => {
+    if (!date || !startTime || !endTime) {
+      alert("All fields required");
+      return;
+    }
 
-<div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    try {
+      setLoading(true);
 
-<div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+      const dayOfWeek = new Date(date).getDay();
 
-<h2 className="text-base font-semibold text-gray-900">
-Create Booking Slot
-</h2>
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/availability`,
+        {
+          businessId,
+          dayOfWeek,
+          startTime,
+          endTime,
+          slotDuration: 30,
+          bufferTime: 0,
+        },
+        { withCredentials: true }
+      );
 
-{/* Month */}
+      onSuccess?.(); // refresh
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to create slot");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-<div>
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+        <h2 className="text-base font-semibold text-gray-900">
+          Create Booking Slot
+        </h2>
 
-<label className="text-sm font-medium text-gray-800">
-Month
-</label>
+        {/* DATE */}
+        <div>
+          <label className="text-sm font-medium text-gray-800">
+            Date
+          </label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm"
+          />
+        </div>
 
-<select
-value={month}
-onChange={(e)=>setMonth(e.target.value)}
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900"
+        {/* START TIME */}
+        <div>
+          <label className="text-sm font-medium text-gray-800">
+            Start Time
+          </label>
+          <input
+            type="time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm"
+          />
+        </div>
 
->
+        {/* END TIME */}
+        <div>
+          <label className="text-sm font-medium text-gray-800">
+            End Time
+          </label>
+          <input
+            type="time"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm"
+          />
+        </div>
 
-<option value="">Select Month</option>
-<option>January</option>
-<option>February</option>
-<option>March</option>
-<option>April</option>
-<option>May</option>
-<option>June</option>
-<option>July</option>
-<option>August</option>
-<option>September</option>
-<option>October</option>
-<option>November</option>
-<option>December</option>
+        {/* ACTIONS */}
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            onClick={onClose}
+            className="text-sm text-gray-700"
+          >
+            Cancel
+          </button>
 
-</select>
-
-</div>
-
-{/* Date */}
-
-<div>
-
-<label className="text-sm font-medium text-gray-800">
-Date
-</label>
-
-<input
-type="date"
-value={date}
-onChange={(e)=>setDate(e.target.value)}
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900"
-/>
-
-</div>
-
-{/* Time */}
-
-<div>
-
-<label className="text-sm font-medium text-gray-800">
-Time
-</label>
-
-<input
-type="time"
-value={time}
-onChange={(e)=>setTime(e.target.value)}
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900"
-/>
-
-</div>
-
-<div className="flex justify-end gap-3 pt-2">
-
-<button
-onClick={onClose}
-className="text-sm text-gray-700"
-
->
-
-Cancel </button>
-
-<button className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">
-Save Slot
-</button>
-
-</div>
-
-</div>
-
-</div>
-
-)
-
+          <button
+            onClick={handleCreate}
+            disabled={loading}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+          >
+            {loading ? "Saving..." : "Save Slot"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -1,14 +1,21 @@
 import prisma from "../config/prisma";
-import { fetchAvailableSlots, createNewAppointment } from "./booking.service";
+import {
+  fetchAvailableSlots,
+  createNewAppointment,
+} from "./booking.service";
 import {
   setConversationState,
-  clearConversationState
+  clearConversationState,
 } from "./conversationState.service";
+import {
+  parseDateFromText,
+  parseTimeFromText,
+  findClosestSlot,
+} from "../utils/booking-ai.utils";
 
 /*
 =========================================================
-AI BOOKING ENGINE
-Handles booking intent + slot suggestion + confirmation
+AI BOOKING ENGINE (ADVANCED)
 =========================================================
 */
 
@@ -18,18 +25,20 @@ interface BookingResult {
   slots?: Date[];
 }
 
+/*
+=========================================================
+HANDLE AI BOOKING INTENT
+=========================================================
+*/
 export const handleAIBookingIntent = async (
   businessId: string,
   leadId: string,
   message: string
 ): Promise<BookingResult> => {
-
   try {
-
-    /* ------------------------------------------------
+    /* --------------------------------------------
     GET LEAD
-    ------------------------------------------------ */
-
+    -------------------------------------------- */
     const lead = await prisma.lead.findUnique({
       where: { id: leadId },
       select: {
@@ -41,23 +50,71 @@ export const handleAIBookingIntent = async (
     });
 
     if (!lead) {
-
       return {
         handled: false,
         message: "Lead not found",
       };
-
     }
 
-    /* ------------------------------------------------
-    FETCH NEXT AVAILABLE SLOTS
-    ------------------------------------------------ */
+    /* --------------------------------------------
+    SMART DATE + TIME DETECTION
+    -------------------------------------------- */
+    const parsedDate = parseDateFromText(message);
+    const parsedTime = parseTimeFromText(message);
 
+    if (parsedDate && parsedTime) {
+      const requested = new Date(parsedDate);
+      requested.setHours(parsedTime.hours, parsedTime.minutes, 0, 0);
+
+      const availableSlots = await fetchAvailableSlots(
+        businessId,
+        parsedDate
+      );
+
+      if (!availableSlots.length) {
+        return {
+          handled: true,
+          message: "No slots available for that date.",
+        };
+      }
+
+      const closest = findClosestSlot(requested, availableSlots);
+
+      if (!closest) {
+        return {
+          handled: true,
+          message: "No suitable slot found.",
+        };
+      }
+
+      const endTime = new Date(closest.getTime() + 30 * 60000);
+
+      const appointment = await createNewAppointment({
+        businessId,
+        leadId,
+        name: lead.name || "Customer",
+        email: lead.email || null,
+        phone: lead.phone || null,
+        startTime: closest,
+        endTime,
+      });
+
+      await clearConversationState(leadId);
+
+      return {
+        handled: true,
+        message: `✅ Booked for ${closest.toLocaleString()}`,
+        slots: [closest],
+      };
+    }
+
+    /* --------------------------------------------
+    FETCH NEXT AVAILABLE SLOTS
+    -------------------------------------------- */
     const today = new Date();
     const slotResults: Date[] = [];
 
     for (let i = 0; i < 5; i++) {
-
       const checkDate = new Date();
       checkDate.setDate(today.getDate() + i);
 
@@ -66,35 +123,24 @@ export const handleAIBookingIntent = async (
         checkDate
       );
 
-      if (slots.length) {
-
-        for (const s of slots) {
-
-          slotResults.push(s);
-
-          if (slotResults.length >= 5) break;
-
-        }
-
+      for (const s of slots) {
+        slotResults.push(s);
+        if (slotResults.length >= 5) break;
       }
 
       if (slotResults.length >= 5) break;
-
     }
 
     if (!slotResults.length) {
-
       return {
         handled: true,
         message: "Sorry, no available booking slots right now.",
       };
-
     }
 
-    /* ------------------------------------------------
+    /* --------------------------------------------
     STORE STATE
-    ------------------------------------------------ */
-
+    -------------------------------------------- */
     await setConversationState(
       leadId,
       "BOOKING_SELECTION",
@@ -102,70 +148,51 @@ export const handleAIBookingIntent = async (
       15
     );
 
-    /* ------------------------------------------------
+    /* --------------------------------------------
     FORMAT SLOTS
-    ------------------------------------------------ */
-
-    const formattedSlots = slotResults
-      .slice(0, 5)
-      .map((slot, index) => {
-
-        const date = slot.toLocaleDateString();
-        const time = slot.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-
-        return `${index + 1}. ${date} at ${time}`;
-
+    -------------------------------------------- */
+    const formattedSlots = slotResults.map((slot, index) => {
+      const date = slot.toLocaleDateString();
+      const time = slot.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
       });
 
-    const replyMessage =
-      "Great! Here are some available slots:\n\n" +
-      formattedSlots.join("\n") +
-      "\n\nReply with the slot number you prefer.";
+      return `${index + 1}. ${date} at ${time}`;
+    });
 
     return {
       handled: true,
       slots: slotResults,
-      message: replyMessage,
+      message:
+        "Here are available slots:\n\n" +
+        formattedSlots.join("\n") +
+        "\n\nReply with slot number.",
     };
-
   } catch (error) {
-
     console.error("AI BOOKING ENGINE ERROR:", error);
 
     return {
       handled: false,
       message: "Failed to process booking request",
     };
-
   }
-
 };
 
 /*
 =========================================================
-CONFIRM BOOKING FROM SLOT SELECTION
+CONFIRM BOOKING
 =========================================================
 */
-
 export const confirmAIBooking = async (
   businessId: string,
   leadId: string,
   slot: Date
 ) => {
-
   try {
-
-    /* ------------------------------------------------
-    GET LEAD
-    ------------------------------------------------ */
-
     const lead = await prisma.lead.findUnique({
       where: { id: leadId },
       select: {
-        id: true,
         name: true,
         email: true,
         phone: true,
@@ -173,32 +200,18 @@ export const confirmAIBooking = async (
     });
 
     if (!lead) {
-
       throw new Error("Lead not found");
-
     }
 
-    /* ------------------------------------------------
-    SLOT VALIDATION
-    ------------------------------------------------ */
-
     const startTime = new Date(slot);
-    const endTime = new Date(
-      startTime.getTime() + 30 * 60000
-    );
+    const endTime = new Date(startTime.getTime() + 30 * 60000);
 
     if (startTime < new Date()) {
-
       return {
         success: false,
         message: "That slot is no longer available.",
       };
-
     }
-
-    /* ------------------------------------------------
-    CREATE APPOINTMENT
-    ------------------------------------------------ */
 
     const appointment = await createNewAppointment({
       businessId,
@@ -210,44 +223,19 @@ export const confirmAIBooking = async (
       endTime,
     });
 
-    /* ------------------------------------------------
-    CLEAR STATE
-    ------------------------------------------------ */
-
     await clearConversationState(leadId);
-
-    /* ------------------------------------------------
-    FORMAT RESPONSE
-    ------------------------------------------------ */
-
-    const date = startTime.toLocaleDateString();
-    const time = startTime.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-    const confirmationMessage =
-      "✅ Your appointment is confirmed for " +
-      date +
-      " at " +
-      time +
-      ".";
 
     return {
       success: true,
       appointment,
-      message: confirmationMessage,
+      message: `✅ Appointment confirmed for ${startTime.toLocaleString()}`,
     };
-
   } catch (error) {
-
     console.error("AI BOOKING CONFIRM ERROR:", error);
 
     return {
       success: false,
       message: "Failed to confirm appointment",
     };
-
   }
-
 };

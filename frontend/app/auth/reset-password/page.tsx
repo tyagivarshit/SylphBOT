@@ -11,7 +11,6 @@ import { resetPassword } from "@/lib/auth"
 export default function ResetPasswordPage(){
 
 const params = useSearchParams()
-
 const token = params.get("token")
 
 const [password,setPassword] = useState("")
@@ -21,6 +20,11 @@ const [success,setSuccess] = useState(false)
 const [showPass,setShowPass] = useState(false)
 const [showConfirm,setShowConfirm] = useState(false)
 
+/* 🔥 STRONG PASSWORD CHECK */
+const isStrongPassword = (pass:string)=>{
+return /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{6,}$/.test(pass)
+}
+
 const handleReset = async(e?:React.FormEvent)=>{
 
 if(e) e.preventDefault()
@@ -28,12 +32,12 @@ if(e) e.preventDefault()
 if(loading) return
 
 if(!token){
-toast.error("Invalid reset link")
+toast.error("Invalid or expired link")
 return
 }
 
-if(password.length < 6){
-toast.error("Password must be at least 6 characters")
+if(!isStrongPassword(password)){
+toast.error("Use uppercase, lowercase & number")
 return
 }
 
@@ -54,7 +58,14 @@ toast.success("Password reset successful")
 
 }catch(err:any){
 
-toast.error(err?.message || "Reset failed")
+/* 🔥 better error UX */
+if(err?.message?.toLowerCase().includes("expired")){
+toast.error("Reset link expired")
+}else if(err?.message?.toLowerCase().includes("invalid")){
+toast.error("Invalid or already used link")
+}else{
+toast.error("Reset failed")
+}
 
 }finally{
 
@@ -92,12 +103,11 @@ Password updated
 
 <p className="text-sm text-gray-500 mt-2">
 Your password has been successfully reset.
-You can now login with your new password.
 </p>
 
 <Link
 href="/auth/login"
-className="inline-block mt-6 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition"
+className="inline-block mt-6 bg-blue-600 text-white px-5 py-2.5 rounded-lg"
 >
 Go to login
 </Link>
@@ -106,39 +116,29 @@ Go to login
 
 ) : (
 
-<form
-onSubmit={handleReset}
-className="space-y-4"
->
+<form onSubmit={handleReset} className="space-y-4">
 
-<h2 className="text-lg sm:text-xl font-semibold text-gray-900 text-center">
+<h2 className="text-lg font-semibold text-center">
 Reset your password
 </h2>
 
-<p className="text-sm text-gray-500 text-center">
-Enter a new password for your account
-</p>
-
 <div>
 
-<label className="text-xs font-medium text-gray-700">
-New password
-</label>
+<label className="text-xs">New password</label>
 
 <div className="relative mt-1">
 
 <input
 type={showPass ? "text":"password"}
-placeholder="Enter new password"
 value={password}
 onChange={(e)=>setPassword(e.target.value)}
-className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+className="w-full border px-3 py-2 rounded-lg pr-10"
 />
 
 <button
 type="button"
 onClick={()=>setShowPass(!showPass)}
-className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+className="absolute right-3 top-2"
 >
 {showPass ? <EyeOff size={16}/> : <Eye size={16}/>}
 </button>
@@ -149,24 +149,21 @@ className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
 
 <div>
 
-<label className="text-xs font-medium text-gray-700">
-Confirm password
-</label>
+<label className="text-xs">Confirm password</label>
 
 <div className="relative mt-1">
 
 <input
 type={showConfirm ? "text":"password"}
-placeholder="Confirm password"
 value={confirm}
 onChange={(e)=>setConfirm(e.target.value)}
-className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+className="w-full border px-3 py-2 rounded-lg pr-10"
 />
 
 <button
 type="button"
 onClick={()=>setShowConfirm(!showConfirm)}
-className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+className="absolute right-3 top-2"
 >
 {showConfirm ? <EyeOff size={16}/> : <Eye size={16}/>}
 </button>
@@ -176,26 +173,14 @@ className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
 </div>
 
 <button
-type="submit"
 disabled={loading}
-className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-70"
+className="w-full bg-blue-600 text-white py-2 rounded-lg"
 >
-
 {loading ? "Resetting..." : "Reset password"}
-
 </button>
 
-<p className="text-xs text-gray-500 text-center pt-2">
-
-Remember your password?{" "}
-
-<Link
-href="/auth/login"
-className="text-blue-600 font-medium hover:underline"
->
-Login
-</Link>
-
+<p className="text-xs text-center mt-2">
+<Link href="/auth/login">Back to login</Link>
 </p>
 
 </form>

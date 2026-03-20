@@ -2,7 +2,8 @@ import "./globals.css"
 import { Toaster } from "react-hot-toast"
 import { Roboto } from "next/font/google"
 import Script from "next/script"
-import ReactQueryProvider from "../providers" // ✅ ADD
+import ReactQueryProvider from "../providers"
+import { AuthProvider } from "@/hooks/useAuth" // 🔥 ADD
 
 const roboto = Roboto({
   subsets: ["latin"],
@@ -27,28 +28,30 @@ export default function RootLayout({
         suppressHydrationWarning
       >
 
-        {/* 🔥 REACT QUERY PROVIDER */}
         <ReactQueryProvider>
-          
-          {/* 🔥 FACEBOOK SDK */}
-          <Script
-            src="https://connect.facebook.net/en_US/sdk.js"
-            strategy="afterInteractive"
-          />
 
-          {/* 🔥 TOASTER */}
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              style: {
-                borderRadius: "10px",
-                padding: "12px 16px",
-                fontSize: "14px",
-              },
-            }}
-          />
+          {/* 🔥 AUTH PROVIDER (MOST IMPORTANT) */}
+          <AuthProvider>
 
-          {children}
+            <Script
+              src="https://connect.facebook.net/en_US/sdk.js"
+              strategy="afterInteractive"
+            />
+
+            <Toaster
+              position="top-right"
+              toastOptions={{
+                style: {
+                  borderRadius: "10px",
+                  padding: "12px 16px",
+                  fontSize: "14px",
+                },
+              }}
+            />
+
+            {children}
+
+          </AuthProvider>
 
         </ReactQueryProvider>
 

@@ -6,38 +6,70 @@ import { useEffect, useState } from "react"
 export default function SuccessPage(){
 
 const router = useRouter()
+
 const [show,setShow] = useState(false)
 const [loading,setLoading] = useState(true)
 
-useEffect(()=>{
+/* ================= POLLING ================= */
 
-// animation
-setTimeout(()=>setShow(true),300)
-
-// 🔥 IMPORTANT: wait for webhook sync
-setTimeout(async ()=>{
-
+const checkSubscription = async () => {
 try{
-await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/billing`,{
+const res = await fetch(`/api/billing`,{
 credentials:"include"
 })
-}catch(e){
-console.error("Billing refresh failed")
+const data = await res.json()
+
+if(data?.subscription?.status === "ACTIVE"){
+return true
 }
 
-setLoading(false)
+return false
+}catch{
+return false
+}
+}
 
-},2000) // 2 sec delay for webhook
+/* ================= EFFECT ================= */
+
+useEffect(()=>{
+
+setTimeout(()=>setShow(true),300)
+
+let attempts = 0
+const maxAttempts = 10
+
+const interval = setInterval(async () => {
+
+const active = await checkSubscription()
+
+if(active){
+clearInterval(interval)
+setLoading(false)
+return
+}
+
+attempts++
+
+if(attempts >= maxAttempts){
+clearInterval(interval)
+setLoading(false) // fallback
+}
+
+},1500) // poll every 1.5s
+
+return ()=>clearInterval(interval)
 
 },[])
+
+/* ================= UI ================= */
 
 return(
 
 <div className="min-h-screen flex items-center justify-center bg-gray-50">
 
-<div className="bg-white p-8 rounded-xl shadow text-center">
+<div className="bg-white p-8 rounded-xl shadow text-center w-[350px]">
 
-{/* ANIMATED TICK */}
+{/* ANIMATION */}
 
 <div className="flex justify-center mb-6">
 
@@ -53,17 +85,20 @@ transition-all duration-500 ${show?"scale-100":"scale-0"}`}>
 <h1 className="text-xl font-semibold">Payment Successful</h1>
 
 <p className="text-sm text-gray-500 mt-2">
-{loading ? "Activating your subscription..." : "Your subscription is now active"}
+{loading
+? "Activating your subscription..."
+: "Your subscription is now active"}
 </p>
 
 <button
 onClick={()=>router.push("/dashboard")}
 disabled={loading}
 className="mt-6 w-full bg-blue-600 text-white py-2 rounded disabled:opacity-50"
-
 >
 
-{loading ? "Please wait..." : "Go to Dashboard"} </button>
+{loading ? "Please wait..." : "Go to Dashboard"}
+
+</button>
 
 </div>
 

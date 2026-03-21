@@ -12,16 +12,26 @@ export default function ReactQueryProvider({
 }: {
   children: React.ReactNode;
 }) {
+
   const [queryClient] = useState(
     () =>
       new QueryClient({
         defaultOptions: {
+
           queries: {
-            staleTime: 1000 * 60, // 1 min fresh data
-            gcTime: 1000 * 60 * 5, // cache for 5 min
+            staleTime: 1000 * 60, // 1 min
+            gcTime: 1000 * 60 * 5, // 5 min
+
             refetchOnWindowFocus: false,
-            retry: 1, // retry once only
+            refetchOnReconnect: true,
+            refetchOnMount: false,
+
+            retry: 1,
+
+            // 🔥 prevent infinite retry loops on auth
+            retryDelay: 1000,
           },
+
           mutations: {
             retry: 1,
           },
@@ -33,7 +43,6 @@ export default function ReactQueryProvider({
     <QueryClientProvider client={queryClient}>
       {children}
 
-      {/* 🔥 Devtools (only for development) */}
       {process.env.NODE_ENV === "development" && (
         <ReactQueryDevtools initialIsOpen={false} />
       )}

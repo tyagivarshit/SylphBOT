@@ -9,13 +9,29 @@ import {
 
 const isProd = process.env.NODE_ENV === "production";
 
-/* 🔥 SAFE IP */
+/* ======================================
+UTILS
+====================================== */
+
 const getIP = (req: Request) =>
   (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
   req.socket.remoteAddress ||
   "unknown";
 
-/* 🔥 GOOGLE INIT (STATE + WRAPPER) */
+const hashToken = (token: string) =>
+  crypto.createHash("sha256").update(token).digest("hex");
+
+const getCookieOptions = () => ({
+  httpOnly: true,
+  secure: isProd,
+  sameSite: isProd ? ("none" as const) : ("lax" as const),
+  path: "/",
+});
+
+/* ======================================
+GOOGLE INIT
+====================================== */
+
 export const googleAuth = (req: Request, res: Response, next: NextFunction) => {
   try {
     const state = crypto.randomBytes(16).toString("hex");
@@ -36,12 +52,14 @@ export const googleAuth = (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
-/* 🔥 CALLBACK (FULL HARDENED) */
+/* ======================================
+GOOGLE CALLBACK
+====================================== */
+
 export const googleCallback = async (req: Request, res: Response) => {
   try {
     const user = req.user as any;
 
-    /* 🔐 STATE CHECK (CSRF PROTECTION) */
     const stateFromGoogle = req.query.state;
     const stateFromCookie = req.cookies?.oauth_state;
 
@@ -51,79 +69,69 @@ export const googleCallback = async (req: Request, res: Response) => {
 
     res.clearCookie("oauth_state");
 
-    /* 🔐 USER VALIDATION */
     if (!user || !user.id || !user.isActive) {
       return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
     }
 
-    /* 🔥 MULTI-TENANT SAFE (STRICT) */
-    let business = await prisma.business.findFirst({
-      where: { ownerId: user.id },
-    });
+    const result = await prisma.$transaction(async (tx) => {
+      let business = await tx.business.findFirst({
+        where: { ownerId: user.id },
+      });
 
-    if (!business) {
-      business = await prisma.business.create({
+      if (!business) {
+        business = await tx.business.create({
+          data: {
+            name: `${user.name || "My"} Business`,
+            ownerId: user.id,
+          },
+        });
+      }
+
+      const accessToken = generateAccessToken(
+        user.id,
+        user.role,
+        business.id,
+        user.tokenVersion
+      );
+
+      const refreshRaw = generateRefreshToken(
+        user.id,
+        user.tokenVersion
+      );
+
+      const refreshToken = hashToken(refreshRaw);
+
+      await tx.refreshToken.create({
         data: {
-          name: `${user.name || "My"} Business`,
-          ownerId: user.id,
+          token: refreshToken,
+          userId: user.id,
+          userAgent: req.headers["user-agent"],
+          ip: getIP(req),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
       });
-    }
 
-    /* 🔐 TOKENS (WITH VERSION) */
-    const accessToken = generateAccessToken(
-      user.id,
-      user.role,
-      business.id,
-      user.tokenVersion
-    );
-
-    const refreshToken = generateRefreshToken(
-      user.id,
-      user.tokenVersion
-    );
-
-    const ip = getIP(req);
-
-    /* 🔄 STORE SESSION (DEVICE + IP) */
-    await prisma.refreshToken.create({
-      data: {
-        token: refreshToken,
-        userId: user.id,
-        userAgent: req.headers["user-agent"],
-        ip,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
+      return {
+        accessToken,
+        refreshRaw,
+      };
     });
 
-    /* 🔐 COOKIES */
-    res.cookie("accessToken", accessToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? "none" : "lax",
-      path: "/",
+    const cookieOptions = getCookieOptions();
+
+    res.cookie("accessToken", result.accessToken, {
+      ...cookieOptions,
       maxAge: 15 * 60 * 1000,
     });
 
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? "none" : "lax",
-      path: "/",
+    res.cookie("refreshToken", result.refreshRaw, {
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    /* 🔥 SECURITY LOG */
-    console.log("GOOGLE_LOGIN_SUCCESS", {
-      userId: user.id,
-      ip,
     });
 
     return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
 
-  } catch (error) {
-    console.error("Google Auth Error:", error);
-
+  } catch {
     return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
   }
 };

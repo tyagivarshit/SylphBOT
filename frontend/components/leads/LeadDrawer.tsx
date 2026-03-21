@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { X, User } from "lucide-react"
-import { getLeadDetail } from "@/lib/dashboard"
+import { getLeadDetail } from "@/lib/dashboard.api"
 import { apiFetch } from "@/lib/apiClient"
 import { socket } from "@/lib/socket"
 

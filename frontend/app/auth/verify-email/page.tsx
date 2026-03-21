@@ -1,172 +1,194 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { verifyEmail, resendVerification } from "@/lib/auth"
 import toast from "react-hot-toast"
+import { verifyEmail, resendVerification } from "@/lib/auth"
 
 export default function VerifyEmailPage() {
 
-const params = useSearchParams()
+  const params = useSearchParams()
 
-const [status,setStatus] = useState<"loading"|"success"|"error">("loading")
-const [message,setMessage] = useState("")
-const [resendLoading,setResendLoading] = useState(false)
-const [email,setEmail] = useState("") // 🔥 for resend
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
+  const [message, setMessage] = useState("")
+  const [email, setEmail] = useState("")
 
-useEffect(()=>{
+  const [cooldown, setCooldown] = useState(0)
 
-const token = params.get("token")
+  const mounted = useRef(true)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
 
-if(!token){
-setStatus("error")
-setMessage("Invalid verification link")
-return
-}
+  /* ======================================
+  CLEANUP
+  ====================================== */
 
-const runVerification = async()=>{
+  useEffect(() => {
+    return () => {
+      mounted.current = false
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [])
 
-try{
+  /* ======================================
+  COOLDOWN TIMER
+  ====================================== */
 
-const data = await verifyEmail(token)
+  useEffect(() => {
+    if (cooldown <= 0) return
 
-if(data?.error){
-throw new Error(data.error)
-}
+    timerRef.current = setInterval(() => {
+      setCooldown(prev => prev - 1)
+    }, 1000)
 
-setStatus("success")
-setMessage("Your email has been successfully verified.")
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [cooldown])
 
-}catch(err:any){
+  const startCooldown = () => setCooldown(30)
 
-/* 🔥 better UX handling */
-if(err?.message?.toLowerCase().includes("expired")){
-setMessage("Verification link expired. You can request a new one.")
-}else if(err?.message?.toLowerCase().includes("invalid")){
-setMessage("Invalid or already used link.")
-}else{
-setMessage("Verification failed")
-}
+  /* ======================================
+  VERIFY EMAIL
+  ====================================== */
 
-setStatus("error")
+  useEffect(() => {
 
-}
+    const token = params.get("token")
 
-}
+    if (!token) {
+      setStatus("error")
+      setMessage("Invalid verification link")
+      return
+    }
 
-runVerification()
+    const runVerification = async () => {
+      try {
 
-},[params])
+        await verifyEmail(token)
 
-/* 🔥 RESEND (COOLDOWN) */
-const handleResend = async()=>{
+        if (mounted.current) {
+          setStatus("success")
+          setMessage("Your email has been successfully verified.")
+        }
 
-if(!email){
-toast.error("Enter your email")
-return
-}
+      } catch (err: any) {
 
-if(resendLoading) return
+        const msg = err?.message?.toLowerCase() || ""
 
-try{
+        let finalMsg = "Verification failed"
 
-setResendLoading(true)
+        if (msg.includes("expired")) {
+          finalMsg = "Verification link expired. Request a new one."
+        } else if (msg.includes("invalid")) {
+          finalMsg = "Invalid or already used link."
+        }
 
-await resendVerification(email)
+        if (mounted.current) {
+          setStatus("error")
+          setMessage(finalMsg)
+        }
+      }
+    }
 
-toast.success("Verification email sent")
+    runVerification()
 
-setTimeout(()=>{
-setResendLoading(false)
-},30000)
+  }, [params])
 
-}catch{
-toast.error("Try again later")
-setResendLoading(false)
-}
+  /* ======================================
+  RESEND
+  ====================================== */
 
-}
+  const handleResend = async () => {
 
-return(
+    if (!email) {
+      toast.error("Enter your email")
+      return
+    }
 
-<div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4 sm:px-6">
+    if (cooldown > 0) return
 
-<div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-6 sm:p-10 max-w-sm sm:max-w-md w-full text-center">
+    try {
 
-{status === "loading" && (
+      await resendVerification(email.trim().toLowerCase())
 
-<>
-<div className="flex justify-center mb-6">
-<div className="w-14 h-14 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin"/>
-</div>
+      toast.success("Verification email sent")
 
-<h1 className="text-xl font-bold text-gray-900">
-Verifying Email...
-</h1>
-</>
+      startCooldown()
 
-)}
+    } catch {
+      toast.error("Try again later")
+    }
+  }
 
-{status === "success" && (
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4 sm:px-6">
 
-<>
-<h1 className="text-xl font-bold text-green-600">
-Email Verified 🎉
-</h1>
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-6 sm:p-10 max-w-sm sm:max-w-md w-full text-center">
 
-<p className="mt-3 text-sm">{message}</p>
+        {status === "loading" && (
+          <>
+            <div className="flex justify-center mb-6">
+              <div className="w-14 h-14 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin"/>
+            </div>
 
-<Link
-href="/auth/login"
-className="mt-6 inline-block bg-blue-600 text-white px-5 py-2.5 rounded-lg"
->
-Go to Login
-</Link>
-</>
+            <h1 className="text-xl font-bold text-gray-900">
+              Verifying Email...
+            </h1>
+          </>
+        )}
 
-)}
+        {status === "success" && (
+          <>
+            <h1 className="text-xl font-bold text-green-600">
+              Email Verified 🎉
+            </h1>
 
-{status === "error" && (
+            <p className="mt-3 text-sm">{message}</p>
 
-<>
-<h1 className="text-xl font-bold text-red-600">
-Verification Failed
-</h1>
+            <Link
+              href="/auth/login"
+              className="mt-6 inline-block bg-blue-600 text-white px-5 py-2.5 rounded-lg"
+            >
+              Go to Login
+            </Link>
+          </>
+        )}
 
-<p className="mt-3 text-sm">{message}</p>
+        {status === "error" && (
+          <>
+            <h1 className="text-xl font-bold text-red-600">
+              Verification Failed
+            </h1>
 
-{/* 🔥 RESEND UI */}
-<input
-type="email"
-placeholder="Enter your email"
-value={email}
-onChange={(e)=>setEmail(e.target.value)}
-className="w-full mt-4 border px-3 py-2 rounded-lg"
-/>
+            <p className="mt-3 text-sm">{message}</p>
 
-<button
-onClick={handleResend}
-disabled={resendLoading}
-className="mt-3 w-full bg-blue-600 text-white py-2 rounded-lg disabled:opacity-70"
->
-{resendLoading ? "Wait 30s..." : "Resend verification"}
-</button>
+            <input
+              type="email"
+              placeholder="Enter your email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full mt-4 border px-3 py-2 rounded-lg"
+            />
 
-<Link
-href="/auth/login"
-className="mt-4 block text-blue-600 text-sm"
->
-Back to Login
-</Link>
-</>
+            <button
+              onClick={handleResend}
+              disabled={cooldown > 0}
+              className="mt-3 w-full bg-blue-600 text-white py-2 rounded-lg disabled:opacity-70"
+            >
+              {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend verification"}
+            </button>
 
-)}
+            <Link
+              href="/auth/login"
+              className="mt-4 block text-blue-600 text-sm"
+            >
+              Back to Login
+            </Link>
+          </>
+        )}
 
-</div>
-
-</div>
-
-)
-
+      </div>
+    </div>
+  )
 }

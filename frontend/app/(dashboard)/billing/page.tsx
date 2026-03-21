@@ -10,35 +10,38 @@ export default function BillingPage(){
 
 const [loading,setLoading] = useState<string | null>(null)
 const [billing,setBilling] = useState<"monthly"|"yearly">("monthly")
+
 const [currency,setCurrency] = useState<Currency>("INR")
 const [lockedCurrency,setLockedCurrency] = useState<Currency | null>(null)
+
 const [isEarly,setIsEarly] = useState(false)
 
 const [subscription,setSubscription] = useState<any>(null)
 const [invoices,setInvoices] = useState<any[]>([])
 
-/* ================= GEO DETECTION ================= */
+const [pageLoading,setPageLoading] = useState(true)
+const [error,setError] = useState<string | null>(null)
+
+/* ================= INIT ================= */
 
 useEffect(()=>{
 
-fetch("https://ipapi.co/json/")
-.then(res=>res.json())
-.then(data=>{
-if(data.country === "IN"){
-setCurrency("INR")
-}else{
-setCurrency("USD")
-}
-})
-.catch(()=>setCurrency("INR"))
+const init = async () => {
 
-setIsEarly(true)
+try{
 
-/* ================= FETCH BILLING ================= */
-
+const [geoRes,billingRes] = await Promise.allSettled([
+fetch("https://ipapi.co/json/"),
 fetch("/api/billing")
-.then(res=>res.json())
-.then(data=>{
+])
+
+if(geoRes.status === "fulfilled"){
+const geo = await geoRes.value.json()
+setCurrency(geo?.country === "IN" ? "INR" : "USD")
+}
+
+if(billingRes.status === "fulfilled"){
+const data = await billingRes.value.json()
 
 if(data?.subscription){
   setSubscription(data.subscription)
@@ -52,13 +55,23 @@ if(data?.subscription?.currency){
 if(data?.invoices){
   setInvoices(data.invoices)
 }
+}
 
-})
-.catch(()=>{})
+setIsEarly(true)
+
+}catch(err){
+setError("Failed to load billing")
+}finally{
+setPageLoading(false)
+}
+
+}
+
+init()
 
 },[])
 
-/* ================= PRICING ================= */
+/* ================= PLANS ================= */
 
 const plans = [
 {
@@ -103,6 +116,8 @@ features:[
 
 const handleUpgrade = async(plan:string)=>{
 
+if(loading) return
+
 try{
 
 setLoading(plan)
@@ -125,23 +140,34 @@ if(checkout?.url){
 window.location.href = checkout.url
 }
 
-}catch(err:any){
-
-console.error(err)
-
-if(err?.response?.data?.message){
-alert(err.response.data.message)
-}else{
+}catch{
 alert("Something went wrong")
-}
-
 }finally{
 setLoading(null)
 }
 
 }
 
-/* ================= RENDER ================= */
+/* ================= LOADING ================= */
+
+if(pageLoading){
+return (
+<div className="p-6 space-y-4">
+<div className="h-6 w-40 bg-gray-200 rounded animate-pulse"/>
+<div className="grid grid-cols-3 gap-4">
+{[1,2,3].map(i=>(
+<div key={i} className="h-64 bg-gray-200 rounded-xl animate-pulse"/>
+))}
+</div>
+</div>
+)
+}
+
+if(error){
+return <div className="p-6 text-red-500">{error}</div>
+}
+
+/* ================= UI ================= */
 
 return(
 
@@ -151,37 +177,33 @@ return(
 
 <div className="flex justify-between items-center">
 
-<div>
-<h1 className="text-2xl font-semibold text-gray-950">
-Billing
-</h1>
-</div>
+<h1 className="text-2xl font-semibold">Billing</h1>
 
 <div className="flex bg-gray-100 rounded-lg p-1 text-sm">
 
 <button
 onClick={()=>setBilling("monthly")}
 className={`px-4 py-1 rounded-md ${
-billing==="monthly" ? "bg-white shadow text-black" : "text-gray-600"
+billing==="monthly" ? "bg-white shadow" : "text-gray-500"
 }`}
-
 >
-
-Monthly </button>
+Monthly
+</button>
 
 <button
 onClick={()=>setBilling("yearly")}
 className={`px-4 py-1 rounded-md ${
-billing==="yearly" ? "bg-white shadow text-black" : "text-gray-600"
+billing==="yearly" ? "bg-white shadow" : "text-gray-500"
 }`}
-
 >
+Yearly (Save 20%)
+</button>
 
-Yearly (Save 20%) </button>
+</div>
 
 </div>
 
-</div>
+{/* PLANS */}
 
 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
 
@@ -200,79 +222,73 @@ const original = billing==="monthly"
 : data.yearly
 
 const isCurrent = subscription?.plan?.name === plan.id
+const isPopular = plan.id === "PRO"
 
 return(
 
 <div
 key={plan.id}
-className="bg-white rounded-xl p-6 flex flex-col justify-between border border-gray-300 shadow-sm hover:shadow-2xl transition"
+className={`relative p-6 rounded-2xl border transition ${
+isPopular
+? "border-blue-600 shadow-2xl scale-[1.03]"
+: "border-gray-300 hover:shadow-xl"
+}`}
 >
 
-<div className="space-y-5">
-
-<div>
-
-<h2 className="text-lg font-semibold text-gray-950">
-{plan.name}
-</h2>
-
-{isCurrent && ( <span className="text-xs text-green-600 font-semibold">
-Current Plan </span>
+{isPopular && (
+<div className="absolute -top-3 left-1/2 -translate-x-1/2">
+<span className="bg-blue-600 text-white text-xs px-3 py-1 rounded-full">
+🔥 Most Popular
+</span>
+</div>
 )}
 
-<div className="mt-2">
+<h2 className="text-lg font-semibold">{plan.name}</h2>
+
+{isCurrent && (
+<span className="text-xs text-green-600">✔ Current</span>
+)}
+
+<div className="mt-3">
 
 {isEarly && (
-
-<p className="text-xs text-gray-500 line-through">
+<p className="text-xs line-through text-gray-400">
 {currency==="INR" ? "₹" : "$"}{original}
 </p>
 )}
 
 <div className="flex items-end gap-1">
-
-<span className="text-3xl font-bold text-black">
+<span className="text-3xl font-bold">
 {currency==="INR" ? "₹" : "$"}{price}
 </span>
-
-<span className="text-sm text-gray-700">
-/{billing}
-</span>
-
-</div>
-
-{isEarly && ( <span className="text-xs text-green-600 font-semibold">
-🔥 Early Access Offer </span>
-)}
-
+<span className="text-sm text-gray-500">/{billing}</span>
 </div>
 
 </div>
 
-<ul className="text-sm text-gray-800 space-y-2">
+<ul className="mt-4 space-y-2 text-sm">
 
-{plan.features.map((f,index)=>(
-
-<li key={index} className="flex gap-2">
-<span className="text-green-700">✔</span>
-{f}
+{plan.features.map((f,i)=>(
+<li key={i} className="flex gap-2">
+<span>✔</span>{f}
 </li>
-
 ))}
 
 </ul>
 
-</div>
-
 <button
 onClick={()=>handleUpgrade(plan.id)}
 disabled={loading===plan.id || isCurrent}
-className="mt-6 w-full text-sm font-medium py-2 rounded-lg transition bg-blue-600 hover:bg-blue-700 text-white"
-
+className={`mt-6 w-full py-2 rounded-lg text-sm font-semibold ${
+isPopular
+? "bg-blue-600 hover:bg-blue-700 text-white"
+: "bg-black hover:bg-gray-900 text-white"
+}`}
 >
 
-{isCurrent ? "Current Plan" :
-loading===plan.id ? "Processing..." : "Get Started"}
+{isCurrent ? "Current Plan"
+: loading===plan.id ? "Processing..."
+: "Upgrade Now"}
 
 </button>
 

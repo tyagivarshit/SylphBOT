@@ -1,111 +1,189 @@
-const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+/* ======================================
+TYPES
+====================================== */
 
-/* 🔥 SAFE FETCH WRAPPER (timeout + errors + env check) */
-async function safeFetch(url: string, options: RequestInit = {}) {
-  if (!API) {
-    throw new Error("API not configured");
-  }
+type AuthResponse = {
+  success?: boolean;
+  message?: string;
+  user?: any;
+};
+
+/* ======================================
+🔥 SAFE FETCH (FINAL FIXED)
+====================================== */
+
+async function safeFetch<T = any>(
+  url: string,
+  options: RequestInit = {}
+): Promise<T> {
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+  const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
     const res = await fetch(url, {
       ...options,
       credentials: "include",
+      cache: "no-store", // 🔥 FIX 304
       signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
     });
 
-    const contentType = res.headers.get("content-type");
+    if (res.status === 204) return {} as T;
 
+    const contentType = res.headers.get("content-type");
     let data: any = null;
 
     if (contentType?.includes("application/json")) {
       data = await res.json();
-    } else {
-      data = { message: "Invalid server response" };
     }
 
     if (!res.ok) {
+      if (res.status === 401) throw new Error("UNAUTHORIZED");
+      if (res.status === 429) throw new Error("Too many requests");
       throw new Error(data?.message || "Request failed");
     }
 
     return data;
 
   } catch (err: any) {
-
     if (err.name === "AbortError") {
       throw new Error("Request timeout");
     }
-
-    throw new Error(err?.message || "Network error");
-
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-/* ================= LOGIN ================= */
+/* ======================================
+AUTH STATE
+====================================== */
 
-export async function loginUser(email: string, password: string) {
-  return safeFetch(`${API}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+let currentUserCache: any = null;
+
+/* ======================================
+CURRENT USER
+====================================== */
+
+export async function getCurrentUser(): Promise<AuthResponse | null> {
+  try {
+    const res = await safeFetch<AuthResponse>(`/api/auth/me`);
+    currentUserCache = res?.user || null;
+    return res;
+  } catch (err: any) {
+    if (err.message === "UNAUTHORIZED") {
+      currentUserCache = null;
+      return null;
+    }
+    return null;
+  }
 }
 
-/* ================= REGISTER ================= */
+/* ======================================
+LOGIN
+====================================== */
+
+export async function loginUser(
+  email: string,
+  password: string
+): Promise<AuthResponse> {
+
+  const res = await safeFetch<AuthResponse>(`/api/auth/login`, {
+    method: "POST",
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      password,
+    }),
+  });
+
+  await new Promise((r) => setTimeout(r, 100)); // cookie settle
+
+  return res;
+}
+
+/* ======================================
+REGISTER
+====================================== */
 
 export async function registerUser(
   name: string,
   email: string,
   password: string
-) {
-  return safeFetch(`${API}/api/auth/register`, {
+): Promise<AuthResponse> {
+
+  return safeFetch<AuthResponse>(`/api/auth/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, email, password }),
+    body: JSON.stringify({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+    }),
   });
 }
 
-/* ================= VERIFY EMAIL ================= */
+/* ======================================
+VERIFY EMAIL
+====================================== */
 
 export async function verifyEmail(token: string) {
-  return safeFetch(
-    `${API}/api/auth/verify-email?token=${encodeURIComponent(token)}`
-  );
+  return safeFetch(`/api/auth/verify-email?token=${encodeURIComponent(token)}`);
 }
 
-/* ================= RESEND VERIFICATION ================= */
+/* ======================================
+RESEND VERIFICATION
+====================================== */
 
 export async function resendVerification(email: string) {
-  return safeFetch(`${API}/api/auth/resend-verification`, {
+  return safeFetch(`/api/auth/resend-verification`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+    }),
   });
 }
 
-/* ================= FORGOT PASSWORD ================= */
+/* ======================================
+FORGOT PASSWORD
+====================================== */
 
 export async function forgotPassword(email: string) {
-  return safeFetch(`${API}/api/auth/forgot-password`, {
+  return safeFetch(`/api/auth/forgot-password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+    }),
   });
 }
 
-/* ================= RESET PASSWORD ================= */
+/* ======================================
+RESET PASSWORD
+====================================== */
 
 export async function resetPassword(
   token: string,
   password: string
 ) {
-  return safeFetch(`${API}/api/auth/reset-password`, {
+  return safeFetch(`/api/auth/reset-password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, password }),
+    body: JSON.stringify({
+      token,
+      password,
+    }),
+  });
+}
+
+/* ======================================
+LOGOUT
+====================================== */
+
+export async function logoutUser() {
+  currentUserCache = null;
+
+  return safeFetch(`/api/auth/logout`, {
+    method: "POST",
   });
 }

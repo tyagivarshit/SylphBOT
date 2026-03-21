@@ -1,15 +1,54 @@
 import rateLimit from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
+import { redis } from "../config/redis";
 
 /* ======================================
-🔥 KEY GENERATOR (IMPORTANT)
+CONFIG
 ====================================== */
 
+const isProd = process.env.NODE_ENV === "production";
+
+/* ======================================
+🔥 CREATE SEPARATE STORE (FIX)
+====================================== */
+
+const createStore = (prefix: string) =>
+  new RedisStore({
+    sendCommand: (...args: any[]) => (redis as any).call(...args),
+    prefix, // 🔥 IMPORTANT (unique per limiter)
+  });
+
+/* ======================================
+KEY GENERATOR
+====================================== */
+
+const getIP = (req: any) =>
+  (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+  req.socket?.remoteAddress ||
+  req.ip ||
+  "unknown";
+
 const keyGenerator = (req: any) => {
-  return req.user?.businessId || req.ip;
+  if (req.user?.businessId) {
+    return `biz_${req.user.businessId}`;
+  }
+  return `ip_${getIP(req)}`;
 };
 
 /* ======================================
-🔐 AUTH LIMITER
+HANDLER
+====================================== */
+
+const handler = (_req: any, res: any) => {
+  return res.status(429).json({
+    success: false,
+    code: "RATE_LIMIT",
+    message: "Too many requests. Please try again later.",
+  });
+};
+
+/* ======================================
+AUTH LIMITER
 ====================================== */
 
 export const authLimiter = rateLimit({
@@ -18,36 +57,35 @@ export const authLimiter = rateLimit({
   keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    code: "TOO_MANY_ATTEMPTS",
-    message: "Too many login attempts. Try again later.",
-  },
+  store: createStore("auth"), // 🔥 FIX
+  skipSuccessfulRequests: true,
+  handler,
 });
 
 /* ======================================
-🤖 AI LIMITER
+AI LIMITER
 ====================================== */
 
 export const aiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 30,
+  max: isProd ? 30 : 100,
   keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    code: "AI_RATE_LIMIT",
-    message: "Too many AI requests. Slow down.",
-  },
+  store: createStore("ai"), // 🔥 FIX
+  handler,
 });
 
 /* ======================================
-🌍 GLOBAL LIMITER
+GLOBAL LIMITER
 ====================================== */
 
 export const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: isProd ? 100 : 500,
   keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore("global"), // 🔥 FIX
+  handler,
 });

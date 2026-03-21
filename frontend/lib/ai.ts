@@ -1,5 +1,3 @@
-import { getToken } from "./token"
-
 const API = process.env.NEXT_PUBLIC_API_URL
 
 export async function getAISettings(clientId: string) {
@@ -7,12 +5,8 @@ export async function getAISettings(clientId: string) {
     throw new Error("Client not connected")
   }
 
-  const token = getToken()
-
   const res = await fetch(`${API}/api/clients/${clientId}`, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
+    credentials: "include", // 🔥 MUST
   })
 
   if (!res.ok) {
@@ -28,15 +22,13 @@ export async function getAISettings(clientId: string) {
 }
 
 export async function updateAISettings(clientId: string, data: any) {
-  const token = getToken()
-
   const res = await fetch(`${API}/api/clients/${clientId}`, {
     method: "PUT",
+    credentials: "include", // 🔥 MUST
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
   })
 
   if (!res.ok) {

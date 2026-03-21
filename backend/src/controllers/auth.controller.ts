@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import prisma from "../config/prisma";
@@ -8,153 +8,137 @@ import {
   generateRefreshToken,
 } from "../utils/generateToken";
 import { sendVerificationEmail } from "../services/email.service";
+import {
+  badRequest,
+  unauthorized,
+  conflict,
+  tooManyRequests,
+} from "../utils/AppError";
 
-const isProd = process.env.NODE_ENV === "production";
+/* ======================================
+UTILS
+====================================== */
 
-/* 🔥 TYPE SAFE */
-type AuthRequest = Request & {
-  user: {
-    id: string;
-    role: string;
-    businessId: string;
-  };
-};
-
-/* 🔥 SAFE IP (NO TS ERROR + PRODUCTION READY) */
 const getIP = (req: Request) =>
   (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
   req.socket.remoteAddress ||
   "unknown";
 
-/* 🔥 GLOBAL RATE LIMIT */
+const getUA = (req: Request) => req.headers["user-agent"] || "unknown";
+
+const hashToken = (token: string) =>
+  crypto.createHash("sha256").update(token).digest("hex");
+
+/* ======================================
+RATE LIMIT
+====================================== */
+
 const checkGlobalLimit = async (ip: string) => {
   const key = `global:${ip}`;
   const count = await redis.incr(key);
   if (count === 1) await redis.expire(key, 60);
-
-  if (count > 60) {
-    throw new Error("RATE_LIMIT");
-  }
+  if (count > 60) throw tooManyRequests("Too many requests");
 };
 
-/* ================= REGISTER ================= */
+/* ======================================
+🔥 COOKIE CONFIG (FINAL WORKING)
+====================================== */
 
-export const register = async (req: Request, res: Response) => {
+const getCookieOptions = () => ({
+  httpOnly: true,
+  secure: false, // 🔥 DEV ke liye false
+  sameSite: "lax" as const, // 🔥 proxy ke saath works
+  path: "/",
+});
+
+/* ======================================
+🔥 SET COOKIES
+====================================== */
+
+const setCookies = (res: Response, access: string, refresh: string) => {
+  const options = getCookieOptions();
+
+  res.cookie("accessToken", access, {
+    ...options,
+    maxAge: 15 * 60 * 1000,
+  });
+
+  res.cookie("refreshToken", refresh, {
+    ...options,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  console.log("🍪 Cookies SET → access + refresh");
+};
+
+/* ======================================
+REGISTER
+====================================== */
+
+export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ip = getIP(req);
-    await checkGlobalLimit(ip);
+    await checkGlobalLimit(getIP(req));
 
-    const name = req.body.name?.trim();
-    const email = req.body.email?.toLowerCase().trim();
-    const password = req.body.password;
+    const { name, email, password } = req.body;
 
     if (!name || !email || !password || password.length < 6) {
-      return res.status(400).json({ success: false });
+      throw badRequest("Invalid input");
     }
+
+    const exists = await prisma.user.findUnique({ where: { email } });
+    if (exists) throw conflict("Email already exists");
 
     const hashed = await bcrypt.hash(password, 12);
-    const verifyToken = crypto.randomBytes(32).toString("hex");
+    const rawToken = crypto.randomBytes(32).toString("hex");
 
-    await prisma.$transaction(async (tx) => {
-      const exists = await tx.user.findUnique({ where: { email } });
-      if (exists) throw new Error("EMAIL_EXISTS");
-
-      const user = await tx.user.create({
-        data: {
-          name,
-          email,
-          password: hashed,
-          verifyToken,
-          verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        },
-      });
-
-      const business = await tx.business.create({
-        data: {
-          name: `${name}'s Business`,
-          ownerId: user.id,
-        },
-      });
-
-      const trialPlan = await tx.plan.findUnique({
-        where: { name: "FREE_TRIAL" },
-      });
-
-      if (!trialPlan) throw new Error("PLAN_NOT_FOUND");
-
-      await tx.subscription.create({
-        data: {
-          businessId: business.id,
-          planId: trialPlan.id,
-          status: "ACTIVE",
-          isTrial: true,
-          trialUsed: true,
-          currentPeriodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
-      });
-
-      await tx.usage.create({
-        data: {
-          businessId: business.id,
-          month: new Date().getMonth() + 1,
-          year: new Date().getFullYear(),
-        },
-      });
+    await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashed,
+        verifyToken: hashToken(rawToken),
+        verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
     });
 
-    const link = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verifyToken}`;
-    await sendVerificationEmail(email, link);
+    await sendVerificationEmail(
+      email,
+      `${process.env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`
+    );
 
-    return res.status(201).json({ success: true });
+    res.status(201).json({ success: true });
 
-  } catch (e: any) {
-    if (e.message === "EMAIL_EXISTS") {
-      return res.status(400).json({ success: false });
-    }
-    if (e.message === "RATE_LIMIT") {
-      return res.status(429).json({ success: false });
-    }
-    return res.status(500).json({ success: false });
+  } catch (err) {
+    next(err);
   }
 };
 
-/* ================= LOGIN ================= */
+/* ======================================
+LOGIN
+====================================== */
 
-export const login = async (req: Request, res: Response) => {
+export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ip = getIP(req);
-    await checkGlobalLimit(ip);
+    await checkGlobalLimit(getIP(req));
 
-    const email = req.body.email?.toLowerCase().trim();
-    const password = req.body.password;
-
-    if (!email || !password) {
-      return res.status(400).json({ success: false });
-    }
-
-    const key = `login:limit:${email}:${ip}`;
+    const { email, password } = req.body;
 
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (
       !user ||
-      !user.isActive ||
       !user.isVerified ||
       !(await bcrypt.compare(password, user.password))
     ) {
-      await redis.incr(key);
-      await redis.expire(key, 60 * 15);
-      return res.status(400).json({ success: false });
+      throw unauthorized("Invalid credentials");
     }
-
-    await redis.del(key);
 
     const business = await prisma.business.findFirst({
       where: { ownerId: user.id },
     });
 
     if (!business) {
-      return res.status(500).json({ success: false });
+      throw badRequest("Business not found");
     }
 
     const accessToken = generateAccessToken(
@@ -164,100 +148,36 @@ export const login = async (req: Request, res: Response) => {
       user.tokenVersion
     );
 
-    const refreshToken = generateRefreshToken(
-      user.id,
-      user.tokenVersion
-    );
+    const refreshRaw = generateRefreshToken(user.id, user.tokenVersion);
 
     await prisma.refreshToken.create({
       data: {
-        token: refreshToken,
+        token: hashToken(refreshRaw),
         userId: user.id,
-        userAgent: req.headers["user-agent"],
-        ip,
+        userAgent: getUA(req),
+        ip: getIP(req),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
 
-    console.log("LOGIN_SUCCESS", { userId: user.id, ip });
+    console.log("🔐 LOGIN SUCCESS → setting cookies");
 
-    res.cookie("accessToken", accessToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? "none" : "lax",
-      maxAge: 15 * 60 * 1000,
-      path: "/",
-    });
+    setCookies(res, accessToken, refreshRaw);
 
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: "/",
-    });
+    res.json({ success: true });
 
-    return res.json({ success: true });
-
-  } catch (e: any) {
-    if (e.message === "RATE_LIMIT") {
-      return res.status(429).json({ success: false });
-    }
-    return res.status(500).json({ success: false });
+  } catch (err) {
+    next(err);
   }
 };
 
-/* ================= GET ME ================= */
+/* ======================================
+VERIFY EMAIL
+====================================== */
 
-export const getMe = async (req: AuthRequest, res: Response) => {
+export const verifyEmail = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { id: true, name: true, email: true, role: true },
-    });
-
-    if (!user) {
-      return res.status(401).json({ success: false });
-    }
-
-    return res.json({ success: true, user });
-
-  } catch {
-    return res.status(500).json({ success: false });
-  }
-};
-
-/* ================= LOGOUT ================= */
-
-export const logout = async (req: AuthRequest, res: Response) => {
-  try {
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: { tokenVersion: { increment: 1 } },
-    });
-
-    await prisma.refreshToken.deleteMany({
-      where: { userId: req.user.id },
-    });
-
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
-
-    return res.json({ success: true });
-
-  } catch {
-    return res.status(500).json({ success: false });
-  }
-};
-
-/* ================= VERIFY EMAIL ================= */
-
-export const verifyEmail = async (req: Request, res: Response) => {
-  try {
-    const ip = getIP(req);
-    await checkGlobalLimit(ip);
-
-    const token = req.body.token;
+    const token = hashToken(req.query.token as string);
 
     const user = await prisma.user.findFirst({
       where: {
@@ -266,9 +186,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
       },
     });
 
-    if (!user) {
-      return res.status(400).json({ success: false });
-    }
+    if (!user) throw badRequest("Invalid token");
 
     await prisma.user.update({
       where: { id: user.id },
@@ -279,141 +197,144 @@ export const verifyEmail = async (req: Request, res: Response) => {
       },
     });
 
-    return res.json({ success: true });
+    res.json({ success: true });
 
-  } catch (e: any) {
-    if (e.message === "RATE_LIMIT") {
-      return res.status(429).json({ success: false });
-    }
-    return res.status(500).json({ success: false });
+  } catch (err) {
+    next(err);
   }
 };
 
-/* ================= RESEND ================= */
+/* ======================================
+RESEND VERIFICATION
+====================================== */
 
-export const resendVerificationEmail = async (req: Request, res: Response) => {
+export const resendVerificationEmail = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ip = getIP(req);
-    await checkGlobalLimit(ip);
+    const email = req.body.email;
 
-    const email = req.body.email?.toLowerCase().trim();
-
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user || user.isVerified) {
-      return res.status(400).json({ success: false });
-    }
-
-    const token = crypto.randomBytes(32).toString("hex");
+    const raw = crypto.randomBytes(32).toString("hex");
 
     await prisma.user.update({
-      where: { id: user.id },
+      where: { email },
       data: {
-        verifyToken: token,
+        verifyToken: hashToken(raw),
         verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
       },
     });
 
-    const link = `${process.env.FRONTEND_URL}/auth/verify-email?token=${token}`;
-    await sendVerificationEmail(email, link);
+    await sendVerificationEmail(
+      email,
+      `${process.env.FRONTEND_URL}/auth/verify-email?token=${raw}`
+    );
 
-    return res.json({ success: true });
+    res.json({ success: true });
 
-  } catch (e: any) {
-    if (e.message === "RATE_LIMIT") {
-      return res.status(429).json({ success: false });
-    }
-    return res.status(500).json({ success: false });
+  } catch (err) {
+    next(err);
   }
 };
 
-/* ================= FORGOT PASSWORD ================= */
+/* ======================================
+FORGOT PASSWORD
+====================================== */
 
-export const forgotPassword = async (req: Request, res: Response) => {
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ip = getIP(req);
-    await checkGlobalLimit(ip);
-
-    const email = req.body.email?.toLowerCase().trim();
-
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user) {
-      return res.json({ success: true });
-    }
+    const email = req.body.email;
 
     const raw = crypto.randomBytes(32).toString("hex");
-    const hashed = crypto.createHash("sha256").update(raw).digest("hex");
 
     await prisma.user.update({
-      where: { id: user.id },
+      where: { email },
       data: {
-        resetToken: hashed,
+        resetToken: hashToken(raw),
         resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
       },
     });
 
-    const link = `${process.env.FRONTEND_URL}/auth/reset-password?token=${raw}`;
-    await sendVerificationEmail(email, link);
+    await sendVerificationEmail(
+      email,
+      `${process.env.FRONTEND_URL}/auth/reset-password?token=${raw}`
+    );
 
-    return res.json({ success: true });
+    res.json({ success: true });
 
-  } catch (e: any) {
-    if (e.message === "RATE_LIMIT") {
-      return res.status(429).json({ success: false });
-    }
-    return res.status(500).json({ success: false });
+  } catch (err) {
+    next(err);
   }
 };
 
-/* ================= RESET PASSWORD ================= */
+/* ======================================
+RESET PASSWORD
+====================================== */
 
-export const resetPassword = async (req: Request, res: Response) => {
+export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ip = getIP(req);
-    await checkGlobalLimit(ip);
-
     const { token, password } = req.body;
-
-    if (!token || !password || password.length < 6) {
-      return res.status(400).json({ success: false });
-    }
-
-    const hashed = crypto.createHash("sha256").update(token).digest("hex");
 
     const user = await prisma.user.findFirst({
       where: {
-        resetToken: hashed,
+        resetToken: hashToken(token),
         resetTokenExpiry: { gt: new Date() },
       },
     });
 
-    if (!user) {
-      return res.status(400).json({ success: false });
-    }
-
-    const newPass = await bcrypt.hash(password, 12);
+    if (!user) throw badRequest("Invalid token");
 
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        password: newPass,
+        password: await bcrypt.hash(password, 12),
         resetToken: null,
         resetTokenExpiry: null,
-        tokenVersion: { increment: 1 },
       },
     });
 
-    await prisma.refreshToken.deleteMany({
-      where: { userId: user.id },
+    res.json({ success: true });
+
+  } catch (err) {
+    next(err);
+  }
+};
+
+/* ======================================
+GET ME
+====================================== */
+
+export const getMe = async (req: any, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw unauthorized("Not authenticated");
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, name: true, email: true, role: true },
     });
 
-    return res.json({ success: true });
+    res.json({ success: true, user });
 
-  } catch (e: any) {
-    if (e.message === "RATE_LIMIT") {
-      return res.status(429).json({ success: false });
-    }
-    return res.status(500).json({ success: false });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/* ======================================
+LOGOUT
+====================================== */
+
+export const logout = async (req: any, res: Response, next: NextFunction) => {
+  try {
+    await prisma.refreshToken.deleteMany({
+      where: { userId: req.user.id },
+    });
+
+    const options = getCookieOptions();
+
+    res.clearCookie("accessToken", options);
+    res.clearCookie("refreshToken", options);
+
+    res.json({ success: true });
+
+  } catch (err) {
+    next(err);
   }
 };

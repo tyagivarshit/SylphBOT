@@ -1,30 +1,33 @@
 import Redis from "ioredis";
 
-export const redis = new Redis(process.env.REDIS_URL as string);
+export const redis = new Redis(process.env.REDIS_URL as string, {
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+});
+
+/* ======================================
+CONFIG
+====================================== */
 
 const PREFIX = "ai_rate_limit";
 
-/* -------------------------------------------------- */
-/* RATE LIMIT KEY */
-/* -------------------------------------------------- */
+/* ======================================
+KEY BUILDER
+====================================== */
 
 export const getRateKey = (
   businessId: string,
   leadId: string,
   platform?: string
 ) => {
-
-  if (platform) {
-    return `${PREFIX}:${platform}:${businessId}:${leadId}`;
-  }
-
-  return `${PREFIX}:${businessId}:${leadId}`;
-
+  return platform
+    ? `${PREFIX}:${platform}:${businessId}:${leadId}`
+    : `${PREFIX}:${businessId}:${leadId}`;
 };
 
-/* -------------------------------------------------- */
-/* INCREMENT RATE (CORRECT WINDOW LOGIC) */
-/* -------------------------------------------------- */
+/* ======================================
+INCREMENT (ATOMIC + SAFE)
+====================================== */
 
 export const incrementRate = async (
   businessId: string,
@@ -32,76 +35,87 @@ export const incrementRate = async (
   platform?: string,
   windowSeconds = 60
 ) => {
-
   const key = getRateKey(businessId, leadId, platform);
 
   try {
+    const multi = redis.multi();
 
-    const count = await redis.incr(key);
+    multi.incr(key);
+    multi.ttl(key);
 
-    /* TTL ONLY FIRST TIME */
+    const [[, count], [, ttl]] = (await multi.exec()) as any;
 
-    if (count === 1) {
+    if (ttl === -1) {
       await redis.expire(key, windowSeconds);
     }
 
     return count;
-
-  } catch (error) {
-
-    console.error("RATE LIMIT REDIS ERROR:", error);
-
-    /* FAIL SAFE */
+  } catch {
     return 0;
-
   }
-
 };
 
-/* -------------------------------------------------- */
-/* GET CURRENT RATE */
-/* -------------------------------------------------- */
+/* ======================================
+GET RATE
+====================================== */
 
 export const getRate = async (
   businessId: string,
   leadId: string,
   platform?: string
 ) => {
-
   const key = getRateKey(businessId, leadId, platform);
 
-  const value = await redis.get(key);
-
-  return Number(value || 0);
-
+  try {
+    const value = await redis.get(key);
+    return Number(value || 0);
+  } catch {
+    return 0;
+  }
 };
 
-/* -------------------------------------------------- */
-/* RESET RATE (MANUAL UNBLOCK) */
-/* -------------------------------------------------- */
+/* ======================================
+RESET RATE
+====================================== */
 
 export const resetRate = async (
   businessId: string,
   leadId: string,
   platform?: string
 ) => {
-
   const key = getRateKey(businessId, leadId, platform);
 
-  await redis.del(key);
-
+  try {
+    await redis.del(key);
+  } catch {}
 };
 
-/* -------------------------------------------------- */
-/* CLEAR ALL RATE LIMITS (ADMIN TOOL) */
-/* -------------------------------------------------- */
+/* ======================================
+CLEAR ALL (SAFE SCAN)
+====================================== */
 
 export const clearAllRates = async () => {
+  try {
+    const stream = redis.scanStream({
+      match: `${PREFIX}:*`,
+      count: 100,
+    });
 
-  const keys = await redis.keys(`${PREFIX}:*`);
+    const pipeline = redis.pipeline();
 
-  if (keys.length > 0) {
-    await redis.del(keys);
-  }
+    stream.on("data", (keys: string[]) => {
+      if (keys.length) {
+        keys.forEach((key) => pipeline.del(key));
+      }
+    });
 
+    return new Promise<void>((resolve, reject) => {
+      stream.on("end", async () => {
+        await pipeline.exec();
+        resolve();
+      });
+
+      stream.on("error", reject);
+    });
+  } catch {}
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
@@ -9,364 +9,261 @@ import { Eye, EyeOff } from "lucide-react";
 
 import { registerUser, resendVerification } from "@/lib/auth";
 
-export default function RegisterPage(){
+export default function RegisterPage() {
+  const router = useRouter();
 
-const router = useRouter()
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
-const [name,setName] = useState("")
-const [email,setEmail] = useState("")
-const [password,setPassword] = useState("")
-const [loading,setLoading] = useState(false)
-const [showPassword,setShowPassword] = useState(false)
-const [emailSent,setEmailSent] = useState(false)
-const [resendLoading,setResendLoading] = useState(false) // 🔥 added
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-/* ================= EMAIL VALIDATION ================= */
+  const [emailSent, setEmailSent] = useState(false);
 
-const validateEmail = (value:string)=>{
-return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-}
+  const [cooldown, setCooldown] = useState(0);
 
-/* ================= REGISTER ================= */
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const mounted = useRef(true);
 
-const handleRegister = async(e?:React.FormEvent)=>{
+  /* ======================================
+  SAFE CLEANUP
+  ====================================== */
 
-if(e) e.preventDefault()
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
-if(loading) return
+  /* ======================================
+  COOLDOWN TIMER
+  ====================================== */
 
-const cleanName = name.trim()
-const cleanEmail = email.trim().toLowerCase() // 🔥 normalize
+  useEffect(() => {
+    if (cooldown <= 0) return;
 
-if(!cleanName || !cleanEmail || !password){
-toast.error("Fill all fields")
-return
-}
+    timerRef.current = setInterval(() => {
+      setCooldown((prev) => prev - 1);
+    }, 1000);
 
-if(!validateEmail(cleanEmail)){
-toast.error("Enter a valid email")
-return
-}
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [cooldown]);
 
-if(password.length < 6){
-toast.error("Password must be at least 6 characters")
-return
-}
+  const startCooldown = () => setCooldown(30);
 
-try{
+  /* ======================================
+  VALIDATION
+  ====================================== */
 
-setLoading(true)
+  const validateEmail = (value: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  };
 
-await registerUser(cleanName,cleanEmail,password)
+  /* ======================================
+  REGISTER
+  ====================================== */
 
-toast.success("Account created 🎉 Check your email")
+  const handleRegister = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
 
-setEmailSent(true)
+    if (loading) return;
 
-}catch(err:any){
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
 
-/* 🔥 duplicate account handling */
-if(err?.message?.toLowerCase().includes("exists")){
-toast.error("Account already exists. Try login or Google sign-in")
-}else{
-toast.error(err?.message || "Server error")
-}
+    if (!cleanName || !cleanEmail || !password) {
+      toast.error("Fill all fields");
+      return;
+    }
 
-}finally{
+    if (!validateEmail(cleanEmail)) {
+      toast.error("Enter a valid email");
+      return;
+    }
 
-setLoading(false)
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
 
-}
-
-}
-
-/* ================= RESEND EMAIL (RATE LIMITED) ================= */
-
-const handleResendVerification = async ()=>{
-
-if(!email){
-toast.error("Enter email first")
-return
-}
-
-if(resendLoading) return // 🔥 prevent spam
-
-try{
-
-setResendLoading(true)
-
-await resendVerification(email)
-
-toast.success("Verification email sent again")
-
-/* 🔥 cooldown 30s */
-setTimeout(()=>{
-setResendLoading(false)
-},30000)
-
-}catch(err:any){
-
-toast.error(err?.message || "Failed to resend email")
-setResendLoading(false)
-
-}
-
-}
-
-/* ================= GOOGLE REGISTER ================= */
-
-const handleGoogleRegister = ()=>{
-
-const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/,"") // 🔥 safe normalize
-
-if(!API){
-toast.error("API URL not configured")
-return
-}
-
-window.location.href = `${API}/api/auth/google`
-
-}
-
-return(
-
-<div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 sm:px-6">
-
-<div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-6">
-
-{/* Logo */}
-
-<div className="text-center mb-4">
-<h1 className="text-lg sm:text-xl font-bold text-gray-900">
-Sylph AI
-</h1>
-</div>
-
-{/* VERIFY EMAIL SCREEN */}
-
-{emailSent ? (
-
-<div className="text-center">
-
-<div className="mx-auto w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mb-6">
-
-<svg
-className="w-8 h-8 text-blue-600"
-fill="none"
-stroke="currentColor"
-strokeWidth="2"
-viewBox="0 0 24 24"
->
-
-<path
-strokeLinecap="round"
-strokeLinejoin="round"
-d="M3 8l9 6 9-6M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8"
-/>
-
-</svg>
-
-</div>
-
-<h2 className="text-lg font-semibold text-gray-900">
-Verify your email
-</h2>
-
-<p className="text-sm text-gray-500 mt-2">
-We sent a verification link to
-</p>
-
-<p className="text-sm font-medium text-gray-900 mt-1">
-{email}
-</p>
-
-<p className="text-xs text-gray-500 mt-3">
-Click the link in your email to activate your account.
-</p>
-
-<button
-onClick={handleResendVerification}
-disabled={resendLoading} // 🔥 disable spam
-className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition disabled:opacity-70"
->
-{resendLoading ? "Wait 30s..." : "Resend verification email"}
-</button>
-
-<p className="text-xs text-gray-500 mt-4">
-Didn't receive the email? Check your spam folder.
-</p>
-
-<div className="mt-4 text-sm">
-
-<Link
-href="/auth/login"
-className="text-blue-600 hover:underline font-medium"
->
-Go to login
-</Link>
-
-</div>
-
-</div>
-
-) : (
-
-<>
-
-{/* Heading */}
-
-<div className="text-center mb-5">
-
-<h2 className="text-base sm:text-lg font-semibold text-gray-900">
-Create your account
-</h2>
-
-<p className="text-xs text-gray-500 mt-1">
-Start automating your customer conversations
-</p>
-
-</div>
-
-{/* GOOGLE SIGNUP */}
-
-<button
-onClick={handleGoogleRegister}
-className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
->
-
-<FcGoogle size={18}/>
-
-<span className="text-sm font-medium text-gray-700">
-Continue with Google
-</span>
-
-</button>
-
-{/* Divider */}
-
-<div className="flex items-center gap-3 my-5">
-
-<div className="flex-1 h-px bg-gray-200"/>
-
-<span className="text-xs text-gray-400">
-OR
-</span>
-
-<div className="flex-1 h-px bg-gray-200"/>
-
-</div>
-
-{/* REGISTER FORM */}
-
-<form
-className="space-y-3"
-onSubmit={handleRegister}
->
-
-{/* NAME */}
-
-<div>
-
-<label className="text-xs font-medium text-gray-700">
-Full Name
-</label>
-
-<input
-type="text"
-placeholder="John Doe"
-value={name}
-onChange={(e)=>setName(e.target.value)}
-className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-/>
-
-</div>
-
-{/* EMAIL */}
-
-<div>
-
-<label className="text-xs font-medium text-gray-700">
-Email
-</label>
-
-<input
-type="email"
-placeholder="you@example.com"
-value={email}
-onChange={(e)=>setEmail(e.target.value)}
-className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-/>
-
-</div>
-
-{/* PASSWORD */}
-
-<div>
-
-<label className="text-xs font-medium text-gray-700">
-Password
-</label>
-
-<div className="relative mt-1">
-
-<input
-type={showPassword ? "text" : "password"}
-placeholder="Create a strong password"
-value={password}
-onChange={(e)=>setPassword(e.target.value)}
-className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-/>
-
-<button
-type="button"
-onClick={()=>setShowPassword(!showPassword)}
-className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
->
-
-{showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
-
-</button>
-
-</div>
-
-</div>
-
-{/* SUBMIT */}
-
-<button
-type="submit"
-disabled={loading}
-className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition disabled:opacity-70"
->
-
-{loading ? "Creating..." : "Create account"}
-
-</button>
-
-</form>
-
-{/* FOOTER */}
-
-<p className="text-xs text-gray-500 mt-5 text-center">
-
-Already have an account?{" "}
-
-<Link
-href="/auth/login"
-className="text-blue-600 font-medium hover:underline"
->
-Login
-</Link>
-
-</p>
-
-</>
-
-)}
-
-</div>
-
-</div>
-
-)
+    try {
+      setLoading(true);
+
+      await registerUser(cleanName, cleanEmail, password);
+
+      toast.success("Account created 🎉 Check your email");
+
+      if (mounted.current) setEmailSent(true);
+    } catch (err: any) {
+      toast.error(err?.message || "Registration failed");
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  };
+
+  /* ======================================
+  RESEND VERIFICATION
+  ====================================== */
+
+  const handleResendVerification = async () => {
+    if (!email) {
+      toast.error("Enter email first");
+      return;
+    }
+
+    if (cooldown > 0) return;
+
+    try {
+      await resendVerification(email.trim().toLowerCase());
+
+      toast.success("Verification email sent");
+
+      startCooldown();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to resend email");
+    }
+  };
+
+  /* ======================================
+  GOOGLE
+  ====================================== */
+
+  const handleGoogleRegister = () => {
+    const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+
+    if (!API) {
+      toast.error("API URL not configured");
+      return;
+    }
+
+    window.location.href = `${API}/api/auth/google`;
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 sm:px-6">
+      <div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-6">
+
+        <div className="text-center mb-4">
+          <h1 className="text-lg sm:text-xl font-bold text-gray-900">
+            Sylph AI
+          </h1>
+        </div>
+
+        {emailSent ? (
+          <div className="text-center">
+
+            <div className="mx-auto w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mb-6">
+              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8"/>
+              </svg>
+            </div>
+
+            <h2 className="text-lg font-semibold text-gray-900">
+              Verify your email
+            </h2>
+
+            <p className="text-sm text-gray-500 mt-2">
+              We sent a verification link to
+            </p>
+
+            <p className="text-sm font-medium text-gray-900 mt-1">
+              {email}
+            </p>
+
+            <button
+              onClick={handleResendVerification}
+              disabled={cooldown > 0}
+              className="mt-6 w-full bg-blue-600 text-white py-2.5 rounded-lg disabled:opacity-70"
+            >
+              {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend verification email"}
+            </button>
+
+            <Link
+              href="/auth/login"
+              className="mt-4 block text-blue-600 text-sm"
+            >
+              Go to login
+            </Link>
+
+          </div>
+        ) : (
+          <>
+            <div className="text-center mb-5">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
+                Create your account
+              </h2>
+            </div>
+
+            <button
+              onClick={handleGoogleRegister}
+              className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
+            >
+              <FcGoogle size={18} />
+              <span className="text-sm font-medium text-gray-700">
+                Continue with Google
+              </span>
+            </button>
+
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-xs text-gray-400">OR</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            <form className="space-y-3" onSubmit={handleRegister}>
+              
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full border px-3 py-2 rounded-lg"
+              />
+
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full border px-3 py-2 rounded-lg"
+              />
+
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full border px-3 py-2 rounded-lg pr-9"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((p) => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+
+              <button
+                disabled={loading}
+                className="w-full bg-blue-600 text-white py-2 rounded-lg"
+              >
+                {loading ? "Creating..." : "Create account"}
+              </button>
+            </form>
+
+            <p className="text-xs text-center mt-4">
+              <Link href="/auth/login">Login</Link>
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }

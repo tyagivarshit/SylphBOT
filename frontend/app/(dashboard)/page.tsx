@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { getDashboardStats } from "@/lib/dashboard";
+import { getDashboardStats } from "@/lib/dashboard.api";
 
 interface Stats {
   totalLeads: number;

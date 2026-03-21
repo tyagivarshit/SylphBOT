@@ -1,24 +1,90 @@
 "use client"
 
-import { useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/hooks/useAuth" // 🔥 use global context
+import { useEffect, useRef, useMemo } from "react"
+import { useRouter, usePathname } from "next/navigation"
+import { useAuth } from "@/context/AuthContext"
 
-export default function useAuthGuard(){
+type Options = {
+  redirectTo?: string
+  requireAuth?: boolean
+  redirectIfAuth?: string
+}
+
+export default function useAuthGuard(options: Options = {}) {
+
+  const {
+    redirectTo = "/auth/login",
+    requireAuth = true,
+    redirectIfAuth = "/dashboard",
+  } = options
 
   const router = useRouter()
+  const pathname = usePathname()
+
   const { user, loading } = useAuth()
 
-  useEffect(()=>{
+  const hasRedirected = useRef(false)
+  const mounted = useRef(true)
 
-    if(loading) return // 🔥 wait for auth load
+  /* ======================================
+  CLEANUP
+  ====================================== */
 
-    if(!user){
-      router.replace("/auth/login")
+  useEffect(() => {
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  /* ======================================
+  REDIRECT LOGIC (PRODUCTION SAFE)
+  ====================================== */
+
+  useEffect(() => {
+
+    if (loading || hasRedirected.current || !mounted.current) return
+
+    // 🔐 Protected route
+    if (requireAuth && !user) {
+      hasRedirected.current = true
+
+      const next = encodeURIComponent(pathname || "/")
+
+      router.replace(`${redirectTo}?next=${next}`)
+      return
     }
 
-  },[user,loading,router])
+    // 🔓 Public route (logged in)
+    if (!requireAuth && user) {
+      hasRedirected.current = true
 
-  return loading
+      router.replace(redirectIfAuth)
+      return
+    }
 
+  }, [
+    user,
+    loading,
+    router,
+    requireAuth,
+    redirectTo,
+    redirectIfAuth,
+    pathname,
+  ])
+
+  /* ======================================
+  STATE
+  ====================================== */
+
+  const state = useMemo(() => {
+    return {
+      user,
+      loading,
+      isAuthenticated: !!user,
+      isGuest: !user && !loading,
+      isReady: !loading,
+    }
+  }, [user, loading])
+
+  return state
 }

@@ -1,113 +1,104 @@
-"use client"
+"use client";
 
-import { useDashboard } from "@/hooks/useDashboard"
-import FeatureGate from "@/components/FeatureGate"
+import { useDashboard } from "@/hooks/useDashboard";
+import FeatureGate from "@/components/FeatureGate";
 
-import StatCard from "@/components/cards/StatCard"
-import UsageProgress from "@/components/cards/UsageProgress"
-import LeadsTable from "@/components/leads/LeadsTable"
-import LeadsChart from "@/components/charts/LeadsCharts"
-import QuickActions from "@/components/dashboard/QuickActions"
+import StatCard from "@/components/cards/StatCard";
+import UsageProgress from "@/components/cards/UsageProgress";
+import LeadsTable from "@/components/leads/LeadsTable";
+import LeadsChart from "@/components/charts/LeadsCharts";
+import QuickActions from "@/components/dashboard/QuickActions";
 
 import {
   Users,
   Zap,
   BarChart3,
-  TrendingUp
-} from "lucide-react"
+  TrendingUp,
+} from "lucide-react";
 
-export default function DashboardPage(){
+export default function DashboardPage() {
 
-  const { stats, leads, loading } = useDashboard()
+  const { stats, leads, loading } = useDashboard();
 
-  const chart = Array.isArray(stats?.chartData) ? stats.chartData : []
-  const messagesChart = Array.isArray(stats?.messagesChart) ? stats.messagesChart : []
+  /* ================================
+  💣 FINAL LOADING FIX
+  ================================ */
 
-  if(loading){
+  if (loading) {
     return (
-      <div className="space-y-6">
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {Array.from({length:4}).map((_,i)=>(
-            <div
-              key={i}
-              className="h-24 bg-white border border-gray-200 rounded-xl animate-pulse"
-            />
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          {Array.from({length:3}).map((_,i)=>(
-            <div
-              key={i}
-              className="h-72 bg-white border border-gray-200 rounded-xl animate-pulse"
-            />
-          ))}
-        </div>
-
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-500 text-sm">Loading dashboard...</p>
       </div>
-    )
+    );
   }
 
-  return(
+  /* ================================
+  🔥 SAFE DATA
+  ================================ */
 
-    <div className="space-y-8">
+  const chart = Array.isArray(stats?.chartData) ? stats.chartData : [];
+  const messagesChart = Array.isArray(stats?.messagesChart)
+    ? stats.messagesChart
+    : [];
 
-      {/* ===== 1. STATS (VALUE) ===== */}
+  return (
+    <div className="space-y-8 p-6">
+
+      {/* ===== STATS ===== */}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
 
         <StatCard
           title="Total Leads"
           value={stats?.totalLeads ?? 0}
-          icon={<Users size={18}/>}
+          icon={<Users size={18} />}
         />
 
         <StatCard
           title="Leads Today"
           value={stats?.leadsToday ?? 0}
-          icon={<BarChart3 size={18}/>}
+          icon={<BarChart3 size={18} />}
         />
 
         <StatCard
           title="Messages Today"
           value={stats?.messagesToday ?? 0}
-          icon={<TrendingUp size={18}/>}
+          icon={<TrendingUp size={18} />}
         />
 
         <StatCard
           title="AI Messages Sent"
           value={stats?.aiCallsUsed ?? 0}
-          icon={<Zap size={18}/>}
+          icon={<Zap size={18} />}
         />
 
       </div>
 
-      {/* ===== 2. CHARTS (PROOF) ===== */}
+      {/* ===== CHARTS ===== */}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
 
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">
+          <h3 className="text-sm font-semibold mb-4">
             Leads Growth
           </h3>
-          <LeadsChart data={chart}/>
+          <LeadsChart data={chart} />
         </div>
 
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">
+          <h3 className="text-sm font-semibold mb-4">
             Messages Growth
           </h3>
           <LeadsChart
-            data={messagesChart.map((d:any)=>({
-              date:d.date,
-              leads:d.messages
+            data={messagesChart.map((d: any) => ({
+              date: d.date,
+              leads: d.messages,
             }))}
           />
         </div>
 
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">
+          <h3 className="text-sm font-semibold mb-4">
             AI Usage
           </h3>
           <UsageProgress
@@ -118,26 +109,24 @@ export default function DashboardPage(){
 
       </div>
 
-      {/* ===== 3. QUICK ACTIONS (MOVE HERE ✅) ===== */}
+      {/* ===== QUICK ACTIONS ===== */}
 
       <QuickActions />
 
-      {/* ===== 4. LOCKED PREMIUM (ONLY HERE 🔒) ===== */}
+      {/* ===== LEADS ===== */}
 
       <FeatureGate feature="CRM">
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
 
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">
+          <h3 className="text-sm font-semibold mb-4">
             Recent Leads
           </h3>
 
-          <LeadsTable leads={leads}/>
+          <LeadsTable leads={leads} />
 
         </div>
       </FeatureGate>
 
     </div>
-
-  )
-
+  );
 }

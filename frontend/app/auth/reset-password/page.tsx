@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import toast from "react-hot-toast"
@@ -8,189 +8,199 @@ import { Eye, EyeOff, Lock } from "lucide-react"
 
 import { resetPassword } from "@/lib/auth"
 
-export default function ResetPasswordPage(){
+export default function ResetPasswordPage() {
 
-const params = useSearchParams()
-const token = params.get("token")
+  const params = useSearchParams()
+  const token = params.get("token")
 
-const [password,setPassword] = useState("")
-const [confirm,setConfirm] = useState("")
-const [loading,setLoading] = useState(false)
-const [success,setSuccess] = useState(false)
-const [showPass,setShowPass] = useState(false)
-const [showConfirm,setShowConfirm] = useState(false)
+  const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState(false)
 
-/* 🔥 STRONG PASSWORD CHECK */
-const isStrongPassword = (pass:string)=>{
-return /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{6,}$/.test(pass)
-}
+  const [showPass, setShowPass] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
 
-const handleReset = async(e?:React.FormEvent)=>{
+  const mounted = useRef(true)
 
-if(e) e.preventDefault()
+  /* ======================================
+  SAFE CLEANUP
+  ====================================== */
 
-if(loading) return
+  useEffect(() => {
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
-if(!token){
-toast.error("Invalid or expired link")
-return
-}
+  /* ======================================
+  PASSWORD VALIDATION
+  ====================================== */
 
-if(!isStrongPassword(password)){
-toast.error("Use uppercase, lowercase & number")
-return
-}
+  const isStrongPassword = (pass: string) => {
+    return /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{6,}$/.test(pass)
+  }
 
-if(password !== confirm){
-toast.error("Passwords do not match")
-return
-}
+  /* ======================================
+  RESET HANDLER
+  ====================================== */
 
-try{
+  const handleReset = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
 
-setLoading(true)
+    if (loading) return
 
-await resetPassword(token,password)
+    if (!token) {
+      toast.error("Invalid or expired link")
+      return
+    }
 
-setSuccess(true)
+    if (!isStrongPassword(password)) {
+      toast.error("Use uppercase, lowercase & number")
+      return
+    }
 
-toast.success("Password reset successful")
+    if (password !== confirm) {
+      toast.error("Passwords do not match")
+      return
+    }
 
-}catch(err:any){
+    try {
+      setLoading(true)
 
-/* 🔥 better error UX */
-if(err?.message?.toLowerCase().includes("expired")){
-toast.error("Reset link expired")
-}else if(err?.message?.toLowerCase().includes("invalid")){
-toast.error("Invalid or already used link")
-}else{
-toast.error("Reset failed")
-}
+      await resetPassword(token, password)
 
-}finally{
+      if (mounted.current) {
+        setSuccess(true)
+      }
 
-setLoading(false)
+      toast.success("Password reset successful")
 
-}
+    } catch (err: any) {
 
-}
+      const msg = err?.message?.toLowerCase() || ""
 
-return(
+      if (msg.includes("expired")) {
+        toast.error("Reset link expired")
+      } else if (msg.includes("invalid")) {
+        toast.error("Invalid or already used link")
+      } else {
+        toast.error("Reset failed")
+      }
 
-<div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4 sm:px-6">
+    } finally {
+      if (mounted.current) setLoading(false)
+    }
+  }
 
-<div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-xl p-6 sm:p-8">
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4 sm:px-6">
 
-<div className="text-center mb-6">
-<h1 className="text-xl font-bold text-gray-900">
-Sylph AI
-</h1>
-</div>
+      <div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-xl p-6 sm:p-8">
 
-{success ? (
+        <div className="text-center mb-6">
+          <h1 className="text-xl font-bold text-gray-900">
+            Sylph AI
+          </h1>
+        </div>
 
-<div className="text-center">
+        {success ? (
 
-<div className="flex justify-center mb-4">
-<div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
-<Lock className="text-green-600" size={26}/>
-</div>
-</div>
+          <div className="text-center">
 
-<h2 className="text-lg font-semibold text-gray-900">
-Password updated
-</h2>
+            <div className="flex justify-center mb-4">
+              <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
+                <Lock className="text-green-600" size={26}/>
+              </div>
+            </div>
 
-<p className="text-sm text-gray-500 mt-2">
-Your password has been successfully reset.
-</p>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Password updated
+            </h2>
 
-<Link
-href="/auth/login"
-className="inline-block mt-6 bg-blue-600 text-white px-5 py-2.5 rounded-lg"
->
-Go to login
-</Link>
+            <p className="text-sm text-gray-500 mt-2">
+              Your password has been successfully reset.
+            </p>
 
-</div>
+            <Link
+              href="/auth/login"
+              className="inline-block mt-6 bg-blue-600 text-white px-5 py-2.5 rounded-lg"
+            >
+              Go to login
+            </Link>
 
-) : (
+          </div>
 
-<form onSubmit={handleReset} className="space-y-4">
+        ) : (
 
-<h2 className="text-lg font-semibold text-center">
-Reset your password
-</h2>
+          <form onSubmit={handleReset} className="space-y-4">
 
-<div>
+            <h2 className="text-lg font-semibold text-center">
+              Reset your password
+            </h2>
 
-<label className="text-xs">New password</label>
+            <div>
+              <label className="text-xs">New password</label>
 
-<div className="relative mt-1">
+              <div className="relative mt-1">
 
-<input
-type={showPass ? "text":"password"}
-value={password}
-onChange={(e)=>setPassword(e.target.value)}
-className="w-full border px-3 py-2 rounded-lg pr-10"
-/>
+                <input
+                  type={showPass ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full border px-3 py-2 rounded-lg pr-10"
+                />
 
-<button
-type="button"
-onClick={()=>setShowPass(!showPass)}
-className="absolute right-3 top-2"
->
-{showPass ? <EyeOff size={16}/> : <Eye size={16}/>}
-</button>
+                <button
+                  type="button"
+                  onClick={() => setShowPass(p => !p)}
+                  className="absolute right-3 top-2"
+                >
+                  {showPass ? <EyeOff size={16}/> : <Eye size={16}/>}
+                </button>
 
-</div>
+              </div>
+            </div>
 
-</div>
+            <div>
+              <label className="text-xs">Confirm password</label>
 
-<div>
+              <div className="relative mt-1">
 
-<label className="text-xs">Confirm password</label>
+                <input
+                  type={showConfirm ? "text" : "password"}
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  className="w-full border px-3 py-2 rounded-lg pr-10"
+                />
 
-<div className="relative mt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(p => !p)}
+                  className="absolute right-3 top-2"
+                >
+                  {showConfirm ? <EyeOff size={16}/> : <Eye size={16}/>}
+                </button>
 
-<input
-type={showConfirm ? "text":"password"}
-value={confirm}
-onChange={(e)=>setConfirm(e.target.value)}
-className="w-full border px-3 py-2 rounded-lg pr-10"
-/>
+              </div>
+            </div>
 
-<button
-type="button"
-onClick={()=>setShowConfirm(!showConfirm)}
-className="absolute right-3 top-2"
->
-{showConfirm ? <EyeOff size={16}/> : <Eye size={16}/>}
-</button>
+            <button
+              disabled={loading}
+              className="w-full bg-blue-600 text-white py-2 rounded-lg"
+            >
+              {loading ? "Resetting..." : "Reset password"}
+            </button>
 
-</div>
+            <p className="text-xs text-center mt-2">
+              <Link href="/auth/login">Back to login</Link>
+            </p>
 
-</div>
+          </form>
 
-<button
-disabled={loading}
-className="w-full bg-blue-600 text-white py-2 rounded-lg"
->
-{loading ? "Resetting..." : "Reset password"}
-</button>
+        )}
 
-<p className="text-xs text-center mt-2">
-<Link href="/auth/login">Back to login</Link>
-</p>
-
-</form>
-
-)}
-
-</div>
-
-</div>
-
-)
-
+      </div>
+    </div>
+  )
 }

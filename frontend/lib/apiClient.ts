@@ -1,57 +1,97 @@
-const API = process.env.NEXT_PUBLIC_API_URL
+const API = process.env.NEXT_PUBLIC_API_URL;
 
-export async function apiFetch(url: string, options: any = {}) {
+/* ======================================
+🔥 API FETCH (FINAL 10/10)
+====================================== */
 
-  try{
+export async function apiFetch<T = any>(
+  url: string,
+  options: RequestInit = {}
+): Promise<T> {
 
-    const res = await fetch(`${API}${url}`, {
-
-      ...options,
-
-      credentials: "include",
-
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      }
-
-    })
-
-    /* -------- UNAUTHORIZED -------- */
-
-    if (res.status === 401) {
-
-      if (typeof window !== "undefined") {
-        window.location.href = "/auth/login"
-      }
-
-      return null
-    }
-
-    /* -------- HANDLE NON-JSON -------- */
-
-    const contentType = res.headers.get("content-type")
-
-    if (!contentType?.includes("application/json")) {
-      return null
-    }
-
-    const data = await res.json()
-
-    /* -------- ERROR HANDLING -------- */
-
-    if (!res.ok) {
-      throw new Error(data?.message || "API Error")
-    }
-
-    return data
-
-  }catch(error:any){
-
-    console.error("API ERROR:", error.message)
-
-    throw error
-
+  if (!API) {
+    throw new Error("API URL not configured");
   }
 
+  const fullUrl = url.startsWith("http")
+    ? url
+    : `${API}${url}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+
+    const res = await fetch(fullUrl, {
+      ...options,
+      credentials: "include",
+      cache: "no-store", // 🔥 prevent 304 issues
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+
+    /* =============================
+    HANDLE EMPTY RESPONSE
+    ============================= */
+
+    if (res.status === 204) {
+      return {} as T;
+    }
+
+    const contentType = res.headers.get("content-type");
+    let data: any = null;
+
+    if (contentType?.includes("application/json")) {
+      data = await res.json();
+    }
+
+    /* =============================
+    ERROR HANDLING (CRITICAL)
+    ============================= */
+
+    if (!res.ok) {
+
+      console.error("❌ API ERROR:", {
+        status: res.status,
+        url: fullUrl,
+        data,
+      });
+
+      // 🔥 AUTH ERROR (handled in hooks)
+      if (res.status === 401) {
+        throw new Error("UNAUTHORIZED");
+      }
+
+      // 🔥 RATE LIMIT
+      if (res.status === 429) {
+        throw new Error("Too many requests");
+      }
+
+      // 🔥 SERVER ERROR
+      if (res.status >= 500) {
+        throw new Error("Server error, try again later");
+      }
+
+      // 🔥 FALLBACK
+      throw new Error(data?.message || "API Error");
+    }
+
+    return data;
+
+  } catch (err: any) {
+
+    if (err.name === "AbortError") {
+      throw new Error("Request timeout");
+    }
+
+    console.error("🔥 FETCH FAILED:", err.message);
+
+    throw err;
+
+  } finally {
+    clearTimeout(timeout);
+  }
 }

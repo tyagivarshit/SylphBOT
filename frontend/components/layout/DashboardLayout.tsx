@@ -1,46 +1,97 @@
-"use client"
+"use client";
 
-import { useState, ReactNode } from "react"
-import Sidebar from "./Sidebar"
-import Topbar from "./Topbar"
+import { useState, useEffect, ReactNode, useCallback } from "react";
+import Sidebar from "./Sidebar";
+import Topbar from "./Topbar";
+
+/* ======================================
+🔥 COMPONENT
+====================================== */
 
 export default function DashboardLayout({
-children,
+  children,
 }: {
-children: ReactNode
+  children: ReactNode;
 }) {
 
-const [open,setOpen] = useState(false)
+  const [open, setOpen] = useState(false);
 
-return(
+  /* ======================================
+  🔥 CLOSE HANDLERS (STABLE)
+  ====================================== */
 
-<div className="h-screen flex flex-col bg-gray-50">
+  const closeSidebar = useCallback(() => {
+    setOpen(false);
+  }, []);
 
-  {/* 🔥 TOPBAR (FULL WIDTH) */}
-  <Topbar setOpen={setOpen} />
+  /* ======================================
+  🔥 ESC KEY CLOSE
+  ====================================== */
 
-  {/* 🔥 MAIN BODY */}
-  <div className="flex flex-1 overflow-hidden">
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeSidebar();
+    };
 
-    {/* 🔥 SIDEBAR (NOW BELOW TOPBAR) */}
-    <Sidebar open={open} setOpen={setOpen} />
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [closeSidebar]);
 
-    {/* 🔥 MAIN CONTENT */}
-    <div className="flex flex-col flex-1 min-w-0">
+  /* ======================================
+  🔥 BODY SCROLL LOCK (MOBILE UX)
+  ====================================== */
 
-      <main className="flex-1 overflow-y-auto">
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+  }, [open]);
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
-          {children}
+  /* ======================================
+  🔥 OVERLAY CLICK CLOSE
+  ====================================== */
+
+  const handleOverlayClick = () => {
+    closeSidebar();
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-gray-50">
+
+      {/* ===== TOPBAR ===== */}
+      <Topbar setOpen={setOpen} />
+
+      {/* ===== BODY ===== */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* ===== SIDEBAR ===== */}
+        <Sidebar open={open} setOpen={setOpen} />
+
+        {/* ===== OVERLAY (MOBILE) ===== */}
+        {open && (
+          <div
+            className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+            onClick={handleOverlayClick}
+          />
+        )}
+
+        {/* ===== MAIN CONTENT ===== */}
+        <div className="flex flex-col flex-1 min-w-0">
+
+          <main className="flex-1 overflow-y-auto">
+
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
+              {children}
+            </div>
+
+          </main>
+
         </div>
 
-      </main>
+      </div>
 
     </div>
-
-  </div>
-
-</div>
-
-)
+  );
 }

@@ -3,8 +3,11 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import cookieParser from "cookie-parser";
+
+/* ========= CONFIG ========= */
 import prisma from "./config/prisma";
 
+/* ========= ROUTES ========= */
 import authRoutes from "./routes/auth.routes";
 import googleAuthRoutes from "./routes/googleAuth.routes";
 import clientRoutes from "./routes/client.routes";
@@ -15,79 +18,103 @@ import billingRoutes from "./routes/billing.routes";
 import stripeWebhookRoutes from "./routes/stripeWebhook.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 
-/* 🟢 EXISTING */
 import commentTriggerRoutes from "./routes/commentTrigger.routes";
 import messageRoutes from "./routes/message.routes";
 
-/* 🟢 NEW */
 import automationRoutes from "./routes/automation.routes";
-import instagramRoutes from "./routes/instagram.routes"; 
-import { monitoringMiddleware } from "./middleware/monitoring.middleware";
+import instagramRoutes from "./routes/instagram.routes";
 
-/* 🟢 KNOWLEDGE BASE */
 import knowledgeRoutes from "./routes/knowledge.routes";
-
-/* 🔥 AI TRAINING */
 import trainingRoutes from "./routes/training.routes";
 
-/* 🔥 LEAD CONTROL (NEW) */
 import leadRoutes from "./routes/lead.routes";
 import analyticsRoutes from "./routes/analytics.routes";
 
+/* ========= MIDDLEWARE ========= */
 import {
-  authLimiter,
   aiLimiter,
   globalLimiter,
 } from "./middleware/rateLimit.middleware";
 
+import { monitoringMiddleware } from "./middleware/monitoring.middleware";
+
+/* ========= CRONS ========= */
 import { startTrialExpiryCron } from "./cron/trial.cron";
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "./cron/resetUsage.cron";
 
-import { env } from "./config/env";
+/* ========= ERRORS ========= */
+import { isAppError } from "./utils/AppError";
 
 const app = express();
 
-/* ============================= */
-/* 🚀 PRODUCTION HARDENING */
-/* ============================= */
-
+/* ======================================
+🔥 TRUST PROXY
+====================================== */
 app.set("trust proxy", 1);
 
+/* ======================================
+🔥 SECURITY + PERFORMANCE
+====================================== */
 app.use(helmet());
 app.use(compression());
 app.use(globalLimiter);
 
-/* ============================= */
-/* COOKIE PARSER */
-/* ============================= */
-
+/* ======================================
+🔥 COOKIE PARSER (CRITICAL)
+====================================== */
 app.use(cookieParser());
 
-/* ============================= */
-/* CORS */
-/* ============================= */
-
+/* ======================================
+🔥 CORS (FINAL FIX)
+====================================== */
 app.use(
   cors({
-    origin: env.FRONTEND_URL,
+    origin: "http://localhost:3000",
     credentials: true,
   })
 );
 
-/* ============================= */
-/* 🔥 STRIPE WEBHOOK (RAW BODY) */
-/* ============================= */
+/* ======================================
+🔥 BODY PARSER
+====================================== */
+app.use(express.json({ limit: "1mb" }));
 
+/* ======================================
+🔥 REQUEST LOGGER
+====================================== */
+app.use((req, res, next) => {
+  const start = Date.now();
+
+  res.on("finish", () => {
+    console.info(
+      JSON.stringify({
+        type: "request",
+        method: req.method,
+        url: req.originalUrl,
+        status: res.statusCode,
+        duration: Date.now() - start,
+        ip: req.ip,
+      })
+    );
+  });
+
+  next();
+});
+
+/* ======================================
+🔥 MONITORING
+====================================== */
+app.use(monitoringMiddleware);
+
+/* ======================================
+🔥 RAW BODY (WEBHOOKS)
+====================================== */
 app.use(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
   stripeWebhookRoutes
 );
-
-/* ============================= */
-/* WHATSAPP WEBHOOK */
-/* ============================= */
 
 app.use(
   "/api/webhook/whatsapp",
@@ -95,40 +122,22 @@ app.use(
   whatsappWebhook
 );
 
-/* ============================= */
-/* INSTAGRAM WEBHOOK */
-/* ============================= */
-
 app.use(
   "/api/webhook/instagram",
   express.raw({ type: "application/json" }),
   instagramWebhook
 );
 
-/* ============================= */
-/* MONITORING */
-/* ============================= */
+/* ======================================
+🔥 ROUTES
+====================================== */
 
-app.use(monitoringMiddleware);
-
-/* ============================= */
-/* JSON PARSER */
-/* ============================= */
-
-app.use(express.json());
-
-/* ============================= */
-/* ROUTES */
-/* ============================= */
-
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.send("API Running 🚀");
 });
 
 /* AUTH */
-app.use("/api/auth", authLimiter, authRoutes);
-
-/* GOOGLE AUTH */
+app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
 
 /* CLIENTS */
@@ -146,56 +155,64 @@ app.use("/api/dashboard", dashboardRoutes);
 /* COMMENT AUTOMATION */
 app.use("/api/comment-triggers", commentTriggerRoutes);
 
-/* MESSAGE SYSTEM */
+/* MESSAGE */
 app.use("/api/messages", messageRoutes);
 
-/* AUTOMATION FLOWS */
+/* AUTOMATION */
 app.use("/api/automation", automationRoutes);
 
-/* 🔥 INSTAGRAM MEDIA */
+/* INSTAGRAM */
 app.use("/api/instagram", instagramRoutes);
 
-/* KNOWLEDGE BASE */
+/* KNOWLEDGE */
 app.use("/api/knowledge", knowledgeRoutes);
 
-/* 🔥 AI TRAINING */
+/* TRAINING */
 app.use("/api/training", trainingRoutes);
 
-/* 🔥 HUMAN / AI TOGGLE */
+/* LEADS */
 app.use("/api/leads", leadRoutes);
 
+/* ANALYTICS */
 app.use("/api/analytics", analyticsRoutes);
 
-/* ============================= */
-/* HEALTH */
-/* ============================= */
-
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Server is healthy 🚀",
-  });
+/* ======================================
+🔥 HEALTH
+====================================== */
+app.get("/health", (_req, res) => {
+  res.status(200).json({ success: true });
 });
 
-/* ============================= */
-/* 404 HANDLER */
-/* ============================= */
-
-app.use((req, res) => {
+/* ======================================
+🔥 404
+====================================== */
+app.use((_req, res) => {
   res.status(404).json({
     success: false,
     message: "Route not found",
   });
 });
 
-/* ============================= */
-/* GLOBAL ERROR HANDLER */
-/* ============================= */
+/* ======================================
+🔥 GLOBAL ERROR HANDLER
+====================================== */
+app.use((err: any, req: any, res: any, _next: any) => {
+  console.error("ERROR:", {
+    message: err.message,
+    path: req.originalUrl,
+    method: req.method,
+  });
 
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error("Global Error:", err);
+  if (isAppError(err)) {
+    return res.status(err.statusCode).json({
+      success: false,
+      message: err.message,
+      code: err.code,
+      details: err.details || null,
+    });
+  }
 
-  res.status(err.status || 500).json({
+  return res.status(500).json({
     success: false,
     message:
       process.env.NODE_ENV === "production"
@@ -204,12 +221,13 @@ app.use((err: any, req: any, res: any, next: any) => {
   });
 });
 
-/* ============================= */
-/* CRONS */
-/* ============================= */
-
-startTrialExpiryCron();
-startMetaTokenRefreshCron();
-startUsageResetCron();
+/* ======================================
+🔥 CRONS
+====================================== */
+if (process.env.ENABLE_CRON === "true") {
+  startTrialExpiryCron();
+  startMetaTokenRefreshCron();
+  startUsageResetCron();
+}
 
 export default app;

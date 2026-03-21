@@ -2,12 +2,21 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma";
 import { env } from "../config/env";
-import {
-  generateAccessToken,
-  generateRefreshToken,
-} from "../utils/generateToken";
+import { unauthorized, forbidden } from "../utils/AppError";
+import crypto from "crypto";
 
 const isProd = process.env.NODE_ENV === "production";
+
+/* ======================================
+UTILS
+====================================== */
+
+const hashToken = (token: string) =>
+  crypto.createHash("sha256").update(token).digest("hex");
+
+/* ======================================
+TYPES
+====================================== */
 
 type AuthUser = {
   id: string;
@@ -15,17 +24,26 @@ type AuthUser = {
   businessId: string;
 };
 
-/* 🔥 GLOBAL RATE LIMIT (MIDDLEWARE LEVEL) */
-const checkGlobalLimit = async (ip: string) => {
-  const key = `global:${ip}`;
-  const count = await prisma.$runCommandRaw({
-    incr: key,
-  }).catch(() => null); // fallback safe
+/* ======================================
+COOKIE CONFIG
+====================================== */
 
-  // fallback if redis preferred (recommended)
+const cookieOptions = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: isProd ? ("none" as const) : ("lax" as const),
+  path: "/",
 };
 
-/* 🔐 MAIN AUTH MIDDLEWARE */
+export const clearAuthCookies = (res: Response) => {
+  res.clearCookie("accessToken", cookieOptions);
+  res.clearCookie("refreshToken", cookieOptions);
+};
+
+/* ======================================
+🔥 FINAL PROTECT MIDDLEWARE
+====================================== */
+
 export const protect = async (
   req: Request,
   res: Response,
@@ -34,21 +52,31 @@ export const protect = async (
   try {
     const accessToken = req.cookies?.accessToken;
     const refreshToken = req.cookies?.refreshToken;
-    const headerToken = req.headers.authorization?.split(" ")[1];
 
-    const token = accessToken || headerToken;
+    /* =============================
+    NO TOKENS
+    ============================= */
 
-    if (!token && !refreshToken) {
-      return res.status(401).json({ message: "Not authorized" });
+    if (!accessToken && !refreshToken) {
+      throw unauthorized("Not authorized");
     }
 
-    /* ================= ACCESS TOKEN ================= */
-    if (token) {
+    /* =============================
+    ACCESS TOKEN FLOW (FAST PATH)
+    ============================= */
+
+    if (accessToken) {
       try {
-        const decoded = jwt.verify(token, env.JWT_SECRET) as any;
+        const decoded = jwt.verify(accessToken, env.JWT_SECRET) as any;
 
         const user = await prisma.user.findUnique({
           where: { id: decoded.id },
+          select: {
+            id: true,
+            role: true,
+            isActive: true,
+            tokenVersion: true,
+          },
         });
 
         if (
@@ -56,16 +84,16 @@ export const protect = async (
           !user.isActive ||
           user.tokenVersion !== decoded.tokenVersion
         ) {
-          return res.status(401).json({ message: "Invalid session" });
+          throw unauthorized("Invalid session");
         }
 
-        /* 🔥 MULTI-TENANT STRICT CHECK */
         const business = await prisma.business.findUnique({
           where: { id: decoded.businessId },
+          select: { id: true, ownerId: true },
         });
 
         if (!business || business.ownerId !== user.id) {
-          return res.status(403).json({ message: "Forbidden" });
+          throw forbidden("Forbidden");
         }
 
         (req as any).user = {
@@ -75,126 +103,94 @@ export const protect = async (
         } as AuthUser;
 
         return next();
-      } catch {
-        // expired → fallback
+
+      } catch (err: any) {
+        // Only handle expiration here
+        if (err.name !== "TokenExpiredError") {
+          throw unauthorized("Invalid access token");
+        }
       }
     }
 
-    /* ================= REFRESH ================= */
+    /* =============================
+    REFRESH TOKEN FLOW (SAFE)
+    ============================= */
+
     if (!refreshToken) {
-      return res.status(401).json({ message: "Session expired" });
+      throw unauthorized("Session expired");
     }
+
+    let decoded: any;
 
     try {
-      const decoded = jwt.verify(
-        refreshToken,
-        env.JWT_REFRESH_SECRET
-      ) as any;
-
-      const dbToken = await prisma.refreshToken.findFirst({
-        where: {
-          token: refreshToken,
-          userId: decoded.id,
-          expiresAt: { gt: new Date() },
-        },
-      });
-
-      if (!dbToken) {
-        return res.status(401).json({ message: "Invalid session" });
-      }
-
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.id },
-      });
-
-      if (
-        !user ||
-        !user.isActive ||
-        user.tokenVersion !== decoded.tokenVersion
-      ) {
-        return res.status(401).json({ message: "Invalid session" });
-      }
-
-      const business = await prisma.business.findFirst({
-        where: { ownerId: user.id },
-      });
-
-      if (!business) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      /* 🔥 REUSE DETECTION (SECURITY) */
-      if (!dbToken) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { tokenVersion: { increment: 1 } },
-        });
-
-        return res.status(401).json({ message: "Session compromised" });
-      }
-
-      /* 🔥 ROTATION */
-      await prisma.refreshToken.delete({
-        where: { token: refreshToken },
-      });
-
-      const newRefreshToken = generateRefreshToken(
-        user.id,
-        user.tokenVersion
-      );
-
-      await prisma.refreshToken.create({
-        data: {
-          token: newRefreshToken,
-          userId: user.id,
-          userAgent: req.headers["user-agent"],
-          ip: req.ip,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
-      });
-
-      const newAccessToken = generateAccessToken(
-        user.id,
-        user.role,
-        business.id,
-        user.tokenVersion
-      );
-
-      res.cookie("accessToken", newAccessToken, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: isProd ? "none" : "lax",
-        maxAge: 15 * 60 * 1000,
-        path: "/",
-      });
-
-      res.cookie("refreshToken", newRefreshToken, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: isProd ? "none" : "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: "/",
-      });
-
-      /* 🔥 SECURITY LOG */
-      console.log("TOKEN_REFRESH", {
-        userId: user.id,
-        ip: req.ip,
-      });
-
-      (req as any).user = {
-        id: user.id,
-        role: user.role,
-        businessId: business.id,
-      } as AuthUser;
-
-      next();
-
+      decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET);
     } catch {
-      return res.status(401).json({ message: "Session expired" });
+      clearAuthCookies(res);
+      throw unauthorized("Invalid refresh token");
     }
 
-  } catch {
-    return res.status(500).json({ message: "Internal error" });
+    const hashed = hashToken(refreshToken);
+
+    const dbToken = await prisma.refreshToken.findFirst({
+      where: {
+        token: hashed,
+        userId: decoded.id,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (!dbToken) {
+      clearAuthCookies(res);
+      throw unauthorized("Session expired");
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        role: true,
+        isActive: true,
+        tokenVersion: true,
+      },
+    });
+
+    if (
+      !user ||
+      !user.isActive ||
+      user.tokenVersion !== decoded.tokenVersion
+    ) {
+      clearAuthCookies(res);
+      throw unauthorized("Invalid session");
+    }
+
+    const business = await prisma.business.findFirst({
+      where: { ownerId: user.id },
+      select: { id: true },
+    });
+
+    if (!business) {
+      clearAuthCookies(res);
+      throw unauthorized("Unauthorized");
+    }
+
+    /* ======================================
+    🔥 IMPORTANT: NO ROTATION HERE
+    ====================================== */
+
+    // ❌ NO delete
+    // ❌ NO create
+    // ❌ NO transaction
+    // ❌ NO cookie reset
+
+    (req as any).user = {
+      id: user.id,
+      role: user.role,
+      businessId: business.id,
+    } as AuthUser;
+
+    return next();
+
+  } catch (err) {
+    return next(err);
   }
 };

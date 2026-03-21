@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getRecentLeads } from "@/lib/dashboard"
+import { getRecentLeads } from "@/lib/dashboard.api"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import FeatureGate from "@/components/FeatureGate"

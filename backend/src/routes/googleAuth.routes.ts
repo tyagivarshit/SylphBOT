@@ -8,13 +8,20 @@ import {
 
 const router = Router();
 
-/* 🔥 SAFE IP */
+/* ======================================
+UTILS
+====================================== */
+
 const getIP = (req: Request) =>
   (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
   req.socket.remoteAddress ||
+  req.ip ||
   "unknown";
 
-/* 🔥 RATE LIMIT (OAUTH ABUSE PROTECTION) */
+/* ======================================
+OAUTH LIMITER (ATOMIC + SAFE)
+====================================== */
+
 const oauthLimiter = async (
   req: Request,
   res: Response,
@@ -24,45 +31,55 @@ const oauthLimiter = async (
     const ip = getIP(req);
     const key = `oauth:${ip}`;
 
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
+    const multi = redis.multi();
+    multi.incr(key);
+    multi.ttl(key);
+
+    const [[, count], [, ttl]] = (await multi.exec()) as any;
+
+    if (ttl === -1) {
+      await redis.expire(key, 60);
+    }
 
     if (count > 20) {
-      return res.status(429).json({ message: "Too many requests" });
+      return res.status(429).json({
+        success: false,
+        message: "Too many OAuth attempts. Try again later.",
+      });
     }
 
     next();
   } catch {
-    next(); // fail open (important for auth)
+    return res.status(429).json({
+      success: false,
+      message: "Too many requests",
+    });
   }
 };
 
-/* 🔥 SAFE WRAPPER (PREVENT CRASH) */
+/* ======================================
+SAFE WRAPPER
+====================================== */
+
 const safeHandler =
   (fn: any) => (req: Request, res: Response, next: NextFunction) =>
     Promise.resolve(fn(req, res, next)).catch(() => {
       return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
     });
 
-/* ================= GOOGLE LOGIN ================= */
+/* ======================================
+ROUTES
+====================================== */
 
-router.get(
-  "/google",
-  oauthLimiter,
-  safeHandler(googleAuth)
-);
-
-/* ================= GOOGLE CALLBACK ================= */
+router.get("/google", oauthLimiter, safeHandler(googleAuth));
 
 router.get(
   "/google/callback",
   oauthLimiter,
-
   passport.authenticate("google", {
     session: false,
     failureRedirect: `${process.env.FRONTEND_URL}/auth/login`,
   }),
-
   safeHandler(googleCallback)
 );
 

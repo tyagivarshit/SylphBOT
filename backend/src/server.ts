@@ -13,72 +13,90 @@ import { configurePassport } from "./config/passport";
 /* MONITORING */
 import * as Sentry from "@sentry/node";
 
-/* WORKERS */
-import "./workers/ai.worker";
-import "./workers/funnel.worker";
-
-/* 🔥 SAFE CRON LOADER */
-try {
-  require("./cron/cron.runner");
-  console.log("🧹 Cron runner started");
-} catch (err) {
-  console.error("❌ Cron failed to start:", err);
-}
-
-const PORT = process.env.PORT || 5000;
-
-console.log("🚨 THIS IS SYLPH BACKEND 🚨");
-
-/* ============================= */
-/* SENTRY INIT (MONITORING) */
-/* ============================= */
+/* ======================================
+SENTRY INIT (FULL INTEGRATION)
+====================================== */
 
 Sentry.init({
   dsn: process.env.SENTRY_DSN || "",
   tracesSampleRate: 1.0,
 });
 
-/* ============================= */
-/* PASSPORT INIT */
-/* ============================= */
+/* ======================================
+PASSPORT INIT
+====================================== */
 
 configurePassport();
 app.use(passport.initialize());
 
-/* ============================= */
-/* CREATE SERVER */
-/* ============================= */
+/* ======================================
+WORKERS (CONTROLLED LOAD)
+====================================== */
+
+if (process.env.ENABLE_WORKERS === "true") {
+  require("./workers/ai.worker");
+  require("./workers/funnel.worker");
+}
+
+/* ======================================
+CRON (SINGLE INSTANCE SAFE)
+====================================== */
+
+if (process.env.ENABLE_CRON === "true") {
+  try {
+    require("./cron/cron.runner");
+    console.log("🧹 Cron runner started");
+  } catch (err) {
+    console.error("❌ Cron failed to start:", err);
+  }
+}
+
+const PORT = process.env.PORT || 5000;
+
+/* ======================================
+CREATE SERVER
+====================================== */
 
 const server = http.createServer(app);
 
-/* ============================= */
-/* SOCKET */
-/* ============================= */
+/* ======================================
+SOCKET
+====================================== */
 
 initSocket(server);
 
-/* ============================= */
-/* START SERVER */
-/* ============================= */
+/* ======================================
+START SERVER
+====================================== */
 
-server.listen(PORT, async () => {
+server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
 
-/* ============================= */
-/* GRACEFUL SHUTDOWN */
-/* ============================= */
+/* ======================================
+GRACEFUL SHUTDOWN (SAFE)
+====================================== */
+
+let isShuttingDown = false;
 
 const shutdown = async () => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
   console.log("🛑 Shutting down server...");
 
   try {
-    await prisma.$disconnect();
-
-    server.close(() => {
+    server.close(async () => {
+      await prisma.$disconnect();
       console.log("✅ Server closed");
       process.exit(0);
     });
+
+    /* force exit if hanging */
+    setTimeout(() => {
+      console.error("❌ Force shutdown");
+      process.exit(1);
+    }, 10000);
 
   } catch (error) {
     console.error("Shutdown error:", error);
@@ -90,9 +108,9 @@ const shutdown = async () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-/* ============================= */
-/* GLOBAL ERROR HANDLING */
-/* ============================= */
+/* ======================================
+GLOBAL ERROR HANDLING
+====================================== */
 
 process.on("uncaughtException", (err) => {
   console.error("🚨 Uncaught Exception:", err);

@@ -1,178 +1,200 @@
-"use client"
+"use client";
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { memo } from "react";
+
 import {
-LayoutDashboard,
-Users,
-MessageSquare,
-Workflow,
-Brain,
-BookOpen,
-Calendar,
-BarChart3,
-CreditCard,
-Settings,
-MessageCircle,
-X
-} from "lucide-react"
+  LayoutDashboard,
+  Users,
+  MessageSquare,
+  Workflow,
+  Brain,
+  BookOpen,
+  Calendar,
+  BarChart3,
+  CreditCard,
+  Settings,
+  MessageCircle,
+  X,
+} from "lucide-react";
 
-/* MENU */
+/* ======================================
+🔥 TYPES
+====================================== */
+
+type SidebarProps = {
+  open: boolean;
+  setOpen: (val: boolean) => void;
+};
+
+/* ======================================
+🔥 MENU CONFIG
+====================================== */
+
 const menu = [
-{
-section: "Overview",
-items: [
-{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-]
-},
-{
-section: "CRM",
-items: [
-{ name: "Leads", href: "/leads", icon: Users },
-{ name: "Conversations", href: "/conversations", icon: MessageCircle },
-]
-},
-{
-section: "Automation",
-items: [
-{ name: "Automation", href: "/automation", icon: Workflow },
-{ name: "Comment Automation", href: "/comment-automation", icon: MessageSquare },
-]
-},
-{
-section: "AI",
-items: [
-{ name: "AI Training", href: "/ai-training", icon: Brain },
-{ name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
-]
-},
-{
-section: "Business",
-items: [
-{ name: "Booking", href: "/booking", icon: Calendar },
-{ name: "Analytics", href: "/analytics", icon: BarChart3 },
-{ name: "Billing", href: "/billing", icon: CreditCard },
-]
-},
-{
-section: "System",
-items: [
-{ name: "Settings", href: "/settings", icon: Settings },
-]
+  {
+    section: "Overview",
+    items: [
+      { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    ],
+  },
+  {
+    section: "CRM",
+    items: [
+      { name: "Leads", href: "/leads", icon: Users },
+      { name: "Conversations", href: "/conversations", icon: MessageCircle },
+    ],
+  },
+  {
+    section: "Automation",
+    items: [
+      { name: "Automation", href: "/automation", icon: Workflow },
+      { name: "Comment Automation", href: "/comment-automation", icon: MessageSquare },
+    ],
+  },
+  {
+    section: "AI",
+    items: [
+      { name: "AI Training", href: "/ai-training", icon: Brain },
+      { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+    ],
+  },
+  {
+    section: "Business",
+    items: [
+      { name: "Booking", href: "/booking", icon: Calendar },
+      { name: "Analytics", href: "/analytics", icon: BarChart3 },
+      { name: "Billing", href: "/billing", icon: CreditCard },
+    ],
+  },
+  {
+    section: "System",
+    items: [
+      { name: "Settings", href: "/settings", icon: Settings },
+    ],
+  },
+];
+
+/* ======================================
+🔥 ACTIVE MATCH (FIXED)
+====================================== */
+
+function isActiveRoute(pathname: string, href: string) {
+  if (href === "/dashboard") return pathname === href;
+  return pathname.startsWith(href);
 }
-]
 
-export default function Sidebar({ open, setOpen }: any){
+/* ======================================
+🔥 COMPONENT
+====================================== */
 
-const pathname = usePathname()
+function SidebarComponent({ open, setOpen }: SidebarProps) {
+  const pathname = usePathname();
+  const router = useRouter();
 
-return(
+  return (
+    <>
+      {/* ===== OVERLAY ===== */}
+      <div
+        onClick={() => setOpen(false)}
+        className={`fixed inset-0 bg-black/30 z-40 transition-opacity lg:hidden
+        ${open ? "opacity-100 visible" : "opacity-0 invisible"}`}
+      />
 
-<>
+      {/* ===== SIDEBAR ===== */}
+      <aside
+        className={`
+        fixed lg:relative z-50
+        top-[64px] lg:top-0
+        left-0
+        h-[calc(100vh-64px)] lg:h-full
+        w-64 sm:w-72 lg:w-64
+        bg-white border-r border-gray-200
+        flex flex-col
+        transform transition-transform duration-300 ease-in-out
 
-{/* 🔥 OVERLAY (MOBILE) */}
-<div
-onClick={()=>setOpen?.(false)}
-className={`fixed inset-0 bg-black/30 z-40 transition-opacity lg:hidden
-${open ? "opacity-100 visible" : "opacity-0 invisible"}
-`}
-/>
+        ${open ? "translate-x-0" : "-translate-x-full"}
+        lg:translate-x-0
+      `}
+      >
+        {/* ===== MOBILE HEADER ===== */}
+        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100 lg:hidden">
+          <span className="font-semibold text-gray-800">Menu</span>
 
-<aside
-className={`
-fixed lg:relative z-50
-top-[64px] lg:top-0
-left-0
-h-[calc(100vh-64px)] lg:h-full
-w-64 sm:w-72 lg:w-64
-bg-white border-r border-gray-200
-flex flex-col
-transform transition-transform duration-300 ease-in-out
+          <button
+            onClick={() => setOpen(false)}
+            aria-label="Close sidebar"
+          >
+            <X size={20} />
+          </button>
+        </div>
 
-${open ? "translate-x-0" : "-translate-x-full"}
-lg:translate-x-0
-`}
->
+        {/* ===== NAV ===== */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 sm:py-6 space-y-6">
 
-{/* 🔥 MOBILE HEADER */}
-<div className="flex items-center justify-between px-4 py-4 border-b border-gray-100 lg:hidden">
+          {menu.map((group) => (
+            <div key={group.section}>
 
-<span className="font-semibold text-gray-800">
-Menu
-</span>
+              <p className="px-3 mb-2 text-[10px] sm:text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                {group.section}
+              </p>
 
-<button onClick={()=>setOpen(false)}>
-<X size={20}/>
-</button>
+              <div className="space-y-1">
 
-</div>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActiveRoute(pathname, item.href);
 
-{/* NAV */}
-<nav className="flex-1 overflow-y-auto px-3 py-4 sm:py-6 space-y-6">
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      prefetch
+                      onMouseEnter={() => router.prefetch(item.href)}
+                      onClick={() => setOpen(false)}
+                      aria-label={item.name}
+                      className={`
+                      flex items-center gap-3
+                      px-3 sm:px-4 py-2.5
+                      rounded-lg text-sm font-medium transition
 
-{menu.map((group)=>(
+                      ${active
+                        ? "bg-blue-50 text-blue-600"
+                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                      }
+                    `}
+                    >
+                      <Icon size={18} />
 
-<div key={group.section}>
+                      <span className="truncate">
+                        {item.name}
+                      </span>
+                    </Link>
+                  );
+                })}
 
-<p className="px-3 mb-2 text-[10px] sm:text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-{group.section}
-</p>
+              </div>
 
-<div className="space-y-1">
+            </div>
+          ))}
 
-{group.items.map((item)=>{
+        </nav>
 
-const Icon = item.icon
-const active = pathname.startsWith(item.href)
+        {/* ===== FOOTER ===== */}
+        <div className="p-4 border-t border-gray-100">
+          <p className="text-xs sm:text-sm text-gray-800 text-center font-medium">
+            Sylph v1.0
+          </p>
+        </div>
 
-return(
-
-<Link
-key={item.name}
-href={item.href}
-onClick={()=>setOpen(false)} // ✅ mobile auto close
-className={`
-flex items-center gap-3
-px-3 sm:px-4 py-2.5
-rounded-lg text-sm font-medium transition
-
-${active
-? "bg-blue-50 text-blue-600"
-: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+      </aside>
+    </>
+  );
 }
-`}
->
 
-<Icon size={18}/>
-<span className="truncate">{item.name}</span>
+/* ======================================
+🔥 MEMO (PERFORMANCE)
+====================================== */
 
-</Link>
-
-)
-
-})}
-
-</div>
-
-</div>
-
-))}
-
-</nav>
-
-{/* FOOTER */}
-<div className="p-4 border-t border-gray-100">
-
-<p className="text-xs sm:text-sm text-gray-800 text-center font-medium">
-Sylph v1.0
-</p>
-
-</div>
-
-</aside>
-
-</>
-
-)
-
-}
+export default memo(SidebarComponent);

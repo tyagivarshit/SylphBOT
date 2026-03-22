@@ -41,18 +41,20 @@ const checkGlobalLimit = async (ip: string) => {
 };
 
 /* ======================================
-🔥 COOKIE CONFIG (FINAL WORKING)
+COOKIE CONFIG (PRODUCTION GRADE)
 ====================================== */
+
+const isProd = process.env.NODE_ENV === "production";
 
 const getCookieOptions = () => ({
   httpOnly: true,
-  secure: false, // 🔥 DEV ke liye false
-  sameSite: "lax" as const, // 🔥 proxy ke saath works
+  secure: isProd, // 🔥 production में https required
+  sameSite: isProd ? ("none" as const) : ("lax" as const), // 🔥 cross-origin fix
   path: "/",
 });
 
 /* ======================================
-🔥 SET COOKIES
+SET COOKIES
 ====================================== */
 
 const setCookies = (res: Response, access: string, refresh: string) => {
@@ -68,7 +70,9 @@ const setCookies = (res: Response, access: string, refresh: string) => {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
-  console.log("🍪 Cookies SET → access + refresh");
+  if (!isProd) {
+    console.log("🍪 Cookies set");
+  }
 };
 
 /* ======================================
@@ -135,20 +139,35 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     const business = await prisma.business.findFirst({
       where: { ownerId: user.id },
+      select: { id: true },
     });
-
-    if (!business) {
-      throw badRequest("Business not found");
-    }
 
     const accessToken = generateAccessToken(
       user.id,
       user.role,
-      business.id,
+      business?.id || null,
       user.tokenVersion
     );
 
     const refreshRaw = generateRefreshToken(user.id, user.tokenVersion);
+
+    /* SESSION LIMIT */
+    const count = await prisma.refreshToken.count({
+      where: { userId: user.id },
+    });
+
+    if (count >= 5) {
+      const oldest = await prisma.refreshToken.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (oldest) {
+        await prisma.refreshToken.delete({
+          where: { id: oldest.id },
+        });
+      }
+    }
 
     await prisma.refreshToken.create({
       data: {
@@ -160,11 +179,17 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       },
     });
 
-    console.log("🔐 LOGIN SUCCESS → setting cookies");
-
     setCookies(res, accessToken, refreshRaw);
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        businessId: business?.id || null,
+      },
+    });
 
   } catch (err) {
     next(err);
@@ -212,10 +237,14 @@ export const resendVerificationEmail = async (req: Request, res: Response, next:
   try {
     const email = req.body.email;
 
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    if (!user) return res.json({ success: true });
+
     const raw = crypto.randomBytes(32).toString("hex");
 
     await prisma.user.update({
-      where: { email },
+      where: { id: user.id },
       data: {
         verifyToken: hashToken(raw),
         verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -242,10 +271,14 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
   try {
     const email = req.body.email;
 
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    if (!user) return res.json({ success: true });
+
     const raw = crypto.randomBytes(32).toString("hex");
 
     await prisma.user.update({
-      where: { email },
+      where: { id: user.id },
       data: {
         resetToken: hashToken(raw),
         resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
@@ -272,6 +305,10 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
   try {
     const { token, password } = req.body;
 
+    if (!token || !password || password.length < 6) {
+      throw badRequest("Invalid input");
+    }
+
     const user = await prisma.user.findFirst({
       where: {
         resetToken: hashToken(token),
@@ -287,7 +324,12 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
         password: await bcrypt.hash(password, 12),
         resetToken: null,
         resetTokenExpiry: null,
+        tokenVersion: { increment: 1 },
       },
+    });
+
+    await prisma.refreshToken.deleteMany({
+      where: { userId: user.id },
     });
 
     res.json({ success: true });
@@ -310,7 +352,12 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
       select: { id: true, name: true, email: true, role: true },
     });
 
-    res.json({ success: true, user });
+    res.setHeader("Cache-Control", "no-store");
+
+    res.json({
+      success: true,
+      user,
+    });
 
   } catch (err) {
     next(err);

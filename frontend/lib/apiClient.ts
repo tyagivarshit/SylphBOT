@@ -1,97 +1,177 @@
-const API = process.env.NEXT_PUBLIC_API_URL;
+const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 
 /* ======================================
-🔥 API FETCH (FINAL 10/10)
+🔥 TYPES
 ====================================== */
 
-export async function apiFetch<T = any>(
+export type ApiResponse<T = any> = {
+  success: boolean;
+  data: T | null;
+
+  limited: boolean;
+  upgradeRequired: boolean;
+  unauthorized: boolean;
+
+  message?: string;
+  code?: string;
+  networkError?: boolean;
+};
+
+/* ======================================
+🔥 CORE FETCH (PRODUCTION SAFE)
+====================================== */
+
+async function coreFetch<T>(
   url: string,
-  options: RequestInit = {}
-): Promise<T> {
-
-  if (!API) {
-    throw new Error("API URL not configured");
-  }
-
-  const fullUrl = url.startsWith("http")
-    ? url
-    : `${API}${url}`;
+  options: RequestInit,
+  retry = false
+): Promise<ApiResponse<T>> {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
-
-    const res = await fetch(fullUrl, {
+    const res = await fetch(url, {
       ...options,
+
+      /* 🔥 CRITICAL FOR COOKIES */
       credentials: "include",
-      cache: "no-store", // 🔥 prevent 304 issues
-      signal: controller.signal,
+      mode: "cors", 
+
       headers: {
         "Content-Type": "application/json",
         ...(options.headers || {}),
       },
+
+      signal: controller.signal,
     });
 
-    /* =============================
-    HANDLE EMPTY RESPONSE
-    ============================= */
+    clearTimeout(timeout);
 
-    if (res.status === 204) {
-      return {} as T;
-    }
-
-    const contentType = res.headers.get("content-type");
     let data: any = null;
-
-    if (contentType?.includes("application/json")) {
+    try {
       data = await res.json();
+    } catch {
+      data = null;
     }
 
-    /* =============================
-    ERROR HANDLING (CRITICAL)
-    ============================= */
+    /* ======================================
+    🔐 UNAUTHORIZED (TRY ONCE AGAIN)
+    ====================================== */
+
+    if (res.status === 401) {
+
+      // optional retry (helps in edge cases)
+      if (!retry) {
+        return coreFetch<T>(url, options, true);
+      }
+
+      return {
+        success: false,
+        data: null,
+        unauthorized: true,
+        limited: false,
+        upgradeRequired: false,
+        message: data?.message || "Unauthorized",
+      };
+    }
+
+    /* ======================================
+    🚫 LIMITED MODE
+    ====================================== */
+
+    if (res.status === 403) {
+      return {
+        success: true,
+        data: data?.data ?? null,
+        limited: true,
+        upgradeRequired: data?.upgradeRequired ?? true,
+        unauthorized: false,
+        message: data?.message,
+        code: data?.code,
+      };
+    }
+
+    /* ======================================
+    ❌ ERROR
+    ====================================== */
 
     if (!res.ok) {
-
       console.error("❌ API ERROR:", {
+        url,
         status: res.status,
-        url: fullUrl,
         data,
       });
 
-      // 🔥 AUTH ERROR (handled in hooks)
-      if (res.status === 401) {
-        throw new Error("UNAUTHORIZED");
-      }
-
-      // 🔥 RATE LIMIT
-      if (res.status === 429) {
-        throw new Error("Too many requests");
-      }
-
-      // 🔥 SERVER ERROR
-      if (res.status >= 500) {
-        throw new Error("Server error, try again later");
-      }
-
-      // 🔥 FALLBACK
-      throw new Error(data?.message || "API Error");
+      return {
+        success: false,
+        data: null,
+        limited: false,
+        upgradeRequired: false,
+        unauthorized: false,
+        message: data?.message || "Request failed",
+        code: data?.code,
+      };
     }
 
-    return data;
+    /* ======================================
+    ✅ SUCCESS
+    ====================================== */
 
-  } catch (err: any) {
+    return {
+      success: true,
+      data: data?.data ?? data,
+      limited: data?.limited ?? false,
+      upgradeRequired: data?.upgradeRequired ?? false,
+      unauthorized: false,
+    };
 
-    if (err.name === "AbortError") {
-      throw new Error("Request timeout");
-    }
+  } catch (error: any) {
 
-    console.error("🔥 FETCH FAILED:", err.message);
-
-    throw err;
-
-  } finally {
     clearTimeout(timeout);
+
+    const isAbort = error?.name === "AbortError";
+
+    console.error("❌ FETCH FAILED:", error);
+
+    return {
+      success: false,
+      data: null,
+      limited: false,
+      upgradeRequired: false,
+      unauthorized: false,
+      networkError: true,
+      message: isAbort
+        ? "Request timeout"
+        : error?.message || "Network error",
+    };
   }
+}
+
+/* ======================================
+🔥 PUBLIC API
+====================================== */
+
+export async function apiFetch<T = any>(
+  path: string,
+  options: RequestInit = {}
+): Promise<ApiResponse<T>> {
+
+  if (!API) {
+    console.error("❌ API URL NOT DEFINED");
+
+    return {
+      success: false,
+      data: null,
+      limited: false,
+      upgradeRequired: false,
+      unauthorized: false,
+      networkError: true,
+      message: "API URL not configured",
+    };
+  }
+
+  const url = `${API}${path}`;
+
+  return coreFetch<T>(url, options);
 }

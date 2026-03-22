@@ -3,6 +3,7 @@ import { redis } from "../config/redis";
 
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;
+const MAX_IP_ATTEMPTS = 20;
 
 /* ======================================
 UTILS
@@ -14,8 +15,31 @@ const getIP = (req: Request) =>
   req.ip ||
   "unknown";
 
+const getEmail = (req: Request) =>
+  req.body?.email?.toLowerCase().trim() || "unknown";
+
 /* ======================================
-LOGIN LIMITER (ATOMIC + DISTRIBUTED SAFE)
+CORE LIMITER LOGIC
+====================================== */
+
+const checkLimit = async (key: string, limit: number) => {
+  const now = Date.now();
+
+  const multi = redis.multi();
+
+  multi.zremrangebyscore(key, 0, now - WINDOW * 1000);
+  multi.zadd(key, now, `${now}-${Math.random()}`);
+  multi.zcard(key);
+  multi.expire(key, WINDOW);
+
+  const [, , count] = (await multi.exec()) as any;
+  const attempts = count[1];
+
+  return attempts > limit;
+};
+
+/* ======================================
+🔥 LOGIN LIMITER (PRODUCTION GRADE)
 ====================================== */
 
 export const loginLimiter = async (
@@ -24,42 +48,41 @@ export const loginLimiter = async (
   next: NextFunction
 ) => {
   try {
-    const email = req.body?.email?.toLowerCase().trim() || "unknown";
+    const email = getEmail(req);
     const ip = getIP(req);
 
-    const key = `login:limit:${email}:${ip}`;
-    const now = Date.now();
+    const emailIPKey = `login:limit:${email}:${ip}`;
+    const ipKey = `login:limit:ip:${ip}`;
 
-    const multi = redis.multi();
+    /* ======================================
+    CHECK LIMITS
+    ====================================== */
 
-    /* remove old */
-    multi.zremrangebyscore(key, 0, now - WINDOW * 1000);
+    const [isEmailBlocked, isIPBlocked] = await Promise.all([
+      checkLimit(emailIPKey, MAX_ATTEMPTS),
+      checkLimit(ipKey, MAX_IP_ATTEMPTS),
+    ]);
 
-    /* add current attempt */
-    multi.zadd(key, now, `${now}-${Math.random()}`);
+    if (isEmailBlocked || isIPBlocked) {
+      const ttl = await redis.ttl(emailIPKey);
 
-    /* count */
-    multi.zcard(key);
-
-    /* set expiry */
-    multi.expire(key, WINDOW);
-
-    const [, , count] = (await multi.exec()) as any;
-
-    const attempts = count[1];
-
-    if (attempts > MAX_ATTEMPTS) {
-      const ttl = await redis.ttl(key);
+      console.warn("🚨 LOGIN RATE LIMITED", {
+        email,
+        ip,
+        isEmailBlocked,
+        isIPBlocked,
+      });
 
       return res.status(429).json({
         success: false,
-        message: "Too many failed attempts. Try again later.",
+        message: "Too many attempts. Please try again later.",
         retryAfter: ttl > 0 ? ttl : WINDOW,
       });
     }
 
     next();
-  } catch {
-    next(); // fail open but safe
+  } catch (err) {
+    console.error("❌ LOGIN LIMITER ERROR", err);
+    next(); // fail open
   }
 };

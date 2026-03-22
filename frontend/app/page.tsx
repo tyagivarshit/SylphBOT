@@ -1,18 +1,22 @@
-"use client"
+"use client";
 
-import { useEffect } from "react"
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 
-export default function Home(){
+export default function HomePage() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
 
-  useEffect(()=>{
+  useEffect(() => {
+    if (loading) return;
 
-    const token = localStorage.getItem("token")
-
-    if(token){
-      window.location.href="/auth/login"
+    if (user) {
+      router.replace("/dashboard");
+    } else {
+      router.replace("/auth/login");
     }
+  }, [user, loading, router]);
 
-  },[])
-
-  return null
+  return null;
 }

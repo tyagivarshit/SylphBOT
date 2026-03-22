@@ -2,8 +2,9 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma";
 import { env } from "../config/env";
-import { unauthorized, forbidden } from "../utils/AppError";
+import { unauthorized } from "../utils/AppError";
 import crypto from "crypto";
+import { generateAccessToken } from "../utils/generateToken";
 
 const isProd = process.env.NODE_ENV === "production";
 
@@ -13,16 +14,6 @@ UTILS
 
 const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
-
-/* ======================================
-TYPES
-====================================== */
-
-type AuthUser = {
-  id: string;
-  role: string;
-  businessId: string;
-};
 
 /* ======================================
 COOKIE CONFIG
@@ -35,13 +26,37 @@ const cookieOptions = {
   path: "/",
 };
 
+/* ======================================
+CLEAR COOKIES
+====================================== */
+
 export const clearAuthCookies = (res: Response) => {
   res.clearCookie("accessToken", cookieOptions);
   res.clearCookie("refreshToken", cookieOptions);
 };
 
 /* ======================================
-🔥 FINAL PROTECT MIDDLEWARE
+GET USER
+====================================== */
+
+const getUserWithBusiness = async (userId: string) => {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      role: true,
+      isActive: true,
+      tokenVersion: true,
+      businesses: {
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+};
+
+/* ======================================
+PROTECT MIDDLEWARE (FINAL)
 ====================================== */
 
 export const protect = async (
@@ -53,31 +68,18 @@ export const protect = async (
     const accessToken = req.cookies?.accessToken;
     const refreshToken = req.cookies?.refreshToken;
 
-    /* =============================
-    NO TOKENS
-    ============================= */
-
     if (!accessToken && !refreshToken) {
       throw unauthorized("Not authorized");
     }
 
     /* =============================
-    ACCESS TOKEN FLOW (FAST PATH)
+    ACCESS TOKEN (FAST PATH)
     ============================= */
-
     if (accessToken) {
       try {
         const decoded = jwt.verify(accessToken, env.JWT_SECRET) as any;
 
-        const user = await prisma.user.findUnique({
-          where: { id: decoded.id },
-          select: {
-            id: true,
-            role: true,
-            isActive: true,
-            tokenVersion: true,
-          },
-        });
+        const user = await getUserWithBusiness(decoded.id);
 
         if (
           !user ||
@@ -87,25 +89,17 @@ export const protect = async (
           throw unauthorized("Invalid session");
         }
 
-        const business = await prisma.business.findUnique({
-          where: { id: decoded.businessId },
-          select: { id: true, ownerId: true },
-        });
-
-        if (!business || business.ownerId !== user.id) {
-          throw forbidden("Forbidden");
-        }
+        const businessId = user.businesses[0]?.id || null;
 
         (req as any).user = {
           id: user.id,
           role: user.role,
-          businessId: business.id,
-        } as AuthUser;
+          businessId,
+        };
 
         return next();
 
       } catch (err: any) {
-        // Only handle expiration here
         if (err.name !== "TokenExpiredError") {
           throw unauthorized("Invalid access token");
         }
@@ -113,7 +107,7 @@ export const protect = async (
     }
 
     /* =============================
-    REFRESH TOKEN FLOW (SAFE)
+    REFRESH TOKEN FLOW
     ============================= */
 
     if (!refreshToken) {
@@ -144,15 +138,7 @@ export const protect = async (
       throw unauthorized("Session expired");
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-      select: {
-        id: true,
-        role: true,
-        isActive: true,
-        tokenVersion: true,
-      },
-    });
+    const user = await getUserWithBusiness(decoded.id);
 
     if (
       !user ||
@@ -163,30 +149,33 @@ export const protect = async (
       throw unauthorized("Invalid session");
     }
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId: user.id },
-      select: { id: true },
-    });
-
-    if (!business) {
-      clearAuthCookies(res);
-      throw unauthorized("Unauthorized");
-    }
+    const businessId = user.businesses[0]?.id || null;
 
     /* ======================================
-    🔥 IMPORTANT: NO ROTATION HERE
+    🔥 NEW ACCESS TOKEN (CRITICAL FIX)
     ====================================== */
 
-    // ❌ NO delete
-    // ❌ NO create
-    // ❌ NO transaction
-    // ❌ NO cookie reset
+    const newAccessToken = generateAccessToken(
+      user.id,
+      user.role,
+      businessId,
+      user.tokenVersion
+    );
+
+    res.cookie("accessToken", newAccessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000,
+    });
+
+    /* ======================================
+    SET USER
+    ====================================== */
 
     (req as any).user = {
       id: user.id,
       role: user.role,
-      businessId: business.id,
-    } as AuthUser;
+      businessId,
+    };
 
     return next();
 

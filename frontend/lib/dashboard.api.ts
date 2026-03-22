@@ -1,76 +1,102 @@
-import { apiFetch } from "./apiClient"
+import { apiFetch, ApiResponse } from "./apiClient";
 
-/* ===============================
-   🔥 HELPER (SAFE DATA EXTRACTION)
-================================ */
+/* ======================================
+🔥 TYPES (BACKEND ALIGNED)
+====================================== */
 
-function extractData(res: any) {
-  if (!res) return null
+type DashboardStats = {
+  totalLeads: number;
+  leadsToday: number;
+  leadsThisMonth: number;
+  messagesToday: number;
 
-  // if backend returns { data: ... }
-  if ("data" in res) return res.data
+  aiCallsUsed: number;
+  aiCallsLimit: number;
 
-  // if backend returns direct object
-  return res
-}
+  usagePercent: number;
+  nearLimit: boolean;
+  isUnlimited: boolean;
 
-/* ===============================
-   DASHBOARD STATS
-================================ */
+  plan: string;
 
-export async function getDashboardStats() {
-  const res = await apiFetch("/api/dashboard/stats")
-  return extractData(res) || {}
-}
+  qualifiedLeads?: number;
 
-/* ===============================
-   RECENT LEADS
-================================ */
+  chartData: any[];
+  messagesChart: any[];
+  recentActivity: any[];
+};
 
-export async function getRecentLeads(search?: string, stage?: string) {
+type LeadsResponse = {
+  leads: any[];
+  pagination?: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+};
 
-  let url = "/api/dashboard/leads"
-  const params = new URLSearchParams()
+/* ======================================
+📊 DASHBOARD STATS
+====================================== */
 
-  params.append("limit", "5")
+export const getDashboardStats = async (): Promise<
+  ApiResponse<DashboardStats>
+> => {
+  return apiFetch<DashboardStats>("/api/dashboard/stats");
+};
 
-  if (search) params.append("search", search)
-  if (stage) params.append("stage", stage)
+/* ======================================
+👥 RECENT LEADS
+====================================== */
 
-  if (params.toString()) {
-    url += `?${params.toString()}`
+export const getRecentLeads = async (): Promise<
+  ApiResponse<LeadsResponse>
+> => {
+
+  const params = new URLSearchParams();
+  params.append("limit", "5");
+
+  const url = `/api/dashboard/leads?${params.toString()}`;
+
+  return apiFetch<LeadsResponse>(url);
+};
+
+/* ======================================
+🔍 LEAD DETAIL
+====================================== */
+
+export const getLeadDetail = async (id: string) => {
+  if (!id) {
+    throw new Error("Lead ID is required");
   }
 
-  const res = await apiFetch(url)
-  return extractData(res) || []
-}
+  return apiFetch(`/api/dashboard/leads/${id}`);
+};
 
-/* ===============================
-   LEAD DETAIL
-================================ */
+/* ======================================
+✏️ UPDATE LEAD STAGE
+====================================== */
 
-export async function getLeadDetail(id: string) {
-  const res = await apiFetch(`/api/dashboard/leads/${id}`)
-  return extractData(res) || null
-}
+export const updateLeadStage = async (
+  id: string,
+  stage: string
+) => {
 
-/* ===============================
-   UPDATE LEAD
-================================ */
+  if (!id || !stage) {
+    throw new Error("Lead ID and stage are required");
+  }
 
-export async function updateLeadStage(id: string, stage: string) {
-  const res = await apiFetch(`/api/dashboard/leads/${id}/stage`, {
+  return apiFetch(`/api/dashboard/leads/${id}/stage`, {
     method: "PATCH",
     body: JSON.stringify({ stage }),
-  })
-  return extractData(res) || null
-}
+  });
+};
 
-/* ===============================
-   ACTIVE CONVERSATIONS
-================================ */
+/* ======================================
+💬 ACTIVE CONVERSATIONS
+====================================== */
 
-export async function getActiveConversations() {
-  const res = await apiFetch("/api/dashboard/active-conversations")
-  return extractData(res) || []
-}
+export const getActiveConversations = async () => {
+  return apiFetch("/api/dashboard/active-conversations");
+};

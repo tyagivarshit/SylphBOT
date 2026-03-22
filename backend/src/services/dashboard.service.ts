@@ -1,102 +1,161 @@
 import prisma from "../config/prisma";
 import { startOfDay, startOfMonth, subDays, format } from "date-fns";
 import { Prisma } from "@prisma/client";
+import {
+  getPlanLimits,
+  getPlanKey,
+  isNearLimit,
+} from "../config/plan.config";
 
 export class DashboardService {
 
   /* ======================================
-     DASHBOARD STATS
+     📊 DASHBOARD STATS (SaaS PRO)
   ====================================== */
   static async getStats(businessId: string) {
+    try {
+      const now = new Date();
+      const todayStart = startOfDay(now);
+      const monthStart = startOfMonth(now);
 
-    const todayStart = startOfDay(new Date());
-    const monthStart = startOfMonth(new Date());
+      const baseFilter: Prisma.LeadWhereInput = { businessId };
 
-    const baseFilter: Prisma.LeadWhereInput = {
-      businessId
-    };
+      /* 🔥 SUBSCRIPTION (SAFE FALLBACK) */
+      const subscription = await prisma.subscription.findUnique({
+        where: { businessId },
+        include: { plan: true },
+      });
 
-    console.log("Dashboard query businessId:", businessId);
+      const planKey = getPlanKey(subscription?.plan || null);
+      const limits = getPlanLimits(subscription?.plan || null);
 
-    const subscription = await prisma.subscription.findUnique({
-      where: { businessId },
-      include: { plan: true }
-    });
+      /* ======================================
+      PARALLEL QUERIES (FAST)
+      ====================================== */
 
-    const [
-      totalLeads,
-      leadsToday,
-      leadsThisMonth,
-      messagesToday,
-      aiCallsUsed,
-      qualifiedLeads
-    ] = await Promise.all([
+      const [
+        totalLeads,
+        leadsToday,
+        leadsThisMonth,
+        messagesToday,
+        aiCallsUsed,
+        qualifiedLeads,
+      ] = await Promise.all([
 
-      prisma.lead.count({
-        where: baseFilter
-      }),
+        prisma.lead.count({ where: baseFilter }),
 
-      prisma.lead.count({
-        where: {
-          ...baseFilter,
-          createdAt: { gte: todayStart }
-        }
-      }),
+        prisma.lead.count({
+          where: {
+            ...baseFilter,
+            createdAt: { gte: todayStart },
+          },
+        }),
 
-      prisma.lead.count({
-        where: {
-          ...baseFilter,
-          createdAt: { gte: monthStart }
-        }
-      }),
+        prisma.lead.count({
+          where: {
+            ...baseFilter,
+            createdAt: { gte: monthStart },
+          },
+        }),
 
-      /* USER messages today */
-      prisma.message.count({
-        where: {
-          lead: { businessId },
-          createdAt: { gte: todayStart }
-        }
-      }),
+        prisma.message.count({
+          where: {
+            lead: { businessId },
+            createdAt: { gte: todayStart },
+          },
+        }),
 
-      /* AI calls */
-      prisma.message.count({
-        where: {
-          lead: { businessId },
-          sender: "AI"
-        }
-      }),
+        /* 🔥 AI usage (temporary metric) */
+        prisma.message.count({
+          where: {
+            lead: { businessId },
+            sender: "AI",
+          },
+        }),
 
-      prisma.lead.count({
-        where: {
-          ...baseFilter,
-          stage: "QUALIFIED"
-        }
-      })
+        prisma.lead.count({
+          where: {
+            ...baseFilter,
+            stage: "QUALIFIED",
+          },
+        }),
+      ]);
 
-    ]);
+      const [chartData, messagesChart, activity] = await Promise.all([
+        this.getLeadsGrowth(businessId),
+        this.getMessagesGrowth(businessId),
+        this.getRecentActivity(businessId),
+      ]);
 
-    const [chartData, messagesChart, activity] = await Promise.all([
-      this.getLeadsGrowth(businessId),
-      this.getMessagesGrowth(businessId),
-      this.getRecentActivity(businessId)
-    ]);
+      /* ======================================
+      🔥 USAGE ENGINE
+      ====================================== */
 
-    return {
-      totalLeads,
-      leadsToday,
-      leadsThisMonth,
-      messagesToday,
-      aiCallsUsed,
-      aiCallsLimit: subscription?.plan?.maxAiCalls || 0,
-      qualifiedLeads,
-      chartData,
-      messagesChart,
-      recentActivity: activity
-    };
+      const aiLimit = limits.aiCallsUsed;
+      const isUnlimited = aiLimit === -1;
+
+      const usagePercent =
+        isUnlimited || aiLimit === 0
+          ? 0
+          : aiCallsUsed / aiLimit;
+
+      const nearLimit = isNearLimit(aiCallsUsed, aiLimit);
+
+      /* ======================================
+      FINAL RESPONSE
+      ====================================== */
+
+      return {
+        totalLeads: totalLeads || 0,
+        leadsToday: leadsToday || 0,
+        leadsThisMonth: leadsThisMonth || 0,
+        messagesToday: messagesToday || 0,
+
+        /* 🔥 USAGE */
+        aiCallsUsed: aiCallsUsed || 0,
+        aiCallsLimit: aiLimit,
+        usagePercent,
+        nearLimit,
+        isUnlimited,
+
+        /* 🔥 PLAN */
+        plan: planKey,
+
+        /* 📊 */
+        qualifiedLeads: qualifiedLeads || 0,
+        chartData: chartData || [],
+        messagesChart: messagesChart || [],
+        recentActivity: activity || [],
+      };
+
+    } catch (error) {
+      console.error("❌ SERVICE ERROR (getStats):", error);
+
+      /* 🔥 NEVER BREAK DASHBOARD */
+      return {
+        totalLeads: 0,
+        leadsToday: 0,
+        leadsThisMonth: 0,
+        messagesToday: 0,
+
+        aiCallsUsed: 0,
+        aiCallsLimit: 0,
+        usagePercent: 0,
+        nearLimit: false,
+        isUnlimited: false,
+
+        plan: "FREE",
+
+        qualifiedLeads: 0,
+        chartData: [],
+        messagesChart: [],
+        recentActivity: [],
+      };
+    }
   }
 
   /* ======================================
-     LEADS LIST
+     👥 LEADS LIST
   ====================================== */
   static async getLeadsList(
     businessId: string,
@@ -105,239 +164,248 @@ export class DashboardService {
     stage?: string,
     search?: string
   ) {
+    try {
+      const skip = (page - 1) * limit;
 
-    const skip = (page - 1) * limit;
+      const where: Prisma.LeadWhereInput = { businessId };
 
-    const where: Prisma.LeadWhereInput = {
-      businessId
-    };
+      if (stage) where.stage = stage;
 
-    if (stage) {
-      where.stage = stage;
-    }
-
-    if (search) {
-
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { phone: { contains: search } },
-        { email: { contains: search, mode: "insensitive" } }
-      ];
-
-    }
-
-    const [leads, total] = await Promise.all([
-
-      prisma.lead.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-          email: true,
-          stage: true,
-          platform: true,
-          createdAt: true,
-          lastMessageAt: true
-        }
-      }),
-
-      prisma.lead.count({ where })
-
-    ]);
-
-    return {
-      leads,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
+      if (search) {
+        where.OR = [
+          { name: { contains: search, mode: "insensitive" } },
+          { phone: { contains: search } },
+          { email: { contains: search, mode: "insensitive" } },
+        ];
       }
-    };
+
+      const [leads, total] = await Promise.all([
+        prisma.lead.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true,
+            stage: true,
+            platform: true,
+            createdAt: true,
+            lastMessageAt: true,
+          },
+        }),
+
+        prisma.lead.count({ where }),
+      ]);
+
+      return {
+        leads: leads || [],
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+
+    } catch (error) {
+      console.error("❌ SERVICE ERROR (getLeadsList):", error);
+
+      return {
+        leads: [],
+        pagination: {
+          total: 0,
+          page: 1,
+          limit,
+          totalPages: 0,
+        },
+      };
+    }
   }
 
   /* ======================================
-     LEAD DETAIL
+     🔍 LEAD DETAIL
   ====================================== */
   static async getLeadDetail(businessId: string, leadId: string) {
+    try {
+      const lead = await prisma.lead.findFirst({
+        where: { id: leadId, businessId },
+        include: {
+          messages: {
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
 
-    const lead = await prisma.lead.findFirst({
-      where: { id: leadId, businessId },
-      include: {
-        messages: {
-          orderBy: { createdAt: "asc" }
-        }
-      }
-    });
+      return lead || null;
 
-    if (!lead) throw new Error("Lead not found");
-
-    return lead;
+    } catch (error) {
+      console.error("❌ SERVICE ERROR (getLeadDetail):", error);
+      return null;
+    }
   }
 
   /* ======================================
-     UPDATE LEAD STAGE
+     ✏️ UPDATE LEAD STAGE
   ====================================== */
   static async updateLeadStage(
     businessId: string,
     leadId: string,
     stage: string
   ) {
+    try {
+      const lead = await prisma.lead.findFirst({
+        where: { id: leadId, businessId },
+      });
 
-    const lead = await prisma.lead.findFirst({
-      where: { id: leadId, businessId }
-    });
+      if (!lead) return null;
 
-    if (!lead) throw new Error("Lead not found");
+      return prisma.lead.update({
+        where: { id: leadId },
+        data: { stage },
+      });
 
-    return prisma.lead.update({
-      where: { id: leadId },
-      data: { stage }
-    });
+    } catch (error) {
+      console.error("❌ SERVICE ERROR (updateLeadStage):", error);
+      return null;
+    }
   }
 
   /* ======================================
-     LEADS GROWTH
+     📈 LEADS GROWTH
   ====================================== */
   static async getLeadsGrowth(businessId: string) {
+    try {
+      const today = new Date();
+      const startDate = subDays(today, 6);
 
-    const today = new Date();
-    const startDate = subDays(today, 6);
+      const leads = await prisma.lead.findMany({
+        where: {
+          businessId,
+          createdAt: { gte: startDate },
+        },
+        select: { createdAt: true },
+      });
 
-    const leads = await prisma.lead.findMany({
-      where: {
-        businessId,
-        createdAt: { gte: startDate }
-      },
-      select: { createdAt: true }
-    });
+      const map: Record<string, number> = {};
 
-    const map: Record<string, number> = {};
+      for (let i = 0; i < 7; i++) {
+        const day = format(subDays(today, i), "EEE");
+        map[day] = 0;
+      }
 
-    for (let i = 0; i < 7; i++) {
-      const day = format(subDays(today, i), "EEE");
-      map[day] = 0;
+      leads.forEach((lead) => {
+        const day = format(lead.createdAt, "EEE");
+        if (map[day] !== undefined) map[day]++;
+      });
+
+      return Object.keys(map)
+        .reverse()
+        .map((day) => ({
+          date: day,
+          leads: map[day],
+        }));
+
+    } catch {
+      return [];
     }
-
-    leads.forEach((lead) => {
-
-      const day = format(lead.createdAt, "EEE");
-
-      if (map[day] !== undefined) map[day]++;
-
-    });
-
-    return Object.keys(map)
-      .reverse()
-      .map((day) => ({
-        date: day,
-        leads: map[day]
-      }));
   }
 
   /* ======================================
-     MESSAGES GROWTH
+     💬 MESSAGES GROWTH
   ====================================== */
   static async getMessagesGrowth(businessId: string) {
+    try {
+      const today = new Date();
+      const startDate = subDays(today, 6);
 
-    const today = new Date();
-    const startDate = subDays(today, 6);
+      const messages = await prisma.message.findMany({
+        where: {
+          lead: { businessId },
+          createdAt: { gte: startDate },
+        },
+        select: { createdAt: true },
+      });
 
-    const messages = await prisma.message.findMany({
-      where: {
-        lead: { businessId },
-        createdAt: { gte: startDate }
-      },
-      select: { createdAt: true }
-    });
+      const map: Record<string, number> = {};
 
-    const map: Record<string, number> = {};
+      for (let i = 0; i < 7; i++) {
+        const day = format(subDays(today, i), "EEE");
+        map[day] = 0;
+      }
 
-    for (let i = 0; i < 7; i++) {
-      const day = format(subDays(today, i), "EEE");
-      map[day] = 0;
+      messages.forEach((msg) => {
+        const day = format(msg.createdAt, "EEE");
+        if (map[day] !== undefined) map[day]++;
+      });
+
+      return Object.keys(map)
+        .reverse()
+        .map((day) => ({
+          date: day,
+          messages: map[day],
+        }));
+
+    } catch {
+      return [];
     }
-
-    messages.forEach((msg) => {
-
-      const day = format(msg.createdAt, "EEE");
-
-      if (map[day] !== undefined) map[day]++;
-
-    });
-
-    return Object.keys(map)
-      .reverse()
-      .map((day) => ({
-        date: day,
-        messages: map[day]
-      }));
   }
 
   /* ======================================
-     RECENT ACTIVITY
+     🕒 RECENT ACTIVITY
   ====================================== */
   static async getRecentActivity(businessId: string) {
+    try {
+      const leads = await prisma.lead.findMany({
+        where: { businessId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          name: true,
+          platform: true,
+          createdAt: true,
+        },
+      });
 
-    const leads = await prisma.lead.findMany({
+      return leads.map((lead) => ({
+        id: lead.id,
+        text: `New lead from ${lead.platform} (${lead.name || "Unknown"})`,
+        time: lead.createdAt,
+      }));
 
-      where: { businessId },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-
-      select: {
-        id: true,
-        name: true,
-        platform: true,
-        createdAt: true
-      }
-
-    });
-
-    return leads.map((lead) => ({
-      id: lead.id,
-      text: `New lead from ${lead.platform} (${lead.name || "Unknown"})`,
-      time: lead.createdAt
-    }));
+    } catch {
+      return [];
+    }
   }
 
   /* ======================================
-     ACTIVE CONVERSATIONS
+     📊 ACTIVE CONVERSATIONS
   ====================================== */
   static async getActiveConversations(businessId: string) {
+    try {
+      const leads = await prisma.lead.findMany({
+        where: {
+          businessId,
+          lastMessageAt: { not: null },
+        },
+        select: { unreadCount: true },
+      });
 
-    const leads = await prisma.lead.findMany({
-      where: {
-        businessId,
-        lastMessageAt: {
-          not: null
-        }
-      },
-      select: {
-        unreadCount: true
-      }
-    });
+      return {
+        active: leads.length,
+        waitingReplies: leads.filter((l) => l.unreadCount > 0).length,
+        resolved: leads.filter((l) => l.unreadCount === 0).length,
+      };
 
-    const active = leads.length;
-
-    const waitingReplies = leads.filter(
-      (l) => l.unreadCount > 0
-    ).length;
-
-    const resolved = leads.filter(
-      (l) => l.unreadCount === 0
-    ).length;
-
-    return {
-      active,
-      waitingReplies,
-      resolved
-    };
-
+    } catch {
+      return {
+        active: 0,
+        waitingReplies: 0,
+        resolved: 0,
+      };
+    }
   }
-
 }

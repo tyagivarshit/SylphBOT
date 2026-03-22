@@ -21,10 +21,11 @@ const getIP = (req: Request) =>
 const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
+/* 🔥 FIXED COOKIE OPTIONS */
 const getCookieOptions = () => ({
   httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? ("none" as const) : ("lax" as const),
+  secure: false, // 🔥 FIX: force false for localhost
+  sameSite: "lax" as const,
   path: "/",
 });
 
@@ -34,11 +35,11 @@ GOOGLE INIT
 
 export const googleAuth = (req: Request, res: Response, next: NextFunction) => {
   try {
-    const state = crypto.randomBytes(16).toString("hex");
+    const state = crypto.randomBytes(32).toString("hex");
 
     res.cookie("oauth_state", state, {
       httpOnly: true,
-      secure: isProd,
+      secure: false, // 🔥 FIX
       sameSite: "lax",
       maxAge: 10 * 60 * 1000,
     });
@@ -46,6 +47,7 @@ export const googleAuth = (req: Request, res: Response, next: NextFunction) => {
     passport.authenticate("google", {
       scope: ["profile", "email"],
       state,
+      session: false,
     })(req, res, next);
   } catch {
     return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
@@ -63,7 +65,12 @@ export const googleCallback = async (req: Request, res: Response) => {
     const stateFromGoogle = req.query.state;
     const stateFromCookie = req.cookies?.oauth_state;
 
+    /* ======================================
+    STATE VALIDATION
+    ====================================== */
+
     if (!stateFromGoogle || stateFromGoogle !== stateFromCookie) {
+      console.warn("⚠️ OAuth state mismatch");
       return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
     }
 
@@ -74,23 +81,16 @@ export const googleCallback = async (req: Request, res: Response) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      let business = await tx.business.findFirst({
-        where: { ownerId: user.id },
-      });
 
-      if (!business) {
-        business = await tx.business.create({
-          data: {
-            name: `${user.name || "My"} Business`,
-            ownerId: user.id,
-          },
-        });
-      }
+      const business = await tx.business.findFirst({
+        where: { ownerId: user.id },
+        select: { id: true },
+      });
 
       const accessToken = generateAccessToken(
         user.id,
         user.role,
-        business.id,
+        business?.id || null,
         user.tokenVersion
       );
 
@@ -100,6 +100,25 @@ export const googleCallback = async (req: Request, res: Response) => {
       );
 
       const refreshToken = hashToken(refreshRaw);
+
+      /* SESSION LIMIT */
+
+      const count = await tx.refreshToken.count({
+        where: { userId: user.id },
+      });
+
+      if (count >= 5) {
+        const oldest = await tx.refreshToken.findFirst({
+          where: { userId: user.id },
+          orderBy: { createdAt: "asc" },
+        });
+
+        if (oldest) {
+          await tx.refreshToken.delete({
+            where: { id: oldest.id },
+          });
+        }
+      }
 
       await tx.refreshToken.create({
         data: {
@@ -114,14 +133,20 @@ export const googleCallback = async (req: Request, res: Response) => {
       return {
         accessToken,
         refreshRaw,
+        businessId: business?.id || null,
       };
     });
+
+    /* ======================================
+    SET COOKIES
+    ====================================== */
 
     const cookieOptions = getCookieOptions();
 
     res.cookie("accessToken", result.accessToken, {
       ...cookieOptions,
       maxAge: 15 * 60 * 1000,
+
     });
 
     res.cookie("refreshToken", result.refreshRaw, {
@@ -129,9 +154,23 @@ export const googleCallback = async (req: Request, res: Response) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
+    console.log("✅ GOOGLE LOGIN SUCCESS", {
+      userId: user.id,
+      businessId: result.businessId,
+    });
+
+    /* ======================================
+    REDIRECT
+    ====================================== */
+
+    if (!result.businessId) {
+      return res.redirect(`${process.env.FRONTEND_URL}/onboarding`);
+    }
+
     return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
 
-  } catch {
+  } catch (err) {
+    console.error("❌ GOOGLE CALLBACK ERROR", err);
     return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
   }
 };

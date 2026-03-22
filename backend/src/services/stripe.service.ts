@@ -26,14 +26,14 @@ type Plan = "BASIC" | "PRO" | "ELITE";
 /* ============================= */
 
 const PRICE_MAP = {
-  BASIC: { /* same as yours */ },
-  PRO: { /* same as yours */ },
-  ELITE: { /* same as yours */ },
+  BASIC: {} as any,
+  PRO: {} as any,
+  ELITE: {} as any,
 } as const;
 
 /* ============================= */
-/* 🔥 EARLY USER (CACHED SAFE)
-================================ */
+/* EARLY USER CACHE */
+/* ============================= */
 
 let earlyUserCache: { value: boolean; expires: number } | null = null;
 
@@ -50,7 +50,7 @@ const isEarlyUser = async () => {
 
   earlyUserCache = {
     value,
-    expires: Date.now() + 60 * 1000, // cache 1 min
+    expires: Date.now() + 60 * 1000,
   };
 
   return value;
@@ -70,8 +70,8 @@ const detectCurrency = (req: Request): Currency => {
 };
 
 /* ============================= */
-/* 🔥 VALIDATE PLAN
-================================ */
+/* VALIDATE PLAN */
+/* ============================= */
 
 const validatePlan = (plan: string): Plan => {
   const allowed: Plan[] = ["BASIC", "PRO", "ELITE"];
@@ -95,8 +95,12 @@ const getPriceId = async (
 
   const early = await isEarlyUser();
 
+  const currencyKey = currency as keyof typeof PRICE_MAP[typeof plan];
+  const billingKey =
+    billing as keyof typeof PRICE_MAP[typeof plan][typeof currencyKey];
+
   const price =
-    PRICE_MAP[plan][currency][billing][
+    PRICE_MAP[plan]?.[currencyKey]?.[billingKey]?.[
       early ? "early" : "normal"
     ];
 
@@ -106,7 +110,7 @@ const getPriceId = async (
 };
 
 /* ============================= */
-/* CREATE CHECKOUT */
+/* CREATE CHECKOUT SESSION */
 /* ============================= */
 
 export const createCheckoutSession = async (
@@ -133,7 +137,7 @@ export const createCheckoutSession = async (
     detectedCurrency;
 
   /* ============================= */
-  /* 🔥 CURRENCY LOCK */
+  /* CURRENCY LOCK */
   /* ============================= */
 
   if (
@@ -147,8 +151,8 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
-  /* 🔥 CUSTOMER (SAFE)
-================================ */
+  /* CUSTOMER */
+  /* ============================= */
 
   let customerId: string;
 
@@ -192,61 +196,57 @@ export const createCheckoutSession = async (
     existingSub?.isTrial && !existingSub?.trialUsed;
 
   /* ============================= */
-  /* 🔥 IDEMPOTENCY KEY */
+  /* IDEMPOTENCY */
   /* ============================= */
 
   const idempotencyKey = `${businessId}_${plan}_${billing}`;
 
   /* ============================= */
-  /* CHECKOUT */
-  /* ============================= */
+  /* CHECKOUT SESSION */
+/* ============================= */
 
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: "subscription",
-      customer: customerId,
+ const session = await stripe.checkout.sessions.create(
+  {
+    mode: "subscription",
+    customer: customerId,
 
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-
-      customer_update: {
-        address: "auto",
+    line_items: [
+      {
+        price: priceId,
+        quantity: 1,
       },
+    ],
 
-      billing_address_collection: "required",
+    billing_address_collection: "required",
 
-      ...getTaxConfig(finalCurrency),
+    ...getTaxConfig(finalCurrency),
 
-      discounts,
+    ...(discounts ? { discounts } : {}),
 
-      subscription_data: {
-        trial_period_days: isTrialEligible ? 7 : undefined,
-      },
+    subscription_data: isTrialEligible
+      ? { trial_period_days: 7 }
+      : undefined,
 
-      metadata: {
-        businessId,
-        plan,
-        billing,
-        currency: finalCurrency,
-      },
-
-      success_url: `${env.FRONTEND_URL}/billing/success`,
-      cancel_url: `${env.FRONTEND_URL}/billing`,
+    metadata: {
+      businessId,
+      plan,
+      billing,
+      currency: finalCurrency,
     },
-    {
-      idempotencyKey,
-    }
-  );
+
+    success_url: `${env.FRONTEND_URL}/billing/success`,
+    cancel_url: `${env.FRONTEND_URL}/billing`,
+  } as Stripe.Checkout.SessionCreateParams, // ⭐⭐⭐ MAIN FIX
+  {
+    idempotencyKey,
+  }
+);
 
   /* ============================= */
-  /* FREE PLAN FETCH */
-  /* ============================= */
+  /* FREE PLAN */
+/* ============================= */
 
-  let freePlan = await prisma.plan.findFirst({
+  const freePlan = await prisma.plan.findFirst({
     where: { type: "FREE" },
   });
 
@@ -255,8 +255,8 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
-  /* 🔥 SAFE UPSERT (NO STATUS BREAK)
-================================ */
+  /* UPSERT */
+/* ============================= */
 
   await prisma.subscription.upsert({
     where: { businessId },

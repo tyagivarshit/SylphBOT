@@ -23,7 +23,6 @@ export default function LoginPage() {
   /* ======================================
   SAFE MOUNT TRACK
   ====================================== */
-
   useEffect(() => {
     return () => {
       mounted.current = false;
@@ -31,21 +30,19 @@ export default function LoginPage() {
   }, []);
 
   /* ======================================
-  SESSION CHECK (FINAL FIX)
+  SESSION CHECK (FIXED + SAFE)
   ====================================== */
-
   useEffect(() => {
     const checkSession = async () => {
       try {
         const res = await getCurrentUser();
 
-        // 🔥 STRICT CHECK (NO AUTO LOGIN BUG)
-        if (res?.user?.id && mounted.current) {
+        if (res?.success && res?.data?.user?.id && mounted.current) {
           router.replace("/dashboard");
         }
 
-      } catch {
-        // ignore
+      } catch (err) {
+        console.log("Session check failed");
       } finally {
         if (mounted.current) setChecking(false);
       }
@@ -57,15 +54,13 @@ export default function LoginPage() {
   /* ======================================
   VALIDATION
   ====================================== */
-
   const validateEmail = (value: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   };
 
   /* ======================================
-  LOGIN (FINAL STABLE)
+  LOGIN
   ====================================== */
-
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (loading) return;
@@ -85,9 +80,12 @@ export default function LoginPage() {
     try {
       setLoading(true);
 
-      await loginUser(cleanEmail, password);
+      const res = await loginUser(cleanEmail, password);
 
-      // 🔥 AUTH SYNC (IMPORTANT)
+      if (!res.success) {
+        throw new Error(res.message || "Login failed");
+      }
+
       window.dispatchEvent(new Event("auth:refresh"));
 
       toast.success("Login successful 🚀");
@@ -102,17 +100,23 @@ export default function LoginPage() {
   };
 
   /* ======================================
-  GOOGLE LOGIN
+  GOOGLE LOGIN (🔥 FIXED)
   ====================================== */
-
   const handleGoogleLogin = () => {
-    window.location.href = "/api/auth/google";
+    const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+
+    if (!API) {
+      toast.error("API URL not configured");
+      return;
+    }
+
+    // 🔥 ALWAYS backend hit
+    window.location.href = `${API}/api/auth/google`;
   };
 
   /* ======================================
-  LOADING SCREEN
+  LOADING
   ====================================== */
-
   if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -124,7 +128,6 @@ export default function LoginPage() {
   /* ======================================
   UI
   ====================================== */
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 sm:px-6">
       <div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-6">
@@ -167,7 +170,6 @@ export default function LoginPage() {
         {/* FORM */}
         <form className="space-y-3" onSubmit={handleLogin}>
           
-          {/* EMAIL */}
           <div>
             <label className="text-xs font-medium text-gray-700">
               Email
@@ -178,11 +180,10 @@ export default function LoginPage() {
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
-          {/* PASSWORD */}
           <div>
             <div className="flex justify-between mb-1">
               <label className="text-xs font-medium text-gray-700">
@@ -203,7 +204,7 @@ export default function LoginPage() {
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border rounded-lg px-3 py-2 pr-9 text-sm focus:ring-2 focus:ring-blue-500"
               />
 
               <button
@@ -216,7 +217,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* SUBMIT */}
           <button
             type="submit"
             disabled={loading}
@@ -226,7 +226,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* FOOTER */}
         <p className="text-xs text-gray-500 mt-5 text-center">
           Don’t have an account?{" "}
           <Link

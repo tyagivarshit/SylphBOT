@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { createCheckout, upgradePlan } from "@/lib/billing"
 import PaymentHistory from "@/components/billing/PaymentHistory"
 
+const API = process.env.NEXT_PUBLIC_API_URL
+
 type Currency = "INR" | "USD"
 
 export default function BillingPage(){
@@ -32,34 +34,46 @@ try{
 
 const [geoRes,billingRes] = await Promise.allSettled([
 fetch("https://ipapi.co/json/"),
-fetch("/api/billing")
+fetch(`${API}/api/billing`,{
+  credentials:"include"
+})
 ])
 
+/* GEO */
 if(geoRes.status === "fulfilled"){
 const geo = await geoRes.value.json()
 setCurrency(geo?.country === "IN" ? "INR" : "USD")
 }
 
+/* BILLING */
 if(billingRes.status === "fulfilled"){
-const data = await billingRes.value.json()
 
-if(data?.subscription){
-  setSubscription(data.subscription)
+const res = await billingRes.value.json()
+
+if(!res?.success){
+throw new Error(res?.message || "Billing failed")
 }
 
-if(data?.subscription?.currency){
-  setLockedCurrency(data.subscription.currency)
-  setCurrency(data.subscription.currency)
+if(res.subscription){
+setSubscription(res.subscription)
 }
 
-if(data?.invoices){
-  setInvoices(data.invoices)
-}
+if(res.subscription?.currency){
+setLockedCurrency(res.subscription.currency)
+setCurrency(res.subscription.currency)
 }
 
+if(res.invoices){
+setInvoices(res.invoices)
+}
+
+}
+
+/* EARLY FLAG */
 setIsEarly(true)
 
 }catch(err){
+console.error(err)
 setError("Failed to load billing")
 }finally{
 setPageLoading(false)
@@ -140,7 +154,8 @@ if(checkout?.url){
 window.location.href = checkout.url
 }
 
-}catch{
+}catch(err){
+console.error(err)
 alert("Something went wrong")
 }finally{
 setLoading(null)
@@ -173,35 +188,7 @@ return(
 
 <div className="space-y-10 p-6">
 
-{/* HEADER */}
-
-<div className="flex justify-between items-center">
-
 <h1 className="text-2xl font-semibold">Billing</h1>
-
-<div className="flex bg-gray-100 rounded-lg p-1 text-sm">
-
-<button
-onClick={()=>setBilling("monthly")}
-className={`px-4 py-1 rounded-md ${
-billing==="monthly" ? "bg-white shadow" : "text-gray-500"
-}`}
->
-Monthly
-</button>
-
-<button
-onClick={()=>setBilling("yearly")}
-className={`px-4 py-1 rounded-md ${
-billing==="yearly" ? "bg-white shadow" : "text-gray-500"
-}`}
->
-Yearly (Save 20%)
-</button>
-
-</div>
-
-</div>
 
 {/* PLANS */}
 
@@ -222,26 +209,10 @@ const original = billing==="monthly"
 : data.yearly
 
 const isCurrent = subscription?.plan?.name === plan.id
-const isPopular = plan.id === "PRO"
 
 return(
 
-<div
-key={plan.id}
-className={`relative p-6 rounded-2xl border transition ${
-isPopular
-? "border-blue-600 shadow-2xl scale-[1.03]"
-: "border-gray-300 hover:shadow-xl"
-}`}
->
-
-{isPopular && (
-<div className="absolute -top-3 left-1/2 -translate-x-1/2">
-<span className="bg-blue-600 text-white text-xs px-3 py-1 rounded-full">
-🔥 Most Popular
-</span>
-</div>
-)}
+<div key={plan.id} className="p-6 rounded-2xl border">
 
 <h2 className="text-lg font-semibold">{plan.name}</h2>
 
@@ -266,24 +237,10 @@ isPopular
 
 </div>
 
-<ul className="mt-4 space-y-2 text-sm">
-
-{plan.features.map((f,i)=>(
-<li key={i} className="flex gap-2">
-<span>✔</span>{f}
-</li>
-))}
-
-</ul>
-
 <button
 onClick={()=>handleUpgrade(plan.id)}
 disabled={loading===plan.id || isCurrent}
-className={`mt-6 w-full py-2 rounded-lg text-sm font-semibold ${
-isPopular
-? "bg-blue-600 hover:bg-blue-700 text-white"
-: "bg-black hover:bg-gray-900 text-white"
-}`}
+className="mt-6 w-full py-2 rounded-lg bg-black text-white"
 >
 
 {isCurrent ? "Current Plan"

@@ -1,97 +1,91 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/context/AuthContext";
 import {
   getDashboardStats,
   getRecentLeads,
 } from "@/lib/dashboard.api";
 
-export function useDashboard() {
+/* ======================================
+DEFAULT SAFE DATA
+====================================== */
 
-  /* ================================
-  🔥 STATS
-  ================================ */
+const DEFAULT_STATS = {
+  totalLeads: 0,
+  leadsToday: 0,
+  leadsThisMonth: 0,
+  messagesToday: 0,
+
+  aiCallsUsed: 0,
+  aiCallsLimit: 0,
+  usagePercent: 0,
+  nearLimit: false,
+  isUnlimited: false,
+
+  plan: "FREE",
+
+  chartData: [],
+  messagesChart: [],
+  recentActivity: [],
+};
+
+/* ======================================
+HOOK (FINAL NO-ERROR VERSION)
+====================================== */
+
+export function useDashboard() {
+  const { user } = useAuth();
+
+  /* ================= STATS ================= */
 
   const statsQuery = useQuery({
-    queryKey: ["dashboard-stats"],
-    queryFn: async () => {
-      const res = await getDashboardStats();
-      console.log("📊 STATS:", res);
-      return res;
-    },
-    retry: 1,
-    refetchOnWindowFocus: false,
+    queryKey: ["dashboard-stats", user?.businessId],
+    queryFn: getDashboardStats,
+    enabled: !!user?.businessId, // ✅ FIXED
   });
 
-  /* ================================
-  🔥 LEADS
-  ================================ */
+  /* ================= LEADS ================= */
 
   const leadsQuery = useQuery({
-    queryKey: ["dashboard-leads"],
-    queryFn: async () => {
-      const res = await getRecentLeads();
-      console.log("👥 LEADS:", res);
-      return res;
-    },
-    retry: 1,
-    refetchOnWindowFocus: false,
+    queryKey: ["dashboard-leads", user?.businessId],
+    queryFn: () => getRecentLeads(), 
+    enabled: !!user?.businessId, // ✅ FIXED
   });
 
-  /* ================================
-  💣 FINAL LOADING (STABLE)
-  ================================ */
+  const statsRes: any = statsQuery.data;
+  const leadsRes: any = leadsQuery.data;
 
-  const loading =
-    statsQuery.isPending ||
-    leadsQuery.isPending;
+  /* ======================================
+  SAFE EXTRACTION (ZERO TS ERRORS)
+  ====================================== */
 
-  /* ================================
-  💣 ERROR (FIXED)
-  ================================ */
+  const stats =
+    statsRes?.success && statsRes?.data
+      ? statsRes.data
+      : DEFAULT_STATS;
 
-  const error =
-    statsQuery.error ||
-    leadsQuery.error;
+  const leads =
+    leadsRes?.success && leadsRes?.data?.leads
+      ? leadsRes.data.leads
+      : [];
 
-  /* ================================
-  🔥 HANDLE UNAUTHORIZED (CRITICAL)
-  ================================ */
-
-  if (error && (error as any)?.message === "UNAUTHORIZED") {
-    if (typeof window !== "undefined") {
-      window.location.href = "/auth/login";
-    }
-  }
-
-  /* ================================
-  🔥 DATA (SAFE DEFAULTS)
-  ================================ */
-
-  const stats = statsQuery.data ?? {};
-  const leads = leadsQuery.data ?? [];
-
-  /* ================================
-  🔍 DEBUG
-  ================================ */
-
-  console.log("🔥 DASHBOARD:", {
-    statsStatus: statsQuery.status,
-    leadsStatus: leadsQuery.status,
-    stats,
-    leads,
-    loading,
-    error,
-  });
+  /* ======================================
+  FINAL RETURN
+  ====================================== */
 
   return {
     stats,
     leads,
-    loading,
-    error,
-    refetch: () => {
-      statsQuery.refetch();
-      leadsQuery.refetch();
-    },
+
+    loading: statsQuery.isLoading || leadsQuery.isLoading,
+
+    error:
+      statsQuery.isError || leadsQuery.isError
+        ? "Failed to load dashboard"
+        : null,
+
+    limited: statsRes?.limited ?? false,
+    upgradeRequired: statsRes?.upgradeRequired ?? false,
   };
 }

@@ -56,22 +56,42 @@ app.set("trust proxy", 1);
 /* ======================================
 🔥 SECURITY + PERFORMANCE
 ====================================== */
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+  })
+);
+
 app.use(compression());
 app.use(globalLimiter);
 
 /* ======================================
-🔥 COOKIE PARSER (CRITICAL)
+🔥 COOKIE PARSER
 ====================================== */
 app.use(cookieParser());
 
 /* ======================================
-🔥 CORS (FINAL FIX)
+🔥 CORS (PRODUCTION GRADE)
 ====================================== */
+
+const allowedOrigins = [
+  "http://localhost:3000",
+  process.env.FRONTEND_URL,
+];
+
 app.use(
   cors({
-    origin: "http://localhost:3000",
-    credentials: true,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true); // allow server-to-server
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn("❌ Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true, // 🔥 CRITICAL FOR COOKIES
   })
 );
 

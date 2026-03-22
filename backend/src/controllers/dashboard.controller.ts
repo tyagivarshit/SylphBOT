@@ -1,159 +1,136 @@
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 import { DashboardService } from "../services/dashboard.service";
 
 /* ======================================
-   HELPER: GET BUSINESS ID
+TYPES
 ====================================== */
-async function getBusinessId(req: Request): Promise<string | null> {
 
-  let businessId = req.user?.businessId || null;
+type AuthRequest = Request & {
+  user?: {
+    id: string;
+    role: string;
+    businessId: string | null;
+  };
+  featureDenied?: boolean;
+  isLimited?: boolean; // 🔥 ADD THIS
+};
 
-  if (!businessId && req.user?.id) {
+/* ======================================
+UTILS
+====================================== */
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId: req.user.id },
-      select: { id: true }
-    });
-
-    businessId = business?.id || null;
-  }
-
-  console.log("Dashboard businessId:", businessId);
-
-  return businessId;
+function isValidString(val: any): val is string {
+  return typeof val === "string" && val.trim().length > 0;
 }
+
+function sendSuccess(
+  res: Response,
+  data: any,
+  extra: {
+    limited?: boolean;
+    upgradeRequired?: boolean;
+  } = {}
+) {
+  return res.status(200).json({
+    success: true,
+    data,
+    limited: extra.limited ?? false,
+    upgradeRequired: extra.upgradeRequired ?? false,
+  });
+}
+
+function sendError(res: Response, status: number, message: string) {
+  return res.status(status).json({
+    success: false,
+    message,
+  });
+}
+
+function logError(req: AuthRequest, error: any) {
+  console.error("❌ DASHBOARD ERROR", {
+    userId: req.user?.id,
+    businessId: req.user?.businessId,
+    path: req.originalUrl,
+    error: error?.message,
+  });
+}
+
+/* ======================================
+BASE HANDLER (SaaS UPGRADED)
+====================================== */
+
+async function baseHandler(
+  req: AuthRequest,
+  res: Response,
+  handler: (businessId: string) => Promise<any>
+) {
+  try {
+    const businessId = req.user?.businessId;
+
+    if (!businessId) {
+      return sendError(
+        res,
+        403,
+        "No business found. Please complete onboarding."
+      );
+    }
+
+    /* ======================================
+    🔥 SOFT LIMIT MODE (IMPORTANT FIX)
+    ====================================== */
+
+    if (req.featureDenied || req.isLimited) {
+      return sendSuccess(res, null, {
+        limited: true,
+        upgradeRequired: true,
+      });
+    }
+
+    const data = await handler(businessId);
+
+    /* ======================================
+    ✅ NORMAL FLOW
+    ====================================== */
+
+    return sendSuccess(res, data);
+
+  } catch (error: any) {
+    logError(req, error);
+    return sendError(res, 500, error?.message || "Dashboard error");
+  }
+}
+
+/* ======================================
+CONTROLLER
+====================================== */
 
 export class DashboardController {
 
-  /* ======================================
-     DASHBOARD STATS
-  ====================================== */
-  static async getStats(req: Request, res: Response) {
-
-    try {
-
-      const businessId = await getBusinessId(req);
-
-      if (!businessId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      // 🔥 SAFE MODE
-      if ((req as any).featureDenied) {
-        return res.status(200).json({
-          success: true,
-          limited: true,
-          data: {
-            totalLeads: 0,
-            conversions: 0
-          }
-        });
-      }
-
-      const stats = await DashboardService.getStats(businessId);
-
-      return res.status(200).json({
-        success: true,
-        data: stats,
-      });
-
-    } catch (error) {
-
-      console.error("Dashboard Stats Error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch dashboard stats",
-      });
-
-    }
+  /* ================================
+     📊 STATS
+  ================================ */
+  static async getStats(req: AuthRequest, res: Response) {
+    return baseHandler(req, res, async (businessId) => {
+      return DashboardService.getStats(businessId);
+    });
   }
 
-  /* ======================================
-     LEADS GROWTH
-  ====================================== */
-  static async getLeadsGrowth(req: Request, res: Response) {
-
-    try {
-
-      const businessId = await getBusinessId(req);
-
-      if (!businessId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if ((req as any).featureDenied) {
-        return res.status(200).json({
-          success: true,
-          limited: true,
-          data: []
-        });
-      }
-
-      const growth = await DashboardService.getLeadsGrowth(businessId);
-
-      return res.status(200).json({
-        success: true,
-        data: growth,
-      });
-
-    } catch (error) {
-
-      console.error("Leads Growth Error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch leads growth",
-      });
-
-    }
-  }
-
-  /* ======================================
-     LEADS LIST
-  ====================================== */
-  static async getLeadsList(req: Request, res: Response) {
-
-    try {
-
-      const businessId = await getBusinessId(req);
-
-      if (!businessId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if ((req as any).featureDenied) {
-        return res.status(200).json({
-          success: true,
-          limited: true,
-          data: [],
-          pagination: {
-            total: 0,
-            page: 1,
-            pages: 1
-          }
-        });
-      }
+  /* ================================
+     👥 LEADS LIST
+  ================================ */
+  static async getLeadsList(req: AuthRequest, res: Response) {
+    return baseHandler(req, res, async (businessId) => {
 
       const page = Math.max(Number(req.query.page) || 1, 1);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
 
-      const limit = Math.min(
-        Math.max(Number(req.query.limit) || 10, 1),
-        100
-      );
+      const stage = isValidString(req.query.stage)
+        ? String(req.query.stage)
+        : undefined;
 
-      const stage = req.query.stage as string | undefined;
-      const search = req.query.search as string | undefined;
+      const search = isValidString(req.query.search)
+        ? String(req.query.search)
+        : undefined;
 
       const result = await DashboardService.getLeadsList(
         businessId,
@@ -163,186 +140,57 @@ export class DashboardController {
         search
       );
 
-      return res.status(200).json({
-        success: true,
-        data: result.leads,
+      return {
+        leads: result.leads,
         pagination: result.pagination,
-      });
-
-    } catch (error) {
-
-      console.error("Dashboard Leads List Error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch leads",
-      });
-
-    }
+      };
+    });
   }
 
-  /* ======================================
-     LEAD DETAIL
-  ====================================== */
-  static async getLeadDetail(req: Request, res: Response) {
+  /* ================================
+     🔍 LEAD DETAIL
+  ================================ */
+  static async getLeadDetail(req: AuthRequest, res: Response) {
+    return baseHandler(req, res, async (businessId) => {
 
-    try {
+      const id = req.params.id;
 
-      const businessId = await getBusinessId(req);
-
-      if (!businessId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
+      if (!isValidString(id)) {
+        throw new Error("Valid Lead ID is required");
       }
 
-      if ((req as any).featureDenied) {
-        return res.status(200).json({
-          success: true,
-          limited: true,
-          data: null
-        });
-      }
-
-      const id = req.params.id as string;
-
-      if (!id) {
-        return res.status(400).json({
-          success: false,
-          message: "Lead ID is required",
-        });
-      }
-
-      const lead = await DashboardService.getLeadDetail(
-        businessId,
-        id
-      );
-
-      return res.status(200).json({
-        success: true,
-        data: lead,
-      });
-
-    } catch (error: any) {
-
-      console.error("Dashboard Lead Detail Error:", error);
-
-      if (error?.message === "Lead not found") {
-        return res.status(404).json({
-          success: false,
-          message: error.message,
-        });
-      }
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch lead detail",
-      });
-
-    }
+      return DashboardService.getLeadDetail(businessId, id);
+    });
   }
 
-  /* ======================================
-     UPDATE LEAD STAGE
-  ====================================== */
-  static async updateLeadStage(req: Request, res: Response) {
+  /* ================================
+     ✏️ UPDATE LEAD STAGE
+  ================================ */
+  static async updateLeadStage(req: AuthRequest, res: Response) {
+    return baseHandler(req, res, async (businessId) => {
 
-    try {
-
-      const businessId = await getBusinessId(req);
-
-      if (!businessId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if ((req as any).featureDenied) {
-        return res.status(200).json({
-          success: true,
-          limited: true,
-          data: null
-        });
-      }
-
-      const id = req.params.id as string;
+      const id = req.params.id;
       const { stage } = req.body;
 
-      if (!id || !stage) {
-        return res.status(400).json({
-          success: false,
-          message: "Lead ID and stage are required",
-        });
+      if (!isValidString(id) || !isValidString(stage)) {
+        throw new Error("Valid Lead ID and stage are required");
       }
 
-      const lead = await DashboardService.updateLeadStage(
+      return DashboardService.updateLeadStage(
         businessId,
         id,
         stage
       );
-
-      return res.status(200).json({
-        success: true,
-        data: lead,
-      });
-
-    } catch (error) {
-
-      console.error("Lead Stage Update Error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to update lead stage",
-      });
-
-    }
+    });
   }
 
-  /* ======================================
-     ACTIVE CONVERSATIONS
-  ====================================== */
-  static async getActiveConversations(req: Request, res: Response) {
-
-    try {
-
-      const businessId = await getBusinessId(req);
-
-      if (!businessId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if ((req as any).featureDenied) {
-        return res.status(200).json({
-          success: true,
-          limited: true,
-          data: []
-        });
-      }
-
-      const data =
-        await DashboardService.getActiveConversations(businessId);
-
-      return res.status(200).json({
-        success: true,
-        data
-      });
-
-    } catch (error) {
-
-      console.error("Active Conversations Error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch active conversations",
-      });
-
-    }
-
+  /* ================================
+     💬 ACTIVE CONVERSATIONS
+  ================================ */
+  static async getActiveConversations(req: AuthRequest, res: Response) {
+    return baseHandler(req, res, async (businessId) => {
+      return DashboardService.getActiveConversations(businessId);
+    });
   }
 
 }

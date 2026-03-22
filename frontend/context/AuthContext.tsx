@@ -1,14 +1,36 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+} from "react";
 import { getCurrentUser } from "@/lib/auth";
 
+/* ======================================
+🔥 TYPES
+====================================== */
+
+type User = {
+  id: string;
+  email: string;
+  role: string;
+  businessId: string | null;
+};
+
 type AuthContextType = {
-  user: any;
+  user: User | null;
   loading: boolean;
   isAuthenticated: boolean;
   refreshUser: () => Promise<void>;
 };
+
+/* ======================================
+🔥 CONTEXT
+====================================== */
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
@@ -17,11 +39,25 @@ const AuthContext = createContext<AuthContextType>({
   refreshUser: async () => {},
 });
 
-export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<any>(null);
+/* ======================================
+🔥 PROVIDER
+====================================== */
+
+export const AuthProvider = ({
+  children,
+}: {
+  children: React.ReactNode;
+}) => {
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUser = async () => {
+  const hasFetched = useRef(false);
+
+  /* ======================================
+  🔥 FETCH USER (STRICT + SAFE)
+  ====================================== */
+
+  const fetchUser = useCallback(async () => {
     try {
       console.log("🔥 CALLING /api/auth/me");
 
@@ -29,25 +65,46 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       console.log("✅ /me RESPONSE:", res);
 
-      if (res?.user) {
-        setUser(res.user);
-      } else {
+      /* 🔐 UNAUTHORIZED */
+      if (res.unauthorized) {
         setUser(null);
+        return;
       }
+
+      /* ❌ FAILED */
+      if (!res.success) {
+        setUser(null);
+        return;
+      }
+
+      /* ✅ SUCCESS */
+      const userData = res.data?.user || null;
+
+      setUser(userData);
+
     } catch (err) {
       console.error("❌ AUTH ERROR:", err);
       setUser(null);
     } finally {
       setLoading(false);
     }
-  };
-
-  // Initial load
-  useEffect(() => {
-    fetchUser();
   }, []);
 
-  // 🔥 GLOBAL REFRESH LISTENER
+  /* ======================================
+  🔥 INITIAL LOAD
+  ====================================== */
+
+  useEffect(() => {
+    if (hasFetched.current) return;
+    hasFetched.current = true;
+
+    fetchUser();
+  }, [fetchUser]);
+
+  /* ======================================
+  🔥 GLOBAL REFRESH EVENT
+  ====================================== */
+
   useEffect(() => {
     const handler = () => {
       console.log("🔄 AUTH REFRESH TRIGGERED");
@@ -55,8 +112,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     window.addEventListener("auth:refresh", handler);
-    return () => window.removeEventListener("auth:refresh", handler);
-  }, []);
+    return () =>
+      window.removeEventListener("auth:refresh", handler);
+  }, [fetchUser]);
+
+  /* ======================================
+  🔥 VALUE
+  ====================================== */
 
   return (
     <AuthContext.Provider
@@ -71,5 +133,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     </AuthContext.Provider>
   );
 };
+
+/* ======================================
+🔥 HOOK
+====================================== */
 
 export const useAuth = () => useContext(AuthContext);

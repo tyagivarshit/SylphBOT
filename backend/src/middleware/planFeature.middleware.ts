@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from "express";
-import prisma from "../config/prisma";
 import {
   hasFeature,
   getPlanKey,
@@ -7,7 +6,7 @@ import {
 } from "../config/plan.config";
 
 /* ---------------------------------------------------
-FEATURE TYPES
+TYPES
 --------------------------------------------------- */
 
 type Feature =
@@ -22,7 +21,7 @@ type Feature =
   | "AI_BOOKING_SCHEDULING";
 
 /* ---------------------------------------------------
-MIDDLEWARE (10/10 FINAL)
+🔥 FEATURE MIDDLEWARE (SaaS 10/10)
 --------------------------------------------------- */
 
 export const requireFeature =
@@ -38,45 +37,60 @@ export const requireFeature =
         });
       }
 
-      /* 🔥 PRO TIP APPLIED:
-         - subscription.middleware pehle run hoga
-         - yaha reuse karenge (no extra DB call)
-      */
+      /* ======================================
+      🔥 USE BILLING CONTEXT (NEW SYSTEM)
+      ====================================== */
 
-      const subscription = (req as any).subscription;
+      const billing = (req as any).billing;
 
-      if (!subscription || !subscription.plan) {
-        return res.status(403).json({
-          code: "NO_SUBSCRIPTION",
-          message: "No active subscription",
+      /* FREE USER */
+      if (!billing || billing.status === "NONE") {
+        (req as any).feature = {
+          allowed: false,
+          reason: "NO_SUBSCRIPTION",
+          feature,
           upgradeRequired: true,
-        });
+        };
+
+        return next(); // ✅ DO NOT BLOCK
       }
 
-      /* 🔥 No need to re-check status/trial
-         already handled by subscription.middleware
-      */
-
-      const planKey = getPlanKey(subscription.plan);
+      const plan = billing.plan;
+      const planKey = getPlanKey(plan);
 
       const featureKey = mapFeature(feature);
 
-      const allowed = hasFeature(subscription.plan, featureKey);
+      const allowed = hasFeature(plan, featureKey);
+
+      /* ======================================
+      FEATURE BLOCK (SOFT)
+      ====================================== */
 
       if (!allowed) {
-        return res.status(403).json({
-          code: "FEATURE_NOT_ALLOWED",
+        (req as any).feature = {
+          allowed: false,
+          reason: "FEATURE_NOT_ALLOWED",
           feature,
           plan: planKey,
           upgradeRequired: true,
-        });
+        };
+
+        return next(); // ✅ DO NOT BLOCK
       }
 
-      /* ✅ ACCESS GRANTED */
+      /* ======================================
+      ✅ ACCESS GRANTED
+      ====================================== */
+
+      (req as any).feature = {
+        allowed: true,
+        feature,
+      };
+
       next();
 
     } catch (error) {
-      console.error("Feature Middleware Error:", error);
+      console.error("❌ Feature Middleware Error:", error);
 
       return res.status(500).json({
         message: "Server error",
@@ -85,13 +99,12 @@ export const requireFeature =
   };
 
 /* ---------------------------------------------------
-🔥 FEATURE MAPPING (TYPE SAFE)
+🔥 FEATURE MAPPING
 --------------------------------------------------- */
 
 const mapFeature = (
   feature: Feature
 ): keyof PlanFeatures => {
-
   const mapping: Record<Feature, keyof PlanFeatures> = {
 
     INSTAGRAM_DM: "automationEnabled",

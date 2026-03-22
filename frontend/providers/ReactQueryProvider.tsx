@@ -13,39 +13,24 @@ export default function ReactQueryProvider({
   children: React.ReactNode;
 }) {
 
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-
-          queries: {
-            staleTime: 1000 * 60, // 1 min
-            gcTime: 1000 * 60 * 5, // 5 min
-
-            refetchOnWindowFocus: false,
-            refetchOnReconnect: true,
-            refetchOnMount: false,
-
-            retry: 1,
-
-            // 🔥 prevent infinite retry loops on auth
-            retryDelay: 1000,
-          },
-
-          mutations: {
-            retry: 1,
-          },
+  const [queryClient] = useState(() =>
+    new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false, // 🔥 IMPORTANT (debug)
+          staleTime: 1000 * 60,
+          refetchOnWindowFocus: false,
         },
-      })
+      },
+    })
   );
+
+  console.log("🧠 QueryClient ACTIVE");
 
   return (
     <QueryClientProvider client={queryClient}>
       {children}
-
-      {process.env.NODE_ENV === "development" && (
-        <ReactQueryDevtools initialIsOpen={false} />
-      )}
+      <ReactQueryDevtools initialIsOpen />
     </QueryClientProvider>
   );
 }

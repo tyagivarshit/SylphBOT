@@ -1,98 +1,120 @@
 /* ======================================
-TYPES
+🔥 IMPORTS
 ====================================== */
 
-type AuthResponse = {
-  success?: boolean;
-  message?: string;
-  user?: any;
+import { apiFetch, ApiResponse } from "./apiClient";
+
+/* ======================================
+🔥 TYPES (STRICT)
+====================================== */
+
+type User = {
+  id: string;
+  email: string;
+  role: string;
+  businessId: string | null;
+};
+
+type CurrentUserResponse = {
+  user: User;
 };
 
 /* ======================================
-🔥 SAFE FETCH (FINAL FIXED)
+🔥 AUTH STATE (SAFE CACHE)
 ====================================== */
 
-async function safeFetch<T = any>(
-  url: string,
-  options: RequestInit = {}
-): Promise<T> {
+let currentUserCache: User | null = null;
+let fetchingPromise: Promise<ApiResponse<CurrentUserResponse>> | null = null;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+/* ======================================
+🔥 UTILS
+====================================== */
 
-  try {
-    const res = await fetch(url, {
-      ...options,
-      credentials: "include",
-      cache: "no-store", // 🔥 FIX 304
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
-    });
-
-    if (res.status === 204) return {} as T;
-
-    const contentType = res.headers.get("content-type");
-    let data: any = null;
-
-    if (contentType?.includes("application/json")) {
-      data = await res.json();
-    }
-
-    if (!res.ok) {
-      if (res.status === 401) throw new Error("UNAUTHORIZED");
-      if (res.status === 429) throw new Error("Too many requests");
-      throw new Error(data?.message || "Request failed");
-    }
-
-    return data;
-
-  } catch (err: any) {
-    if (err.name === "AbortError") {
-      throw new Error("Request timeout");
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
+export function clearUserCache() {
+  currentUserCache = null;
 }
 
 /* ======================================
-AUTH STATE
+🔥 CURRENT USER (FINAL FIXED)
 ====================================== */
 
-let currentUserCache: any = null;
+export async function getCurrentUser(): Promise<
+  ApiResponse<CurrentUserResponse>
+> {
+  /* ✅ RETURN CACHE */
+  if (currentUserCache) {
+    return {
+      success: true,
+      data: { user: currentUserCache },
+      limited: false,
+      upgradeRequired: false,
+      unauthorized: false,
+    };
+  }
 
-/* ======================================
-CURRENT USER
-====================================== */
+  /* 🔥 PREVENT PARALLEL CALLS (PROMISE SHARING) */
+  if (fetchingPromise) {
+    return fetchingPromise;
+  }
 
-export async function getCurrentUser(): Promise<AuthResponse | null> {
-  try {
-    const res = await safeFetch<AuthResponse>(`/api/auth/me`);
-    currentUserCache = res?.user || null;
-    return res;
-  } catch (err: any) {
-    if (err.message === "UNAUTHORIZED") {
+  fetchingPromise = (async () => {
+    try {
+      const res = await apiFetch<CurrentUserResponse>(`/api/auth/me`, {
+        headers: {
+          "Cache-Control": "no-cache",
+        },
+      });
+
+      /* 🔐 UNAUTHORIZED */
+      if (res.unauthorized) {
+        currentUserCache = null;
+        return res;
+      }
+
+      /* ❌ FAILED */
+      if (!res.success) {
+        currentUserCache = null;
+        return res;
+      }
+
+      /* ✅ SUCCESS */
+      currentUserCache = res.data?.user || null;
+
+      return res;
+
+    } catch (err: any) {
+      console.error("❌ getCurrentUser error:", err?.message);
+
       currentUserCache = null;
-      return null;
+
+      return {
+        success: false,
+        data: null,
+        limited: false,
+        upgradeRequired: false,
+        unauthorized: false,
+        networkError: true,
+        message: err?.message || "Auth fetch failed",
+      };
+
+    } finally {
+      fetchingPromise = null;
     }
-    return null;
-  }
+  })();
+
+  return fetchingPromise;
 }
 
 /* ======================================
-LOGIN
+🔥 LOGIN
 ====================================== */
 
 export async function loginUser(
   email: string,
   password: string
-): Promise<AuthResponse> {
+): Promise<ApiResponse<{ user: User }>> {
 
-  const res = await safeFetch<AuthResponse>(`/api/auth/login`, {
+  const res = await apiFetch<{ user: User }>(`/api/auth/login`, {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -100,22 +122,27 @@ export async function loginUser(
     }),
   });
 
-  await new Promise((r) => setTimeout(r, 100)); // cookie settle
+  /* 🔥 CLEAR CACHE AFTER LOGIN */
+  clearUserCache();
+
+  /* 🔥 GLOBAL REFRESH */
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("auth:refresh"));
+  }
 
   return res;
 }
 
 /* ======================================
-REGISTER
+🔥 REGISTER
 ====================================== */
 
 export async function registerUser(
   name: string,
   email: string,
   password: string
-): Promise<AuthResponse> {
-
-  return safeFetch<AuthResponse>(`/api/auth/register`, {
+) {
+  return apiFetch(`/api/auth/register`, {
     method: "POST",
     body: JSON.stringify({
       name: name.trim(),
@@ -126,19 +153,21 @@ export async function registerUser(
 }
 
 /* ======================================
-VERIFY EMAIL
+🔥 VERIFY EMAIL
 ====================================== */
 
 export async function verifyEmail(token: string) {
-  return safeFetch(`/api/auth/verify-email?token=${encodeURIComponent(token)}`);
+  return apiFetch(
+    `/api/auth/verify-email?token=${encodeURIComponent(token)}`
+  );
 }
 
 /* ======================================
-RESEND VERIFICATION
+🔥 RESEND VERIFICATION
 ====================================== */
 
 export async function resendVerification(email: string) {
-  return safeFetch(`/api/auth/resend-verification`, {
+  return apiFetch(`/api/auth/resend-verification`, {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -147,11 +176,11 @@ export async function resendVerification(email: string) {
 }
 
 /* ======================================
-FORGOT PASSWORD
+🔥 FORGOT PASSWORD
 ====================================== */
 
 export async function forgotPassword(email: string) {
-  return safeFetch(`/api/auth/forgot-password`, {
+  return apiFetch(`/api/auth/forgot-password`, {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -160,14 +189,14 @@ export async function forgotPassword(email: string) {
 }
 
 /* ======================================
-RESET PASSWORD
+🔥 RESET PASSWORD
 ====================================== */
 
 export async function resetPassword(
   token: string,
   password: string
 ) {
-  return safeFetch(`/api/auth/reset-password`, {
+  return apiFetch(`/api/auth/reset-password`, {
     method: "POST",
     body: JSON.stringify({
       token,
@@ -177,13 +206,18 @@ export async function resetPassword(
 }
 
 /* ======================================
-LOGOUT
+🔥 LOGOUT
 ====================================== */
 
 export async function logoutUser() {
-  currentUserCache = null;
 
-  return safeFetch(`/api/auth/logout`, {
+  clearUserCache();
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("auth:refresh"));
+  }
+
+  return apiFetch(`/api/auth/logout`, {
     method: "POST",
   });
 }

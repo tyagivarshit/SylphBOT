@@ -10,11 +10,22 @@ const CACHE_TTL = 60 * 5; // 5 min
 CACHE KEY
 ====================================== */
 
-const getKey = (businessId: string) =>
-  `sub:${businessId}`;
+const getKey = (businessId: string) => `sub:${businessId}`;
 
 /* ======================================
-SUBSCRIPTION GUARD (FINAL)
+TYPES
+====================================== */
+
+type BillingContext = {
+  subscription: any | null;
+  plan: any | null;
+  status: "NONE" | "ACTIVE" | "PAST_DUE" | "CANCELLED" | "TRIAL_EXPIRED";
+  isLimited: boolean;
+  upgradeRequired: boolean;
+};
+
+/* ======================================
+🔥 SUBSCRIPTION CONTEXT (FINAL 10/10)
 ====================================== */
 
 export const requireActiveSubscription = async (
@@ -32,10 +43,10 @@ export const requireActiveSubscription = async (
       });
     }
 
-    let subscription: any;
+    let subscription: any = null;
 
     /* ======================================
-    🔥 CACHE FIRST
+    CACHE FIRST
     ====================================== */
 
     const cached = await redis.get(getKey(businessId));
@@ -59,78 +70,88 @@ export const requireActiveSubscription = async (
     }
 
     /* ======================================
+    DEFAULT (FREE USER)
+    ====================================== */
+
+    let context: BillingContext = {
+      subscription: null,
+      plan: null,
+      status: "NONE",
+      isLimited: false, // ✅ FREE user allowed (dashboard open)
+      upgradeRequired: false,
+    };
+
+    /* ======================================
     NO SUBSCRIPTION
     ====================================== */
 
     if (!subscription || !subscription.plan) {
-      return res.status(403).json({
-        code: "NO_SUBSCRIPTION",
-        message: "No active subscription",
-        upgradeRequired: true,
-      });
+      (req as any).billing = context;
+      (req as any).subscription = null;
+      return next(); // ✅ NEVER BLOCK
     }
 
     /* ======================================
-    🔥 STATUS LOGIC FIX
+    BUILD BASE CONTEXT
     ====================================== */
 
+    context.subscription = subscription;
+    context.plan = subscription.plan;
+    context.status = subscription.status;
+    context.isLimited = false;
+    context.upgradeRequired = false;
+
+    const now = new Date();
+
+    /* ======================================
+    STATUS HANDLING (CORRECT LOGIC)
+    ====================================== */
+
+    // 🔴 Payment failed
     if (subscription.status === "PAST_DUE") {
-      return res.status(403).json({
-        code: "PAYMENT_FAILED",
-        message: "Payment failed, update billing",
-        upgradeRequired: true,
-      });
+      context.isLimited = true;
+      context.upgradeRequired = true;
     }
 
-    /* CANCELLED BUT STILL VALID UNTIL PERIOD END */
+    // 🔴 Cancelled + expired
     if (
       subscription.status === "CANCELLED" &&
       subscription.currentPeriodEnd &&
-      new Date() < new Date(subscription.currentPeriodEnd)
+      now > new Date(subscription.currentPeriodEnd)
     ) {
-      (req as any).subscription = subscription;
-      return next();
+      context.status = "CANCELLED";
+      context.isLimited = true;
+      context.upgradeRequired = true;
     }
 
-    if (subscription.status !== "ACTIVE") {
-      return res.status(403).json({
-        code: "SUBSCRIPTION_INACTIVE",
-        message: "Subscription inactive",
-        upgradeRequired: true,
-      });
-    }
-
-    /* ======================================
-    TRIAL CHECK
-    ====================================== */
-
+    // 🔴 Trial expired
     if (
       subscription.isTrial &&
       subscription.currentPeriodEnd &&
-      new Date() > new Date(subscription.currentPeriodEnd)
+      now > new Date(subscription.currentPeriodEnd)
     ) {
-      return res.status(403).json({
-        code: "TRIAL_EXPIRED",
-        message: "Trial expired",
-        upgradeRequired: true,
-      });
+      context.status = "TRIAL_EXPIRED";
+      context.isLimited = true;
+      context.upgradeRequired = true;
     }
 
+    // 🟢 ACTIVE or TRIAL (valid) → FULL ACCESS
+    // ❗ NO blanket blocking anymore
+
     /* ======================================
-    ✅ ACCESS GRANTED
+    ATTACH CONTEXT
     ====================================== */
 
     (req as any).subscription = subscription;
+    (req as any).billing = context;
 
     next();
 
   } catch (error) {
-
-    console.error("Subscription Middleware Error:", error);
+    console.error("❌ Subscription Middleware Error:", error);
 
     return res.status(500).json({
       message: "Server error",
     });
-
   }
 };

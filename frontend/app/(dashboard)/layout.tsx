@@ -1,63 +1,24 @@
-"use client"
+"use client";
 
-import { ReactNode, createContext, useContext, useState } from "react"
-import DashboardLayout from "@/components/layout/DashboardLayout"
-import useAuthGuard from "@/hooks/useAuthGuard"
-import UpgradeModal from "@/components/UpgradeModal"
+import  useAuthGuard  from "@/hooks/useAuthGuard";
 
-/* ======================================
-GLOBAL CONTEXT (🔥 NEW)
-====================================== */
+export default function DashboardEntryPage() {
 
-const UpgradeContext = createContext<{
-  openUpgrade: () => void
-} | null>(null)
+  const loading = useAuthGuard();
 
-export const useUpgrade = () => {
-  const ctx = useContext(UpgradeContext)
-  if (!ctx) throw new Error("useUpgrade must be used inside provider")
-  return ctx
-}
-
-/* ======================================
-LAYOUT
-====================================== */
-
-export default function DashboardRootLayout({
-  children,
-}: {
-  children: ReactNode
-}) {
-
-  const loading = useAuthGuard()
-
-  const [open,setOpen] = useState(false)
-
-  /* while checking session */
-
+  /* 🔥 LOADING STATE */
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen text-gray-500">
-        Loading dashboard...
+      <div style={{ padding: 20 }}>
+        Checking authentication...
       </div>
-    )
+    );
   }
 
+  /* 🔥 FALLBACK (redirect already handled in hook) */
   return (
-
-    <UpgradeContext.Provider value={{
-      openUpgrade: ()=>setOpen(true) // ✅ GLOBAL TRIGGER
-    }}>
-
-      <DashboardLayout>
-        {children}
-      </DashboardLayout>
-
-      {/* 🔥 GLOBAL MODAL (IMPORTANT) */}
-      <UpgradeModal open={open} setOpen={setOpen} />
-
-    </UpgradeContext.Provider>
-
-  )
-
+    <div style={{ padding: 20 }}>
+      Redirecting...
+    </div>
+  );
 }

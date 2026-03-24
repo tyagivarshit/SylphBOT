@@ -7,231 +7,190 @@ import { socket } from "@/lib/socket"
 
 export default function LeadsTable({ leads }: any) {
 
-const [selectedLead,setSelectedLead] = useState<any>(null)
-const [tableLeads,setTableLeads] = useState<any[]>([])
+  const [selectedLead,setSelectedLead] = useState<any>(null)
+  const [tableLeads,setTableLeads] = useState<any[]>([])
 
-/* INITIALIZE */
+  /* INITIALIZE */
+  useEffect(()=>{
+    if(Array.isArray(leads)){
+      setTableLeads(leads)
+    }
+  },[leads])
 
-useEffect(()=>{
+  /* REALTIME MESSAGE */
+  useEffect(()=>{
 
-if(Array.isArray(leads)){
-setTableLeads(leads)
-}
+    socket.on("new_message",(msg:any)=>{
 
-},[leads])
+      setTableLeads((prev)=>
+        prev.map((lead:any)=>{
 
-/* REALTIME MESSAGE */
+          if(lead.id === msg.leadId){
+            return{
+              ...lead,
+              lastMessage:msg.content,
+              unreadCount:(lead.unreadCount || 0) + 1
+            }
+          }
 
-useEffect(()=>{
+          return lead
+        })
+      )
 
-socket.on("new_message",(msg:any)=>{
+    })
 
-setTableLeads((prev)=>
+    return ()=>{
+      socket.off("new_message")
+    }
 
-prev.map((lead:any)=>{
+  },[])
 
-if(lead.id === msg.leadId){
+  /* STAGE UPDATE */
+  const handleStageUpdate = (id:string,newStage:string)=>{
 
-return{
-...lead,
-lastMessage:msg.content,
-unreadCount:(lead.unreadCount || 0) + 1
-}
+    setTableLeads((prev)=>
+      prev.map((l:any)=>
+        l.id===id ? {...l,stage:newStage} : l
+      )
+    )
 
-}
+  }
 
-return lead
+  return(
 
-})
+    <div className="relative bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
 
-)
+      <div className="overflow-x-auto">
 
-})
+        <table className="min-w-full text-sm">
 
-return ()=>{
+          {/* HEADER */}
+          <thead className="bg-gray-100 border-b text-gray-800 sticky top-0 z-10">
 
-socket.off("new_message")
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold">
+                Lead
+              </th>
 
-}
+              <th className="px-4 py-3 text-left font-semibold">
+                Platform
+              </th>
 
-},[])
+              <th className="px-4 py-3 text-left font-semibold">
+                Stage
+              </th>
 
-/* STAGE UPDATE */
+              <th className="px-4 py-3 text-left font-semibold">
+                Last Message
+              </th>
+            </tr>
 
-const handleStageUpdate = (id:string,newStage:string)=>{
+          </thead>
 
-setTableLeads((prev)=>
-prev.map((l:any)=>
-l.id===id ? {...l,stage:newStage} : l
-)
-)
+          {/* BODY */}
+          <tbody className="divide-y bg-white">
 
-}
+            {Array.isArray(tableLeads) && tableLeads.length > 0 ? (
 
-return(
+              tableLeads.map((lead:any)=> (
 
-<div className="relative bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                <tr
+                  key={lead.id}
+                  className="hover:bg-gray-50 cursor-pointer transition-all duration-150"
+                  onClick={() => setSelectedLead(lead)}
+                >
 
-<div className="overflow-x-auto">
+                  {/* LEAD */}
+                  <td className="px-4 py-4">
 
-<table className="min-w-full text-sm">
+                    <div className="flex items-center gap-3">
 
-{/* HEADER */}
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] flex items-center justify-center text-xs font-semibold text-white shrink-0">
+                        {lead.name?.charAt(0)?.toUpperCase() || "?"}
+                      </div>
 
-<thead className="bg-gray-50 border-b text-gray-700 sticky top-0 z-10">
+                      <div className="flex flex-col min-w-0">
 
-<tr>
+                        <span className="font-semibold text-gray-900 truncate">
+                          {lead.name || `Lead ${lead.id.slice(-4)}`}
+                        </span>
 
-<th className="px-4 py-3 text-left font-semibold">
-Lead
-</th>
+                        <span className="text-xs text-gray-600 truncate">
+                          ID: {lead.id}
+                        </span>
 
-<th className="px-4 py-3 text-left font-semibold">
-Platform
-</th>
+                      </div>
 
-<th className="px-4 py-3 text-left font-semibold">
-Stage
-</th>
+                    </div>
 
-<th className="px-4 py-3 text-left font-semibold">
-Last Message
-</th>
+                  </td>
 
-</tr>
+                  {/* PLATFORM */}
+                  <td className="px-4 py-4">
 
-</thead>
+                    <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800 capitalize">
+                      {lead.platform}
+                    </span>
 
-{/* BODY */}
+                  </td>
 
-<tbody className="divide-y bg-white">
+                  {/* STAGE */}
+                  <td className="px-4 py-4">
+                    <StageBadge stage={lead.stage} />
+                  </td>
 
-{Array.isArray(tableLeads) && tableLeads.length > 0 ? (
+                  {/* LAST MESSAGE */}
+                  <td className="px-4 py-4 text-gray-700 max-w-xs truncate">
 
-tableLeads.map((lead:any)=> (
+                    <div className="flex items-center gap-2">
 
-<tr
-key={lead.id}
-className="hover:bg-gray-50 cursor-pointer transition"
-onClick={() => setSelectedLead(lead)}
->
+                      <span className="truncate">
+                        {lead.lastMessage || "No messages yet"}
+                      </span>
 
-{/* LEAD */}
+                      {lead.unreadCount > 0 && (
+                        <span className="bg-red-500 text-white text-[11px] px-2 py-0.5 rounded-full font-semibold">
+                          {lead.unreadCount}
+                        </span>
+                      )}
 
-<td className="px-4 py-4">
+                    </div>
 
-<div className="flex items-center gap-3">
+                  </td>
 
-<div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-xs font-semibold text-blue-600 shrink-0">
+                </tr>
 
-{lead.name?.charAt(0)?.toUpperCase() || "?"}
+              ))
 
-</div>
+            ) : (
 
-<div className="flex flex-col min-w-0">
+              <tr>
+                <td colSpan={4} className="text-center py-12 text-gray-500 text-sm">
+                  No leads yet 🚀
+                </td>
+              </tr>
 
-<span className="font-medium text-gray-900 truncate">
+            )}
 
-{lead.name || `Lead ${lead.id.slice(-4)}`}
+          </tbody>
 
-</span>
+        </table>
 
-<span className="text-xs text-gray-500 truncate">
+      </div>
 
-ID: {lead.id}
+      {/* DRAWER */}
+      {selectedLead && selectedLead.id && (
 
-</span>
+        <LeadDrawer
+          lead={selectedLead}
+          onClose={() => setSelectedLead(null)}
+          onStageUpdate={handleStageUpdate}
+        />
 
-</div>
+      )}
 
-</div>
+    </div>
 
-</td>
-
-{/* PLATFORM */}
-
-<td className="px-4 py-4">
-
-<span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-700 capitalize">
-
-{lead.platform}
-
-</span>
-
-</td>
-
-{/* STAGE */}
-
-<td className="px-4 py-4">
-
-<StageBadge stage={lead.stage} />
-
-</td>
-
-{/* LAST MESSAGE */}
-
-<td className="px-4 py-4 text-gray-600 max-w-xs truncate">
-
-<div className="flex items-center gap-2">
-
-<span className="truncate">
-
-{lead.lastMessage || "No messages yet"}
-
-</span>
-
-{lead.unreadCount > 0 && (
-
-<span className="bg-red-500 text-white text-[11px] px-2 py-0.5 rounded-full font-medium">
-
-{lead.unreadCount}
-
-</span>
-
-)}
-
-</div>
-
-</td>
-
-</tr>
-
-))
-
-) : (
-
-<tr>
-
-<td colSpan={4} className="text-center py-10 text-gray-400 text-sm">
-
-No leads yet
-
-</td>
-
-</tr>
-
-)}
-
-</tbody>
-
-</table>
-
-</div>
-
-{/* DRAWER */}
-
-{selectedLead && selectedLead.id && (
-
-<LeadDrawer
-lead={selectedLead}
-onClose={() => setSelectedLead(null)}
-onStageUpdate={handleStageUpdate}
-/>
-
-)}
-
-</div>
-
-)
+  )
 
 }

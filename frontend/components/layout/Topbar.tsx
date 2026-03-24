@@ -3,62 +3,46 @@
 import { Bell, Search, Menu } from "lucide-react";
 import { Dispatch, SetStateAction, useState, memo } from "react";
 
-/* ======================================
-🔥 TYPES
-====================================== */
-
 interface TopbarProps {
   setOpen: Dispatch<SetStateAction<boolean>>;
 }
 
-/* ======================================
-🔥 COMPONENT
-====================================== */
-
 function TopbarComponent({ setOpen }: TopbarProps) {
-
   const [search, setSearch] = useState("");
   const [showMobileSearch, setShowMobileSearch] = useState(false);
 
-  /* ======================================
-  🔥 HANDLERS
-  ====================================== */
-
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
-
-    // 🔥 FUTURE: debounce + API call
     console.log("Search:", e.target.value);
   };
 
   return (
-    <div className="h-16 bg-white border-b border-gray-200 shadow-sm flex items-center justify-between px-3 sm:px-6">
+    <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-6 sticky top-0 z-40">
 
-      {/* ===== LEFT ===== */}
+      {/* LEFT */}
       <div className="flex items-center gap-3 min-w-0">
 
         {/* MOBILE MENU */}
         <button
           onClick={() => setOpen(true)}
-          aria-label="Open sidebar"
           className="lg:hidden p-2 rounded-lg hover:bg-gray-100 transition"
         >
-          <Menu size={20} />
+          <Menu size={20} className="text-gray-700" />
         </button>
 
-        {/* BRAND */}
-        <h1 className="text-lg sm:text-xl font-semibold tracking-tight whitespace-nowrap">
-          <span className="bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600 bg-clip-text text-transparent">
-            SYLPH
-          </span>
+        {/* 🔥 BRAND (LOGIN STYLE) */}
+        <h1 className="flex items-center text-lg sm:text-xl font-bold tracking-[0.25em] font-[Poppins]">
+          <span className="text-[#14E1C1]">S</span>
+          <span className="text-[#14E1C1]">Y</span>
+          <span className="text-gray-900">LPH</span>
         </h1>
 
       </div>
 
-      {/* ===== RIGHT ===== */}
+      {/* RIGHT */}
       <div className="flex items-center gap-2 sm:gap-4">
 
-        {/* ===== DESKTOP SEARCH ===== */}
+        {/* DESKTOP SEARCH */}
         <div className="relative hidden sm:block">
 
           <Search
@@ -74,21 +58,20 @@ function TopbarComponent({ setOpen }: TopbarProps) {
               w-40 sm:w-56 lg:w-72
               border border-gray-200 rounded-lg
               pl-9 pr-3 py-2
-              text-sm text-gray-700
-              placeholder-gray-400
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+              text-sm text-gray-900
+              placeholder-gray-500
+              focus:outline-none focus:ring-2 focus:ring-[#14E1C1] focus:border-transparent
+              transition
             "
           />
-
         </div>
 
-        {/* ===== MOBILE SEARCH ===== */}
+        {/* MOBILE SEARCH BUTTON */}
         <button
-          aria-label="Search"
           onClick={() => setShowMobileSearch((prev) => !prev)}
           className="sm:hidden p-2 rounded-lg hover:bg-gray-100"
         >
-          <Search size={18} />
+          <Search size={18} className="text-gray-700" />
         </button>
 
         {/* MOBILE SEARCH INPUT */}
@@ -101,35 +84,28 @@ function TopbarComponent({ setOpen }: TopbarProps) {
             className="
               fixed top-16 left-0 w-full z-50
               border-b border-gray-200
-              px-4 py-3 text-sm
+              bg-white
+              px-4 py-3 text-sm text-gray-900
+              placeholder-gray-500
               focus:outline-none
             "
           />
         )}
 
-        {/* ===== NOTIFICATIONS ===== */}
-        <button
-          aria-label="Notifications"
-          className="relative p-2 rounded-lg hover:bg-gray-100 transition"
-        >
+        {/* NOTIFICATIONS */}
+        <button className="relative p-2 rounded-lg hover:bg-gray-100 transition">
           <Bell size={18} className="text-gray-600" />
-
-          {/* 🔥 FUTURE: dynamic badge */}
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
         </button>
 
-        {/* ===== PROFILE ===== */}
-        <div
-          role="button"
-          tabIndex={0}
-          className="flex items-center gap-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg hover:bg-gray-100 cursor-pointer transition"
-        >
+        {/* PROFILE */}
+        <div className="flex items-center gap-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg hover:bg-gray-100 cursor-pointer transition">
 
-          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center text-xs font-semibold text-white">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] flex items-center justify-center text-xs font-semibold text-white">
             U
           </div>
 
-          <span className="hidden sm:block text-sm font-medium text-gray-800">
+          <span className="hidden sm:block text-sm font-medium text-gray-900">
             User
           </span>
 
@@ -140,9 +116,5 @@ function TopbarComponent({ setOpen }: TopbarProps) {
     </div>
   );
 }
-
-/* ======================================
-🔥 MEMO
-====================================== */
 
 export default memo(TopbarComponent);

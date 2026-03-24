@@ -20,28 +20,20 @@ export default function LoginPage() {
 
   const mounted = useRef(true);
 
-  /* ======================================
-  SAFE MOUNT TRACK
-  ====================================== */
   useEffect(() => {
     return () => {
       mounted.current = false;
     };
   }, []);
 
-  /* ======================================
-  SESSION CHECK (FIXED + SAFE)
-  ====================================== */
   useEffect(() => {
     const checkSession = async () => {
       try {
         const res = await getCurrentUser();
-
         if (res?.success && res?.data?.user?.id && mounted.current) {
           router.replace("/dashboard");
         }
-
-      } catch (err) {
+      } catch {
         console.log("Session check failed");
       } finally {
         if (mounted.current) setChecking(false);
@@ -51,16 +43,9 @@ export default function LoginPage() {
     checkSession();
   }, [router]);
 
-  /* ======================================
-  VALIDATION
-  ====================================== */
-  const validateEmail = (value: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  };
+  const validateEmail = (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-  /* ======================================
-  LOGIN
-  ====================================== */
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (loading) return;
@@ -87,11 +72,8 @@ export default function LoginPage() {
       }
 
       window.dispatchEvent(new Event("auth:refresh"));
-
       toast.success("Login successful 🚀");
-
       router.replace("/dashboard");
-
     } catch (err: any) {
       toast.error(err?.message || "Login failed");
     } finally {
@@ -99,9 +81,6 @@ export default function LoginPage() {
     }
   };
 
-  /* ======================================
-  GOOGLE LOGIN (🔥 FIXED)
-  ====================================== */
   const handleGoogleLogin = () => {
     const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 
@@ -110,132 +89,137 @@ export default function LoginPage() {
       return;
     }
 
-    // 🔥 ALWAYS backend hit
     window.location.href = `${API}/api/auth/google`;
   };
 
-  /* ======================================
-  LOADING
-  ====================================== */
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-[#f9fcff]">
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
       </div>
     );
   }
 
-  /* ======================================
-  UI
-  ====================================== */
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 sm:px-6">
-      <div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-6">
-        
-        {/* LOGO */}
-        <div className="text-center mb-4">
-          <h1 className="text-lg sm:text-xl font-bold text-gray-900">
-            Sylph AI
-          </h1>
-        </div>
+    <div className="min-h-screen bg-[#f9fcff]">
 
-        {/* HEADING */}
-        <div className="text-center mb-5">
-          <h2 className="text-base sm:text-lg font-semibold text-gray-900">
-            Welcome back
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">
-            Sign in to continue to your dashboard
-          </p>
-        </div>
+      {/* 🔥 BRAND */}
+      <div className="fixed top-5 left-6 sm:left-10 z-20">
+        <h1 className="flex items-center text-2xl sm:text-3xl font-bold tracking-[0.25em] font-[Poppins]">
+          <span className="text-[#14E1C1]">S</span>
+          <span className="text-[#14E1C1]">Y</span>
+          <span className="text-gray-800">LPH</span>
+        </h1>
+      </div>
 
-        {/* GOOGLE LOGIN */}
-        <button
-          onClick={handleGoogleLogin}
-          className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
-        >
-          <FcGoogle size={18} />
-          <span className="text-sm font-medium text-gray-700">
-            Continue with Google
-          </span>
-        </button>
+      {/* 🔥 CENTER */}
+      <div className="min-h-screen flex items-center justify-center px-4">
 
-        {/* DIVIDER */}
-        <div className="flex items-center gap-3 my-5">
-          <div className="flex-1 h-px bg-gray-200" />
-          <span className="text-xs text-gray-400">OR</span>
-          <div className="flex-1 h-px bg-gray-200" />
-        </div>
+        {/* 🔥 CARD */}
+        <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl p-7">
 
-        {/* FORM */}
-        <form className="space-y-3" onSubmit={handleLogin}>
-          
-          <div>
-            <label className="text-xs font-medium text-gray-700">
-              Email
-            </label>
-
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
-            />
+          {/* 🔥 HEADING */}
+          <div className="text-center mb-8">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+              <span className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] bg-clip-text text-transparent">
+                Welcome
+              </span>{" "}
+              <span className="text-gray-800">back</span>
+            </h2>
           </div>
 
-          <div>
-            <div className="flex justify-between mb-1">
-              <label className="text-xs font-medium text-gray-700">
-                Password
+          {/* GOOGLE */}
+          <button
+            onClick={handleGoogleLogin}
+            className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
+          >
+            <FcGoogle size={18} />
+            <span className="text-sm font-medium text-gray-900">
+              Continue with Google
+            </span>
+          </button>
+
+          {/* DIVIDER */}
+          <div className="flex items-center gap-3 my-6">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="text-xs text-gray-600">OR</span>
+            <div className="flex-1 h-px bg-gray-200" />
+          </div>
+
+          {/* FORM */}
+          <form className="space-y-4" onSubmit={handleLogin}>
+
+            {/* EMAIL */}
+            <div>
+              <label className="text-xs font-medium text-gray-900">
+                Email
               </label>
 
-              <Link
-                href="/auth/forgot"
-                className="text-xs text-blue-600 hover:underline"
-              >
-                Forgot?
-              </Link>
-            </div>
-
-            <div className="relative">
               <input
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 pr-9 text-sm focus:ring-2 focus:ring-blue-500"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-[#14E1C1] outline-none"
               />
-
-              <button
-                type="button"
-                onClick={() => setShowPassword((p) => !p)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition disabled:opacity-70"
-          >
-            {loading ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
+            {/* PASSWORD */}
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-xs font-medium text-gray-900">
+                  Password
+                </label>
 
-        <p className="text-xs text-gray-500 mt-5 text-center">
-          Don’t have an account?{" "}
-          <Link
-            href="/auth/register"
-            className="text-blue-600 font-medium hover:underline"
-          >
-            Sign up
-          </Link>
-        </p>
+                <Link
+                  href="/auth/forgot"
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Forgot?
+                </Link>
+              </div>
 
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-9 text-sm text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-[#14E1C1] outline-none"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((p) => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            {/* BUTTON */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-[#14E1C1] via-[#3b82f6] to-[#6366f1] text-white text-sm font-semibold py-2.5 rounded-lg transition active:scale-[0.98] disabled:opacity-70"
+            >
+              {loading ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+
+          {/* FOOTER */}
+          <p className="text-xs text-gray-700 mt-6 text-center">
+            Don’t have an account?{" "}
+            <Link
+              href="/auth/register"
+              className="text-blue-600 font-medium hover:underline"
+            >
+              Sign up
+            </Link>
+          </p>
+
+        </div>
       </div>
     </div>
   );

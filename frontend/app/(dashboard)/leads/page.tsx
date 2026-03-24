@@ -1,11 +1,16 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getRecentLeads } from "@/lib/dashboard.api"
+import { usePlan } from "@/hooks/usePlan"
+import axios from "axios"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import FeatureGate from "@/components/FeatureGate"
-import { usePlan } from "@/hooks/usePlan"
+
+const api = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000",
+  withCredentials: true,
+})
 
 export default function LeadsPage(){
 
@@ -14,8 +19,10 @@ export default function LeadsPage(){
   const [leads,setLeads] = useState<any[]>([])
   const [loading,setLoading] = useState(true)
   const [stage,setStage] = useState("")
+  const [page,setPage] = useState(1)
+  const [totalPages,setTotalPages] = useState(1)
 
-  const isAllowed = plan !== "BASIC" // ✅ IMPORTANT
+  const isAllowed = plan !== "BASIC"
 
   useEffect(()=>{
 
@@ -23,82 +30,114 @@ export default function LeadsPage(){
 
       try{
 
-        // ❌ BASIC → API call skip
         if(!isAllowed){
           setLoading(false)
           return
         }
 
-        const res = await getRecentLeads(undefined,stage)
+        const res = await api.get("/api/dashboard/leads",{
+          params:{
+            page,
+            limit:10,
+            stage: stage || undefined
+          }
+        })
 
-        setLeads(res?.data || res || [])
+        setLeads(res.data.data.leads || [])
+        setTotalPages(res.data.data.pagination?.totalPages || 1)
 
       }catch(err){
-
         console.error("Leads load error",err)
-
       }finally{
-
         setLoading(false)
-
       }
 
     }
 
     loadLeads()
 
-  },[stage, isAllowed])
+  },[stage,page,isAllowed])
 
   return(
 
     <div className="space-y-6">
 
       {/* HEADER */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 
-        <h1 className="text-xl font-semibold text-gray-900">
+        <h1 className="text-lg md:text-xl font-bold text-gray-900">
           Leads CRM
         </h1>
 
         <select
           value={stage}
-          onChange={(e)=>setStage(e.target.value)}
-          className="border-2 border-gray-300 text-gray-900 bg-white rounded-lg px-3 py-2 text-sm font-medium shadow-sm hover:border-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          onChange={(e)=>{
+            setStage(e.target.value)
+            setPage(1)
+          }}
+          className="border border-gray-300 text-gray-900 bg-white rounded-lg px-3 py-2 text-sm font-medium shadow-sm hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="">ALL</option>
-          <option value="NEW">NEW</option>
-          <option value="QUALIFIED">QUALIFIED</option>
-          <option value="WON">WON</option>
-          <option value="LOST">LOST</option>
+          <option value="">All Stages</option>
+          <option value="NEW">New</option>
+          <option value="QUALIFIED">Qualified</option>
+          <option value="WON">Won</option>
+          <option value="LOST">Lost</option>
         </select>
 
       </div>
 
       {/* CONTENT */}
-
       {loading ? (
-        <div className="bg-white border border-gray-200 rounded-xl p-6 text-gray-500">
+        <div className="bg-white border rounded-xl p-6 text-gray-700 shadow-sm">
           Loading leads...
         </div>
       ) : (
 
         <FeatureGate feature="CRM">
-          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
 
-            {/* 👇 BASIC user ke liye fake preview */}
+          <div className="bg-white border rounded-xl p-4 md:p-6 shadow-sm">
+
             {!isAllowed ? (
-              <p className="text-sm text-gray-500 text-center py-10">
+              <p className="text-sm text-gray-600 text-center py-10">
                 Preview of your leads will appear here 🚀
               </p>
             ) : leads.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-10">
+              <p className="text-sm text-gray-600 text-center py-10">
                 No leads yet. Start automations to capture leads 🚀
               </p>
             ) : (
-              <LeadsTable leads={leads}/>
+              <>
+                <LeadsTable leads={leads} />
+
+                {/* PAGINATION */}
+                <div className="flex justify-between items-center mt-4">
+
+                  <button
+                    disabled={page === 1}
+                    onClick={()=>setPage((p)=>p-1)}
+                    className="px-3 py-1.5 text-sm bg-gray-100 rounded-md disabled:opacity-50"
+                  >
+                    Prev
+                  </button>
+
+                  <span className="text-sm text-gray-700">
+                    Page {page} of {totalPages}
+                  </span>
+
+                  <button
+                    disabled={page === totalPages}
+                    onClick={()=>setPage((p)=>p+1)}
+                    className="px-3 py-1.5 text-sm bg-gray-100 rounded-md disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+
+                </div>
+              </>
             )}
 
           </div>
+
         </FeatureGate>
 
       )}

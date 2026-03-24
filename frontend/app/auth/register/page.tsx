@@ -20,15 +20,10 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [emailSent, setEmailSent] = useState(false);
-
   const [cooldown, setCooldown] = useState(0);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const mounted = useRef(true);
-
-  /* ======================================
-  SAFE CLEANUP
-  ====================================== */
 
   useEffect(() => {
     return () => {
@@ -36,10 +31,6 @@ export default function RegisterPage() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
-
-  /* ======================================
-  COOLDOWN TIMER
-  ====================================== */
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -55,21 +46,11 @@ export default function RegisterPage() {
 
   const startCooldown = () => setCooldown(30);
 
-  /* ======================================
-  VALIDATION
-  ====================================== */
-
-  const validateEmail = (value: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  };
-
-  /* ======================================
-  REGISTER
-  ====================================== */
+  const validateEmail = (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
   const handleRegister = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-
     if (loading) return;
 
     const cleanName = name.trim();
@@ -105,10 +86,6 @@ export default function RegisterPage() {
     }
   };
 
-  /* ======================================
-  RESEND VERIFICATION
-  ====================================== */
-
   const handleResendVerification = async () => {
     if (!email) {
       toast.error("Enter email first");
@@ -119,18 +96,12 @@ export default function RegisterPage() {
 
     try {
       await resendVerification(email.trim().toLowerCase());
-
       toast.success("Verification email sent");
-
       startCooldown();
     } catch (err: any) {
       toast.error(err?.message || "Failed to resend email");
     }
   };
-
-  /* ======================================
-  GOOGLE
-  ====================================== */
 
   const handleGoogleRegister = () => {
     const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
@@ -144,125 +115,152 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 sm:px-6">
-      <div className="w-full max-w-sm sm:max-w-md bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-6">
+    <div className="min-h-screen bg-[#f9fcff]">
 
-        <div className="text-center mb-4">
-          <h1 className="text-lg sm:text-xl font-bold text-gray-900">
-            Sylph AI
-          </h1>
-        </div>
+      {/* 🔥 BRAND */}
+      <div className="fixed top-5 left-6 sm:left-10 z-20">
+        <h1 className="flex items-center text-2xl sm:text-3xl font-bold tracking-[0.25em] font-[Poppins]">
+          <span className="text-[#14E1C1]">S</span>
+          <span className="text-[#14E1C1]">Y</span>
+          <span className="text-gray-800">LPH</span>
+        </h1>
+      </div>
 
-        {emailSent ? (
-          <div className="text-center">
+      {/* 🔥 CENTER */}
+      <div className="min-h-screen flex items-center justify-center px-4">
 
-            <div className="mx-auto w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mb-6">
-              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8"/>
-              </svg>
-            </div>
+        <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl p-7">
 
-            <h2 className="text-lg font-semibold text-gray-900">
-              Verify your email
-            </h2>
+          {emailSent ? (
+            <div className="text-center">
 
-            <p className="text-sm text-gray-500 mt-2">
-              We sent a verification link to
-            </p>
-
-            <p className="text-sm font-medium text-gray-900 mt-1">
-              {email}
-            </p>
-
-            <button
-              onClick={handleResendVerification}
-              disabled={cooldown > 0}
-              className="mt-6 w-full bg-blue-600 text-white py-2.5 rounded-lg disabled:opacity-70"
-            >
-              {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend verification email"}
-            </button>
-
-            <Link
-              href="/auth/login"
-              className="mt-4 block text-blue-600 text-sm"
-            >
-              Go to login
-            </Link>
-
-          </div>
-        ) : (
-          <>
-            <div className="text-center mb-5">
-              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
-                Create your account
-              </h2>
-            </div>
-
-            <button
-              onClick={handleGoogleRegister}
-              className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
-            >
-              <FcGoogle size={18} />
-              <span className="text-sm font-medium text-gray-700">
-                Continue with Google
-              </span>
-            </button>
-
-            <div className="flex items-center gap-3 my-5">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-xs text-gray-400">OR</span>
-              <div className="flex-1 h-px bg-gray-200" />
-            </div>
-
-            <form className="space-y-3" onSubmit={handleRegister}>
-              
-              <input
-                type="text"
-                placeholder="Full Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full border px-3 py-2 rounded-lg"
-              />
-
-              <input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full border px-3 py-2 rounded-lg"
-              />
-
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full border px-3 py-2 rounded-lg pr-9"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((p) => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
+              {/* ICON */}
+              <div className="mx-auto w-16 h-16 rounded-full bg-[#14E1C1]/10 flex items-center justify-center mb-6">
+                <svg className="w-8 h-8 text-[#14E1C1]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8"/>
+                </svg>
               </div>
 
-              <button
-                disabled={loading}
-                className="w-full bg-blue-600 text-white py-2 rounded-lg"
-              >
-                {loading ? "Creating..." : "Create account"}
-              </button>
-            </form>
+              {/* HEADING */}
+              <h2 className="text-xl font-bold mb-2">
+                <span className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] bg-clip-text text-transparent">
+                  Verify
+                </span>{" "}
+                <span className="text-gray-800">your email</span>
+              </h2>
 
-            <p className="text-xs text-center mt-4">
-              <Link href="/auth/login">Login</Link>
-            </p>
-          </>
-        )}
+              <p className="text-sm text-gray-700">
+                We sent a link to
+              </p>
+
+              <p className="text-sm font-semibold text-gray-900 mt-1">
+                {email}
+              </p>
+
+              {/* BUTTON */}
+              <button
+                onClick={handleResendVerification}
+                disabled={cooldown > 0}
+                className="mt-6 w-full bg-gradient-to-r from-[#14E1C1] via-[#3b82f6] to-[#6366f1] text-white py-2.5 rounded-lg disabled:opacity-70"
+              >
+                {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend verification email"}
+              </button>
+
+              <Link
+                href="/auth/login"
+                className="mt-4 block text-sm text-blue-600"
+              >
+                Go to login
+              </Link>
+
+            </div>
+          ) : (
+            <>
+              {/* HEADING */}
+              <div className="text-center mb-8">
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+                  <span className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] bg-clip-text text-transparent">
+                    Create
+                  </span>{" "}
+                  <span className="text-gray-800">account</span>
+                </h2>
+              </div>
+
+              {/* GOOGLE */}
+              <button
+                onClick={handleGoogleRegister}
+                className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-lg py-2.5 hover:bg-gray-50 transition"
+              >
+                <FcGoogle size={18} />
+                <span className="text-sm font-medium text-gray-900">
+                  Continue with Google
+                </span>
+              </button>
+
+              {/* DIVIDER */}
+              <div className="flex items-center gap-3 my-6">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-xs text-gray-600">OR</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+
+              {/* FORM */}
+              <form className="space-y-4" onSubmit={handleRegister}>
+
+                <input
+                  type="text"
+                  placeholder="Full Name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-[#14E1C1]"
+                />
+
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-[#14E1C1]"
+                />
+
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-9 text-sm text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-[#14E1C1]"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((p) => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+
+                {/* BUTTON */}
+                <button
+                  disabled={loading}
+                  className="w-full bg-gradient-to-r from-[#14E1C1] via-[#3b82f6] to-[#6366f1] text-white py-2.5 rounded-lg font-semibold"
+                >
+                  {loading ? "Creating..." : "Create account"}
+                </button>
+              </form>
+
+              {/* FOOTER */}
+              <p className="text-xs text-gray-700 mt-6 text-center">
+                Already have an account?{" "}
+                <Link href="/auth/login" className="text-blue-600 font-medium">
+                  Login
+                </Link>
+              </p>
+            </>
+          )}
+
+        </div>
       </div>
     </div>
   );

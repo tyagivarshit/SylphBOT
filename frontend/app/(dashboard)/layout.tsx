@@ -1,24 +1,20 @@
 "use client";
 
-import  useAuthGuard  from "@/hooks/useAuthGuard";
+import { useAuth } from "@/context/AuthContext";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-export default function DashboardEntryPage() {
+export default function DashboardLayout({ children }: any) {
+  const { user, loading } = useAuth();
+  const router = useRouter();
 
-  const loading = useAuthGuard();
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/auth/login");
+    }
+  }, [loading, user, router]);
 
-  /* 🔥 LOADING STATE */
-  if (loading) {
-    return (
-      <div style={{ padding: 20 }}>
-        Checking authentication...
-      </div>
-    );
-  }
+  if (!user && !loading) return null;
 
-  /* 🔥 FALLBACK (redirect already handled in hook) */
-  return (
-    <div style={{ padding: 20 }}>
-      Redirecting...
-    </div>
-  );
+  return <>{children}</>;
 }

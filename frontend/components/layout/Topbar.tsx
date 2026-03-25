@@ -13,7 +13,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useQuery } from "@tanstack/react-query";
 import NotificationsDropdown from "../topbar/NotificationsDropdown";
 import ProfileDropdown from "../topbar/ProfileDropdown";
-import { useRouter } from "next/navigation"; // ✅ ADDED
+import { useRouter } from "next/navigation";
 
 interface TopbarProps {
   setOpen: Dispatch<SetStateAction<boolean>>;
@@ -26,10 +26,52 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   const [activeIndex, setActiveIndex] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const router = useRouter(); // ✅ ADDED
+  const router = useRouter();
 
   const debounced = useDebounce(search, 300);
 
+  /* =========================
+     🔥 USER
+  ========================= */
+  const { data: userData } = useQuery({
+    queryKey: ["me"],
+    queryFn: async () => {
+      const res = await fetch("http://localhost:5000/api/user/me", {
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+  });
+
+  const user = {
+    name: userData?.name || "User",
+    email: userData?.email || "user@example.com",
+    avatar: userData?.avatar || null,
+    plan: "PRO",
+    business: { name: userData?.business?.name || "My Business" },
+  };
+
+  /* =========================
+     🔥 NOTIFICATIONS
+  ========================= */
+  const { data: notifications } = useQuery({
+    queryKey: ["notifications"],
+    queryFn: async () => {
+      const res = await fetch("http://localhost:5000/api/notifications", {
+        credentials: "include",
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const unreadCount =
+    notifications?.filter((n: any) => !n.read).length || 0;
+
+  /* =========================
+     🔥 SEARCH
+  ========================= */
   const { data, isLoading } = useQuery({
     queryKey: ["search", debounced],
     queryFn: async () => {
@@ -71,15 +113,8 @@ function TopbarComponent({ setOpen }: TopbarProps) {
     }
 
     if (e.key === "Enter") {
-      router.push(results[activeIndex]?.url); // ✅ FIXED
+      router.push(results[activeIndex]?.url);
     }
-  };
-
-  const user = {
-    name: "User",
-    email: "user@example.com",
-    plan: "PRO",
-    business: { name: "My Business" },
   };
 
   return (
@@ -105,7 +140,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
       {/* RIGHT */}
       <div className="flex items-center gap-2 sm:gap-4">
 
-        {/* DESKTOP SEARCH */}
+        {/* SEARCH */}
         <div
           ref={containerRef}
           className="relative hidden sm:block w-44 sm:w-56 lg:w-72"
@@ -121,33 +156,24 @@ function TopbarComponent({ setOpen }: TopbarProps) {
             onKeyDown={handleKeyDown}
             onFocus={() => setOpenSearch(true)}
             placeholder="Search..."
-            className="
-              w-full border border-gray-200 rounded-lg
-              pl-9 pr-3 py-2 text-sm
-              text-gray-900 placeholder:text-gray-400
-              focus:outline-none focus:ring-2 focus:ring-[#14E1C1]
-            "
+            className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#14E1C1]"
           />
 
           {openSearch && (
             <div className="absolute mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-72 overflow-y-auto">
 
               {isLoading && (
-                <div className="p-3 text-sm text-gray-500">
-                  Searching...
-                </div>
+                <div className="p-3 text-sm text-gray-500">Searching...</div>
               )}
 
               {!isLoading && results.length === 0 && (
-                <div className="p-3 text-sm text-gray-500">
-                  No results found
-                </div>
+                <div className="p-3 text-sm text-gray-500">No results</div>
               )}
 
               {results.map((item: any, index: number) => (
                 <div
                   key={item.id}
-                  onClick={() => router.push(item.url)} // ✅ FIXED
+                  onClick={() => router.push(item.url)}
                   className={`p-3 text-sm text-gray-800 cursor-pointer ${
                     index === activeIndex
                       ? "bg-gray-100"
@@ -161,67 +187,17 @@ function TopbarComponent({ setOpen }: TopbarProps) {
           )}
         </div>
 
-        {/* MOBILE SEARCH */}
-        <button
-          onClick={() => setShowMobileSearch(true)}
-          className="sm:hidden p-2 rounded-lg hover:bg-gray-100"
-        >
-          <Search size={18} className="text-gray-700" />
-        </button>
+        {/* 🔔 NOTIFICATIONS */}
+        <div className="relative">
+          <NotificationsDropdown />
 
-        {showMobileSearch && (
-          <div className="fixed inset-0 bg-white z-50 flex flex-col p-4">
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
+          )}
+        </div>
 
-            <div className="flex items-center gap-2 mb-4">
-              <Search size={18} className="text-gray-500" />
-
-              <input
-                autoFocus
-                value={search}
-                onChange={handleSearch}
-                onKeyDown={handleKeyDown}
-                placeholder="Search..."
-                className="flex-1 text-sm text-gray-900 outline-none"
-              />
-
-              <button onClick={() => setShowMobileSearch(false)}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto">
-              {isLoading && (
-                <div className="text-sm text-gray-500">
-                  Searching...
-                </div>
-              )}
-
-              {!isLoading && results.length === 0 && (
-                <div className="text-sm text-gray-500">
-                  No results
-                </div>
-              )}
-
-              {results.map((item: any, index: number) => (
-                <div
-                  key={item.id}
-                  onClick={() => router.push(item.url)} // ✅ FIXED
-                  className={`p-3 text-sm text-gray-800 rounded ${
-                    index === activeIndex ? "bg-gray-100" : ""
-                  }`}
-                >
-                  {item.title}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* NOTIFICATIONS */}
-        <NotificationsDropdown />
-
-        {/* PROFILE */}
-        <ProfileDropdown user={user} />
+        {/* 👤 PROFILE */}
+        <ProfileDropdown />
 
       </div>
     </div>

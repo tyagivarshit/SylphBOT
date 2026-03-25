@@ -46,6 +46,9 @@ model User {
   password          String
   role              String   @default("OWNER")
 
+  phone     String?
+  avatar    String?
+  
   isVerified        Boolean  @default(false)
   isActive          Boolean  @default(true)
 
@@ -93,6 +96,12 @@ model Business {
 
   commentTriggers CommentTrigger[]
   automationFlows AutomationFlow[]
+
+  website   String?
+  industry  String?
+  teamSize  String?
+  type      String?
+  timezone  String?
 
   notifications Notification[]
 

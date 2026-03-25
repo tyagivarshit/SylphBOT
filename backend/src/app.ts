@@ -30,6 +30,11 @@ import trainingRoutes from "./routes/training.routes";
 import leadRoutes from "./routes/lead.routes";
 import analyticsRoutes from "./routes/analytics.routes";
 
+/* ========= NEW ROUTES ========= */
+import searchRoutes from "./routes/search.routes";
+import notificationRoutes from "./routes/notification";
+import userRoutes from "./routes/user.routes"; // ✅ ADDED
+
 /* ========= MIDDLEWARE ========= */
 import {
   aiLimiter,
@@ -45,11 +50,6 @@ import { startUsageResetCron } from "./cron/resetUsage.cron";
 
 /* ========= ERRORS ========= */
 import { isAppError } from "./utils/AppError";
-
-/* ✅ SEARCH ROUTE IMPORT (same as before) */
-import searchRoutes from "./routes/search.routes";
-
-import notificationRoutes from "./routes/notification";
 
 const app = express();
 
@@ -76,9 +76,8 @@ app.use(globalLimiter);
 app.use(cookieParser());
 
 /* ======================================
-🔥 CORS (PRODUCTION GRADE)
+🔥 CORS
 ====================================== */
-
 const allowedOrigins = [
   "http://localhost:3000",
   process.env.FRONTEND_URL,
@@ -133,7 +132,7 @@ app.use((req, res, next) => {
 app.use(monitoringMiddleware);
 
 /* ======================================
-🔥 RAW BODY (WEBHOOKS)
+🔥 WEBHOOKS (RAW BODY)
 ====================================== */
 app.use(
   "/api/webhooks/stripe",
@@ -201,10 +200,10 @@ app.use("/api/leads", leadRoutes);
 /* ANALYTICS */
 app.use("/api/analytics", analyticsRoutes);
 
-/* ✅ FIXED POSITION (ONLY CHANGE) */
+/* 🔥 NEW ROUTES (CORRECT POSITION) */
 app.use("/api/search", searchRoutes);
-
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/user", userRoutes); // ✅ IMPORTANT
 
 /* ======================================
 🔥 HEALTH
@@ -214,7 +213,7 @@ app.get("/health", (_req, res) => {
 });
 
 /* ======================================
-🔥 404
+🔥 404 (ALWAYS LAST)
 ====================================== */
 app.use((_req, res) => {
   res.status(404).json({

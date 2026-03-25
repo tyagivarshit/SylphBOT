@@ -59,7 +59,7 @@ export async function getCurrentUser(): Promise<
 
   fetchingPromise = (async () => {
     try {
-      const res = await apiFetch<CurrentUserResponse>(`/api/auth/me`, {
+      const res = await apiFetch<CurrentUserResponse>(`/auth/me`, {
         headers: {
           "Cache-Control": "no-cache",
         },
@@ -114,7 +114,7 @@ export async function loginUser(
   password: string
 ): Promise<ApiResponse<{ user: User }>> {
 
-  const res = await apiFetch<{ user: User }>(`/api/auth/login`, {
+  const res = await apiFetch<{ user: User }>(`/auth/login`, {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -142,7 +142,7 @@ export async function registerUser(
   email: string,
   password: string
 ) {
-  return apiFetch(`/api/auth/register`, {
+  return apiFetch(`/auth/register`, {
     method: "POST",
     body: JSON.stringify({
       name: name.trim(),
@@ -158,7 +158,7 @@ export async function registerUser(
 
 export async function verifyEmail(token: string) {
   return apiFetch(
-    `/api/auth/verify-email?token=${encodeURIComponent(token)}`
+    `/auth/verify-email?token=${encodeURIComponent(token)}`
   );
 }
 
@@ -167,7 +167,7 @@ export async function verifyEmail(token: string) {
 ====================================== */
 
 export async function resendVerification(email: string) {
-  return apiFetch(`/api/auth/resend-verification`, {
+  return apiFetch(`/auth/resend-verification`, {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -180,7 +180,7 @@ export async function resendVerification(email: string) {
 ====================================== */
 
 export async function forgotPassword(email: string) {
-  return apiFetch(`/api/auth/forgot-password`, {
+  return apiFetch(`/auth/forgot-password`, {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -196,7 +196,7 @@ export async function resetPassword(
   token: string,
   password: string
 ) {
-  return apiFetch(`/api/auth/reset-password`, {
+  return apiFetch(`/auth/reset-password`, {
     method: "POST",
     body: JSON.stringify({
       token,
@@ -217,7 +217,7 @@ export async function logoutUser() {
     window.dispatchEvent(new Event("auth:refresh"));
   }
 
-  return apiFetch(`/api/auth/logout`, {
+  return apiFetch(`/auth/logout`, {
     method: "POST",
   });
 }

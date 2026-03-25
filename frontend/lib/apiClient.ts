@@ -1,4 +1,9 @@
-const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+/* ======================================
+🔥 BASE URL FIX (FINAL)
+====================================== */
+
+const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API = `${BASE.replace(/\/$/, "")}/api`;
 
 /* ======================================
 🔥 TYPES
@@ -33,16 +38,12 @@ async function coreFetch<T>(
   try {
     const res = await fetch(url, {
       ...options,
-
-      /* 🔥 CRITICAL FOR COOKIES */
       credentials: "include",
-      mode: "cors", 
-
+      mode: "cors",
       headers: {
         "Content-Type": "application/json",
         ...(options.headers || {}),
       },
-
       signal: controller.signal,
     });
 
@@ -55,13 +56,7 @@ async function coreFetch<T>(
       data = null;
     }
 
-    /* ======================================
-    🔐 UNAUTHORIZED (TRY ONCE AGAIN)
-    ====================================== */
-
     if (res.status === 401) {
-
-      // optional retry (helps in edge cases)
       if (!retry) {
         return coreFetch<T>(url, options, true);
       }
@@ -76,10 +71,6 @@ async function coreFetch<T>(
       };
     }
 
-    /* ======================================
-    🚫 LIMITED MODE
-    ====================================== */
-
     if (res.status === 403) {
       return {
         success: true,
@@ -91,10 +82,6 @@ async function coreFetch<T>(
         code: data?.code,
       };
     }
-
-    /* ======================================
-    ❌ ERROR
-    ====================================== */
 
     if (!res.ok) {
       console.error("❌ API ERROR:", {
@@ -113,10 +100,6 @@ async function coreFetch<T>(
         code: data?.code,
       };
     }
-
-    /* ======================================
-    ✅ SUCCESS
-    ====================================== */
 
     return {
       success: true,
@@ -156,20 +139,6 @@ export async function apiFetch<T = any>(
   path: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
-
-  if (!API) {
-    console.error("❌ API URL NOT DEFINED");
-
-    return {
-      success: false,
-      data: null,
-      limited: false,
-      upgradeRequired: false,
-      unauthorized: false,
-      networkError: true,
-      message: "API URL not configured",
-    };
-  }
 
   const url = `${API}${path}`;
 

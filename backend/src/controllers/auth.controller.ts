@@ -48,8 +48,8 @@ const isProd = process.env.NODE_ENV === "production";
 
 const getCookieOptions = () => ({
   httpOnly: true,
-  secure: isProd, // 🔥 production में https required
-  sameSite: isProd ? ("none" as const) : ("lax" as const), // 🔥 cross-origin fix
+  secure: isProd,
+  sameSite: isProd ? ("none" as const) : ("lax" as const),
   path: "/",
 });
 
@@ -137,10 +137,27 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       throw unauthorized("Invalid credentials");
     }
 
-    const business = await prisma.business.findFirst({
+    let business = await prisma.business.findFirst({
       where: { ownerId: user.id },
       select: { id: true },
     });
+
+    /* ✅ SAFETY FALLBACK (ADDED) */
+    if (!business) {
+      const newBusiness = await prisma.business.create({
+        data: {
+          name: `${user.name || "My"} Workspace`,
+          ownerId: user.id,
+        },
+      });
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { businessId: newBusiness.id },
+      });
+
+      business = { id: newBusiness.id };
+    }
 
     const accessToken = generateAccessToken(
       user.id,
@@ -151,7 +168,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     const refreshRaw = generateRefreshToken(user.id, user.tokenVersion);
 
-    /* SESSION LIMIT */
     const count = await prisma.refreshToken.count({
       where: { userId: user.id },
     });
@@ -211,14 +227,48 @@ export const verifyEmail = async (req: Request, res: Response, next: NextFunctio
       },
     });
 
-    if (!user) throw badRequest("Invalid token");
+    /* ✅ IDEMPOTENT */
+    if (!user) {
+      return res.json({ success: true });
+    }
 
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
         isVerified: true,
         verifyToken: null,
         verifyTokenExpiry: null,
+      },
+    });
+
+    /* ======================================
+    🔥 DUPLICATE PREVENTION (ADDED)
+    ====================================== */
+
+    let existingBusiness = await prisma.business.findFirst({
+      where: { ownerId: updatedUser.id },
+      select: { id: true },
+    });
+
+    let business = existingBusiness;
+
+    if (!existingBusiness) {
+      business = await prisma.business.create({
+        data: {
+          name: `${updatedUser.name || "My"} Workspace`,
+          ownerId: updatedUser.id,
+        },
+      });
+    }
+
+    /* ======================================
+    🔥 LINK USER → BUSINESS
+    ====================================== */
+
+    await prisma.user.update({
+      where: { id: updatedUser.id },
+      data: {
+        businessId: business!.id,
       },
     });
 
@@ -349,7 +399,13 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, name: true, email: true, role: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        businessId: true, // 🔥 THIS FIXES EVERYTHING
+}
     });
 
     res.setHeader("Cache-Control", "no-store");

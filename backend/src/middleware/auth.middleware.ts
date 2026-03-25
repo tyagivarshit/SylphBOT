@@ -36,7 +36,7 @@ export const clearAuthCookies = (res: Response) => {
 };
 
 /* ======================================
-GET USER
+GET USER (FIXED)
 ====================================== */
 
 const getUserWithBusiness = async (userId: string) => {
@@ -47,10 +47,7 @@ const getUserWithBusiness = async (userId: string) => {
       role: true,
       isActive: true,
       tokenVersion: true,
-      businesses: {
-        select: { id: true },
-        take: 1,
-      },
+      businessId: true, // ✅ FIX
     },
   });
 };
@@ -89,7 +86,7 @@ export const protect = async (
           throw unauthorized("Invalid session");
         }
 
-        const businessId = user.businesses[0]?.id || null;
+        const businessId = user.businessId || null; // ✅ FIX
 
         (req as any).user = {
           id: user.id,
@@ -149,10 +146,10 @@ export const protect = async (
       throw unauthorized("Invalid session");
     }
 
-    const businessId = user.businesses[0]?.id || null;
+    const businessId = user.businessId || null; // ✅ FIX
 
     /* ======================================
-    🔥 NEW ACCESS TOKEN (CRITICAL FIX)
+    🔥 NEW ACCESS TOKEN
     ====================================== */
 
     const newAccessToken = generateAccessToken(

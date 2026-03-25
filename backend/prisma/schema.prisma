@@ -49,7 +49,7 @@ model User {
   isVerified        Boolean  @default(false)
   isActive          Boolean  @default(true)
 
-  tokenVersion      Int      @default(0) // 🔥 CRITICAL
+  tokenVersion      Int      @default(0)
 
   verifyToken       String?
   verifyTokenExpiry DateTime?
@@ -57,7 +57,13 @@ model User {
   resetToken        String?
   resetTokenExpiry  DateTime?
 
-  businesses        Business[]
+  /* WORKSPACE RELATION */
+  businessId String?   @db.ObjectId
+  business   Business? @relation("UserBusiness", fields: [businessId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  /* OWNER RELATION (FIX) */
+  ownedBusinesses Business[] @relation("BusinessOwner")
+
   refreshTokens     RefreshToken[]
 
   createdAt         DateTime @default(now())
@@ -73,7 +79,10 @@ model Business {
   name          String
 
   ownerId       String   @db.ObjectId
-  owner         User     @relation(fields: [ownerId], references: [id])
+  owner         User     @relation("BusinessOwner", fields: [ownerId], references: [id])
+
+  /* WORKSPACE USERS */
+  users         User[]   @relation("UserBusiness")
 
   clients       Client[]
   subscription  Subscription?

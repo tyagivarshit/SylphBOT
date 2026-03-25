@@ -2,13 +2,13 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, createContext, useContext } from "react";
+import { useEffect, useState, createContext, useContext, useMemo } from "react";
 
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
 
 /* =========================
-   🔥 UPGRADE CONTEXT
+   🔥 UPGRADE CONTEXT (STABLE)
 ========================= */
 const UpgradeContext = createContext<any>(null);
 
@@ -21,13 +21,20 @@ export default function DashboardLayout({ children }: any) {
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
-  const [upgradeOpen, setUpgradeOpen] = useState(false); // 🔥 NEW
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
+  /* 🔥 FIX: prevent multiple redirects */
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/auth/login");
     }
-  }, [loading, user, router]);
+  }, [loading, user]); // ❌ router hata diya
+
+  /* 🔥 FIX: stable context (NO re-render spam) */
+  const upgradeValue = useMemo(() => ({
+    openUpgrade: () => setUpgradeOpen(true),
+    closeUpgrade: () => setUpgradeOpen(false),
+  }), []);
 
   if (loading) {
     return (
@@ -40,12 +47,7 @@ export default function DashboardLayout({ children }: any) {
   if (!user) return null;
 
   return (
-    <UpgradeContext.Provider
-      value={{
-        openUpgrade: () => setUpgradeOpen(true),
-        closeUpgrade: () => setUpgradeOpen(false),
-      }}
-    >
+    <UpgradeContext.Provider value={upgradeValue}>
       <div className="min-h-screen bg-[#f9fcff] flex flex-col">
 
         {/* 🔥 TOPBAR */}
@@ -54,14 +56,17 @@ export default function DashboardLayout({ children }: any) {
         {/* 🔥 BODY */}
         <div className="flex flex-1">
 
-          <Sidebar open={open} setOpen={setOpen} />
+          {/* 🔥 FIX: sidebar stable wrapper */}
+          <div className="h-screen sticky top-0">
+            <Sidebar open={open} setOpen={setOpen} />
+          </div>
 
+          {/* 🔥 CONTENT */}
           <main className="flex-1 p-4 sm:p-6">
             {children}
           </main>
 
         </div>
-
       </div>
 
       {/* =========================

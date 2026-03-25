@@ -2,73 +2,66 @@
 
 import { ReactNode } from "react"
 import { usePlan } from "@/hooks/usePlan"
-import { hasFeature } from "@/lib/featureGuard"
+import { hasFeature, getNextPlan, isHigherPlan, PLAN_LABELS } from "@/lib/featureGuard"
 import { useUpgrade } from "@/app/(dashboard)/layout"
 
 /* ✅ UPDATED TYPE */
 type Feature =
-  | "INSTAGRAM_DM"
-  | "COMMENT_TO_DM"
-  | "CRM"
-  | "WHATSAPP_AUTOMATION"
-  | "AI_BOOKING_SCHEDULING"
-  | "CUSTOM_FOLLOWUPS" // ✅ ADD
-  | "FOLLOWUPS"        // 🔥 future ready
-  | "REEL_AUTOMATION_CONTROL" // 🔥 future ready
+| "INSTAGRAM_DM"
+| "COMMENT_TO_DM"
+| "CRM"
+| "WHATSAPP_AUTOMATION"
+| "AI_BOOKING_SCHEDULING"
+| "CUSTOM_FOLLOWUPS"
+| "FOLLOWUPS"
+| "REEL_AUTOMATION_CONTROL"
 
 export default function FeatureGate({
-  feature,
-  children
+feature,
+children
 }:{
-  feature: Feature
-  children: ReactNode
+feature: Feature
+children: ReactNode
 }){
 
-  const { plan } = usePlan()
-  const { openUpgrade } = useUpgrade()
+const { plan } = usePlan()
+const { openUpgrade } = useUpgrade()
 
-  const allowed = hasFeature(plan, feature)
+const allowed = hasFeature(plan, feature)
 
-  if(allowed) return <>{children}</>
+/* =========================
+✅ ALLOWED
+========================= */
+if(allowed) return <>{children}</>
 
-  return (
-    <div
-      className="relative cursor-pointer group"
-      onClick={openUpgrade}
-    >
+const nextPlan = getNextPlan(plan)
 
-      {/* 🔥 BLUR */}
-      <div className="opacity-40 pointer-events-none blur-[2px] group-hover:blur-[3px] transition">
-        {children}
-      </div>
+/* =========================
+🚫 HIGHER PLAN → HIDE
+========================= */
+if (!nextPlan) {
+return null
+}
 
-      {/* 🔥 OVERLAY */}
-      <div className="absolute inset-0 flex items-center justify-center">
+/* =========================
+🔥 NEXT PLAN → SMART DISABLED UI
+========================= */
+return ( <div
+   className="relative group cursor-pointer"
+   onClick={openUpgrade}
+ >
 
-        <div className="bg-white/90 backdrop-blur border shadow-xl px-5 py-3 rounded-xl text-sm text-center transition group-hover:scale-105">
+  {/* 🔥 UPGRADE BADGE */}
+  <div className="absolute -top-2 -right-2 z-10 text-[10px] px-2 py-1 rounded-full bg-gradient-to-r from-[#14E1C1] to-blue-500 text-white shadow">
+    Upgrade to {PLAN_LABELS[nextPlan]}
+  </div>
 
-          <p className="font-semibold text-gray-800">
-            🔒 Premium Feature
-          </p>
+  {/* 🔥 DISABLED CONTENT */}
+  <div className="opacity-50 pointer-events-none blur-[1px] group-hover:blur-[2px] transition">
+    {children}
+  </div>
 
-          <p className="text-xs text-gray-500 mt-1">
-            Upgrade to unlock this feature
-          </p>
+</div>
 
-          <button
-            className="mt-2 text-xs bg-blue-600 text-white px-3 py-1 rounded-md hover:bg-blue-700 transition"
-            onClick={(e)=>{
-              e.stopPropagation()
-              openUpgrade()
-            }}
-          >
-            Upgrade
-          </button>
-
-        </div>
-
-      </div>
-
-    </div>
-  )
+)
 }

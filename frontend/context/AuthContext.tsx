@@ -1,12 +1,12 @@
 "use client";
 
 import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useRef,
-  useCallback,
+createContext,
+useContext,
+useEffect,
+useState,
+useRef,
+useCallback,
 } from "react";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -15,17 +15,17 @@ import { getCurrentUser } from "@/lib/auth";
 ====================================== */
 
 type User = {
-  id: string;
-  email: string;
-  role: string;
-  businessId: string | null;
+id: string;
+email: string;
+role: string;
+businessId?: string | null; // ✅ SAFE OPTIONAL
 };
 
 type AuthContextType = {
-  user: User | null;
-  loading: boolean;
-  isAuthenticated: boolean;
-  refreshUser: () => Promise<void>;
+user: User | null;
+loading: boolean;
+isAuthenticated: boolean;
+refreshUser: () => Promise<void>;
 };
 
 /* ======================================
@@ -33,10 +33,10 @@ type AuthContextType = {
 ====================================== */
 
 const AuthContext = createContext<AuthContextType>({
-  user: null,
-  loading: true,
-  isAuthenticated: false,
-  refreshUser: async () => {},
+user: null,
+loading: true,
+isAuthenticated: false,
+refreshUser: async () => {},
 });
 
 /* ======================================
@@ -44,94 +44,104 @@ const AuthContext = createContext<AuthContextType>({
 ====================================== */
 
 export const AuthProvider = ({
-  children,
+children,
 }: {
-  children: React.ReactNode;
+children: React.ReactNode;
 }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+const [user, setUser] = useState<User | null>(null);
+const [loading, setLoading] = useState(true);
 
-  const hasFetched = useRef(false);
+const hasFetched = useRef(false);
 
-  /* ======================================
-  🔥 FETCH USER (STRICT + SAFE)
-  ====================================== */
+/* ======================================
+🔥 FETCH USER (STRICT + SAFE)
+====================================== */
 
-  const fetchUser = useCallback(async () => {
-    try {
-      console.log("🔥 CALLING /api/auth/me");
+const fetchUser = useCallback(async () => {
+try {
+console.log("🔥 CALLING /api/auth/me");
 
-      const res = await getCurrentUser();
+  const res = await getCurrentUser();
 
-      console.log("✅ /me RESPONSE:", res);
+  console.log("✅ /me RESPONSE:", res);
 
-      /* 🔐 UNAUTHORIZED */
-      if (res.unauthorized) {
-        setUser(null);
-        return;
-      }
+  /* 🔐 UNAUTHORIZED */
+  if (res.unauthorized) {
+    setUser(null);
+    return;
+  }
 
-      /* ❌ FAILED */
-      if (!res.success) {
-        setUser(null);
-        return;
-      }
+  /* ❌ FAILED */
+  if (!res.success) {
+    setUser(null);
+    return;
+  }
 
-      /* ✅ SUCCESS */
-      const userData = res.data?.user || null;
+  /* ✅ SUCCESS */
+  const userData = res.data?.user || null;
+  setUser(userData);
 
-      setUser(userData);
+} catch (err) {
+  console.error("❌ AUTH ERROR:", err);
+  setUser(null);
+} finally {
+  setLoading(false); // ✅ ALWAYS STOP LOADING
+}
 
-    } catch (err) {
-      console.error("❌ AUTH ERROR:", err);
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+}, []);
 
-  /* ======================================
-  🔥 INITIAL LOAD
-  ====================================== */
+/* ======================================
+🔥 INITIAL LOAD
+====================================== */
 
-  useEffect(() => {
-    if (hasFetched.current) return;
-    hasFetched.current = true;
+useEffect(() => {
+if (hasFetched.current) return;
+hasFetched.current = true;
 
-    fetchUser();
-  }, [fetchUser]);
+fetchUser();
 
-  /* ======================================
-  🔥 GLOBAL REFRESH EVENT
-  ====================================== */
+}, [fetchUser]);
 
-  useEffect(() => {
-    const handler = () => {
-      console.log("🔄 AUTH REFRESH TRIGGERED");
-      fetchUser();
-    };
+/* ======================================
+🔥 GLOBAL REFRESH EVENT
+====================================== */
 
-    window.addEventListener("auth:refresh", handler);
-    return () =>
-      window.removeEventListener("auth:refresh", handler);
-  }, [fetchUser]);
+useEffect(() => {
+const handler = () => {
+console.log("🔄 AUTH REFRESH TRIGGERED");
+fetchUser();
+};
 
-  /* ======================================
-  🔥 VALUE
-  ====================================== */
+window.addEventListener("auth:refresh", handler);
+return () =>
+  window.removeEventListener("auth:refresh", handler);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        isAuthenticated: !!user,
-        refreshUser: fetchUser,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+}, [fetchUser]);
+
+/* ======================================
+🔥 LOADING GUARD (FIXED)
+====================================== */
+
+if (loading) {
+return <div>Loading...</div>;
+}
+
+/* ======================================
+🔥 VALUE
+====================================== */
+
+return (
+<AuthContext.Provider
+value={{
+user,
+loading,
+isAuthenticated: !!user,
+refreshUser: fetchUser,
+}}
+>
+{children}
+</AuthContext.Provider>
+);
 };
 
 /* ======================================

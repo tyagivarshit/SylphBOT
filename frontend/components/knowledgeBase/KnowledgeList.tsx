@@ -21,7 +21,7 @@ const fetchKnowledge = async () => {
   try{
     setLoading(true)
 
-    const res = await api.get("/knowledge")
+    const res = await api.get("/api/knowledge")
 
     setKnowledge(res.data.knowledge || [])
 
@@ -45,7 +45,7 @@ const handleDelete = async (id: string) => {
 
   try{
 
-    await api.delete(`/knowledge/${id}`)
+    await api.delete(`/api/knowledge/${id}`)
 
     setKnowledge(prev => prev.filter(item => item.id !== id))
 

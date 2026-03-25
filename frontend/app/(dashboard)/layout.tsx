@@ -2,16 +2,26 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, createContext, useContext } from "react";
 
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
+
+/* =========================
+   🔥 UPGRADE CONTEXT
+========================= */
+const UpgradeContext = createContext<any>(null);
+
+export function useUpgrade() {
+  return useContext(UpgradeContext);
+}
 
 export default function DashboardLayout({ children }: any) {
   const { user, loading } = useAuth();
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false); // 🔥 NEW
 
   useEffect(() => {
     if (!loading && !user) {
@@ -30,24 +40,68 @@ export default function DashboardLayout({ children }: any) {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-[#f9fcff] flex flex-col">
+    <UpgradeContext.Provider
+      value={{
+        openUpgrade: () => setUpgradeOpen(true),
+        closeUpgrade: () => setUpgradeOpen(false),
+      }}
+    >
+      <div className="min-h-screen bg-[#f9fcff] flex flex-col">
 
-      {/* 🔥 TOPBAR FULL WIDTH */}
-      <Topbar setOpen={setOpen} />
+        {/* 🔥 TOPBAR */}
+        <Topbar setOpen={setOpen} />
 
-      {/* 🔥 BELOW AREA */}
-      <div className="flex flex-1">
+        {/* 🔥 BODY */}
+        <div className="flex flex-1">
 
-        {/* SIDEBAR (NOW BELOW TOPBAR) */}
-        <Sidebar open={open} setOpen={setOpen} />
+          <Sidebar open={open} setOpen={setOpen} />
 
-        {/* CONTENT */}
-        <main className="flex-1 p-4 sm:p-6">
-          {children}
-        </main>
+          <main className="flex-1 p-4 sm:p-6">
+            {children}
+          </main>
+
+        </div>
 
       </div>
 
-    </div>
+      {/* =========================
+         🔥 UPGRADE MODAL
+      ========================= */}
+      {upgradeOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+
+          <div className="bg-white rounded-2xl p-6 w-[90%] max-w-md shadow-xl">
+
+            <h2 className="text-lg font-bold text-gray-900">
+              Upgrade Required 🚀
+            </h2>
+
+            <p className="text-sm text-gray-700 mt-2">
+              This feature is locked in your current plan.
+              Upgrade to unlock CRM & automation features.
+            </p>
+
+            <div className="flex gap-3 mt-5">
+
+              <button
+                onClick={() => setUpgradeOpen(false)}
+                className="flex-1 border rounded-lg py-2 text-sm"
+              >
+                Cancel
+              </button>
+
+              <button
+                className="flex-1 bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white rounded-lg py-2 text-sm font-medium"
+              >
+                Upgrade Plan
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
+    </UpgradeContext.Provider>
   );
 }

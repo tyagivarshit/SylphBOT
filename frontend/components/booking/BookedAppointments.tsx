@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { cancelAppointment } from "@/lib/booking.api";
-import axios from "axios";
+import { api } from "@/lib/api";
 import useAuthGuard from "@/hooks/useAuthGuard";
-import { useAuth } from "@/hooks/useAuth"
+import { useAuth } from "@/context/AuthContext";
 
 interface Booking {
   id: string;
@@ -18,29 +18,34 @@ export default function BookedAppointments({
 }: {
   refreshKey?: number;
 }) {
+
+  /* ============================= */
   /* AUTH */
+  /* ============================= */
+
   const authLoading = useAuthGuard();
   const { user } = useAuth();
 
-  const businessId = user?.businesses?.[0]?.id;
+  const businessId = user?.businessId; // ✅ FIXED
 
+  /* ============================= */
   /* STATE */
+  /* ============================= */
+
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
 
-  /* ============================================
-  FETCH BOOKINGS
-  ============================================ */
+  /* ============================= */
+  /* FETCH BOOKINGS */
+  /* ============================= */
+
   const fetchBookings = async () => {
     if (!businessId) return;
 
     try {
       setLoading(true);
 
-      const res = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_URL}/booking/list/${businessId}`,
-        { withCredentials: true }
-      );
+      const res = await api.get(`/booking/list/${businessId}`);
 
       setBookings(res.data.bookings || []);
     } catch (err) {
@@ -55,9 +60,10 @@ export default function BookedAppointments({
     fetchBookings();
   }, [businessId, refreshKey]);
 
-  /* ============================================
-  CANCEL BOOKING
-  ============================================ */
+  /* ============================= */
+  /* CANCEL BOOKING */
+  /* ============================= */
+
   const handleCancel = async (id: string) => {
     try {
       await cancelAppointment(id);
@@ -67,9 +73,10 @@ export default function BookedAppointments({
     }
   };
 
-  /* ============================================
-  FORMAT DATE
-  ============================================ */
+  /* ============================= */
+  /* FORMAT DATE */
+  /* ============================= */
+
   const formatDateTime = (dateStr: string) => {
     const date = new Date(dateStr);
 
@@ -79,9 +86,10 @@ export default function BookedAppointments({
     })}`;
   };
 
-  /* ============================================
-  STATUS COLOR
-  ============================================ */
+  /* ============================= */
+  /* STATUS COLOR */
+  /* ============================= */
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "BOOKED":
@@ -95,9 +103,10 @@ export default function BookedAppointments({
     }
   };
 
-  /* ============================================
-  AUTH LOADING
-  ============================================ */
+  /* ============================= */
+  /* AUTH LOADING */
+  /* ============================= */
+
   if (authLoading) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -106,11 +115,13 @@ export default function BookedAppointments({
     );
   }
 
-  /* ============================================
-  UI
-  ============================================ */
+  /* ============================= */
+  /* UI */
+  /* ============================= */
+
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5">
+
       <h2 className="text-sm font-semibold text-gray-900 mb-4">
         Booked Appointments
       </h2>
@@ -123,13 +134,15 @@ export default function BookedAppointments({
         <p className="text-sm text-gray-500">No bookings yet</p>
       ) : (
         <div className="space-y-3">
+
           {bookings.map((b) => (
             <div
               key={b.id}
               className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex justify-between items-center"
             >
+
               <div>
-                <p className="text-sm font-medium text-gray-900">
+                <p className="text-sm font-semibold text-gray-900">
                   {b.name}
                 </p>
 
@@ -138,7 +151,7 @@ export default function BookedAppointments({
                 </p>
 
                 <p
-                  className={`text-xs font-medium ${getStatusColor(
+                  className={`text-xs font-semibold ${getStatusColor(
                     b.status
                   )}`}
                 >
@@ -149,15 +162,18 @@ export default function BookedAppointments({
               {b.status === "BOOKED" && (
                 <button
                   onClick={() => handleCancel(b.id)}
-                  className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg"
+                  className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg"
                 >
                   Cancel
                 </button>
               )}
+
             </div>
           ))}
+
         </div>
       )}
+
     </div>
   );
 }

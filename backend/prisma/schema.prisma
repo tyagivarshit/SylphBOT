@@ -57,6 +57,8 @@ model User {
   resetToken        String?
   resetTokenExpiry  DateTime?
 
+  notifications Notification[]
+
   /* WORKSPACE RELATION */
   businessId String?   @db.ObjectId
   business   Business? @relation("UserBusiness", fields: [businessId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -91,6 +93,8 @@ model Business {
 
   commentTriggers CommentTrigger[]
   automationFlows AutomationFlow[]
+
+  notifications Notification[]
 
   calendarConnections CalendarConnection[]
   bookingSlots        BookingSlot[]
@@ -580,4 +584,26 @@ model KnowledgeBase {
 
   @@index([businessId])
 }
+model Notification {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
 
+  userId      String   @db.ObjectId
+  user        User     @relation(fields: [userId], references: [id])
+
+  businessId  String?  @db.ObjectId
+  business    Business? @relation(fields: [businessId], references: [id])
+
+  type        String   // LEAD / MESSAGE / AUTOMATION / SYSTEM
+  title       String?
+  message     String
+
+  link        String?  // redirect URL (🔥 important for UX)
+
+  read        Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([businessId])
+  @@index([read])
+}

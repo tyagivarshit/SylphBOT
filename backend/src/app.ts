@@ -46,6 +46,11 @@ import { startUsageResetCron } from "./cron/resetUsage.cron";
 /* ========= ERRORS ========= */
 import { isAppError } from "./utils/AppError";
 
+/* ✅ SEARCH ROUTE IMPORT (same as before) */
+import searchRoutes from "./routes/search.routes";
+
+import notificationRoutes from "./routes/notification";
+
 const app = express();
 
 /* ======================================
@@ -82,7 +87,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true); // allow server-to-server
+      if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -91,7 +96,7 @@ app.use(
       console.warn("❌ Blocked by CORS:", origin);
       return callback(new Error("Not allowed by CORS"));
     },
-    credentials: true, // 🔥 CRITICAL FOR COOKIES
+    credentials: true,
   })
 );
 
@@ -195,6 +200,11 @@ app.use("/api/leads", leadRoutes);
 
 /* ANALYTICS */
 app.use("/api/analytics", analyticsRoutes);
+
+/* ✅ FIXED POSITION (ONLY CHANGE) */
+app.use("/api/search", searchRoutes);
+
+app.use("/api/notifications", notificationRoutes);
 
 /* ======================================
 🔥 HEALTH

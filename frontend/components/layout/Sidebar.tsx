@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 
 import {
   LayoutDashboard,
@@ -77,7 +77,7 @@ const menu = [
 ];
 
 /* ======================================
-🔥 ACTIVE MATCH (FIXED)
+🔥 ACTIVE MATCH
 ====================================== */
 
 function isActiveRoute(pathname: string, href: string) {
@@ -92,6 +92,25 @@ function isActiveRoute(pathname: string, href: string) {
 function SidebarComponent({ open, setOpen }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+
+  /* 🔥 SCROLL FIX */
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem("sidebar_scroll");
+    if (saved && scrollRef.current) {
+      scrollRef.current.scrollTop = Number(saved);
+    }
+  }, []);
+
+  const handleScroll = () => {
+    if (scrollRef.current) {
+      sessionStorage.setItem(
+        "sidebar_scroll",
+        String(scrollRef.current.scrollTop)
+      );
+    }
+  };
 
   return (
     <>
@@ -122,26 +141,24 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
         <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100 lg:hidden">
           <span className="font-semibold text-gray-800">Menu</span>
 
-          <button
-            onClick={() => setOpen(false)}
-            aria-label="Close sidebar"
-          >
+          <button onClick={() => setOpen(false)}>
             <X size={20} />
           </button>
         </div>
 
         {/* ===== NAV ===== */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 sm:py-6 space-y-6">
-
+        <nav
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-3 py-4 sm:py-6 space-y-6"
+        >
           {menu.map((group) => (
             <div key={group.section}>
-
               <p className="px-3 mb-2 text-[10px] sm:text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
                 {group.section}
               </p>
 
               <div className="space-y-1">
-
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   const active = isActiveRoute(pathname, item.href);
@@ -150,35 +167,28 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
                     <Link
                       key={item.name}
                       href={item.href}
-                      prefetch
                       onMouseEnter={() => router.prefetch(item.href)}
                       onClick={() => setOpen(false)}
-                      aria-label={item.name}
                       className={`
                       flex items-center gap-3
                       px-3 sm:px-4 py-2.5
                       rounded-lg text-sm font-medium transition
 
-                      ${active
-                        ? "bg-blue-50 text-blue-600"
-                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                      ${
+                        active
+                          ? "bg-gradient-to-r from-[#14E1C1]/20 to-[#3b82f6]/20 text-blue-600"
+                          : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       }
                     `}
                     >
                       <Icon size={18} />
-
-                      <span className="truncate">
-                        {item.name}
-                      </span>
+                      <span className="truncate">{item.name}</span>
                     </Link>
                   );
                 })}
-
               </div>
-
             </div>
           ))}
-
         </nav>
 
         {/* ===== FOOTER ===== */}
@@ -187,14 +197,13 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
             Sylph v1.0
           </p>
         </div>
-
       </aside>
     </>
   );
 }
 
 /* ======================================
-🔥 MEMO (PERFORMANCE)
+🔥 MEMO
 ====================================== */
 
 export default memo(SidebarComponent);

@@ -11,18 +11,18 @@ import { checkAIRateLimit } from "../services/aiRateLimiter.service";
 import { getIO } from "../sockets/socket.server";
 import logger from "../utils/logger";
 
-/* SENTRY MONITORING */
+/* SENTRY */
 import * as Sentry from "@sentry/node";
 
-/* ---------------- HUMAN DELAY HELPER ---------------- */
-
+/* ---------------- DELAY ---------------- */
 const delay = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
+
+/* ---------------- WORKER ---------------- */
 
 const worker = new Worker(
   "aiQueue",
   async (job) => {
-
     const {
       businessId,
       leadId,
@@ -31,7 +31,7 @@ const worker = new Worker(
       senderId,
       phoneNumberId,
       pageId,
-      accessTokenEncrypted
+      accessTokenEncrypted,
     } = job.data;
 
     logger.info({ leadId, businessId, platform }, "AI Worker Processing");
@@ -39,29 +39,24 @@ const worker = new Worker(
     let aiReply: string | null = null;
 
     try {
-
-      /* ---------------- HUMAN TAKEOVER CHECK ---------------- */
+      /* ---------------- HUMAN TAKEOVER ---------------- */
 
       const lead = await prisma.lead.findUnique({
         where: { id: leadId },
-        select: { isHumanActive: true }
+        select: { isHumanActive: true },
       });
 
       if (lead?.isHumanActive) {
-
         logger.info(
           { leadId },
           "AI paused because human agent is active"
         );
-
         return;
-
       }
 
-      /* ---------------- AUTOMATION ENGINE ---------------- */
+      /* ---------------- AUTOMATION ---------------- */
 
       try {
-
         const automationReply = await runAutomationEngine({
           businessId,
           leadId,
@@ -71,31 +66,28 @@ const worker = new Worker(
         if (automationReply) {
           aiReply = automationReply;
         }
-
       } catch (error) {
-
         logger.warn({ leadId, error }, "Automation engine failed");
         Sentry.captureException(error);
-
       }
 
-      /* ---------------- AI ROUTER ---------------- */
+      /* ---------------- AI ---------------- */
 
       if (!aiReply) {
-
         aiReply = await routeAIMessage({
           businessId,
           leadId,
           message,
         });
-
       }
 
       if (!aiReply || aiReply.trim().length === 0) {
         aiReply = "Thanks for your message!";
       }
 
-      /* ---------------- RATE LIMIT CHECK ---------------- */
+      logger.info({ leadId, aiReply }, "AI reply generated");
+
+      /* ---------------- RATE LIMIT ---------------- */
 
       const rate = await checkAIRateLimit({
         businessId,
@@ -104,17 +96,14 @@ const worker = new Worker(
       });
 
       if (rate.blocked) {
-
         logger.warn(
           { leadId, businessId, platform },
           "AI message blocked by rate limiter"
         );
-
         return;
-
       }
 
-      /* ---------------- SAVE AI MESSAGE ---------------- */
+      /* ---------------- SAVE MESSAGE ---------------- */
 
       const aiMessage = await prisma.message.create({
         data: {
@@ -124,30 +113,26 @@ const worker = new Worker(
         },
       });
 
-      /* ---------------- SOCKET EVENT ---------------- */
+      /* ---------------- SOCKET ---------------- */
 
       try {
-
         const io = getIO();
         io.to(`lead_${leadId}`).emit("new_message", aiMessage);
-
       } catch (error) {
-
         logger.warn({ leadId, error }, "Socket emit failed");
         Sentry.captureException(error);
-
       }
 
-      /* ---------------- SEND MESSAGE ---------------- */
+      /* ---------------- TOKEN ---------------- */
 
       const accessToken = decrypt(accessTokenEncrypted);
 
-      /* ---------------- WHATSAPP ---------------- */
+      /* ===================================================
+         WHATSAPP SEND
+      =================================================== */
 
       if (platform === "WHATSAPP") {
-
         try {
-
           const response = await axios.post(
             `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
             {
@@ -169,123 +154,117 @@ const worker = new Worker(
             { leadId, response: response.data },
             "WhatsApp message sent"
           );
-
         } catch (error: any) {
+          console.log("❌ WHATSAPP ERROR:", error?.response?.data);
 
           logger.error(
             {
               leadId,
-              error: error?.response?.data || error.message
+              error: error?.response?.data || error.message,
             },
             "WhatsApp send failed"
           );
 
           Sentry.captureException(error);
-
         }
-
       }
 
-      /* ---------------- INSTAGRAM ---------------- */
+      /* ===================================================
+         INSTAGRAM SEND (FIXED)
+      =================================================== */
 
       if (platform === "INSTAGRAM") {
-
-        if (!senderId || senderId === pageId) {
-
-          logger.warn(
-            { leadId, senderId, pageId },
-            "Skipping self message send"
-          );
-
-        } else {
-
-          try {
-
-            logger.info(
-              { leadId, senderId, pageId, aiReply },
-              "Preparing Instagram reply"
-            );
-
-            const randomDelay = 2000 + Math.floor(Math.random() * 2000);
-            await delay(randomDelay);
-
-            await axios.post(
-              "https://graph.facebook.com/v19.0/me/messages",
-              {
-                recipient: { id: senderId },
-                sender_action: "typing_on"
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  "Content-Type": "application/json",
-                }
-              }
-            );
-
-            await delay(1500);
-
-            const response = await axios.post(
-              "https://graph.facebook.com/v19.0/me/messages",
-              {
-                recipient: { id: senderId },
-                message: { text: aiReply },
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  "Content-Type": "application/json",
-                },
-                timeout: 10000,
-              }
-            );
-
-            logger.info(
-              { leadId, response: response.data },
-              "Instagram message sent successfully"
-            );
-
-          } catch (error: any) {
-
-            logger.error(
-              {
-                leadId,
-                senderId,
-                pageId,
-                error: error?.response?.data || error.message
-              },
-              "Instagram send failed"
-            );
-
-            Sentry.captureException(error);
-
-          }
-
+        if (!senderId) {
+          logger.warn({ leadId }, "Missing senderId");
+          return;
         }
 
+        try {
+          logger.info(
+            { leadId, senderId, pageId, aiReply },
+            "Preparing Instagram reply"
+          );
+
+          const randomDelay = 2000 + Math.floor(Math.random() * 2000);
+          await delay(randomDelay);
+
+          /* typing indicator */
+          await axios.post(
+            "https://graph.facebook.com/v19.0/me/messages",
+            {
+              recipient: { id: senderId },
+              sender_action: "typing_on",
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          await delay(1500);
+
+          /* actual message */
+          const response = await axios.post(
+            "https://graph.facebook.com/v19.0/me/messages",
+            {
+              recipient: { id: senderId },
+              message: { text: aiReply },
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+              timeout: 10000,
+            }
+          );
+
+          logger.info(
+            { leadId, response: response.data },
+            "Instagram message sent successfully"
+          );
+        } catch (error: any) {
+          console.log("❌ INSTAGRAM ERROR FULL:", error?.response?.data);
+
+          logger.error(
+            {
+              leadId,
+              senderId,
+              pageId,
+              error: error?.response?.data || error.message,
+            },
+            "Instagram send failed"
+          );
+
+          Sentry.captureException(error);
+        }
       }
 
       /* ---------------- UPDATE LEAD ---------------- */
 
-      prisma.lead.update({
-        where: { id: leadId },
-        data: {
-          lastMessageAt: new Date(),
-          unreadCount: { increment: 1 },
-        },
-      }).catch((error) => {
-        logger.warn({ leadId, error }, "Lead update failed");
-        Sentry.captureException(error);
-      });
+      prisma.lead
+        .update({
+          where: { id: leadId },
+          data: {
+            lastMessageAt: new Date(),
+            unreadCount: { increment: 1 },
+          },
+        })
+        .catch((error) => {
+          logger.warn({ leadId, error }, "Lead update failed");
+          Sentry.captureException(error);
+        });
 
       logger.info({ leadId }, "AI Worker Completed");
-
     } catch (error: any) {
+      console.log("❌ WORKER CRASH:", error);
 
       logger.error(
         {
           leadId,
-          error: error?.response?.data || error?.message || error
+          error: error?.response?.data || error?.message || error,
         },
         "AI Worker Error"
       );
@@ -293,9 +272,7 @@ const worker = new Worker(
       Sentry.captureException(error);
 
       throw error;
-
     }
-
   },
   {
     connection: redisConnection,
@@ -303,17 +280,15 @@ const worker = new Worker(
   }
 );
 
-/* ---------------- WORKER ERROR HANDLING ---------------- */
+/* ---------------- WORKER EVENTS ---------------- */
 
 worker.on("failed", (job, err) => {
-
   logger.error(
     { jobId: job?.id, error: err },
     "AI Worker Failed"
   );
 
   Sentry.captureException(err);
-
 });
 
-logger.info("AI Worker Started");
+logger.info("🔥 AI Worker Started");

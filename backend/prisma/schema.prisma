@@ -71,6 +71,8 @@ model User {
 
   refreshTokens     RefreshToken[]
 
+  deletedAt DateTime?
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
@@ -112,6 +114,7 @@ model Business {
   knowledgeBases KnowledgeBase[]
 
   createdAt     DateTime @default(now())
+  deletedAt DateTime?
 
   @@index([ownerId])
 }
@@ -615,4 +618,15 @@ model Notification {
   @@index([userId])
   @@index([businessId])
   @@index([read])
+}
+model NotificationSettings {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @unique
+
+  email     Boolean  @default(true)
+  whatsapp  Boolean  @default(false)
+  leads     Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

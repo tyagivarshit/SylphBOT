@@ -2,7 +2,7 @@ import express from "express";
 import prisma from "../config/prisma";
 import upload from "../middleware/upload";
 import cloudinary from "../config/cloudinary";
-import { protect } from "../middleware/auth.middleware"; // 🔥 IMPORTANT
+import { protect } from "../middleware/auth.middleware";
 
 const router = express.Router();
 
@@ -13,12 +13,21 @@ router.get("/me", protect, async (req: any, res) => {
   try {
     const userId = req.user?.id;
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
+    const user = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null, // 🔥 IMPORTANT
+      },
       include: {
-        business: true,
+        business: {
+          where: { deletedAt: null }, // 🔥 IMPORTANT
+        },
       },
     });
+
+    if (!user) {
+      return res.status(401).json({ error: "User not found or deleted" });
+    }
 
     res.setHeader("Cache-Control", "no-store");
 
@@ -57,8 +66,11 @@ router.patch("/update", protect, async (req: any, res) => {
     });
 
     /* 🔹 GET BUSINESS ID */
-    const userData = await prisma.user.findUnique({
-      where: { id: userId },
+    const userData = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null, // 🔥 IMPORTANT
+      },
       select: { businessId: true },
     });
 
@@ -78,10 +90,15 @@ router.patch("/update", protect, async (req: any, res) => {
     }
 
     /* 🔥 RETURN UPDATED USER */
-    const updatedUser = await prisma.user.findUnique({
-      where: { id: userId },
+    const updatedUser = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null, // 🔥 IMPORTANT
+      },
       include: {
-        business: true,
+        business: {
+          where: { deletedAt: null }, // 🔥 IMPORTANT
+        },
       },
     });
 
@@ -98,7 +115,7 @@ router.patch("/update", protect, async (req: any, res) => {
 ========================= */
 router.post(
   "/upload-avatar",
-  protect, // 🔥 IMPORTANT
+  protect,
   upload.single("file"),
   async (req: any, res) => {
     try {
@@ -106,6 +123,18 @@ router.post(
 
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      /* 🔥 CHECK USER ACTIVE */
+      const user = await prisma.user.findFirst({
+        where: {
+          id: userId,
+          deletedAt: null, // 🔥 IMPORTANT
+        },
+      });
+
+      if (!user) {
+        return res.status(401).json({ error: "User deleted or not found" });
       }
 
       /* 🔥 CLOUDINARY UPLOAD */
@@ -135,10 +164,15 @@ router.post(
       });
 
       /* 🔥 RETURN UPDATED USER */
-      const updatedUser = await prisma.user.findUnique({
-        where: { id: userId },
+      const updatedUser = await prisma.user.findFirst({
+        where: {
+          id: userId,
+          deletedAt: null, // 🔥 IMPORTANT
+        },
         include: {
-          business: true,
+          business: {
+            where: { deletedAt: null }, // 🔥 IMPORTANT
+          },
         },
       });
 

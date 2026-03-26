@@ -12,6 +12,7 @@ import { processWebhookEvent } from "../services/webhookDedup.service";
 
 /* ✅ FIX: import rate limiter */
 import { incrementRate } from "../redis/rateLimiter.redis";
+import { createNotification } from "../services/notification.service";
 
 const router = Router();
 
@@ -38,7 +39,7 @@ const verifySignature = (req: any): boolean => {
       "sha256=" +
       crypto
         .createHmac("sha256", appSecret)
-        .update(req.rawBody || req.body)
+        .update(req.body)
         .digest("hex");
 
     return signature === expected;
@@ -272,12 +273,19 @@ router.post("/", async (req: any, res: Response) => {
     --------------------------------------------------- */
 
     const client = await prisma.client.findFirst({
-      where: {
-        platform: "INSTAGRAM",
-        pageId,
-        isActive: true,
+  where: {
+    platform: "INSTAGRAM",
+    pageId,
+    isActive: true,
+  },
+  include: {
+    business: {
+      select: {
+        ownerId: true, // 
       },
-    });
+    },
+  },
+});
 
     if (!client) {
 
@@ -311,6 +319,12 @@ router.post("/", async (req: any, res: Response) => {
       });
 
       log("Lead created:", lead.id);
+      await createNotification({
+        userId: client.business.ownerId,
+        title: "New Lead",
+        message: "A new Instagram lead has been created",
+        type: "LEAD",
+      });
 
     }
 
@@ -325,7 +339,13 @@ router.post("/", async (req: any, res: Response) => {
         sender: "USER",
       },
     });
-
+    // 🔥 ADD THIS
+     await createNotification({
+      userId: client.business.ownerId,
+      title: "New Message",
+      message: text,
+      type: "MESSAGE",
+    });
     try {
 
       const io = getIO();

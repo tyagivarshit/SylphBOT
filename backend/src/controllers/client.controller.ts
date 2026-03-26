@@ -200,7 +200,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         params: {
           client_id: process.env.META_APP_ID,
           client_secret: process.env.META_APP_SECRET,
-          redirect_uri: `${process.env.FRONTEND_URL}/integrations/meta/callback`,
+          redirect_uri: `${process.env.BACKEND_URL}/api/oauth/meta/callback`,
           code,
         },
       }
@@ -625,4 +625,30 @@ export const getSingleClient = async (req: Request, res: Response) => {
 
   }
 
+};
+/* ====================================================
+👇 YAHAN PASTE KAR (FILE KE END ME)
+==================================================== */
+
+export const startMetaOAuth = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const redirectUri = `${process.env.BACKEND_URL}/api/oauth/meta/callback`;
+
+    const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${process.env.META_APP_ID}&redirect_uri=${redirectUri}&scope=pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_messages,whatsapp_business_management&response_type=code&state=${userId}`;
+
+    return res.json({ url });
+
+  } catch (error) {
+    console.error("Start OAuth error:", error);
+
+    return res.status(500).json({
+      message: "Failed to start OAuth",
+    });
+  }
 };

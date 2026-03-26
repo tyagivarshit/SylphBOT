@@ -53,26 +53,31 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   };
 
   /* =========================
-     🔥 NOTIFICATIONS
+     🔥 NOTIFICATIONS (FIXED)
   ========================= */
-  const { data: notifications } = useQuery({
+  const { data } = useQuery({
     queryKey: ["notifications"],
     queryFn: async () => {
       const res = await fetch("http://localhost:5000/api/notifications", {
         credentials: "include",
       });
-      if (!res.ok) return [];
+
+      if (!res.ok) {
+        return { notifications: [], unreadCount: 0 };
+      }
+
       return res.json();
     },
   });
 
-  const unreadCount =
-    notifications?.filter((n: any) => !n.read).length || 0;
+  // ✅ FIX HERE
+  const notifications = data?.notifications || [];
+  const unreadCount = data?.unreadCount ?? 0;
 
   /* =========================
      🔥 SEARCH
   ========================= */
-  const { data, isLoading } = useQuery({
+  const { data: searchData, isLoading } = useQuery({
     queryKey: ["search", debounced],
     queryFn: async () => {
       if (!debounced) return [];
@@ -82,7 +87,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
     enabled: !!debounced,
   });
 
-  const results = Array.isArray(data) ? data : [];
+  const results = Array.isArray(searchData) ? searchData : [];
 
   useEffect(() => {
     function handleClickOutside(e: any) {
@@ -189,7 +194,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
 
         {/* 🔔 NOTIFICATIONS */}
         <div className="relative">
-          <NotificationsDropdown />
+          <NotificationsDropdown userId={userData?.id} />
 
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />

@@ -20,8 +20,7 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-
-  console.log("🌍 ROOT LAYOUT RENDER"); // 🔥 DEBUG
+  console.log("🌍 ROOT LAYOUT RENDER");
 
   return (
     <html lang="en">
@@ -30,13 +29,39 @@ export default function RootLayout({
       >
         <Providers>
 
+          {/* 🔥 FACEBOOK SDK */}
           <Script
             id="facebook-sdk"
             src="https://connect.facebook.net/en_US/sdk.js"
             strategy="afterInteractive"
           />
 
-          <Toaster position="top-right" />
+          {/* 🔥 PREMIUM TOASTER */}
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              duration: 3000,
+              style: {
+                background: "#111827",
+                color: "#fff",
+                borderRadius: "10px",
+                fontSize: "14px",
+                padding: "10px 14px",
+              },
+              success: {
+                iconTheme: {
+                  primary: "#14E1C1",
+                  secondary: "#fff",
+                },
+              },
+              error: {
+                iconTheme: {
+                  primary: "#ef4444",
+                  secondary: "#fff",
+                },
+              },
+            }}
+          />
 
           {children}
 

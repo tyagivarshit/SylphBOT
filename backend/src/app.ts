@@ -33,7 +33,10 @@ import analyticsRoutes from "./routes/analytics.routes";
 /* ========= NEW ROUTES ========= */
 import searchRoutes from "./routes/search.routes";
 import notificationRoutes from "./routes/notification";
-import userRoutes from "./routes/user.routes"; // ✅ ADDED
+import userRoutes from "./routes/user.routes";
+import securityRoutes from "./routes/security.routes";
+import integrationRoutes from "./routes/integration.routes";
+import oauthRoutes from "./routes/oauth.routes";
 
 /* ========= MIDDLEWARE ========= */
 import {
@@ -100,11 +103,6 @@ app.use(
 );
 
 /* ======================================
-🔥 BODY PARSER
-====================================== */
-app.use(express.json({ limit: "1mb" }));
-
-/* ======================================
 🔥 REQUEST LOGGER
 ====================================== */
 app.use((req, res, next) => {
@@ -132,25 +130,39 @@ app.use((req, res, next) => {
 app.use(monitoringMiddleware);
 
 /* ======================================
-🔥 WEBHOOKS (RAW BODY)
+🔥 WEBHOOKS (CRITICAL ORDER)
 ====================================== */
+
+// STRIPE
 app.use(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
   stripeWebhookRoutes
 );
 
+// WHATSAPP
 app.use(
   "/api/webhook/whatsapp",
   express.raw({ type: "application/json" }),
   whatsappWebhook
 );
 
+// INSTAGRAM (FIXED)
 app.use(
   "/api/webhook/instagram",
-  express.raw({ type: "application/json" }),
+  express.raw({
+    type: "application/json",
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf; // ✅ IMPORTANT
+    },
+  }),
   instagramWebhook
 );
+
+/* ======================================
+🔥 JSON PARSER (ONLY HERE)
+====================================== */
+app.use(express.json({ limit: "1mb" }));
 
 /* ======================================
 🔥 ROUTES
@@ -200,10 +212,13 @@ app.use("/api/leads", leadRoutes);
 /* ANALYTICS */
 app.use("/api/analytics", analyticsRoutes);
 
-/* 🔥 NEW ROUTES (CORRECT POSITION) */
+/* NEW */
 app.use("/api/search", searchRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/user", userRoutes); // ✅ IMPORTANT
+app.use("/api/user", userRoutes);
+app.use("/api/security", securityRoutes);
+app.use("/api/integrations", integrationRoutes);
+app.use("/api/oauth", oauthRoutes);
 
 /* ======================================
 🔥 HEALTH
@@ -213,7 +228,7 @@ app.get("/health", (_req, res) => {
 });
 
 /* ======================================
-🔥 404 (ALWAYS LAST)
+🔥 404
 ====================================== */
 app.use((_req, res) => {
   res.status(404).json({

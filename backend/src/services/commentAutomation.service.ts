@@ -2,7 +2,8 @@ import prisma from "../config/prisma";
 import axios from "axios";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "./ai.service";
-import { incrementRate } from "../redis/rateLimiter.redis";
+import { DELAY_TIME_5 } from "bullmq";
+import { incrementRate } from "../middleware/serviceRateLimiter"
 
 interface CommentInput {
   businessId: string;

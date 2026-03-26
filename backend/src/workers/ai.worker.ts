@@ -8,6 +8,9 @@ import { routeAIMessage } from "../services/aiRouter.service";
 import { runAutomationEngine } from "../services/automationEngine.service";
 import { checkAIRateLimit } from "../services/aiRateLimiter.service";
 
+/* 🔥 NEW (ONLY ADD) */
+import { bookingPriorityRouter } from "../services/bookingPriorityRouter.service";
+
 import { getIO } from "../sockets/socket.server";
 import logger from "../utils/logger";
 
@@ -80,6 +83,26 @@ const worker = new Worker(
           message,
         });
       }
+
+      /* =====================================================
+         🔥 BOOKING PRIORITY ROUTER (NEW - CLEAN INTEGRATION)
+      ===================================================== */
+
+      try {
+        const bookingReply = await bookingPriorityRouter({
+          businessId,
+          leadId,
+          message,
+        });
+
+        if (bookingReply) {
+          aiReply = bookingReply;
+        }
+      } catch (error) {
+        logger.warn({ leadId, error }, "Booking router failed");
+      }
+
+      /* ---------------- FALLBACK ---------------- */
 
       if (!aiReply || aiReply.trim().length === 0) {
         aiReply = "Thanks for your message!";

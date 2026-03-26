@@ -18,7 +18,6 @@ export default function BookedAppointments({
 }: {
   refreshKey?: number;
 }) {
-
   /* ============================= */
   /* AUTH */
   /* ============================= */
@@ -26,7 +25,7 @@ export default function BookedAppointments({
   const authLoading = useAuthGuard();
   const { user } = useAuth();
 
-  const businessId = user?.businessId; // ✅ FIXED
+  const businessId = user?.businessId;
 
   /* ============================= */
   /* STATE */
@@ -46,7 +45,6 @@ export default function BookedAppointments({
       setLoading(true);
 
       const res = await api.get(`/booking/list/${businessId}`);
-
       setBookings(res.data.bookings || []);
     } catch (err) {
       console.error("FETCH BOOKINGS ERROR:", err);
@@ -87,19 +85,19 @@ export default function BookedAppointments({
   };
 
   /* ============================= */
-  /* STATUS COLOR */
+  /* STATUS BADGE */
   /* ============================= */
 
-  const getStatusColor = (status: string) => {
+  const getStatusStyles = (status: string) => {
     switch (status) {
       case "BOOKED":
-        return "text-green-600";
+        return "bg-green-100 text-green-600";
       case "CANCELLED":
-        return "text-red-500";
+        return "bg-red-100 text-red-600";
       case "RESCHEDULED":
-        return "text-yellow-600";
+        return "bg-yellow-100 text-yellow-600";
       default:
-        return "text-gray-500";
+        return "bg-gray-100 text-gray-500";
     }
   };
 
@@ -109,8 +107,8 @@ export default function BookedAppointments({
 
   if (authLoading) {
     return (
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
-        <p className="text-sm text-gray-500">Checking authentication...</p>
+      <div className="flex items-center justify-center py-6">
+        <div className="w-6 h-6 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
       </div>
     );
   }
@@ -120,28 +118,39 @@ export default function BookedAppointments({
   /* ============================= */
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5">
+    <div className="h-full flex flex-col">
 
-      <h2 className="text-sm font-semibold text-gray-900 mb-4">
-        Booked Appointments
-      </h2>
+      {/* 🔥 HEADER */}
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-sm font-semibold text-gray-900">
+          Booked Appointments
+        </h2>
+      </div>
 
-      {!businessId ? (
-        <p className="text-sm text-gray-500">Loading business...</p>
-      ) : loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
-      ) : bookings.length === 0 ? (
-        <p className="text-sm text-gray-500">No bookings yet</p>
-      ) : (
-        <div className="space-y-3">
+      {/* 🔥 CONTENT */}
+      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
 
-          {bookings.map((b) => (
+        {!businessId ? (
+          <p className="text-sm text-gray-500 text-center py-6">
+            Loading business...
+          </p>
+        ) : loading ? (
+          <div className="flex items-center justify-center py-6">
+            <div className="w-6 h-6 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+          </div>
+        ) : bookings.length === 0 ? (
+          <p className="text-sm text-gray-500 text-center py-6">
+            No bookings yet
+          </p>
+        ) : (
+          bookings.map((b) => (
             <div
               key={b.id}
-              className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex justify-between items-center"
+              className="bg-white border border-gray-200 rounded-xl p-4 flex justify-between items-center hover:bg-gray-50 transition"
             >
+              {/* INFO */}
+              <div className="flex flex-col gap-1">
 
-              <div>
                 <p className="text-sm font-semibold text-gray-900">
                   {b.name}
                 </p>
@@ -150,29 +159,30 @@ export default function BookedAppointments({
                   {formatDateTime(b.startTime)}
                 </p>
 
-                <p
-                  className={`text-xs font-semibold ${getStatusColor(
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded-full font-medium w-fit ${getStatusStyles(
                     b.status
                   )}`}
                 >
                   {b.status}
-                </p>
+                </span>
+
               </div>
 
+              {/* ACTION */}
               {b.status === "BOOKED" && (
                 <button
                   onClick={() => handleCancel(b.id)}
-                  className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg"
+                  className="text-xs px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition"
                 >
                   Cancel
                 </button>
               )}
-
             </div>
-          ))}
+          ))
+        )}
 
-        </div>
-      )}
+      </div>
 
     </div>
   );

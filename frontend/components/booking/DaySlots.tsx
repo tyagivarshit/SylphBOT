@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { Plus } from "lucide-react";
 import CreateSlotModal from "./CreateSlotModal";
 
 export default function DaySlots({ onUpdate }: any) {
@@ -50,7 +51,9 @@ export default function DaySlots({ onUpdate }: any) {
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5">
+    <div className="h-full flex flex-col">
+
+      {/* 🔥 HEADER */}
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-sm font-semibold text-gray-900">
           Available Slots
@@ -58,40 +61,57 @@ export default function DaySlots({ onUpdate }: any) {
 
         <button
           onClick={() => setOpen(true)}
-          className="bg-blue-600 text-white text-xs px-3 py-1 rounded-lg"
+          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white font-medium hover:opacity-90 transition"
         >
-          Add Slot
+          <Plus size={14} />
+          Add
         </button>
       </div>
 
-      {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
-      ) : slots.length === 0 ? (
-        <p className="text-sm text-gray-500">
-          No slots available
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {slots.map((slot: any) => (
+      {/* 🔥 CONTENT */}
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <div className="w-6 h-6 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+          </div>
+        ) : slots.length === 0 ? (
+          <p className="text-sm text-gray-500 text-center py-6">
+            No slots available
+          </p>
+        ) : (
+          slots.map((slot: any) => (
             <div
               key={slot.id}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 font-medium flex justify-between"
+              className="flex justify-between items-center border border-gray-200 rounded-xl px-3 py-2 bg-white hover:bg-gray-50 transition"
             >
-              <span>
-                {formatTime(slot.startTime)} -{" "}
+              {/* TIME */}
+              <div className="text-sm font-medium text-gray-900">
+                {formatTime(slot.startTime)} –{" "}
                 {formatTime(slot.endTime)}
-              </span>
+              </div>
 
-              {!slot.isActive && (
-                <span className="text-xs text-red-500">
-                  Inactive
-                </span>
-              )}
+              {/* STATUS */}
+              <div className="flex items-center gap-2">
+
+                {slot.isActive ? (
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-600 font-medium">
+                    Active
+                  </span>
+                ) : (
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">
+                    Inactive
+                  </span>
+                )}
+
+              </div>
             </div>
-          ))}
-        </div>
-      )}
+          ))
+        )}
 
+      </div>
+
+      {/* 🔥 MODAL */}
       <CreateSlotModal
         open={open}
         onClose={() => setOpen(false)}

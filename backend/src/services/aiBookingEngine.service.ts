@@ -2,9 +2,7 @@ import prisma from "../config/prisma";
 import {
   fetchAvailableSlots,
   createNewAppointment,
-  getUpcomingAppointment,
   cancelAppointmentByLead,
-  rescheduleByLead,
 } from "./booking.service";
 
 import {
@@ -27,18 +25,13 @@ import {
 import { sendOwnerWhatsAppNotification } from "./ownerNotification.service";
 import { getLeadBehavior } from "./leadBehaviourEngine.service";
 
-/* =================================================
-TYPES
-================================================= */
+/* ================================================= */
 interface BookingResult {
   handled: boolean;
   message: string;
 }
 
-/* =================================================
-INTENT HELPERS
-================================================= */
-
+/* ================================================= */
 const isCancelIntent = (msg: string) =>
   ["cancel", "delete booking", "remove appointment"].some((k) =>
     msg.includes(k)
@@ -49,22 +42,16 @@ const isRescheduleIntent = (msg: string) =>
     msg.includes(k)
   );
 
-/* =================================================
-SMART DECISION
-================================================= */
-
+/* ================================================= */
 const shouldStartBooking = async (
   leadId: string,
   message: string
 ) => {
   const msg = message.toLowerCase();
 
-  const strongIntent = [
-    "book",
-    "schedule",
-    "appointment",
-    "call",
-  ].some((k) => msg.includes(k));
+  const strongIntent = ["book", "schedule", "appointment", "call"].some((k) =>
+    msg.includes(k)
+  );
 
   const behavior = await getLeadBehavior({ leadId });
 
@@ -74,10 +61,19 @@ const shouldStartBooking = async (
   return "NO";
 };
 
-/* =================================================
-MAIN ENGINE
-================================================= */
+/* ================================================= */
+const getContext = (state: any) => {
+  try {
+    if (!state?.context) return {};
+    return typeof state.context === "string"
+      ? JSON.parse(state.context)
+      : state.context;
+  } catch {
+    return {};
+  }
+};
 
+/* ================================================= */
 export const handleAIBookingIntent = async (
   businessId: string,
   leadId: string,
@@ -85,33 +81,22 @@ export const handleAIBookingIntent = async (
 ): Promise<BookingResult> => {
   try {
     const clean = message.toLowerCase().trim();
-
     const state: any = await getConversationState(leadId);
+    const context = getContext(state);
 
-    /* =================================================
-    🔥 1. CANCEL FLOW
-    ================================================= */
+    /* ================= CANCEL ================= */
     if (isCancelIntent(clean)) {
       try {
         await cancelAppointmentByLead(leadId);
-        return {
-          handled: true,
-          message: "Your booking has been cancelled 👍",
-        };
+        return { handled: true, message: "Your booking has been cancelled 👍" };
       } catch {
-        return {
-          handled: true,
-          message: "No active booking found.",
-        };
+        return { handled: true, message: "No active booking found." };
       }
     }
 
-    /* =================================================
-    🔥 2. RESCHEDULE FLOW
-    ================================================= */
+    /* ================= RESCHEDULE ================= */
     if (isRescheduleIntent(clean)) {
       await clearConversationState(leadId);
-
       return {
         handled: true,
         message:
@@ -119,14 +104,10 @@ export const handleAIBookingIntent = async (
       };
     }
 
-    /* =================================================
-    🔥 3. DECISION LAYER
-    ================================================= */
+    /* ================= DECISION ================= */
     const decision = await shouldStartBooking(leadId, message);
 
-    if (decision === "NO") {
-      return { handled: false, message: "" };
-    }
+    if (decision === "NO") return { handled: false, message: "" };
 
     if (decision === "SOFT" && !clean.includes("yes")) {
       return {
@@ -137,20 +118,57 @@ export const handleAIBookingIntent = async (
     }
 
     /* =================================================
-    🔵 4. CONFIRMATION
+    🔥 CONFIRMATION (FINAL FIXED)
     ================================================= */
     if (state?.state === "BOOKING_CONFIRMATION") {
-      const selectedSlot = new Date(state.context?.slot);
-      const slotKey = selectedSlot.toISOString();
+      const slotISO = context?.slot;
+
+      if (!slotISO) {
+        await clearConversationState(leadId);
+        return {
+          handled: true,
+          message: "Session expired. Please try again.",
+        };
+      }
+
+      const selectedSlot = new Date(slotISO);
 
       if (clean.includes("yes") || clean.includes("confirm")) {
-        const lockValid = await acquireSlotLock(slotKey, leadId);
+
+        /* 🔥 DATE NORMALIZATION */
+        const normalizedDate = new Date(
+          selectedSlot.getFullYear(),
+          selectedSlot.getMonth(),
+          selectedSlot.getDate()
+        );
+
+        const freshSlots = await fetchAvailableSlots(
+          businessId,
+          normalizedDate
+        );
+
+        /* 🔥 FINAL FIX: TOLERANCE MATCH */
+        const exists = freshSlots.some((s) => {
+          const diff = Math.abs(s.getTime() - selectedSlot.getTime());
+          return diff < 60000; // 1 minute tolerance
+        });
+
+        if (!exists) {
+          await clearConversationState(leadId);
+          return {
+            handled: true,
+            message: "⚠️ Slot no longer available. Please choose again.",
+          };
+        }
+
+        /* 🔒 LOCK */
+        const lockValid = await acquireSlotLock(slotISO, leadId);
 
         if (!lockValid) {
           await clearConversationState(leadId);
           return {
             handled: true,
-            message: "⚠️ Slot no longer available.",
+            message: "⚠️ Slot just got booked by someone else.",
           };
         }
 
@@ -173,7 +191,7 @@ export const handleAIBookingIntent = async (
             endTime,
           });
 
-          await releaseSlotLock(slotKey);
+          await releaseSlotLock(slotISO);
 
           await sendOwnerWhatsAppNotification({
             businessId,
@@ -188,7 +206,7 @@ export const handleAIBookingIntent = async (
             message: `✅ Booked for ${selectedSlot.toLocaleString()}`,
           };
         } catch {
-          await releaseSlotLock(slotKey);
+          await releaseSlotLock(slotISO);
           return {
             handled: true,
             message: "⚠️ Booking failed. Try again.",
@@ -203,7 +221,7 @@ export const handleAIBookingIntent = async (
     }
 
     /* =================================================
-    🧠 5. SMART DATE INPUT
+    🧠 SMART DATE INPUT
     ================================================= */
     const parsedDate = parseDateFromText(message);
     const parsedTime = parseTimeFromText(message);
@@ -212,29 +230,31 @@ export const handleAIBookingIntent = async (
       const requested = new Date(parsedDate);
       requested.setHours(parsedTime.hours, parsedTime.minutes, 0, 0);
 
+      const normalizedDate = new Date(
+        parsedDate.getFullYear(),
+        parsedDate.getMonth(),
+        parsedDate.getDate()
+      );
+
       const available = await fetchAvailableSlots(
         businessId,
-        parsedDate
+        normalizedDate
       );
 
       if (!available.length) {
-        return {
-          handled: true,
-          message: "No slots available that day.",
-        };
+        return { handled: true, message: "No slots available that day." };
       }
 
       const closest = findClosestSlot(requested, available);
 
       if (!closest) {
-        return {
-          handled: true,
-          message: "No suitable slot found.",
-        };
+        return { handled: true, message: "No suitable slot found." };
       }
 
       await setConversationState(leadId, "BOOKING_CONFIRMATION", {
-        context: { slot: closest.toISOString() },
+        context: {
+          slot: closest.toISOString(),
+        },
       });
 
       return {
@@ -248,7 +268,7 @@ Reply YES to confirm.`,
     }
 
     /* =================================================
-    🔵 6. FETCH SLOTS
+    🔵 FETCH SLOTS
     ================================================= */
     const today = new Date();
     const slotResults: Date[] = [];
@@ -277,8 +297,10 @@ Reply YES to confirm.`,
       };
     }
 
+    const slotISOs = slotResults.map((s) => s.toISOString());
+
     await setConversationState(leadId, "BOOKING_SELECTION", {
-      context: { slots: slotResults },
+      context: { slots: slotISOs },
     });
 
     const formatted = slotResults.map(

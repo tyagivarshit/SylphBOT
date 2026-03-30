@@ -1,9 +1,9 @@
 import prisma from "../config/prisma";
 
 /* =====================================================
-TYPES
+TYPES (STRICT 🔥)
 ===================================================== */
-type StateContext = any;
+type StateContext = Record<string, any>;
 
 interface SetStateOptions {
   context?: StateContext;
@@ -11,31 +11,39 @@ interface SetStateOptions {
 }
 
 /* =====================================================
-HELPERS
+STRICT HELPERS (NO SILENT FAILS)
 ===================================================== */
 
-const safeParse = (data: any) => {
+/* 🔥 ALWAYS PARSE STRING → OBJECT */
+const parseContext = (data: any): StateContext => {
+  if (!data) return {};
+
   try {
-    if (!data) return null;
-    if (typeof data === "object") return data;
-    return JSON.parse(data);
-  } catch {
-    return null;
+    if (typeof data === "string") {
+      return JSON.parse(data);
+    }
+
+    /* 🚨 If object stored directly (old bug), force stringify+parse */
+    return JSON.parse(JSON.stringify(data));
+  } catch (err) {
+    console.error("CONTEXT PARSE ERROR:", err);
+    return {};
   }
 };
 
-const safeStringify = (data: any) => {
+/* 🔥 ALWAYS STORE STRING */
+const stringifyContext = (data: any): string => {
   try {
-    if (!data) return null;
-    if (typeof data === "string") return data;
+    if (!data) return JSON.stringify({});
     return JSON.stringify(data);
-  } catch {
-    return null;
+  } catch (err) {
+    console.error("CONTEXT STRINGIFY ERROR:", err);
+    return JSON.stringify({});
   }
 };
 
 /* =====================================================
-GET STATE (SMART + SAFE)
+GET STATE (STRICT + SAFE)
 ===================================================== */
 export const getConversationState = async (leadId: string) => {
   if (!leadId) return null;
@@ -56,12 +64,12 @@ export const getConversationState = async (leadId: string) => {
 
   return {
     ...state,
-    context: safeParse(state.context),
+    context: parseContext(state.context), // ALWAYS OBJECT
   };
 };
 
 /* =====================================================
-SET STATE (UPSERT + FLEXIBLE)
+SET STATE (STRICT)
 ===================================================== */
 export const setConversationState = async (
   leadId: string,
@@ -70,7 +78,7 @@ export const setConversationState = async (
 ) => {
   if (!leadId) return null;
 
-  const { context, ttlMinutes = 15 } = options;
+  const { context = {}, ttlMinutes = 15 } = options;
 
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
@@ -79,14 +87,14 @@ export const setConversationState = async (
       where: { leadId },
       update: {
         state,
-        context: safeStringify(context),
+        context: stringifyContext(context), // ALWAYS STRING
         expiresAt,
         updatedAt: new Date(),
       },
       create: {
         leadId,
         state,
-        context: safeStringify(context),
+        context: stringifyContext(context),
         expiresAt,
       },
     });
@@ -97,30 +105,34 @@ export const setConversationState = async (
 };
 
 /* =====================================================
-UPDATE STATE (PARTIAL UPDATE 🔥)
+UPDATE STATE (SAFE MERGE)
 ===================================================== */
 export const updateConversationState = async (
   leadId: string,
-  partialContext: any
+  partialContext: StateContext
 ) => {
   if (!leadId) return null;
 
   const current = await getConversationState(leadId);
-
   if (!current) return null;
 
   const updatedContext = {
     ...(current.context || {}),
-    ...partialContext,
+    ...(partialContext || {}),
   };
 
-  return await prisma.conversationState.update({
-    where: { leadId },
-    data: {
-      context: safeStringify(updatedContext),
-      updatedAt: new Date(),
-    },
-  });
+  try {
+    return await prisma.conversationState.update({
+      where: { leadId },
+      data: {
+        context: stringifyContext(updatedContext),
+        updatedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error("UPDATE STATE ERROR:", error);
+    return null;
+  }
 };
 
 /* =====================================================
@@ -139,7 +151,7 @@ export const clearConversationState = async (leadId: string) => {
 };
 
 /* =====================================================
-DEBUG (OPTIONAL 🔥)
+DEBUG
 ===================================================== */
 export const getRawState = async (leadId: string) => {
   return prisma.conversationState.findUnique({

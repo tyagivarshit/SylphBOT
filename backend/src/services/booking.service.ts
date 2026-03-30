@@ -2,14 +2,22 @@ import prisma from "../config/prisma";
 
 /*
 =====================================================
-FETCH AVAILABLE SLOTS (UNCHANGED CORE - OPTIMIZED)
+🔥 FETCH AVAILABLE SLOTS (UTC FIXED)
 =====================================================
 */
 export const fetchAvailableSlots = async (
   businessId: string,
   date: Date
 ): Promise<Date[]> => {
-  const dayOfWeek = date.getDay();
+
+  /* 🔥 NORMALIZE TO UTC DATE */
+  const utcDate = new Date(Date.UTC(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate()
+  ));
+
+  const dayOfWeek = utcDate.getUTCDay();
 
   const slots = await prisma.bookingSlot.findMany({
     where: {
@@ -22,11 +30,12 @@ export const fetchAvailableSlots = async (
 
   if (!slots.length) return [];
 
-  const startOfDay = new Date(date);
-  startOfDay.setHours(0, 0, 0, 0);
+  /* 🔥 UTC DAY RANGE */
+  const startOfDay = new Date(utcDate);
+  startOfDay.setUTCHours(0, 0, 0, 0);
 
-  const endOfDay = new Date(date);
-  endOfDay.setHours(23, 59, 59, 999);
+  const endOfDay = new Date(utcDate);
+  endOfDay.setUTCHours(23, 59, 59, 999);
 
   const appointments = await prisma.appointment.findMany({
     where: {
@@ -52,11 +61,12 @@ export const fetchAvailableSlots = async (
     const slotDuration = slot.slotDuration || 30;
     const bufferTime = slot.bufferTime || 0;
 
-    let current = new Date(date);
-    current.setHours(startHour, startMinute, 0, 0);
+    /* 🔥 UTC SLOT GENERATION */
+    let current = new Date(utcDate);
+    current.setUTCHours(startHour, startMinute, 0, 0);
 
-    const end = new Date(date);
-    end.setHours(endHour, endMinute, 0, 0);
+    const end = new Date(utcDate);
+    end.setUTCHours(endHour, endMinute, 0, 0);
 
     while (current < end) {
       const slotStart = new Date(current);
@@ -87,10 +97,9 @@ export const fetchAvailableSlots = async (
 
 /*
 =====================================================
-CREATE APPOINTMENT (TRANSACTION SAFE)
+CREATE APPOINTMENT (UNCHANGED)
 =====================================================
 */
-
 interface AppointmentInput {
   businessId: string;
   leadId?: string;
@@ -159,10 +168,9 @@ export const createNewAppointment = async (
 
 /*
 =====================================================
-GET UPCOMING APPOINTMENT (🔥 NEW)
+GET UPCOMING APPOINTMENT
 =====================================================
 */
-
 export const getUpcomingAppointment = async (leadId: string) => {
   return prisma.appointment.findFirst({
     where: {
@@ -176,10 +184,9 @@ export const getUpcomingAppointment = async (leadId: string) => {
 
 /*
 =====================================================
-CANCEL APPOINTMENT (SMART)
+CANCEL APPOINTMENT
 =====================================================
 */
-
 export const cancelAppointmentByLead = async (leadId: string) => {
   const appointment = await getUpcomingAppointment(leadId);
 
@@ -195,10 +202,9 @@ export const cancelAppointmentByLead = async (leadId: string) => {
 
 /*
 =====================================================
-RESCHEDULE APPOINTMENT (SMART)
+RESCHEDULE APPOINTMENT
 =====================================================
 */
-
 export const rescheduleByLead = async (
   leadId: string,
   newStart: Date,

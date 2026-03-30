@@ -58,4 +58,12 @@ export const env = {
   STRIPE_ELITE_USD_YEARLY: process.env.STRIPE_ELITE_USD_YEARLY!,
   STRIPE_ELITE_USD_MONTHLY_EARLY: process.env.STRIPE_ELITE_USD_MONTHLY_EARLY!,
   STRIPE_ELITE_USD_YEARLY_EARLY: process.env.STRIPE_ELITE_USD_YEARLY_EARLY!,
+
+  /* =========================
+     TWILIO (WHATSAPP)
+  ========================= */
+  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID as string,
+  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN as string,
+  TWILIO_WHATSAPP_NUMBER: process.env.TWILIO_WHATSAPP_NUMBER as string,
+
 };

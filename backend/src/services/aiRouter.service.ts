@@ -1,4 +1,4 @@
-import { generateIntentReply } from "./aiIntentEngine.service";
+import { generateIntentReply, IntentResponse } from "./aiIntentEngine.service";
 import { handleAIBookingIntent } from "./aiBookingEngine.service";
 import {
   getConversationState,
@@ -9,17 +9,39 @@ import { generateAIFunnelReply } from "./aiFunnel.service";
 import { generateAIReply } from "./ai.service";
 import { isHumanActive } from "./humanTakeoverManager.service";
 
-/*
-=========================================================
-AI ROUTER (FINAL - SMART + SAFE)
-=========================================================
-*/
+import { applyConversionBooster } from "./aiConversionBooster.service";
+import { processLeadIntelligence } from "./leadIntelligence.service";
+import { getLeadBehavior } from "./leadBehaviourEngine.service";
 
+/* =================================================
+TYPES
+================================================= */
 interface RouterInput {
   businessId: string;
   leadId: string;
   message: string;
 }
+
+/* =================================================
+HELPERS
+================================================= */
+
+const isGreeting = (msg: string) =>
+  ["hi", "hello", "hey", "hii", "yo"].includes(msg);
+
+const isAffirmative = (msg: string) =>
+  ["yes", "yeah", "yep", "sure", "ok", "okay"].some((k) =>
+    msg.includes(k)
+  );
+
+const isContextSwitch = (msg: string) =>
+  ["wait", "stop", "leave it", "not now", "later"].some((k) =>
+    msg.includes(k)
+  );
+
+/* =================================================
+🔥 MAIN ROUTER
+================================================= */
 
 export const routeAIMessage = async ({
   businessId,
@@ -32,177 +54,150 @@ export const routeAIMessage = async ({
     /* =================================================
     0️⃣ HUMAN TAKEOVER
     ================================================= */
+    if (await isHumanActive(leadId)) return null;
 
-    if (await isHumanActive(leadId)) {
-      return null;
+    /* =================================================
+    🧠 1️⃣ LEAD INTELLIGENCE
+    ================================================= */
+    await processLeadIntelligence({ leadId, message });
+    const behavior = await getLeadBehavior({ leadId });
+
+    /* =================================================
+    👋 2️⃣ GREETING
+    ================================================= */
+    if (isGreeting(lowerMessage)) {
+      await clearConversationState(leadId);
+      return "Hey 👋 How can I help you today?";
     }
 
     /* =================================================
-    1️⃣ STATE ENGINE
+    🧠 3️⃣ INTENT DETECTION
     ================================================= */
-
-    const state = await getConversationState(leadId);
-
-    /* =========================
-    🔵 BOOKING CONFIRMATION STATE
-    ========================= */
-
-    if (state?.state === "BOOKING_CONFIRMATION") {
-      const selectedSlot = new Date(state.context || "");
-
-      if (lowerMessage.includes("confirm") || lowerMessage === "yes") {
-        const bookingResult = await handleAIBookingIntent(
-          businessId,
-          leadId,
-          selectedSlot.toISOString()
-        );
-
-        await clearConversationState(leadId);
-
-        return bookingResult.message || "✅ Appointment confirmed";
-      }
-
-      if (lowerMessage.includes("change")) {
-        await clearConversationState(leadId);
-        return "No problem, please select another slot.";
-      }
-
-      return 'Please reply "confirm" or "change".';
-    }
-
-    /* =========================
-    🟢 BOOKING SELECTION STATE
-    ========================= */
-
-    if (state?.state === "BOOKING_SELECTION") {
-      try {
-        const slots: string[] = JSON.parse(state.context || "[]");
-
-        let selectedSlot: string | null = null;
-
-        // ✅ 1. Number input
-        const slotIndex = parseInt(message);
-        if (!isNaN(slotIndex)) {
-          selectedSlot = slots[slotIndex - 1];
-        }
-
-        // ✅ 2. Basic NLP (first, second, last)
-        if (!selectedSlot) {
-          if (lowerMessage.includes("first")) selectedSlot = slots[0];
-          else if (lowerMessage.includes("second")) selectedSlot = slots[1];
-          else if (lowerMessage.includes("third")) selectedSlot = slots[2];
-          else if (lowerMessage.includes("last"))
-            selectedSlot = slots[slots.length - 1];
-          else if (lowerMessage.includes("earliest"))
-            selectedSlot = slots[0];
-          else if (lowerMessage.includes("latest"))
-            selectedSlot = slots[slots.length - 1];
-        }
-
-        // ✅ अगर slot mil gaya
-        if (selectedSlot) {
-          await setConversationState(
-            leadId,
-            "BOOKING_CONFIRMATION",
-            selectedSlot,
-            15
-          );
-
-          const date = new Date(selectedSlot);
-
-          return `You selected:
-📅 ${date.toLocaleString()}
-
-Reply "confirm" to book or "change" to pick another slot.`;
-        }
-
-        // ❌ confirm bola but slot nahi select
-        if (
-          lowerMessage.includes("confirm") ||
-          lowerMessage.includes("yes")
-        ) {
-          return "Please select a slot first from the list above.";
-        }
-
-        return "Please choose a slot (e.g., 1, first, second, last).";
-      } catch (err) {
-        console.error("BOOKING STATE ERROR", err);
-        await clearConversationState(leadId);
-        return "Something went wrong. Please try booking again.";
-      }
-    }
-
-    /* =================================================
-    2️⃣ INTENT ENGINE
-    ================================================= */
-
-    let intentResponse: any = null;
+    let intent: IntentResponse | null = null;
 
     try {
-      intentResponse = await generateIntentReply({
+      intent = await generateIntentReply({
         businessId,
         leadId,
         message,
       });
+    } catch {}
 
-      if (intentResponse?.intent === "BOOKING") {
-        const bookingResult = await handleAIBookingIntent(
-          businessId,
-          leadId,
-          message
-        );
-
-        if (bookingResult?.handled) {
-          return bookingResult.message;
-        }
-      }
-
-      if (intentResponse?.reply) {
-        return intentResponse.reply;
-      }
-    } catch (err) {
-      console.log("Intent engine failed");
+    /* =================================================
+    🔄 4️⃣ CONTEXT SWITCH
+    ================================================= */
+    if (isContextSwitch(lowerMessage)) {
+      await clearConversationState(leadId);
     }
 
     /* =================================================
-    3️⃣ STRONG BOOKING FALLBACK
+    📦 5️⃣ STATE ENGINE
     ================================================= */
+    const state = await getConversationState(leadId);
 
-    const strongBookingTriggers = [
-      "book appointment",
-      "schedule call",
-      "book call",
-      "book meeting",
-      "schedule meeting",
-      "book now",
-      "i want to book",
-      "schedule demo",
-    ];
+    const allowStateFlow =
+      state &&
+      (intent?.intent === "BOOKING" ||
+        isAffirmative(lowerMessage) ||
+        lowerMessage.includes("confirm"));
 
-    const isStrongBooking = strongBookingTriggers.some((word) =>
-      lowerMessage.includes(word)
-    );
+    if (state && allowStateFlow) {
+      /* -------- CONFIRMATION -------- */
+      if (state.state === "BOOKING_CONFIRMATION") {
+        const selectedSlot = new Date(state.context?.slot);
 
-    if (isStrongBooking) {
-      try {
-        const bookingResult = await handleAIBookingIntent(
-          businessId,
-          leadId,
-          message
-        );
+        if (isAffirmative(lowerMessage) || lowerMessage.includes("confirm")) {
+          const bookingResult = await handleAIBookingIntent(
+            businessId,
+            leadId,
+            selectedSlot.toISOString()
+          );
 
-        if (bookingResult?.handled) {
-          return bookingResult.message;
+          await clearConversationState(leadId);
+          return bookingResult.message || "✅ Booking confirmed!";
         }
-      } catch (err) {
-        console.log("Booking engine fallback failed");
+
+        if (lowerMessage.includes("change")) {
+          await clearConversationState(leadId);
+          return "No worries 👍 Let's pick another slot.";
+        }
+
+        return `Just confirm once 👍
+
+Reply YES to confirm  
+or CHANGE to pick another slot.`;
+      }
+
+      /* -------- SLOT SELECTION -------- */
+      if (state.state === "BOOKING_SELECTION") {
+        try {
+          const slots: string[] = state.context?.slots || [];
+
+          let selectedSlot: string | null = null;
+
+          const index = parseInt(message);
+          if (!isNaN(index)) selectedSlot = slots[index - 1];
+
+          if (!selectedSlot) {
+            if (lowerMessage.includes("first")) selectedSlot = slots[0];
+            else if (lowerMessage.includes("second"))
+              selectedSlot = slots[1];
+            else if (lowerMessage.includes("last"))
+              selectedSlot = slots[slots.length - 1];
+          }
+
+          if (selectedSlot) {
+            await setConversationState(leadId, "BOOKING_CONFIRMATION", {
+              context: { slot: selectedSlot },
+            });
+
+            const date = new Date(selectedSlot);
+
+            return `Great choice 👍
+
+📅 ${date.toLocaleString()}
+
+Reply YES to confirm  
+or CHANGE to pick another time.`;
+          }
+
+          return "Please select a valid slot number (1, 2, 3...).";
+        } catch {
+          await clearConversationState(leadId);
+          return "Something went wrong. Please try again.";
+        }
       }
     }
 
-    /* =================================================
-    4️⃣ FUNNEL AI
-    ================================================= */
+    /* 🔥 STATE EXIT */
+    if (state && !allowStateFlow) {
+      await clearConversationState(leadId);
+    }
 
+    /* =================================================
+    🔥 6️⃣ BOOKING (CONTROLLED)
+    ================================================= */
+    let bookingResult = { handled: false, message: "" };
+
+    if (
+      intent?.intent === "BOOKING" ||
+      lowerMessage.includes("book") ||
+      lowerMessage.includes("schedule")
+    ) {
+      bookingResult = await handleAIBookingIntent(
+        businessId,
+        leadId,
+        message
+      );
+    }
+
+    if (bookingResult?.handled) {
+      return bookingResult.message;
+    }
+
+    /* =================================================
+    🧲 7️⃣ FUNNEL
+    ================================================= */
     try {
       const funnelReply = await generateAIFunnelReply({
         businessId,
@@ -210,23 +205,40 @@ Reply "confirm" to book or "change" to pick another slot.`;
         message,
       });
 
-      if (funnelReply) return funnelReply;
-    } catch (err) {
-      console.log("Funnel AI failed");
-    }
+      if (funnelReply) {
+        const boosted = behavior.urgency
+          ? await applyConversionBooster({
+              leadId,
+              message: funnelReply,
+              behavior,
+            })
+          : { boostedMessage: funnelReply };
+
+        return boosted.boostedMessage;
+      }
+    } catch {}
 
     /* =================================================
-    5️⃣ BASIC AI
+    💬 8️⃣ FALLBACK
     ================================================= */
-
-    return await generateAIReply({
+    const fallback = await generateAIReply({
       businessId,
       leadId,
       message,
     });
 
+    const boosted = behavior.urgency
+      ? await applyConversionBooster({
+          leadId,
+          message: fallback || "",
+          behavior,
+        })
+      : { boostedMessage: fallback || "" };
+
+    return boosted.boostedMessage;
+
   } catch (error) {
     console.error("AI ROUTER ERROR:", error);
-    return "Sorry, something went wrong while processing your message.";
+    return "Sorry, something went wrong.";
   }
 };

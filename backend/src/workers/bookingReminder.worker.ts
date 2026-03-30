@@ -2,18 +2,13 @@ import { Worker } from "bullmq";
 import prisma from "../config/prisma";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
 import { redisConnection } from "../config/redis";
+import { BOOKING_REMINDER_QUEUE_NAME } from "../queues/bookingReminder.queue";
 
 /*
 =========================================================
-BOOKING REMINDER WORKER
-Handles:
-1. Booking confirmation message
-2. Morning reminder
-3. 30 min before reminder
+BOOKING REMINDER WORKER (FINAL PRO)
 =========================================================
 */
-
-const QUEUE_NAME = "booking-reminder-queue";
 
 type ReminderJob = {
   type: "CONFIRMATION" | "MORNING" | "BEFORE_30_MIN";
@@ -21,7 +16,7 @@ type ReminderJob = {
 };
 
 export const bookingReminderWorker = new Worker<ReminderJob>(
-  QUEUE_NAME,
+  BOOKING_REMINDER_QUEUE_NAME, // ✅ sync with queue
   async (job) => {
     try {
       const { type, appointmentId } = job.data;
@@ -43,7 +38,7 @@ export const bookingReminderWorker = new Worker<ReminderJob>(
         return;
       }
 
-      const { lead, startTime, business } = appointment;
+      const { lead, startTime } = appointment;
 
       if (!lead?.phone) {
         console.log("❌ No phone number for lead");
@@ -64,15 +59,17 @@ export const bookingReminderWorker = new Worker<ReminderJob>(
 
 📅 Date & Time: ${formattedTime}
 
-We look forward to speaking with you.`;
+We look forward to speaking with you 🚀`;
           break;
 
         case "MORNING":
-          message = `🌅 Reminder: You have a meeting scheduled today.
+          message = `🌅 Good morning!
+
+Reminder: You have a meeting today.
 
 📅 Time: ${formattedTime}
 
-Please be ready.`;
+Be ready 👍`;
           break;
 
         case "BEFORE_30_MIN":
@@ -80,26 +77,31 @@ Please be ready.`;
 
 📅 Time: ${formattedTime}
 
-Join on time.`;
+Please join on time 🚀`;
           break;
 
         default:
-          console.log("❌ Unknown reminder type");
+          console.log("❌ Unknown reminder type:", type);
           return;
       }
 
       /* =================================================
-      SEND WHATSAPP MESSAGE
+      SEND WHATSAPP
       ================================================= */
 
-      await sendWhatsAppMessage({
+      const sent = await sendWhatsAppMessage({
         to: lead.phone,
         message,
       });
 
+      if (!sent) {
+        throw new Error("WhatsApp send failed");
+      }
+
       console.log(`✅ ${type} reminder sent to ${lead.phone}`);
     } catch (error) {
       console.error("❌ BOOKING REMINDER WORKER ERROR:", error);
+      throw error; // 🔥 important → retry trigger karega
     }
   },
   {

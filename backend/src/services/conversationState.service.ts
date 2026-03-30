@@ -1,87 +1,148 @@
-import prisma from "../config/prisma"
+import prisma from "../config/prisma";
 
-/*
-GET CURRENT CONVERSATION STATE
-*/
+/* =====================================================
+TYPES
+===================================================== */
+type StateContext = any;
+
+interface SetStateOptions {
+  context?: StateContext;
+  ttlMinutes?: number;
+}
+
+/* =====================================================
+HELPERS
+===================================================== */
+
+const safeParse = (data: any) => {
+  try {
+    if (!data) return null;
+    if (typeof data === "object") return data;
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+};
+
+const safeStringify = (data: any) => {
+  try {
+    if (!data) return null;
+    if (typeof data === "string") return data;
+    return JSON.stringify(data);
+  } catch {
+    return null;
+  }
+};
+
+/* =====================================================
+GET STATE (SMART + SAFE)
+===================================================== */
 export const getConversationState = async (leadId: string) => {
-
   if (!leadId) return null;
 
-  const state = await prisma.conversationState.findFirst({
+  const state = await prisma.conversationState.findUnique({
     where: { leadId },
-    orderBy: { updatedAt: "desc" }
   });
 
   if (!state) return null;
 
-  /* CHECK EXPIRY */
-
+  /* 🔥 AUTO EXPIRE */
   if (state.expiresAt && new Date() > state.expiresAt) {
-
-    await prisma.conversationState.deleteMany({
+    await prisma.conversationState.delete({
       where: { leadId },
     });
-
     return null;
-
   }
 
-  return state;
-
+  return {
+    ...state,
+    context: safeParse(state.context),
+  };
 };
 
-/*
-SET OR UPDATE CONVERSATION STATE
-*/
+/* =====================================================
+SET STATE (UPSERT + FLEXIBLE)
+===================================================== */
 export const setConversationState = async (
   leadId: string,
   state: string,
-  context?: string,
-  ttlMinutes: number = 15
+  options: SetStateOptions = {}
 ) => {
-
   if (!leadId) return null;
+
+  const { context, ttlMinutes = 15 } = options;
 
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
-  const existing = await prisma.conversationState.findFirst({
-    where: { leadId },
-  });
-
-  if (existing) {
-
-    return prisma.conversationState.update({
-      where: { id: existing.id },
-      data: {
+  try {
+    return await prisma.conversationState.upsert({
+      where: { leadId },
+      update: {
         state,
-        context,
+        context: safeStringify(context),
         expiresAt,
         updatedAt: new Date(),
       },
+      create: {
+        leadId,
+        state,
+        context: safeStringify(context),
+        expiresAt,
+      },
     });
-
+  } catch (error) {
+    console.error("SET STATE ERROR:", error);
+    return null;
   }
-
-  return prisma.conversationState.create({
-    data: {
-      leadId,
-      state,
-      context,
-      expiresAt,
-    },
-  });
-
 };
 
-/*
-CLEAR CONVERSATION STATE
-*/
-export const clearConversationState = async (leadId: string) => {
+/* =====================================================
+UPDATE STATE (PARTIAL UPDATE 🔥)
+===================================================== */
+export const updateConversationState = async (
+  leadId: string,
+  partialContext: any
+) => {
+  if (!leadId) return null;
 
+  const current = await getConversationState(leadId);
+
+  if (!current) return null;
+
+  const updatedContext = {
+    ...(current.context || {}),
+    ...partialContext,
+  };
+
+  return await prisma.conversationState.update({
+    where: { leadId },
+    data: {
+      context: safeStringify(updatedContext),
+      updatedAt: new Date(),
+    },
+  });
+};
+
+/* =====================================================
+CLEAR STATE
+===================================================== */
+export const clearConversationState = async (leadId: string) => {
   if (!leadId) return;
 
-  return prisma.conversationState.deleteMany({
+  try {
+    await prisma.conversationState.delete({
+      where: { leadId },
+    });
+  } catch (error) {
+    console.error("CLEAR STATE ERROR:", error);
+  }
+};
+
+/* =====================================================
+DEBUG (OPTIONAL 🔥)
+===================================================== */
+export const getRawState = async (leadId: string) => {
+  return prisma.conversationState.findUnique({
     where: { leadId },
   });
-
 };

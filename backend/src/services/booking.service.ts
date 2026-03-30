@@ -1,17 +1,14 @@
 import prisma from "../config/prisma";
-import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
 
 /*
 =====================================================
-FETCH AVAILABLE SLOTS (ADVANCED - OPTIMIZED)
+FETCH AVAILABLE SLOTS (UNCHANGED CORE - OPTIMIZED)
 =====================================================
 */
-
 export const fetchAvailableSlots = async (
   businessId: string,
   date: Date
 ): Promise<Date[]> => {
-
   const dayOfWeek = date.getDay();
 
   const slots = await prisma.bookingSlot.findMany({
@@ -20,9 +17,7 @@ export const fetchAvailableSlots = async (
       dayOfWeek,
       isActive: true,
     },
-    orderBy: {
-      startTime: "asc",
-    },
+    orderBy: { startTime: "asc" },
   });
 
   if (!slots.length) return [];
@@ -36,37 +31,23 @@ export const fetchAvailableSlots = async (
   const appointments = await prisma.appointment.findMany({
     where: {
       businessId,
-      startTime: {
-        gte: startOfDay,
-        lte: endOfDay,
-      },
+      startTime: { gte: startOfDay, lte: endOfDay },
       status: "BOOKED",
     },
-    select: {
-      startTime: true,
-      endTime: true,
-    },
+    select: { startTime: true, endTime: true },
   });
 
-  /* 🔥 PERFORMANCE BOOST */
   const appointmentRanges = appointments.map((a) => ({
     start: a.startTime.getTime(),
     end: a.endTime.getTime(),
   }));
 
   const now = new Date();
-
   const availableSlots: Date[] = [];
 
   for (const slot of slots) {
-
-    const [startHour, startMinute] = slot.startTime
-      .split(":")
-      .map(Number);
-
-    const [endHour, endMinute] = slot.endTime
-      .split(":")
-      .map(Number);
+    const [startHour, startMinute] = slot.startTime.split(":").map(Number);
+    const [endHour, endMinute] = slot.endTime.split(":").map(Number);
 
     const slotDuration = slot.slotDuration || 30;
     const bufferTime = slot.bufferTime || 0;
@@ -78,7 +59,6 @@ export const fetchAvailableSlots = async (
     end.setHours(endHour, endMinute, 0, 0);
 
     while (current < end) {
-
       const slotStart = new Date(current);
       const slotEnd = new Date(
         current.getTime() + slotDuration * 60000
@@ -124,7 +104,6 @@ interface AppointmentInput {
 export const createNewAppointment = async (
   data: AppointmentInput
 ) => {
-
   const {
     businessId,
     leadId,
@@ -136,8 +115,6 @@ export const createNewAppointment = async (
   } = data;
 
   return prisma.$transaction(async (tx) => {
-
-    /* 🔥 STRONG CONFLICT CHECK (INSIDE TX) */
     const existing = await tx.appointment.findFirst({
       where: {
         businessId,
@@ -166,7 +143,6 @@ export const createNewAppointment = async (
       },
     });
 
-    /* 🔥 SAFE LEAD UPDATE */
     if (leadId) {
       await tx.lead.update({
         where: { id: leadId },
@@ -183,31 +159,67 @@ export const createNewAppointment = async (
 
 /*
 =====================================================
-RESCHEDULE APPOINTMENT (SAFE)
+GET UPCOMING APPOINTMENT (🔥 NEW)
 =====================================================
 */
 
-export const rescheduleAppointment = async (
-  appointmentId: string,
+export const getUpcomingAppointment = async (leadId: string) => {
+  return prisma.appointment.findFirst({
+    where: {
+      leadId,
+      status: "BOOKED",
+      startTime: { gte: new Date() },
+    },
+    orderBy: { startTime: "asc" },
+  });
+};
+
+/*
+=====================================================
+CANCEL APPOINTMENT (SMART)
+=====================================================
+*/
+
+export const cancelAppointmentByLead = async (leadId: string) => {
+  const appointment = await getUpcomingAppointment(leadId);
+
+  if (!appointment) {
+    throw new Error("No active booking found");
+  }
+
+  return prisma.appointment.update({
+    where: { id: appointment.id },
+    data: { status: "CANCELLED" },
+  });
+};
+
+/*
+=====================================================
+RESCHEDULE APPOINTMENT (SMART)
+=====================================================
+*/
+
+export const rescheduleByLead = async (
+  leadId: string,
   newStart: Date,
   newEnd: Date
 ) => {
+  const appointment = await getUpcomingAppointment(leadId);
+
+  if (!appointment) {
+    throw new Error("No active booking found");
+  }
+
+  if (appointment.startTime < new Date()) {
+    throw new Error("Cannot reschedule past appointment");
+  }
 
   return prisma.$transaction(async (tx) => {
-
-    const appointment = await tx.appointment.findUnique({
-      where: { id: appointmentId },
-    });
-
-    if (!appointment) {
-      throw new Error("Appointment not found");
-    }
-
     const conflict = await tx.appointment.findFirst({
       where: {
         businessId: appointment.businessId,
         status: "BOOKED",
-        id: { not: appointmentId },
+        id: { not: appointment.id },
         AND: [
           { startTime: { lt: newEnd } },
           { endTime: { gt: newStart } },
@@ -220,7 +232,7 @@ export const rescheduleAppointment = async (
     }
 
     return tx.appointment.update({
-      where: { id: appointmentId },
+      where: { id: appointment.id },
       data: {
         startTime: newStart,
         endTime: newEnd,
@@ -228,23 +240,4 @@ export const rescheduleAppointment = async (
       },
     });
   });
-};
-
-/*
-=====================================================
-CANCEL APPOINTMENT
-=====================================================
-*/
-
-export const cancelExistingAppointment = async (
-  appointmentId: string
-) => {
-
-  return prisma.appointment.update({
-    where: { id: appointmentId },
-    data: {
-      status: "CANCELLED",
-    },
-  });
-
 };

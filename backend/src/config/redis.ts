@@ -4,9 +4,13 @@ import { RedisOptions } from "bullmq";
 /* BullMQ connection */
 
 export const redisConnection: RedisOptions = {
-  url: process.env.REDIS_URL,
+  host: "127.0.0.1",
+  port: 6379,
 };
 
 /* Redis client for rate limits, cache, etc */
 
-export const redis = new Redis(process.env.REDIS_URL as string);
+export const redis = new Redis({
+  host: "127.0.0.1",
+  port: 6379,
+});

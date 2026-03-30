@@ -561,7 +561,8 @@ AI CONVERSATION STATE ENGINE
 model ConversationState {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
 
-  leadId    String   @db.ObjectId
+  leadId    String   @unique @db.ObjectId   // ✅ ONLY THIS
+
   lead      Lead     @relation(fields: [leadId], references: [id])
 
   state     String
@@ -571,8 +572,6 @@ model ConversationState {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  @@index([leadId])
 }
 
 /* =====================================================

@@ -34,7 +34,23 @@ const worker = new Worker(
     let aiReply: string | null = null;
 
     try {
-      /* ---------------- HUMAN CHECK ---------------- */
+      /* =====================================================
+      🔴 LOOP PROTECTION (VERY IMPORTANT)
+      ===================================================== */
+      const lowerMsg = message?.toLowerCase() || "";
+
+      if (
+        lowerMsg.includes("conversation limit reached") ||
+        lowerMsg.includes("our team will assist") ||
+        lowerMsg.includes("please wait")
+      ) {
+        logger.warn("🚫 Blocked loop/system message");
+        return;
+      }
+
+      /* =====================================================
+      👤 HUMAN TAKEOVER CHECK
+      ===================================================== */
       const lead = await prisma.lead.findUnique({
         where: { id: leadId },
         select: { isHumanActive: true },
@@ -42,20 +58,45 @@ const worker = new Worker(
 
       if (lead?.isHumanActive) return;
 
-      /* ---------------- AUTOMATION ---------------- */
+      /* =====================================================
+      🧠 STEP 1: BOOKING PRIORITY (HIGHEST)
+      ===================================================== */
       try {
-        const automationReply = await runAutomationEngine({
+        const bookingReply = await bookingPriorityRouter({
           businessId,
           leadId,
           message,
         });
 
-        if (automationReply) aiReply = automationReply;
+        if (bookingReply) {
+          aiReply = bookingReply;
+        }
       } catch (err) {
-        logger.warn({ err }, "Automation failed");
+        logger.warn({ err }, "Booking router failed");
       }
 
-      /* ---------------- AI ---------------- */
+      /* =====================================================
+      ⚙️ STEP 2: AUTOMATION (SECOND)
+      ===================================================== */
+      if (!aiReply) {
+        try {
+          const automationReply = await runAutomationEngine({
+            businessId,
+            leadId,
+            message,
+          });
+
+          if (automationReply) {
+            aiReply = automationReply;
+          }
+        } catch (err) {
+          logger.warn({ err }, "Automation failed");
+        }
+      }
+
+      /* =====================================================
+      🤖 STEP 3: AI BRAIN (FINAL)
+      ===================================================== */
       if (!aiReply) {
         aiReply = await routeAIMessage({
           businessId,
@@ -64,20 +105,11 @@ const worker = new Worker(
         });
       }
 
-      /* ---------------- BOOKING ---------------- */
-      try {
-        const bookingReply = await bookingPriorityRouter({
-          businessId,
-          leadId,
-          message,
-        });
-
-        if (bookingReply) aiReply = bookingReply;
-      } catch {}
-
-      /* ---------------- FALLBACK ---------------- */
+      /* =====================================================
+      🛟 FALLBACK
+      ===================================================== */
       if (!aiReply || !aiReply.trim()) {
-        aiReply = "Thanks for your message!";
+        aiReply = "Thanks for your message! 😊";
       }
 
       /* 🔴 LENGTH LIMIT */
@@ -85,16 +117,23 @@ const worker = new Worker(
         aiReply = aiReply.slice(0, 1000);
       }
 
-      /* ---------------- RATE LIMIT ---------------- */
+      /* =====================================================
+      🚦 RATE LIMIT
+      ===================================================== */
       const rate = await checkAIRateLimit({
         businessId,
         leadId,
         platform,
       });
 
-      if (rate.blocked) return;
+      if (rate.blocked) {
+        logger.warn("🚫 Rate limit hit");
+        return;
+      }
 
-      /* ---------------- SAVE ---------------- */
+      /* =====================================================
+      💾 SAVE MESSAGE
+      ===================================================== */
       const aiMessage = await prisma.message.create({
         data: {
           leadId,
@@ -103,7 +142,9 @@ const worker = new Worker(
         },
       });
 
-      /* ---------------- SOCKET ---------------- */
+      /* =====================================================
+      🔌 SOCKET EMIT
+      ===================================================== */
       try {
         const io = getIO();
         io.to(`lead_${leadId}`).emit("new_message", aiMessage);
@@ -111,8 +152,9 @@ const worker = new Worker(
 
       const accessToken = decrypt(accessTokenEncrypted);
 
-      /* ---------------- SEND ---------------- */
-
+      /* =====================================================
+      📤 SEND MESSAGE (INSTAGRAM / WHATSAPP)
+      ===================================================== */
       const sendMessage = async () => {
         if (platform === "WHATSAPP") {
           await axios.post(
@@ -135,7 +177,6 @@ const worker = new Worker(
         if (platform === "INSTAGRAM") {
           if (!senderId) return;
 
-          /* small delay (optimized) */
           await delay(500 + Math.random() * 1000);
 
           await axios.post(
@@ -154,10 +195,12 @@ const worker = new Worker(
         }
       };
 
-      /* 🔥 RETRY SYSTEM */
+      /* 🔁 RETRY SYSTEM */
       await retryAsync(sendMessage, 3, 800);
 
-      /* ---------------- UPDATE LEAD ---------------- */
+      /* =====================================================
+      📊 UPDATE LEAD
+      ===================================================== */
       await prisma.lead.update({
         where: { id: leadId },
         data: {
@@ -174,7 +217,7 @@ const worker = new Worker(
   },
   {
     connection: redisConnection,
-    concurrency: 10, // 🔥 upgraded
+    concurrency: 10,
   }
 );
 

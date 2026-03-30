@@ -3,8 +3,47 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { redisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
-import { generateAIReply } from "../services/ai.service";
 import { getIO } from "../sockets/socket.server";
+
+/* 🔥 SMART FOLLOWUP GENERATOR */
+const generateSmartFollowup = (
+  type: string,
+  stage: string,
+  aiStage?: string
+) => {
+
+  /* HOT LEADS (🔥 close fast) */
+  if (stage === "READY_TO_BUY" || aiStage === "HOT") {
+    return "Hey 👋 Just checking — want me to lock a slot for you before it fills up?";
+  }
+
+  /* WARM LEADS */
+  if (stage === "INTERESTED" || aiStage === "WARM") {
+    if (type === "2hr") {
+      return "Hey 😊 Just wanted to follow up — any questions I can help you with?";
+    }
+
+    if (type === "12hr") {
+      return "Quick check — would you like me to show you how this works on a short call?";
+    }
+
+    return "Slots are filling fast today ⚡ Want me to book one for you?";
+  }
+
+  /* COLD LEADS */
+  return "Hey 👋 Just checking if you're still interested. Happy to help!";
+};
+
+/* 🔥 SYSTEM MESSAGE FILTER */
+const isSystemGenerated = (msg: string) => {
+  const m = msg.toLowerCase();
+
+  return (
+    m.includes("please wait") ||
+    m.includes("try again later") ||
+    m.includes("conversation limit reached")
+  );
+};
 
 new Worker(
   "followupQueue",
@@ -16,57 +55,58 @@ new Worker(
 
       console.log(`⏳ Processing followup ${type} for lead ${leadId}`);
 
-      /* FETCH LEAD */
+      /* ---------------- FETCH LEAD ---------------- */
 
       const lead = await prisma.lead.findUnique({
         where: { id: leadId },
         include: { client: true },
       });
 
-      if (!lead) {
-        console.log("❌ Lead not found");
+      if (!lead || !lead.client) return;
+
+      /* ---------------- HARD STOP CONDITIONS ---------------- */
+
+      if (lead.isHumanActive) {
+        console.log("🛑 Human takeover active");
         return;
       }
 
-      if (!lead.client) {
-        console.log("❌ Client not found for lead");
+      if (lead.stage === "CLOSED" || lead.stage === "BOOKED_CALL") {
+        console.log("🛑 Lead already converted");
         return;
       }
 
-      /* STOP FOLLOWUPS IF USER REPLIED */
-
+      /* USER REPLIED → STOP */
       if (lead.unreadCount > 0) {
-        console.log("🛑 Lead already replied, skipping followup");
+        console.log("🛑 User replied, stopping followups");
         return;
       }
 
-      /* FOLLOWUP LIMIT */
-
+      /* LIMIT */
       if ((lead.followupCount ?? 0) >= 3) {
         console.log("🚫 Followup limit reached");
         return;
       }
 
-      /* GENERATE AI FOLLOWUP */
+      /* ---------------- SMART MESSAGE ---------------- */
 
-      const aiReply = await generateAIReply({
-        businessId: lead.businessId,
-        leadId: lead.id,
-        message: `This is a ${type} follow-up. Continue conversation naturally.`,
-      });
+      const message = generateSmartFollowup(
+        type,
+        lead.stage || "NEW",
+        (lead as any).aiStage
+      );
 
-      console.log("🤖 AI Generated:", aiReply);
+      if (!message || isSystemGenerated(message)) {
+        return;
+      }
 
       const accessToken = decrypt(lead.client.accessToken);
 
-      /* SEND MESSAGE */
+      /* ---------------- SEND MESSAGE ---------------- */
 
       if (lead.platform === "WHATSAPP") {
 
-        if (!lead.client.phoneNumberId || !lead.phone) {
-          console.log("❌ WhatsApp data missing");
-          return;
-        }
+        if (!lead.client.phoneNumberId || !lead.phone) return;
 
         await axios.post(
           `https://graph.facebook.com/v19.0/${lead.client.phoneNumberId}/messages`,
@@ -74,68 +114,53 @@ new Worker(
             messaging_product: "whatsapp",
             to: lead.phone,
             type: "text",
-            text: { body: aiReply },
+            text: { body: message },
           },
           {
             timeout: 10000,
             headers: {
               Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
             },
           }
         );
 
-      }
+      } else if (lead.platform === "INSTAGRAM") {
 
-      else if (lead.platform === "INSTAGRAM") {
-
-        if (!lead.client.pageId || !lead.instagramId) {
-          console.log("❌ Instagram data missing");
-          return;
-        }
+        if (!lead.instagramId) return;
 
         await axios.post(
-          `https://graph.facebook.com/v19.0/${lead.client.pageId}/messages`,
+          `https://graph.facebook.com/v19.0/me/messages`,
           {
-            recipient: {
-              id: lead.instagramId,
-            },
-            message: {
-              text: aiReply,
-            },
+            recipient: { id: lead.instagramId },
+            message: { text: message },
           },
           {
             timeout: 10000,
             headers: {
               Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
             },
           }
         );
-
       }
 
-      /* SAVE MESSAGE */
+      /* ---------------- SAVE ---------------- */
 
       const aiMessage = await prisma.message.create({
         data: {
           leadId: lead.id,
-          content: aiReply,
+          content: message,
           sender: "AI",
         },
       });
 
-      /* SOCKET EVENT */
+      /* ---------------- SOCKET ---------------- */
 
       try {
-
         const io = getIO();
-
         io.to(`lead_${lead.id}`).emit("new_message", aiMessage);
-
       } catch {}
 
-      /* UPDATE FOLLOWUP STATE */
+      /* ---------------- UPDATE ---------------- */
 
       await prisma.lead.update({
         where: { id: lead.id },
@@ -145,7 +170,7 @@ new Worker(
         },
       });
 
-      console.log(`✅ Followup ${type} sent successfully`);
+      console.log(`✅ Followup ${type} sent`);
 
     } catch (err: any) {
 
@@ -158,7 +183,6 @@ new Worker(
       );
 
       throw err;
-
     }
 
   },

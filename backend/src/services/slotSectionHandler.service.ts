@@ -1,9 +1,20 @@
-import prisma from "../config/prisma";
-import { confirmAIBooking } from "./aiBookingEngine.service";
 import {
   getConversationState,
   clearConversationState,
+  setConversationState,
 } from "./conversationState.service";
+
+/* 🔥 SLOT LOCK */
+import {
+  acquireSlotLock,
+  releaseSlotLock, // 🔥 NEW
+} from "./slotLock.service";
+
+/*
+=====================================================
+SLOT SELECTION HANDLER (FINAL + SAFE LOCK SYSTEM)
+=====================================================
+*/
 
 export const handleSlotSelection = async ({
   leadId,
@@ -16,7 +27,6 @@ export const handleSlotSelection = async ({
 }) => {
   try {
     /* ---------------- GET STATE ---------------- */
-
     const state = await getConversationState(leadId);
 
     if (!state || state.state !== "BOOKING_SELECTION") {
@@ -24,40 +34,55 @@ export const handleSlotSelection = async ({
     }
 
     /* ---------------- PARSE SLOTS ---------------- */
-
     let slots: string[] = [];
 
     try {
       slots =
-        typeof (state as any).data === "string"
-          ? JSON.parse((state as any).data)
+        typeof state.context === "string"
+          ? JSON.parse(state.context)
           : [];
     } catch {
-      await clearConversationState(leadId); // 🔥 reset broken state
-      return "Something went wrong. Please try again.";
+      await clearConversationState(leadId);
+      return "Something went wrong. Please try booking again.";
     }
 
     if (!slots.length) {
-      await clearConversationState(leadId); // 🔥 clean invalid state
+      await clearConversationState(leadId);
       return "No slots available anymore.";
     }
 
-    /* ---------------- EXTRACT NUMBER ---------------- */
+    /* ---------------- USER CHANGE HANDLING 🔥 ---------------- */
+    const clean = message.toLowerCase();
 
-    const index = parseInt(message.replace(/\D/g, ""));
+    if (clean.includes("change")) {
+      // 🔥 release previous lock if exists
+      if (state.context) {
+        await releaseSlotLock(state.context);
+      }
 
-    if (
-      isNaN(index) ||
-      index <= 0 ||
-      index > slots.length
-    ) {
+      await clearConversationState(leadId);
+
+      return "No problem 👍 Please choose another slot.";
+    }
+
+    /* ---------------- SMART PARSING ---------------- */
+    let index: number | null = null;
+
+    const numeric = parseInt(clean.replace(/\D/g, ""));
+    if (!isNaN(numeric)) index = numeric - 1;
+
+    if (clean.includes("first")) index = 0;
+    if (clean.includes("second")) index = 1;
+    if (clean.includes("third")) index = 2;
+    if (clean.includes("last")) index = slots.length - 1;
+
+    if (index === null || index < 0 || index >= slots.length) {
       return `Please select a valid option (1-${slots.length}).`;
     }
 
-    const selectedSlot = new Date(slots[index - 1]);
+    const selectedSlot = new Date(slots[index]);
 
-    /* ---------------- VALIDATE SLOT ---------------- */
-
+    /* ---------------- VALIDATION ---------------- */
     if (isNaN(selectedSlot.getTime())) {
       await clearConversationState(leadId);
       return "Invalid slot selected. Please try again.";
@@ -67,21 +92,35 @@ export const handleSlotSelection = async ({
       return "That slot is no longer available.";
     }
 
-    /* ---------------- CONFIRM BOOKING ---------------- */
-
-    const result = await confirmAIBooking(
-      businessId,
-      leadId,
-      selectedSlot
+    /* =====================================================
+    🔒 SLOT LOCK (WITH SAFETY)
+    ===================================================== */
+    const locked = await acquireSlotLock(
+      selectedSlot.toISOString(),
+      leadId
     );
 
-    await clearConversationState(leadId);
-
-    if (!result.success) {
-      return result.message || "Failed to confirm booking.";
+    if (!locked) {
+      return "⚠️ This slot was just booked by someone else. Please choose another one.";
     }
 
-    return result.message;
+    /* =====================================================
+    🔥 MOVE TO CONFIRMATION STATE
+    ===================================================== */
+    await setConversationState(
+      leadId,
+      "BOOKING_CONFIRMATION",
+      selectedSlot.toISOString(),
+      15
+    );
+
+    /* ---------------- RESPONSE ---------------- */
+    return `Great choice 👍
+
+📅 ${selectedSlot.toLocaleString()}
+
+Just reply "YES" to confirm your booking  
+or "CHANGE" to pick another slot.`;
 
   } catch (error) {
     console.error("SLOT SELECTION ERROR:", error);

@@ -1,6 +1,13 @@
 import OpenAI from "openai";
 import prisma from "../config/prisma";
-import { generateAIFunnelReply } from "./aiFunnel.service";
+
+/* =====================================================
+TYPE (UPGRADED)
+===================================================== */
+export type IntentResponse = {
+  intent: string;
+  confidence: number;
+};
 
 const openai = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
@@ -13,39 +20,41 @@ interface IntentInput {
   message: string;
 }
 
-/* ---------------------------------------------------
-GET CLIENT CONTEXT
---------------------------------------------------- */
+/* =====================================================
+🔥 FAST RULE-BASED INTENT (NO API)
+===================================================== */
 
-const getBusinessContext = async (businessId: string) => {
+const detectIntentFast = (msg: string) => {
+  const text = msg.toLowerCase();
 
-  const client = await prisma.client.findFirst({
-    where: {
-      businessId,
-      isActive: true,
-    },
-  });
+  if (["hi", "hello", "hey"].includes(text)) {
+    return { intent: "GREETING", confidence: 0.95 };
+  }
 
-  if (!client) return null;
+  if (/price|cost|fees|pricing/.test(text)) {
+    return { intent: "PRICING", confidence: 0.85 };
+  }
 
-  return {
-    businessInfo: client.businessInfo || "",
-    pricingInfo: client.pricingInfo || "",
-    aiTone: client.aiTone || "Professional",
-  };
+  if (/book|schedule|appointment|call/.test(text)) {
+    return { intent: "BOOKING", confidence: 0.75 };
+  }
 
+  if (/buy|purchase|pay/.test(text)) {
+    return { intent: "BUYING", confidence: 0.9 };
+  }
+
+  return null;
 };
 
-/* ---------------------------------------------------
-LLM INTENT DETECTION
---------------------------------------------------- */
+/* =====================================================
+🔥 AI INTENT (ONLY WHEN NEEDED)
+===================================================== */
 
 const detectIntentWithAI = async (message: string) => {
-
   const prompt = `
-Classify the user's intent.
+Classify user intent.
 
-Possible intents:
+Options:
 GREETING
 PRICING
 PRODUCT_INFO
@@ -55,87 +64,54 @@ BUYING
 SUPPORT
 GENERAL
 
-User message:
-"${message}"
-
-Return ONLY the intent label.
-`;
-
-  const response = await openai.chat.completions.create({
-    model: "llama-3.1-8b-instant",
-    temperature: 0,
-    messages: [
-      {
-        role: "system",
-        content: "You are an intent classification AI.",
-      },
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-  });
-
-  const intent =
-    response.choices?.[0]?.message?.content?.trim() || "GENERAL";
-
-  return intent;
-
-};
-
-/* ---------------------------------------------------
-SENTIMENT DETECTION
---------------------------------------------------- */
-
-const detectSentiment = async (message: string) => {
-
-  const prompt = `
-Analyze the sentiment of this message.
-
-Possible outputs:
-POSITIVE
-NEUTRAL
-NEGATIVE
-
 Message:
 "${message}"
 
-Return only the sentiment label.
+Return JSON:
+{ "intent": "...", "confidence": 0-1 }
 `;
 
   const response = await openai.chat.completions.create({
     model: "llama-3.1-8b-instant",
     temperature: 0,
     messages: [
-      {
-        role: "system",
-        content: "You are a sentiment analysis AI.",
-      },
-      {
-        role: "user",
-        content: prompt,
-      },
+      { role: "system", content: "You classify user intent." },
+      { role: "user", content: prompt },
     ],
   });
 
-  return response.choices?.[0]?.message?.content?.trim() || "NEUTRAL";
+  try {
+    const text = response.choices?.[0]?.message?.content || "{}";
+    const parsed = JSON.parse(text);
 
+    return {
+      intent: parsed.intent || "GENERAL",
+      confidence: parsed.confidence || 0.5,
+    };
+  } catch {
+    return { intent: "GENERAL", confidence: 0.5 };
+  }
 };
 
-/* ---------------------------------------------------
-LEAD SCORE
---------------------------------------------------- */
+/* =====================================================
+🔥 LEAD UPDATE (SMARTER)
+===================================================== */
 
-const updateLeadScore = async (leadId: string, intent: string) => {
+const updateLeadScore = async (
+  leadId: string,
+  intent: string,
+  confidence: number
+) => {
+  let base = 0;
 
-  let score = 0;
+  if (intent === "PRICING") base = 3;
+  if (intent === "BOOKING") base = 5;
+  if (intent === "NEGOTIATION") base = 4;
+  if (intent === "BUYING") base = 10;
 
-  if (intent === "PRICING") score = 3;
-  if (intent === "BOOKING") score = 5;
-  if (intent === "NEGOTIATION") score = 4;
-  if (intent === "BUYING") score = 10;
+  const score = Math.round(base * confidence);
 
-  if (score === 0) return;
+  if (!score) return;
 
   await prisma.lead.update({
     where: { id: leadId },
@@ -143,15 +119,9 @@ const updateLeadScore = async (leadId: string, intent: string) => {
       leadScore: { increment: score },
     },
   });
-
 };
 
-/* ---------------------------------------------------
-STAGE UPDATE
---------------------------------------------------- */
-
 const updateStage = async (leadId: string, intent: string) => {
-
   let stage = "NEW";
 
   if (intent === "PRICING") stage = "INTERESTED";
@@ -162,151 +132,57 @@ const updateStage = async (leadId: string, intent: string) => {
     where: { id: leadId },
     data: { stage },
   });
-
 };
 
-/* ---------------------------------------------------
-INTENT STRATEGY
---------------------------------------------------- */
-
-const intentStrategy = (intent: string, sentiment: string) => {
-
-  if (intent === "GREETING")
-    return "Greet the user and ask what service they are interested in.";
-
-  if (intent === "PRICING")
-    return "Explain pricing packages clearly and ask what service they want.";
-
-  if (intent === "PRODUCT_INFO")
-    return "Explain available services and recommend the best option.";
-
-  if (intent === "BOOKING")
-    return "Encourage booking a call or demo immediately.";
-
-  if (intent === "NEGOTIATION")
-    return "Handle negotiation professionally and emphasize value.";
-
-  if (intent === "BUYING")
-    return "The user wants to purchase. Send the payment link and help them complete the purchase.";
-
-  if (sentiment === "NEGATIVE")
-    return "Respond calmly and resolve concerns.";
-
-  return "Answer helpfully and guide the conversation toward conversion.";
-
-};
-
-/* ---------------------------------------------------
-GET STRIPE PAYMENT LINK
---------------------------------------------------- */
-
-const getPaymentLink = async (businessId: string) => {
-
-  const subscription = await prisma.subscription.findUnique({
-    where: { businessId },
-    include: { plan: true },
-  });
-
-  if (!subscription?.plan) return null;
-
-  const currency = subscription.currency || "USD";
-
-  const priceId =
-    currency === "INR"
-      ? subscription.plan.priceIdINR
-      : subscription.plan.priceIdUSD;
-
-  if (!priceId) return null;
-
-  return `https://buy.stripe.com/${priceId}`;
-
-};
-
-/* ---------------------------------------------------
-MAIN INTENT ENGINE
---------------------------------------------------- */
+/* =====================================================
+🔥 MAIN ENGINE
+===================================================== */
 
 export const generateIntentReply = async ({
   businessId,
   leadId,
   message,
-}: IntentInput) => {
-
+}: IntentInput): Promise<IntentResponse> => {
   try {
+    /* =================================================
+    1️⃣ FAST PATH (NO API)
+    ================================================= */
+    const fast = detectIntentFast(message);
 
-    const context = await getBusinessContext(businessId);
+    let intent = "GENERAL";
+    let confidence = 0.5;
 
-    if (!context) {
-      return "Thanks for your message!";
+    if (fast) {
+      intent = fast.intent;
+      confidence = fast.confidence;
+    } else {
+      /* =================================================
+      2️⃣ AI FALLBACK
+      ================================================= */
+      const ai = await detectIntentWithAI(message);
+      intent = ai.intent;
+      confidence = ai.confidence;
     }
 
-    /* DETECT INTENT */
+    console.log("Intent:", intent, "Confidence:", confidence);
 
-    const intent = await detectIntentWithAI(message);
-
-    /* SENTIMENT */
-
-    const sentiment = await detectSentiment(message);
-
-    console.log("Intent:", intent);
-    console.log("Sentiment:", sentiment);
-
-    /* UPDATE CRM */
-
-    await updateLeadScore(leadId, intent);
+    /* =================================================
+    3️⃣ UPDATE CRM
+    ================================================= */
+    await updateLeadScore(leadId, intent, confidence);
     await updateStage(leadId, intent);
 
-    /* BUYING FLOW */
-
-    if (intent === "BUYING") {
-
-      const paymentLink = await getPaymentLink(businessId);
-
-      if (paymentLink) {
-
-        return `Awesome! You can complete your purchase here:
-
-${paymentLink}
-
-Let me know once you've completed the payment and we'll get started immediately.`;
-
-      }
-
-    }
-
-    /* STRATEGY */
-
-    const strategy = intentStrategy(intent, sentiment);
-
-    const enhancedMessage = `
-
-User message:
-${message}
-
-Intent:
-${intent}
-
-Sentiment:
-${sentiment}
-
-Response strategy:
-${strategy}
-`;
-
-    const reply = await generateAIFunnelReply({
-      businessId,
-      leadId,
-      message: enhancedMessage,
-    });
-
-    return reply;
+    return {
+      intent,
+      confidence,
+    };
 
   } catch (error) {
-
     console.error("Intent Engine Error:", error);
 
-    return "Thanks for reaching out! How can we help you today?";
-
+    return {
+      intent: "GENERAL",
+      confidence: 0.5,
+    };
   }
-
 };

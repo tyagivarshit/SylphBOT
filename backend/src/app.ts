@@ -56,6 +56,7 @@ import { monitoringMiddleware } from "./middleware/monitoring.middleware";
 import { startTrialExpiryCron } from "./cron/trial.cron";
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "./cron/resetUsage.cron";
+import "./workers/bookingReminder.worker";
 
 /* ========= ERRORS ========= */
 import { isAppError } from "./utils/AppError";

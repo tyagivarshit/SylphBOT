@@ -21,6 +21,20 @@ const [loadingMedia,setLoadingMedia] = useState(false)
 
 const [error,setError] = useState("")
 
+/* ---------------- RESET ON CLOSE ---------------- */
+
+useEffect(()=>{
+  if(!open){
+    setKeyword("")
+    setReply("")
+    setDm("")
+    setClientId("")
+    setSelectedPost("")
+    setMedia([])
+    setError("")
+  }
+},[open])
+
 /* ---------------- FETCH CLIENTS ---------------- */
 
 useEffect(()=>{
@@ -30,11 +44,10 @@ useEffect(()=>{
   const fetchClients = async () => {
 
     try{
-
       setLoadingClients(true)
-      setError("")
 
-      const res = await api.get("/clients")
+      // ✅ FIXED
+      const res = await api.get("/api/clients")
 
       const data = Array.isArray(res.data)
         ? res.data
@@ -42,15 +55,10 @@ useEffect(()=>{
 
       setClients(data)
 
-    }catch(err: any){
-
-      console.log("CLIENT ERROR:", err?.response?.data || err.message)
+    }catch{
       setError("Failed to load clients")
-
     }finally{
-
       setLoadingClients(false)
-
     }
 
   }
@@ -68,25 +76,17 @@ useEffect(()=>{
   const fetchMedia = async () => {
 
     try{
-
       setLoadingMedia(true)
-      setError("")
 
-      const res = await api.get(`/instagram/media?clientId=${clientId}`)
+      // ✅ FIXED
+      const res = await api.get(`/api/instagram/media?clientId=${clientId}`)
 
-      const data = res.data?.data || []
+      setMedia(res.data?.data || [])
 
-      setMedia(data)
-
-    }catch(err: any){
-
-      console.log("MEDIA ERROR:", err?.response?.data || err.message)
+    }catch{
       setError("Failed to load posts")
-
     }finally{
-
       setLoadingMedia(false)
-
     }
 
   }
@@ -95,73 +95,62 @@ useEffect(()=>{
 
 },[clientId])
 
-if(!open) return null
-
 /* ---------------- CREATE ---------------- */
 
 const handleCreate = async () => {
 
-  if(!clientId || !selectedPost || !keyword || !reply){
+  if(
+    !clientId ||
+    !selectedPost ||
+    !keyword.trim() ||
+    !reply.trim()
+  ){
     setError("All fields are required")
     return
   }
 
   try{
-
     setLoading(true)
     setError("")
 
-    await api.post("/comment-triggers",{
+    await api.post("/api/comment-triggers",{
       clientId,
       reelId: selectedPost,
-      keyword,
-      replyText: reply,
-      dmText: dm
+      keyword: keyword.trim(),
+      replyText: reply.trim(),
+      dmText: dm.trim()
     })
-
-    /* RESET */
-
-    setKeyword("")
-    setReply("")
-    setDm("")
-    setClientId("")
-    setSelectedPost("")
-    setMedia([])
 
     onClose()
 
-  }catch(err: any){
-
-    console.log("CREATE ERROR:", err?.response?.data || err.message)
+  }catch{
     setError("Failed to create automation")
-
   }finally{
-
     setLoading(false)
-
   }
 
 }
 
+const selectedMedia = media.find((m:any)=>m.id === selectedPost)
+
+if(!open) return null
+
 return(
 
-<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+<div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 px-3 sm:px-0">
 
-<div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl space-y-5">
+<div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md p-4 sm:p-6 shadow-xl space-y-5 border border-gray-200 max-h-[90vh] overflow-y-auto">
 
-<h2 className="text-lg font-semibold text-gray-900">
-Create Comment Automation
+<h2 className="text-base sm:text-lg font-semibold text-gray-900">
+Create Comment Automation 🚀
 </h2>
 
-{/* ERROR */}
 {error && (
-  <p className="text-sm text-red-600 font-medium">{error}</p>
+  <p className="text-xs sm:text-sm text-red-500">{error}</p>
 )}
 
-{/* CLIENT */}
-
 <div>
-<label className="text-sm font-semibold text-gray-900">
+<label className="text-xs sm:text-sm font-medium text-gray-900">
 Instagram Account
 </label>
 
@@ -169,11 +158,12 @@ Instagram Account
 value={clientId}
 onChange={(e)=>{
   setClientId(e.target.value)
-  setError("") // 🔥 UX fix
+  setSelectedPost("")
+  setMedia([])
+  setError("")
 }}
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
 >
-
 <option value="">
 {loadingClients ? "Loading..." : "Select account"}
 </option>
@@ -187,12 +177,10 @@ className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-
 </select>
 </div>
 
-{/* POST SELECT */}
-
 {clientId && (
 
 <div>
-<label className="text-sm font-semibold text-gray-900">
+<label className="text-xs sm:text-sm font-medium text-gray-900">
 Select Post / Reel
 </label>
 
@@ -202,9 +190,8 @@ onChange={(e)=>{
   setSelectedPost(e.target.value)
   setError("")
 }}
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
 >
-
 <option value="">
 {loadingMedia ? "Loading posts..." : "Select post"}
 </option>
@@ -220,10 +207,23 @@ className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-
 
 )}
 
-{/* KEYWORD */}
+{selectedMedia && (
+<div className="border border-gray-200 rounded-xl p-2 bg-gray-50">
+  {selectedMedia.media_url && (
+    <img
+      src={selectedMedia.media_url}
+      alt=""
+      className="w-full h-28 sm:h-32 object-cover rounded-lg"
+    />
+  )}
+  <p className="text-[10px] sm:text-xs text-gray-600 mt-1">
+    {(selectedMedia.caption || "No caption").slice(0,80)}
+  </p>
+</div>
+)}
 
 <div>
-<label className="text-sm font-semibold text-gray-900">
+<label className="text-xs sm:text-sm font-medium text-gray-900">
 Keyword
 </label>
 
@@ -234,15 +234,13 @@ onChange={(e)=>{
   setError("")
 }}
 placeholder="Example: price"
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
 />
 </div>
 
-{/* REPLY */}
-
 <div>
-<label className="text-sm font-semibold text-gray-900">
-Reply Comment
+<label className="text-xs sm:text-sm font-medium text-gray-900">
+Comment Reply
 </label>
 
 <input
@@ -251,16 +249,14 @@ onChange={(e)=>{
   setReply(e.target.value)
   setError("")
 }}
-placeholder="Example: Check your DM"
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+placeholder="Example: Check your DM 👀"
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
 />
 </div>
 
-{/* DM */}
-
 <div>
-<label className="text-sm font-semibold text-gray-900">
-Auto DM Message
+<label className="text-xs sm:text-sm font-medium text-gray-900">
+DM Message
 </label>
 
 <textarea
@@ -269,29 +265,27 @@ onChange={(e)=>{
   setDm(e.target.value)
   setError("")
 }}
-placeholder="Example: Hi! Sending you the details..."
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+placeholder="Example: Hi! Sending details..."
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 resize-none focus:ring-2 focus:ring-indigo-500/30"
 rows={3}
 />
 </div>
 
-{/* BUTTONS */}
-
-<div className="flex justify-end gap-3 pt-2">
+<div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 pt-2">
 
 <button
 onClick={onClose}
-className="text-sm font-medium text-gray-800 hover:text-black"
+className="w-full sm:w-auto text-sm text-gray-600 hover:text-gray-900"
 >
 Cancel
 </button>
 
 <button
 onClick={handleCreate}
-disabled={loading}
-className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition disabled:opacity-50"
+disabled={loading || !clientId || !selectedPost}
+className="w-full sm:w-auto bg-indigo-600 text-white px-5 py-2 rounded-xl text-sm font-medium hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition disabled:opacity-50"
 >
-{loading ? "Creating..." : "Create"}
+{loading ? "Creating..." : "Create Automation"}
 </button>
 
 </div>

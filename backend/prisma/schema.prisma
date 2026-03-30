@@ -95,6 +95,7 @@ model Business {
   subscription  Subscription?
   leads         Lead[]
   usage         Usage[]
+  invoices      Invoice[]
 
   commentTriggers CommentTrigger[]
   automationFlows AutomationFlow[]
@@ -194,6 +195,7 @@ model Subscription {
 
   stripeCustomerId     String?
   stripeSubscriptionId String? @unique
+  graceUntil DateTime?
 
   currentPeriodEnd     DateTime?
 
@@ -345,6 +347,8 @@ model CommentTrigger {
   reelId     String
   keyword    String
   replyText  String
+
+  commentReplyText String?
 
   aiPrompt   String?
   dmText String?
@@ -629,4 +633,30 @@ model NotificationSettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+/* =====================================================
+INVOICES (🔥 BILLING CORE)
+===================================================== */
+
+model Invoice {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId      String   @db.ObjectId
+  business        Business @relation(fields: [businessId], references: [id])
+
+  amount          Int      // total (including tax)
+  subtotal        Int?     // before tax
+  taxAmount       Int?     // Stripe tax
+  taxType         String?  // GST / VAT
+
+  currency        String
+  status          String
+
+  stripeInvoiceId String?
+  invoiceNumber   String   @unique
+
+  createdAt       DateTime @default(now())
+
+  @@index([businessId])
+  @@index([stripeInvoiceId])
 }

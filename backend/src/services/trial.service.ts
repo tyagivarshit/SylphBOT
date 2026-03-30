@@ -17,13 +17,18 @@ export const startTrial = async (businessId: string) => {
       throw new Error("Trial already used");
     }
 
-    /* 🔥 GET FREE PLAN */
-    const freePlan = await tx.plan.findFirst({
-      where: { type: "FREE" },
+    /* ======================================
+    ✅ FIX: USE BASIC PLAN (NO FREE PLAN)
+    ====================================== */
+
+    const selectedPlan = await tx.plan.findFirst({
+      where: {
+        OR: [{ name: "BASIC" }, { type: "BASIC" }],
+      },
     });
 
-    if (!freePlan) {
-      throw new Error("Free plan not found");
+    if (!selectedPlan) {
+      throw new Error("Default trial plan not found");
     }
 
     const trialDays = 7;
@@ -35,16 +40,16 @@ export const startTrial = async (businessId: string) => {
       where: { businessId },
 
       update: {
-        status: "ACTIVE", // 🔥 keep consistent
+        status: "ACTIVE",
         isTrial: true,
         trialUsed: true,
         currentPeriodEnd: endDate,
-        planId: freePlan.id,
+        planId: selectedPlan.id, // ✅ FIX
       },
 
       create: {
         businessId,
-        planId: freePlan.id,
+        planId: selectedPlan.id, // ✅ FIX
         status: "ACTIVE",
         isTrial: true,
         trialUsed: true,

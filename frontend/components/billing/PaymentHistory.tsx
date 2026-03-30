@@ -4,7 +4,9 @@ import { ExternalLink, Download } from "lucide-react";
 
 type Invoice = {
   id: string;
-  amount_paid?: number;
+  amount?: number;
+  subtotal?: number;
+  taxAmount?: number; // 🔥 FIX (backend aligned)
   currency?: string;
   created?: number;
   status?: string;
@@ -18,7 +20,7 @@ export default function PaymentHistory({
   invoices: Invoice[];
 }) {
   const getStatusColor = (status?: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case "paid":
         return "bg-green-100 text-green-700";
       case "open":
@@ -32,26 +34,24 @@ export default function PaymentHistory({
     }
   };
 
-  /* 🔥 SORT LATEST FIRST */
   const sorted = [...invoices].sort(
     (a, b) => (b.created || 0) - (a.created || 0)
   );
 
-  /* 🔥 FORMATTER */
   const formatAmount = (amount?: number, currency?: string) => {
-    if (!amount) return "-";
+    if (amount === undefined || amount === null) return "-";
+
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: currency?.toUpperCase() || "USD",
-    }).format(amount / 100);
+    }).format(amount / 100); // 🔥 FIX (Stripe cents → rupees/dollars)
   };
 
   return (
-    <div className="bg-white border border-gray-300 rounded-2xl p-6 shadow-sm space-y-6">
+    <div className="bg-white/80 backdrop-blur border border-gray-200 rounded-2xl p-5 md:p-6 shadow-sm space-y-6">
 
-      {/* HEADER */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">
+        <h3 className="text-sm md:text-base font-semibold text-gray-900">
           Payment History
         </h3>
         <p className="text-xs text-gray-500 mt-1">
@@ -59,16 +59,13 @@ export default function PaymentHistory({
         </p>
       </div>
 
-      {/* LIST */}
+      {sorted.length === 0 && (
+        <div className="text-center py-10 text-gray-500 text-sm border border-dashed rounded-xl">
+          No payments yet
+        </div>
+      )}
+
       <div className="space-y-3">
-
-        {/* EMPTY */}
-        {sorted.length === 0 && (
-          <div className="text-center py-10 text-gray-500 text-sm border border-dashed rounded-xl">
-            No payments yet
-          </div>
-        )}
-
         {sorted.map((inv) => {
           const date = inv.created
             ? new Date(inv.created * 1000).toLocaleDateString()
@@ -77,40 +74,50 @@ export default function PaymentHistory({
           return (
             <div
               key={inv.id}
-              className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:shadow-md hover:bg-gray-50 transition"
+              className="rounded-xl border border-gray-200 bg-white p-4 transition-all hover:shadow-md hover:bg-gray-50"
             >
-              {/* LEFT */}
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-gray-900">
-                  {formatAmount(inv.amount_paid, inv.currency)}
-                </p>
 
-                <p className="text-xs text-gray-500">
-                  {date}
-                </p>
-              </div>
+              {/* MOBILE */}
+              <div className="flex flex-col gap-3 md:hidden">
 
-              {/* RIGHT */}
-              <div className="flex items-center gap-4">
+                <div className="flex justify-between items-center">
+                  <p className="text-base font-semibold text-gray-900">
+                    {formatAmount(inv.amount, inv.currency)}
+                  </p>
 
-                {/* STATUS */}
-                <span
-                  className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStatusColor(
-                    inv.status
-                  )}`}
-                >
-                  {inv.status?.toUpperCase() || "UNKNOWN"}
-                </span>
+                  <span
+                    className={`text-[10px] px-2 py-1 rounded-full font-medium ${getStatusColor(
+                      inv.status
+                    )}`}
+                  >
+                    {inv.status?.toUpperCase() || "UNKNOWN"}
+                  </span>
+                </div>
 
-                {/* ACTIONS */}
-                <div className="flex items-center gap-2">
+                {(inv.subtotal !== undefined || inv.taxAmount !== undefined) && (
+                  <div className="text-xs text-gray-500 space-y-1">
+                    {inv.subtotal !== undefined && (
+                      <p>
+                        Subtotal: {formatAmount(inv.subtotal, inv.currency)}
+                      </p>
+                    )}
+                    {inv.taxAmount !== undefined && (
+                      <p>
+                        Tax: {formatAmount(inv.taxAmount, inv.currency)}
+                      </p>
+                    )}
+                  </div>
+                )}
 
+                <p className="text-xs text-gray-500">{date}</p>
+
+                <div className="flex gap-3">
                   {inv.hosted_invoice_url && (
                     <a
                       href={inv.hosted_invoice_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      className="flex-1 flex items-center justify-center gap-1 text-xs py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition"
                     >
                       <ExternalLink size={14} />
                       View
@@ -122,16 +129,80 @@ export default function PaymentHistory({
                       href={inv.invoice_pdf}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-medium"
+                      className="flex-1 flex items-center justify-center gap-1 text-xs py-2 rounded-lg bg-green-50 text-green-600 hover:bg-green-100 transition"
                     >
                       <Download size={14} />
                       PDF
                     </a>
                   )}
+                </div>
+              </div>
 
+              {/* DESKTOP */}
+              <div className="hidden md:flex items-center justify-between">
+
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {formatAmount(inv.amount, inv.currency)}
+                  </p>
+
+                  {(inv.subtotal !== undefined || inv.taxAmount !== undefined) && (
+                    <div className="text-xs text-gray-500 space-y-0.5">
+                      {inv.subtotal !== undefined && (
+                        <p>
+                          Subtotal: {formatAmount(inv.subtotal, inv.currency)}
+                        </p>
+                      )}
+                      {inv.taxAmount !== undefined && (
+                        <p>
+                          Tax: {formatAmount(inv.taxAmount, inv.currency)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-500">{date}</p>
                 </div>
 
+                <div className="flex items-center gap-4">
+
+                  <span
+                    className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStatusColor(
+                      inv.status
+                    )}`}
+                  >
+                    {inv.status?.toUpperCase() || "UNKNOWN"}
+                  </span>
+
+                  <div className="flex items-center gap-3">
+                    {inv.hosted_invoice_url && (
+                      <a
+                        href={inv.hosted_invoice_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        <ExternalLink size={14} />
+                        View
+                      </a>
+                    )}
+
+                    {inv.invoice_pdf && (
+                      <a
+                        href={inv.invoice_pdf}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-medium"
+                      >
+                        <Download size={14} />
+                        PDF
+                      </a>
+                    )}
+                  </div>
+
+                </div>
               </div>
+
             </div>
           );
         })}

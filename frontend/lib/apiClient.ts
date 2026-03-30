@@ -36,12 +36,24 @@ async function coreFetch<T>(
   const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
+    /* 🔥 TOKEN */
+    const token =
+      typeof window !== "undefined"
+        ? localStorage.getItem("accessToken")
+        : null;
+
     const res = await fetch(url, {
       ...options,
       credentials: "include",
       mode: "cors",
       headers: {
         "Content-Type": "application/json",
+
+        /* 🔥 MAIN FIX */
+        ...(token && {
+          Authorization: `Bearer ${token}`,
+        }),
+
         ...(options.headers || {}),
       },
       signal: controller.signal,
@@ -56,6 +68,7 @@ async function coreFetch<T>(
       data = null;
     }
 
+    /* 🔐 UNAUTHORIZED */
     if (res.status === 401) {
       if (!retry) {
         return coreFetch<T>(url, options, true);
@@ -71,6 +84,7 @@ async function coreFetch<T>(
       };
     }
 
+    /* 🔒 403 (LIMIT / ACCESS CONTROL) */
     if (res.status === 403) {
       return {
         success: true,
@@ -83,6 +97,7 @@ async function coreFetch<T>(
       };
     }
 
+    /* ❌ OTHER ERRORS */
     if (!res.ok) {
       console.error("❌ API ERROR:", {
         url,
@@ -101,6 +116,7 @@ async function coreFetch<T>(
       };
     }
 
+    /* ✅ SUCCESS */
     return {
       success: true,
       data: data?.data ?? data,

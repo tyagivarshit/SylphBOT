@@ -12,12 +12,13 @@ CREATE AVAILABILITY
 =====================================================
 */
 export const createAvailabilityController = async (
-  req: Request,
+  req: any,
   res: Response
 ) => {
   try {
+    const businessId = req.user?.businessId;
+
     const {
-      businessId,
       dayOfWeek,
       startTime,
       endTime,
@@ -26,8 +27,14 @@ export const createAvailabilityController = async (
       timezone,
     } = req.body;
 
-    /* VALIDATION */
-    if (!businessId || dayOfWeek === undefined || !startTime || !endTime) {
+    if (!businessId) {
+      return res.status(400).json({
+        success: false,
+        message: "Business not found in token",
+      });
+    }
+
+    if (dayOfWeek === undefined || !startTime || !endTime) {
       return res.status(400).json({
         success: false,
         message: "Missing required fields",
@@ -67,7 +74,7 @@ export const createAvailabilityController = async (
 
 /*
 =====================================================
-GET AVAILABILITY
+🔥 GET AVAILABILITY (FIXED FOR PARAM ROUTE)
 =====================================================
 */
 export const getAvailabilityController = async (
@@ -80,7 +87,7 @@ export const getAvailabilityController = async (
     if (!businessId) {
       return res.status(400).json({
         success: false,
-        message: "Business ID is required",
+        message: "businessId param required",
       });
     }
 

@@ -1,5 +1,20 @@
 import { stripe } from "./stripe.service";
 
+/* ================= 🔥 INVOICE NUMBER ================= */
+
+export const generateInvoiceNumber = () => {
+  const date = new Date();
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  const random = Math.floor(1000 + Math.random() * 9000);
+
+  return `INV-${year}${month}-${random}`;
+};
+
+/* ================= 🔥 GET INVOICES ================= */
+
 export const getInvoices = async (customerId: string) => {
 
   const invoices = await stripe.invoices.list({
@@ -7,25 +22,34 @@ export const getInvoices = async (customerId: string) => {
     limit: 10,
   });
 
-  return invoices.data.map(inv => ({
+  return invoices.data.map((inv) => {
 
-    id: inv.id,
+    const invoiceAny = inv as any;
 
-    // ✅ FIX: safe amount
-    amount: inv.amount_paid ? inv.amount_paid / 100 : 0,
+    const taxAmount = Array.isArray(invoiceAny.total_tax_amounts)
+      ? invoiceAny.total_tax_amounts.reduce(
+          (sum: number, t: any) => sum + (t?.amount || 0),
+          0
+        )
+      : 0;
 
-    // ✅ FIX: uppercase for UI
-    currency: inv.currency?.toUpperCase() || "USD",
+    return {
+      id: inv.id,
 
-    // ✅ FIX: raw timestamp bhejo (frontend handle karega)
-    date: inv.created,
+      amount: inv.amount_paid ? inv.amount_paid / 100 : 0,
 
-    // ✅ status
-    status: inv.status || "paid",
+      subtotal: inv.subtotal ? inv.subtotal / 100 : 0,
 
-    // ✅ 🔥 MAIN FIX: pdf link
-    pdf: inv.invoice_pdf || inv.hosted_invoice_url || null,
+      tax: taxAmount / 100,
 
-  }));
+      currency: inv.currency?.toUpperCase() || "USD",
 
+      created: inv.created,
+
+      status: inv.status || "paid",
+
+      hosted_invoice_url: inv.hosted_invoice_url || null,
+      invoice_pdf: inv.invoice_pdf || null,
+    };
+  });
 };

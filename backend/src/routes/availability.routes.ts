@@ -4,7 +4,7 @@ import {
   getAvailabilityController,
   updateAvailabilityController,
   deleteAvailabilityController,
-} from "../controllers/availabilty.controller"
+} from "../controllers/availabilty.controller";
 import { protect } from "../middleware/auth.middleware";
 
 const router = Router();
@@ -18,10 +18,10 @@ router.post("/", protect, createAvailabilityController);
 
 /*
 =====================================================
-GET AVAILABILITY (BY BUSINESS)
+🔥 GET AVAILABILITY BY BUSINESS ID (FIXED)
 =====================================================
 */
-router.get("/:businessId", protect, getAvailabilityController);
+router.get("/:businessId", getAvailabilityController);
 
 /*
 =====================================================
@@ -39,7 +39,7 @@ router.delete("/:id", protect, deleteAvailabilityController);
 
 /*
 =====================================================
-TOGGLE ACTIVE / INACTIVE (IMPORTANT)
+TOGGLE ACTIVE / INACTIVE
 =====================================================
 */
 router.patch("/:id/toggle", protect, updateAvailabilityController);

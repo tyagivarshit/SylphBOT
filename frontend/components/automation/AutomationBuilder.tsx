@@ -56,7 +56,7 @@ const moveStep = (index:number, direction:"up"|"down") => {
 
 return(
 
-<div className="space-y-4">
+<div className="space-y-5">
 
 {/* STEPS */}
 
@@ -78,25 +78,25 @@ return(
 
 {/* ADD BUTTONS */}
 
-<div className="flex gap-2 pt-2">
+<div className="flex gap-2 pt-3">
 
 <button
 onClick={()=>addStep("MESSAGE")}
-className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-200"
+className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-xl hover:bg-indigo-200 transition"
 >
 + Message
 </button>
 
 <button
 onClick={()=>addStep("DELAY")}
-className="text-xs bg-yellow-100 text-yellow-700 px-3 py-1 rounded-lg hover:bg-yellow-200"
+className="text-xs bg-yellow-100 text-yellow-700 px-3 py-1.5 rounded-xl hover:bg-yellow-200 transition"
 >
 + Delay
 </button>
 
 <button
 onClick={()=>addStep("CONDITION")}
-className="text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-lg hover:bg-purple-200"
+className="text-xs bg-purple-100 text-purple-700 px-3 py-1.5 rounded-xl hover:bg-purple-200 transition"
 >
 + Condition
 </button>
@@ -106,5 +106,4 @@ className="text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-lg hover:bg-p
 </div>
 
 )
-
 }

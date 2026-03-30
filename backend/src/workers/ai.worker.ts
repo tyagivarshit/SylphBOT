@@ -3,25 +3,20 @@ import prisma from "../config/prisma";
 import axios from "axios";
 import { redisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
+import { retryAsync } from "../utils/retry.utils";
 
 import { routeAIMessage } from "../services/aiRouter.service";
 import { runAutomationEngine } from "../services/automationEngine.service";
 import { checkAIRateLimit } from "../services/aiRateLimiter.service";
-
-/* 🔥 NEW (ONLY ADD) */
 import { bookingPriorityRouter } from "../services/bookingPriorityRouter.service";
 
 import { getIO } from "../sockets/socket.server";
 import logger from "../utils/logger";
-
-/* SENTRY */
 import * as Sentry from "@sentry/node";
 
 /* ---------------- DELAY ---------------- */
 const delay = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
-
-/* ---------------- WORKER ---------------- */
 
 const worker = new Worker(
   "aiQueue",
@@ -33,32 +28,21 @@ const worker = new Worker(
       platform,
       senderId,
       phoneNumberId,
-      pageId,
       accessTokenEncrypted,
     } = job.data;
-
-    logger.info({ leadId, businessId, platform }, "AI Worker Processing");
 
     let aiReply: string | null = null;
 
     try {
-      /* ---------------- HUMAN TAKEOVER ---------------- */
-
+      /* ---------------- HUMAN CHECK ---------------- */
       const lead = await prisma.lead.findUnique({
         where: { id: leadId },
         select: { isHumanActive: true },
       });
 
-      if (lead?.isHumanActive) {
-        logger.info(
-          { leadId },
-          "AI paused because human agent is active"
-        );
-        return;
-      }
+      if (lead?.isHumanActive) return;
 
       /* ---------------- AUTOMATION ---------------- */
-
       try {
         const automationReply = await runAutomationEngine({
           businessId,
@@ -66,16 +50,12 @@ const worker = new Worker(
           message,
         });
 
-        if (automationReply) {
-          aiReply = automationReply;
-        }
-      } catch (error) {
-        logger.warn({ leadId, error }, "Automation engine failed");
-        Sentry.captureException(error);
+        if (automationReply) aiReply = automationReply;
+      } catch (err) {
+        logger.warn({ err }, "Automation failed");
       }
 
       /* ---------------- AI ---------------- */
-
       if (!aiReply) {
         aiReply = await routeAIMessage({
           businessId,
@@ -84,10 +64,7 @@ const worker = new Worker(
         });
       }
 
-      /* =====================================================
-         🔥 BOOKING PRIORITY ROUTER (NEW - CLEAN INTEGRATION)
-      ===================================================== */
-
+      /* ---------------- BOOKING ---------------- */
       try {
         const bookingReply = await bookingPriorityRouter({
           businessId,
@@ -95,39 +72,29 @@ const worker = new Worker(
           message,
         });
 
-        if (bookingReply) {
-          aiReply = bookingReply;
-        }
-      } catch (error) {
-        logger.warn({ leadId, error }, "Booking router failed");
-      }
+        if (bookingReply) aiReply = bookingReply;
+      } catch {}
 
       /* ---------------- FALLBACK ---------------- */
-
-      if (!aiReply || aiReply.trim().length === 0) {
+      if (!aiReply || !aiReply.trim()) {
         aiReply = "Thanks for your message!";
       }
 
-      logger.info({ leadId, aiReply }, "AI reply generated");
+      /* 🔴 LENGTH LIMIT */
+      if (aiReply.length > 1000) {
+        aiReply = aiReply.slice(0, 1000);
+      }
 
       /* ---------------- RATE LIMIT ---------------- */
-
       const rate = await checkAIRateLimit({
         businessId,
         leadId,
         platform,
       });
 
-      if (rate.blocked) {
-        logger.warn(
-          { leadId, businessId, platform },
-          "AI message blocked by rate limiter"
-        );
-        return;
-      }
+      if (rate.blocked) return;
 
-      /* ---------------- SAVE MESSAGE ---------------- */
-
+      /* ---------------- SAVE ---------------- */
       const aiMessage = await prisma.message.create({
         data: {
           leadId,
@@ -137,26 +104,18 @@ const worker = new Worker(
       });
 
       /* ---------------- SOCKET ---------------- */
-
       try {
         const io = getIO();
         io.to(`lead_${leadId}`).emit("new_message", aiMessage);
-      } catch (error) {
-        logger.warn({ leadId, error }, "Socket emit failed");
-        Sentry.captureException(error);
-      }
-
-      /* ---------------- TOKEN ---------------- */
+      } catch {}
 
       const accessToken = decrypt(accessTokenEncrypted);
 
-      /* ===================================================
-         WHATSAPP SEND
-      =================================================== */
+      /* ---------------- SEND ---------------- */
 
-      if (platform === "WHATSAPP") {
-        try {
-          const response = await axios.post(
+      const sendMessage = async () => {
+        if (platform === "WHATSAPP") {
+          await axios.post(
             `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
             {
               messaging_product: "whatsapp",
@@ -167,69 +126,19 @@ const worker = new Worker(
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
               },
               timeout: 10000,
             }
           );
-
-          logger.info(
-            { leadId, response: response.data },
-            "WhatsApp message sent"
-          );
-        } catch (error: any) {
-          console.log("❌ WHATSAPP ERROR:", error?.response?.data);
-
-          logger.error(
-            {
-              leadId,
-              error: error?.response?.data || error.message,
-            },
-            "WhatsApp send failed"
-          );
-
-          Sentry.captureException(error);
-        }
-      }
-
-      /* ===================================================
-         INSTAGRAM SEND (FIXED)
-      =================================================== */
-
-      if (platform === "INSTAGRAM") {
-        if (!senderId) {
-          logger.warn({ leadId }, "Missing senderId");
-          return;
         }
 
-        try {
-          logger.info(
-            { leadId, senderId, pageId, aiReply },
-            "Preparing Instagram reply"
-          );
+        if (platform === "INSTAGRAM") {
+          if (!senderId) return;
 
-          const randomDelay = 2000 + Math.floor(Math.random() * 2000);
-          await delay(randomDelay);
+          /* small delay (optimized) */
+          await delay(500 + Math.random() * 1000);
 
-          /* typing indicator */
           await axios.post(
-            "https://graph.facebook.com/v19.0/me/messages",
-            {
-              recipient: { id: senderId },
-              sender_action: "typing_on",
-            },
-            {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-              },
-            }
-          );
-
-          await delay(1500);
-
-          /* actual message */
-          const response = await axios.post(
             "https://graph.facebook.com/v19.0/me/messages",
             {
               recipient: { id: senderId },
@@ -238,80 +147,39 @@ const worker = new Worker(
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
               },
               timeout: 10000,
             }
           );
-
-          logger.info(
-            { leadId, response: response.data },
-            "Instagram message sent successfully"
-          );
-        } catch (error: any) {
-          console.log("❌ INSTAGRAM ERROR FULL:", error?.response?.data);
-
-          logger.error(
-            {
-              leadId,
-              senderId,
-              pageId,
-              error: error?.response?.data || error.message,
-            },
-            "Instagram send failed"
-          );
-
-          Sentry.captureException(error);
         }
-      }
+      };
+
+      /* 🔥 RETRY SYSTEM */
+      await retryAsync(sendMessage, 3, 800);
 
       /* ---------------- UPDATE LEAD ---------------- */
-
-      prisma.lead
-        .update({
-          where: { id: leadId },
-          data: {
-            lastMessageAt: new Date(),
-            unreadCount: { increment: 1 },
-          },
-        })
-        .catch((error) => {
-          logger.warn({ leadId, error }, "Lead update failed");
-          Sentry.captureException(error);
-        });
-
-      logger.info({ leadId }, "AI Worker Completed");
-    } catch (error: any) {
-      console.log("❌ WORKER CRASH:", error);
-
-      logger.error(
-        {
-          leadId,
-          error: error?.response?.data || error?.message || error,
+      await prisma.lead.update({
+        where: { id: leadId },
+        data: {
+          lastMessageAt: new Date(),
+          unreadCount: { increment: 1 },
         },
-        "AI Worker Error"
-      );
+      });
 
+    } catch (error: any) {
+      logger.error("Worker crash", error);
       Sentry.captureException(error);
-
       throw error;
     }
   },
   {
     connection: redisConnection,
-    concurrency: 5,
+    concurrency: 10, // 🔥 upgraded
   }
 );
 
-/* ---------------- WORKER EVENTS ---------------- */
-
 worker.on("failed", (job, err) => {
-  logger.error(
-    { jobId: job?.id, error: err },
-    "AI Worker Failed"
-  );
-
-  Sentry.captureException(err);
+  logger.error({ jobId: job?.id, err }, "Worker failed");
 });
 
 logger.info("🔥 AI Worker Started");

@@ -3,14 +3,25 @@ import Stripe from "stripe";
 import { stripe } from "../services/stripe.service";
 import prisma from "../config/prisma";
 import { env } from "../config/env";
-import { getPlanFromPrice } from "../config/stripe.price.map";
 import Redis from "ioredis";
+
+/* 🔥 EMAIL */
+import {
+  sendSubscriptionEmail,
+  sendInvoiceEmail,
+} from "../services/email.service";
+
+/* 🔥 TAX */
+import { getStripeTaxDetails } from "../services/tax.service";
+
+/* 🔥 INVOICE NUMBER */
+import { generateInvoiceNumber } from "../services/invoice.service";
 
 const redis = new Redis(process.env.REDIS_URL!);
 
-/* ======================================
-UTILS
-====================================== */
+/* ====================================== */
+/* UTILS */
+/* ====================================== */
 
 function getSubscriptionId(
   subscription: string | Stripe.Subscription | null | undefined
@@ -33,19 +44,15 @@ const safeRedisDel = async (key: string) => {
   }
 };
 
-/* ======================================
-🔥 CURRENCY FIX (ADDED ONLY)
-====================================== */
-
 const mapCurrency = (currency: string): "INR" | "USD" => {
   if (!currency) return "INR";
   const upper = currency.toUpperCase();
   return upper === "USD" ? "USD" : "INR";
 };
 
-/* ======================================
-WEBHOOK
-====================================== */
+/* ====================================== */
+/* WEBHOOK */
+/* ====================================== */
 
 export const stripeWebhook = async (req: Request, res: Response) => {
   const sig = req.headers["stripe-signature"] as string;
@@ -64,30 +71,30 @@ export const stripeWebhook = async (req: Request, res: Response) => {
   }
 
   try {
+    /* 🔥 DUPLICATE PROTECTION */
     const exists = await prisma.stripeEvent.findUnique({
       where: { eventId: event.id },
     });
 
-    if (exists) {
-      return res.json({ received: true });
-    }
+    if (exists) return res.json({ received: true });
 
     await prisma.stripeEvent.create({
-      data: {
-        eventId: event.id,
-        type: event.type,
-      },
+      data: { eventId: event.id, type: event.type },
     });
 
     switch (event.type) {
+
+      /* ====================================== */
+      /* CHECKOUT COMPLETE */
+      /* ====================================== */
 
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
 
         const businessId = session.metadata?.businessId;
+        const planType = session.metadata?.plan as string;
 
-        /* 🔥 FIXED (ONLY CHANGE HERE) */
-        const rawCurrency: string =
+        const rawCurrency =
           (session.metadata?.currency as string) ||
           session.currency ||
           "INR";
@@ -98,28 +105,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
           session.subscription as any
         );
 
-        if (!businessId || !subscriptionId) break;
+        if (!businessId || !subscriptionId || !planType) break;
 
-        let priceId: string | undefined;
-
-        try {
-          const lineItems =
-            await stripe.checkout.sessions.listLineItems(session.id, {
-              limit: 1,
-            });
-
-          priceId = lineItems.data[0]?.price?.id;
-        } catch {
-          console.error("❌ lineItems fetch failed");
-          break;
-        }
-
-        const planType = getPlanFromPrice(priceId);
-
-        if (!planType) {
-          console.error("❌ Unknown priceId:", priceId);
-          break;
-        }
+        const existing = await prisma.subscription.findUnique({
+          where: { businessId },
+        });
 
         const plan = await prisma.plan.findFirst({
           where: {
@@ -127,35 +117,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
           },
         });
 
-        if (!plan) {
-          console.error("❌ Plan not found:", planType);
-          break;
-        }
+        if (!plan) break;
 
-        let stripeSub: Stripe.Subscription | null = null;
-
-        try {
-          stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-        } catch {
-          console.error("❌ subscription fetch failed");
-          break;
-        }
-
-        if (!stripeSub) break;
+        const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
 
         const periodEnd = getPeriodEnd(stripeSub);
-
-        const existing = await prisma.subscription.findUnique({
-          where: { businessId },
-        });
-
-        if (
-          existing?.currentPeriodEnd &&
-          periodEnd &&
-          existing.currentPeriodEnd > periodEnd
-        ) {
-          break;
-        }
 
         await prisma.subscription.upsert({
           where: { businessId },
@@ -167,19 +133,20 @@ export const stripeWebhook = async (req: Request, res: Response) => {
                 ? stripeSub.customer
                 : stripeSub.customer?.id ?? null,
             planId: plan.id,
-
-            /* 🔥 FIX APPLIED */
             currency,
-
             status:
-              stripeSub.status === "active" ||
-              stripeSub.status === "trialing"
+              stripeSub.status === "trialing" ||
+              stripeSub.status === "active"
                 ? "ACTIVE"
                 : "INACTIVE",
-
             currentPeriodEnd: periodEnd,
             isTrial: stripeSub.status === "trialing",
-            trialUsed: true,
+
+            /* 🔥 TRIAL PROTECTION */
+            trialUsed:
+              existing?.trialUsed === true
+                ? true
+                : stripeSub.status === "trialing",
           },
 
           create: {
@@ -190,29 +157,98 @@ export const stripeWebhook = async (req: Request, res: Response) => {
                 ? stripeSub.customer
                 : stripeSub.customer?.id ?? null,
             planId: plan.id,
-
-            /* 🔥 FIX APPLIED */
             currency,
-
             status:
-              stripeSub.status === "active" ||
-              stripeSub.status === "trialing"
+              stripeSub.status === "trialing" ||
+              stripeSub.status === "active"
                 ? "ACTIVE"
                 : "INACTIVE",
-
             currentPeriodEnd: periodEnd,
             isTrial: stripeSub.status === "trialing",
-            trialUsed: true,
+            trialUsed: stripeSub.status === "trialing",
           },
         });
+
+        const user = await prisma.user.findFirst({
+          where: { businessId },
+        });
+
+        if (user?.email) {
+          await sendSubscriptionEmail(user.email, planType);
+        }
 
         await safeRedisDel(`sub:${businessId}`);
         break;
       }
 
-      /* ======================================
-      🔥 ALL YOUR ORIGINAL CASES UNTOUCHED
-      ====================================== */
+      /* ====================================== */
+      /* PAYMENT SUCCESS */
+      /* ====================================== */
+
+      case "invoice.payment_succeeded": {
+        const invoice = event.data.object as Stripe.Invoice;
+
+        const subscriptionId = getSubscriptionId(
+          (invoice as any).subscription
+        );
+
+        if (!subscriptionId) break;
+
+        const existing = await prisma.subscription.findFirst({
+          where: { stripeSubscriptionId: subscriptionId },
+        });
+
+        if (!existing) break;
+
+        await prisma.subscription.update({
+          where: { stripeSubscriptionId: subscriptionId },
+          data: {
+            status: "ACTIVE",
+            graceUntil: null, // 🔥 clear grace
+          },
+        });
+
+        const taxData = getStripeTaxDetails(invoice);
+        const invoiceNumber = await generateInvoiceNumber();
+
+        await prisma.invoice.create({
+          data: {
+            businessId: existing.businessId,
+            amount: taxData.total,
+            currency: taxData.currency,
+            status: "PAID",
+            stripeInvoiceId: invoice.id,
+            invoiceNumber,
+            subtotal: taxData.subtotal,
+            taxAmount: taxData.taxAmount,
+            taxType: taxData.taxType,
+          },
+        });
+
+        const user = await prisma.user.findFirst({
+          where: { businessId: existing.businessId },
+        });
+
+        if (user?.email) {
+          await sendInvoiceEmail(
+            user.email,
+            taxData.total,
+            taxData.currency,
+            invoice.hosted_invoice_url || undefined,
+            invoice.invoice_pdf || undefined,
+            taxData.subtotal,
+            taxData.taxAmount,
+            taxData.taxType
+          );
+        }
+
+        await safeRedisDel(`sub:${existing.businessId}`);
+        break;
+      }
+
+      /* ====================================== */
+      /* SUB UPDATED */
+      /* ====================================== */
 
       case "customer.subscription.updated": {
         const sub = event.data.object as Stripe.Subscription;
@@ -224,14 +260,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         if (!existing) break;
 
         const periodEnd = getPeriodEnd(sub);
-
-        if (
-          existing.currentPeriodEnd &&
-          periodEnd &&
-          existing.currentPeriodEnd > periodEnd
-        ) {
-          break;
-        }
 
         await prisma.subscription.update({
           where: { stripeSubscriptionId: sub.id },
@@ -249,6 +277,10 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         await safeRedisDel(`sub:${existing.businessId}`);
         break;
       }
+
+      /* ====================================== */
+      /* CANCELLED */
+      /* ====================================== */
 
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
@@ -268,6 +300,10 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         break;
       }
 
+      /* ====================================== */
+      /* PAYMENT FAILED (GRACE PERIOD) */
+      /* ====================================== */
+
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
 
@@ -285,31 +321,12 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
         await prisma.subscription.update({
           where: { stripeSubscriptionId: subscriptionId },
-          data: { status: "PAST_DUE" },
-        });
-
-        await safeRedisDel(`sub:${existing.businessId}`);
-        break;
-      }
-
-      case "invoice.payment_succeeded": {
-        const invoice = event.data.object as Stripe.Invoice;
-
-        const subscriptionId = getSubscriptionId(
-          (invoice as any).subscription
-        );
-
-        if (!subscriptionId) break;
-
-        const existing = await prisma.subscription.findFirst({
-          where: { stripeSubscriptionId: subscriptionId },
-        });
-
-        if (!existing) break;
-
-        await prisma.subscription.update({
-          where: { stripeSubscriptionId: subscriptionId },
-          data: { status: "ACTIVE" },
+          data: {
+            status: "PAST_DUE",
+            graceUntil: new Date(
+              Date.now() + 3 * 24 * 60 * 60 * 1000
+            ),
+          },
         });
 
         await safeRedisDel(`sub:${existing.businessId}`);

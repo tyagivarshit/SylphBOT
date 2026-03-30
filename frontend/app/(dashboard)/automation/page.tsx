@@ -13,27 +13,24 @@ return(
 <div className="flex items-center justify-between">
 
 <div>
-  <h1 className="text-lg font-semibold text-gray-900">
+  <h1 className="text-xl font-semibold text-gray-900">
     Automation
   </h1>
 
-  <p className="text-sm text-gray-500 mt-1">
+  <p className="text-sm text-gray-600 mt-1">
     Create and manage your Instagram automations
   </p>
 </div>
-
-{/* FUTURE: stats / toggle */}
 
 </div>
 
 {/* LIST */}
 
-<div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+<div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
   <AutomationList/>
 </div>
 
 </div>
 
 )
-
 }

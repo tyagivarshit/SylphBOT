@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { cancelAppointment } from "@/lib/booking.api";
 import { api } from "@/lib/api";
 import useAuthGuard from "@/hooks/useAuthGuard";
-import { useAuth } from "@/context/AuthContext";
 
 interface Booking {
   id: string;
@@ -18,33 +17,21 @@ export default function BookedAppointments({
 }: {
   refreshKey?: number;
 }) {
-  /* ============================= */
-  /* AUTH */
-  /* ============================= */
-
-  const authLoading = useAuthGuard();
-  const { user } = useAuth();
-
-  const businessId = user?.businessId;
-
-  /* ============================= */
-  /* STATE */
-  /* ============================= */
+  const { loading: authLoading } = useAuthGuard(); // 🔥 FIX
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
 
-  /* ============================= */
-  /* FETCH BOOKINGS */
-  /* ============================= */
-
   const fetchBookings = async () => {
-    if (!businessId) return;
-
     try {
+      console.log("🔥 FETCH BOOKINGS CALLED"); // DEBUG
+
       setLoading(true);
 
-      const res = await api.get(`/booking/list/${businessId}`);
+      const res = await api.get("/api/booking/list");
+
+      console.log("BOOKINGS API:", res.data);
+
       setBookings(res.data.bookings || []);
     } catch (err) {
       console.error("FETCH BOOKINGS ERROR:", err);
@@ -54,26 +41,19 @@ export default function BookedAppointments({
   };
 
   useEffect(() => {
-    if (!businessId) return;
-    fetchBookings();
-  }, [businessId, refreshKey]);
+    if (authLoading) return;
 
-  /* ============================= */
-  /* CANCEL BOOKING */
-  /* ============================= */
+    fetchBookings();
+  }, [authLoading, refreshKey]);
 
   const handleCancel = async (id: string) => {
     try {
       await cancelAppointment(id);
       fetchBookings();
     } catch (err) {
-      console.error("CANCEL ERROR:", err);
+      console.error(err);
     }
   };
-
-  /* ============================= */
-  /* FORMAT DATE */
-  /* ============================= */
 
   const formatDateTime = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -83,10 +63,6 @@ export default function BookedAppointments({
       minute: "2-digit",
     })}`;
   };
-
-  /* ============================= */
-  /* STATUS BADGE */
-  /* ============================= */
 
   const getStatusStyles = (status: string) => {
     switch (status) {
@@ -101,10 +77,6 @@ export default function BookedAppointments({
     }
   };
 
-  /* ============================= */
-  /* AUTH LOADING */
-  /* ============================= */
-
   if (authLoading) {
     return (
       <div className="flex items-center justify-center py-6">
@@ -113,28 +85,11 @@ export default function BookedAppointments({
     );
   }
 
-  /* ============================= */
-  /* UI */
-  /* ============================= */
-
   return (
     <div className="h-full flex flex-col">
-
-      {/* 🔥 HEADER */}
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-sm font-semibold text-gray-900">
-          Booked Appointments
-        </h2>
-      </div>
-
-      {/* 🔥 CONTENT */}
       <div className="flex-1 overflow-y-auto space-y-3 pr-1">
 
-        {!businessId ? (
-          <p className="text-sm text-gray-500 text-center py-6">
-            Loading business...
-          </p>
-        ) : loading ? (
+        {loading ? (
           <div className="flex items-center justify-center py-6">
             <div className="w-6 h-6 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
           </div>
@@ -146,34 +101,26 @@ export default function BookedAppointments({
           bookings.map((b) => (
             <div
               key={b.id}
-              className="bg-white border border-gray-200 rounded-xl p-4 flex justify-between items-center hover:bg-gray-50 transition"
+              className="bg-white border border-gray-200 rounded-xl p-4 flex justify-between items-center"
             >
-              {/* INFO */}
-              <div className="flex flex-col gap-1">
-
-                <p className="text-sm font-semibold text-gray-900">
-                  {b.name}
-                </p>
-
+              <div>
+                <p className="text-sm font-semibold">{b.name}</p>
                 <p className="text-xs text-gray-600">
                   {formatDateTime(b.startTime)}
                 </p>
-
                 <span
-                  className={`text-[11px] px-2 py-0.5 rounded-full font-medium w-fit ${getStatusStyles(
+                  className={`text-[11px] px-2 py-0.5 rounded-full ${getStatusStyles(
                     b.status
                   )}`}
                 >
                   {b.status}
                 </span>
-
               </div>
 
-              {/* ACTION */}
               {b.status === "BOOKED" && (
                 <button
                   onClick={() => handleCancel(b.id)}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition"
+                  className="text-xs px-3 py-1.5 rounded-lg bg-red-500 text-white"
                 >
                   Cancel
                 </button>
@@ -183,7 +130,6 @@ export default function BookedAppointments({
         )}
 
       </div>
-
     </div>
   );
 }

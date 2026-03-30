@@ -2,9 +2,11 @@ import { incrementRate } from "../redis/rateLimiter.redis";
 import logger from "../utils/logger";
 
 const PLATFORM_LIMITS: Record<string, number> = {
-  INSTAGRAM: 25,
-  WHATSAPP: 40,
+  INSTAGRAM: 20,
+  WHATSAPP: 30,
 };
+
+const BUSINESS_LIMIT_PER_MIN = 120; // 🔥 global safety
 
 interface RateInput {
   businessId: string;
@@ -17,28 +19,35 @@ export const checkAIRateLimit = async ({
   leadId,
   platform,
 }: RateInput) => {
-
   try {
-
-    /* BASIC VALIDATION */
-
     if (!businessId || !leadId) {
       return { blocked: false };
     }
 
-    /* NORMALIZE PLATFORM */
-
     const normalizedPlatform = (platform || "UNKNOWN").toUpperCase();
 
-    const limit = PLATFORM_LIMITS[normalizedPlatform] || 20;
+    const limit = PLATFORM_LIMITS[normalizedPlatform] || 15;
 
-    /* REDIS COUNTER */
+    /* ============================= */
+    /* PER-LEAD LIMIT */
+    /* ============================= */
 
-    const current = await incrementRate(
+    const leadCount = await incrementRate(
       businessId,
       leadId,
       normalizedPlatform,
-      60 // ⬅️ 60 second window
+      60
+    );
+
+    /* ============================= */
+    /* BUSINESS LEVEL LIMIT */
+    /* ============================= */
+
+    const businessCount = await incrementRate(
+      businessId,
+      "GLOBAL",
+      normalizedPlatform,
+      60
     );
 
     logger.info(
@@ -46,44 +55,48 @@ export const checkAIRateLimit = async ({
         businessId,
         leadId,
         platform: normalizedPlatform,
-        current,
+        leadCount,
+        businessCount,
         limit,
       },
       "AI RATE LIMIT CHECK"
     );
 
-    /* BLOCK CONDITION */
+    /* ============================= */
+    /* BLOCK CONDITIONS */
+    /* ============================= */
 
-    if (current > limit) {
-
+    if (leadCount > limit) {
       logger.warn(
-        {
-          businessId,
-          leadId,
-          platform: normalizedPlatform,
-          current,
-          limit,
-        },
-        "AI RATE LIMIT TRIGGERED"
+        { businessId, leadId, leadCount, limit },
+        "LEAD RATE LIMIT TRIGGERED"
       );
 
       return {
         blocked: true,
-        reason: "RATE_LIMIT",
-        limit,
-        current,
+        reason: "LEAD_RATE_LIMIT",
       };
+    }
 
+    if (businessCount > BUSINESS_LIMIT_PER_MIN) {
+      logger.error(
+        { businessId, businessCount },
+        "BUSINESS RATE LIMIT TRIGGERED"
+      );
+
+      return {
+        blocked: true,
+        reason: "BUSINESS_RATE_LIMIT",
+      };
     }
 
     return {
       blocked: false,
-      limit,
-      current,
+      leadCount,
+      businessCount,
     };
 
   } catch (error) {
-
     logger.error(
       {
         businessId,
@@ -94,12 +107,6 @@ export const checkAIRateLimit = async ({
       "AI RATE LIMIT ERROR"
     );
 
-    /* FAIL SAFE */
-
-    return {
-      blocked: false,
-    };
-
+    return { blocked: false };
   }
-
 };

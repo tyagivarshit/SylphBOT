@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import axios from "axios";
+import { api } from "@/lib/api";
 import { X } from "lucide-react";
 
 export default function CreateSlotModal({
@@ -14,12 +14,10 @@ export default function CreateSlotModal({
   const [endTime, setEndTime] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const businessId = "YOUR_BUSINESS_ID"; // replace later
-
   if (!open) return null;
 
   /* ============================================
-  CREATE SLOT
+  CREATE SLOT (FIXED)
   ============================================ */
   const handleCreate = async () => {
     if (!date || !startTime || !endTime) {
@@ -37,18 +35,14 @@ export default function CreateSlotModal({
 
       const dayOfWeek = new Date(date).getDay();
 
-      await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL}/availability`,
-        {
-          businessId,
-          dayOfWeek,
-          startTime,
-          endTime,
-          slotDuration: 30,
-          bufferTime: 0,
-        },
-        { withCredentials: true }
-      );
+      // 🔥 FIX: businessId removed
+      await api.post("/api/availability", {
+        dayOfWeek,
+        startTime,
+        endTime,
+        slotDuration: 30,
+        bufferTime: 0,
+      });
 
       onSuccess?.();
       onClose();
@@ -59,7 +53,7 @@ export default function CreateSlotModal({
       setEndTime("");
 
     } catch (err) {
-      console.error(err);
+      console.error("CREATE SLOT ERROR:", err);
       alert("Failed to create slot");
     } finally {
       setLoading(false);
@@ -69,7 +63,6 @@ export default function CreateSlotModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm">
 
-      {/* 🔥 CARD */}
       <div className="w-full md:max-w-md bg-white rounded-t-2xl md:rounded-2xl p-5 md:p-6 space-y-4 animate-slideUp">
 
         {/* HEADER */}
@@ -146,7 +139,6 @@ export default function CreateSlotModal({
         </div>
       </div>
 
-      {/* 🔥 ANIMATION */}
       <style jsx>{`
         @keyframes slideUp {
           from {

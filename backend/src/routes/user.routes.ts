@@ -13,27 +13,26 @@ router.get("/me", protect, async (req: any, res) => {
   try {
     const userId = req.user?.id;
 
-    const user = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        deletedAt: null, // 🔥 IMPORTANT
-      },
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
       include: {
-        business: {
-          where: { deletedAt: null }, // 🔥 IMPORTANT
-        },
+        business: true,
       },
     });
 
     if (!user) {
-      return res.status(401).json({ error: "User not found or deleted" });
+      return res.status(404).json({ error: "User not found" });
     }
 
     res.setHeader("Cache-Control", "no-store");
 
     return res.json(user);
   } catch (err) {
-    console.error(err);
+    console.error("GET USER ERROR:", err);
     res.status(500).json({ error: "Failed to fetch user" });
   }
 });
@@ -44,6 +43,10 @@ router.get("/me", protect, async (req: any, res) => {
 router.patch("/update", protect, async (req: any, res) => {
   try {
     const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const {
       name,
@@ -66,11 +69,8 @@ router.patch("/update", protect, async (req: any, res) => {
     });
 
     /* 🔹 GET BUSINESS ID */
-    const userData = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        deletedAt: null, // 🔥 IMPORTANT
-      },
+    const userData = await prisma.user.findUnique({
+      where: { id: userId },
       select: { businessId: true },
     });
 
@@ -90,22 +90,17 @@ router.patch("/update", protect, async (req: any, res) => {
     }
 
     /* 🔥 RETURN UPDATED USER */
-    const updatedUser = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        deletedAt: null, // 🔥 IMPORTANT
-      },
+    const updatedUser = await prisma.user.findUnique({
+      where: { id: userId },
       include: {
-        business: {
-          where: { deletedAt: null }, // 🔥 IMPORTANT
-        },
+        business: true,
       },
     });
 
     return res.json(updatedUser);
 
   } catch (err) {
-    console.error(err);
+    console.error("UPDATE USER ERROR:", err);
     res.status(500).json({ error: "Update failed" });
   }
 });
@@ -121,20 +116,21 @@ router.post(
     try {
       const userId = req.user?.id;
 
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      /* 🔥 CHECK USER ACTIVE */
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          deletedAt: null, // 🔥 IMPORTANT
-        },
+      /* 🔥 CHECK USER */
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
       });
 
       if (!user) {
-        return res.status(401).json({ error: "User deleted or not found" });
+        return res.status(404).json({ error: "User not found" });
       }
 
       /* 🔥 CLOUDINARY UPLOAD */
@@ -164,22 +160,17 @@ router.post(
       });
 
       /* 🔥 RETURN UPDATED USER */
-      const updatedUser = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          deletedAt: null, // 🔥 IMPORTANT
-        },
+      const updatedUser = await prisma.user.findUnique({
+        where: { id: userId },
         include: {
-          business: {
-            where: { deletedAt: null }, // 🔥 IMPORTANT
-          },
+          business: true,
         },
       });
 
       return res.json(updatedUser);
 
     } catch (err) {
-      console.error(err);
+      console.error("UPLOAD AVATAR ERROR:", err);
       res.status(500).json({ error: "Upload failed" });
     }
   }

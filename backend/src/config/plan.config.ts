@@ -2,12 +2,13 @@
 TYPES
 ====================================== */
 
-export type PlanType = "FREE" | "BASIC" | "PRO" | "ELITE";
+export type PlanType = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE";
 
 export type PlanLimits = {
-  aiCallsUsed: number; // -1 = unlimited
-  messagesUsed: number;
-  followupsUsed: number;
+  aiCallsLimit: number; // -1 = unlimited
+  messagesLimit: number;
+  followupsLimit: number;
+  maxTriggers: number;
 };
 
 export type PlanFeatures = {
@@ -15,6 +16,7 @@ export type PlanFeatures = {
   automationEnabled: boolean;
   bookingEnabled: boolean;
   crmEnabled: boolean;
+  followupsEnabled: boolean;
   prioritySupport: boolean;
 };
 
@@ -29,69 +31,77 @@ const PLAN_CONFIG: Record<
     features: PlanFeatures;
   }
 > = {
-  FREE: {
+  FREE_LOCKED: {
     limits: {
-      aiCallsUsed: 50,
-      messagesUsed: 200,
-      followupsUsed: 20,
+      aiCallsLimit: 0,
+      messagesLimit: 0,
+      followupsLimit: 0,
+      maxTriggers: 0,
     },
     features: {
       whatsappEnabled: false,
       automationEnabled: false,
       bookingEnabled: false,
-      crmEnabled: true,
+      crmEnabled: false,
+      followupsEnabled: false,
       prioritySupport: false,
     },
   },
 
   BASIC: {
     limits: {
-      aiCallsUsed: 500,
-      messagesUsed: 2000,
-      followupsUsed: 200,
+      aiCallsLimit: 500,
+      messagesLimit: 2000,
+      followupsLimit: 0,
+      maxTriggers: 5,
     },
     features: {
-      whatsappEnabled: true,
+      whatsappEnabled: false,
       automationEnabled: true,
       bookingEnabled: false,
-      crmEnabled: true,
+      crmEnabled: false,
+      followupsEnabled: false,
       prioritySupport: false,
     },
   },
 
   PRO: {
     limits: {
-      aiCallsUsed: 5000,
-      messagesUsed: 15000,
-      followupsUsed: 2000,
+      aiCallsLimit: 5000,
+      messagesLimit: 15000,
+      followupsLimit: 2000,
+      maxTriggers: -1,
     },
     features: {
       whatsappEnabled: true,
       automationEnabled: true,
-      bookingEnabled: true,
+      bookingEnabled: false,
       crmEnabled: true,
+      followupsEnabled: true,
       prioritySupport: true,
     },
   },
 
   ELITE: {
     limits: {
-      aiCallsUsed: -1,
-      messagesUsed: -1,
-      followupsUsed: -1,
+      aiCallsLimit: -1,
+      messagesLimit: -1,
+      followupsLimit: -1,
+      maxTriggers: -1,
     },
     features: {
       whatsappEnabled: true,
       automationEnabled: true,
       bookingEnabled: true,
       crmEnabled: true,
+      followupsEnabled: true,
       prioritySupport: true,
     },
   },
 };
 
 /* ======================================
-🔥 DB PLAN TYPE
+DB PLAN TYPE
 ====================================== */
 
 type DBPlan = {
@@ -110,7 +120,7 @@ export const getPlanKey = (plan: DBPlan | null): PlanType => {
   const key = (name || type) as PlanType;
 
   if (!key || !PLAN_CONFIG[key]) {
-    return "FREE";
+    return "FREE_LOCKED";
   }
 
   return key;
@@ -144,7 +154,33 @@ export const hasFeature = (
 };
 
 /* ======================================
-🔥 SOFT LIMIT CHECK (UPSELL ENGINE)
+LIMIT HELPERS
+====================================== */
+
+export const canCreateTrigger = (
+  plan: DBPlan | null,
+  currentCount: number
+): boolean => {
+  const { maxTriggers } = getPlanLimits(plan);
+
+  if (maxTriggers === -1) return true;
+
+  return currentCount < maxTriggers;
+};
+
+export const canSendFollowup = (
+  plan: DBPlan | null,
+  used: number
+): boolean => {
+  const { followupsLimit } = getPlanLimits(plan);
+
+  if (followupsLimit === -1) return true;
+
+  return used < followupsLimit;
+};
+
+/* ======================================
+UPSELL ENGINE
 ====================================== */
 
 export const isNearLimit = (
@@ -152,15 +188,11 @@ export const isNearLimit = (
   max: number
 ): boolean => {
   if (max === -1) return false;
-  return current / max >= 0.8; // 80%
+  return current / max >= 0.8;
 };
 
-/* ======================================
-🔥 RECOMMENDED UPGRADE PLAN
-====================================== */
-
 export const getUpgradePlan = (current: PlanType): PlanType => {
-  const order: PlanType[] = ["FREE", "BASIC", "PRO", "ELITE"];
+  const order: PlanType[] = ["FREE_LOCKED", "BASIC", "PRO", "ELITE"];
 
   const index = order.indexOf(current);
 

@@ -2,15 +2,21 @@ import { Router } from "express";
 import { BillingController } from "../controllers/billing.controller";
 import { protect } from "../middleware/auth.middleware";
 import { authLimiter } from "../middleware/rateLimit.middleware";
-import { requireActiveSubscription } from "../middleware/subscription.middleware";
+import { attachBillingContext } from "../middleware/subscription.middleware";
 
 const router = Router();
+
+/* ======================================
+GET ALL PLANS
+====================================== */
+
+router.get("/plans", BillingController.getPlans);
 
 /* ======================================
 GET CURRENT BILLING
 ====================================== */
 
-router.get("/", protect, BillingController.getBilling);
+router.get("/", protect, attachBillingContext, BillingController.getBilling);
 
 /* ======================================
 CHECKOUT
@@ -41,7 +47,7 @@ BILLING PORTAL
 router.post(
   "/portal",
   protect,
-  requireActiveSubscription,
+  attachBillingContext,
   BillingController.createPortal
 );
 
@@ -52,7 +58,7 @@ CANCEL SUBSCRIPTION
 router.post(
   "/cancel",
   protect,
-  requireActiveSubscription,
+  attachBillingContext,
   BillingController.cancelSubscription
 );
 

@@ -1,12 +1,12 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import { canCreateTrigger } from "../config/plan.config";
 
 /* ---------------------------------------------------
 HELPER
 --------------------------------------------------- */
 
 const getBusinessId = async (userId: string) => {
-
   const business = await prisma.business.findFirst({
     where: { ownerId: userId },
     select: { id: true },
@@ -23,9 +23,7 @@ export const createCommentTrigger = async (
   req: Request,
   res: Response
 ) => {
-
   try {
-
     const userId = req.user?.id;
 
     if (!userId) {
@@ -50,6 +48,10 @@ export const createCommentTrigger = async (
       });
     }
 
+    /* ---------------------------------------------------
+    CLIENT VALIDATION
+    --------------------------------------------------- */
+
     const client = await prisma.client.findFirst({
       where: {
         id: clientId,
@@ -64,6 +66,53 @@ export const createCommentTrigger = async (
         message: "Instagram client not found",
       });
     }
+
+    /* ===================================================
+    🔥 PLAN LIMIT CHECK (FINAL FIX)
+    =================================================== */
+
+    const subscription = await prisma.subscription.findUnique({
+      where: { businessId },
+      include: { plan: true },
+    });
+
+    const triggerCount = await prisma.commentTrigger.count({
+      where: {
+        businessId,
+        clientId,
+        isActive: true,
+      },
+    });
+
+    if (!canCreateTrigger(subscription?.plan || null, triggerCount)) {
+      return res.status(403).json({
+        message: "Trigger limit reached for your plan",
+        upgradeRequired: true,
+      });
+    }
+
+    /* ---------------------------------------------------
+    DUPLICATE PROTECTION
+    --------------------------------------------------- */
+
+    const existing = await prisma.commentTrigger.findFirst({
+      where: {
+        businessId,
+        clientId,
+        reelId,
+        keyword: keyword.toLowerCase().trim(),
+      },
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        message: "Trigger already exists for this keyword",
+      });
+    }
+
+    /* ---------------------------------------------------
+    CREATE TRIGGER
+    --------------------------------------------------- */
 
     const trigger = await prisma.commentTrigger.create({
       data: {
@@ -83,28 +132,23 @@ export const createCommentTrigger = async (
     });
 
   } catch (error) {
-
     console.error("Create comment trigger error:", error);
 
     return res.status(500).json({
       message: "Failed to create trigger",
     });
-
   }
-
 };
 
 /* ---------------------------------------------------
-GET TRIGGERS (ALL - ACTIVE + PAUSED)
+GET TRIGGERS
 --------------------------------------------------- */
 
 export const getCommentTriggers = async (
   req: Request,
   res: Response
 ) => {
-
   try {
-
     const userId = req.user?.id;
 
     if (!userId) {
@@ -122,39 +166,30 @@ export const getCommentTriggers = async (
     }
 
     const triggers = await prisma.commentTrigger.findMany({
-      where: {
-        businessId,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
+      where: { businessId },
+      orderBy: { createdAt: "desc" },
     });
 
     return res.json(triggers);
 
   } catch (error) {
-
     console.error("Fetch triggers error:", error);
 
     return res.status(500).json({
       message: "Failed to fetch triggers",
     });
-
   }
-
 };
 
 /* ---------------------------------------------------
-DELETE TRIGGER (SOFT DELETE)
+DELETE TRIGGER (SOFT)
 --------------------------------------------------- */
 
 export const deleteCommentTrigger = async (
   req: Request,
   res: Response
 ) => {
-
   try {
-
     const userId = req.user?.id;
     const id = req.params.id as string;
 
@@ -173,10 +208,7 @@ export const deleteCommentTrigger = async (
     }
 
     const trigger = await prisma.commentTrigger.findFirst({
-      where: {
-        id,
-        businessId,
-      },
+      where: { id, businessId },
     });
 
     if (!trigger) {
@@ -187,9 +219,7 @@ export const deleteCommentTrigger = async (
 
     await prisma.commentTrigger.update({
       where: { id },
-      data: {
-        isActive: false,
-      },
+      data: { isActive: false },
     });
 
     return res.json({
@@ -198,28 +228,23 @@ export const deleteCommentTrigger = async (
     });
 
   } catch (error) {
-
     console.error("Delete trigger error:", error);
 
     return res.status(500).json({
       message: "Failed to delete trigger",
     });
-
   }
-
 };
 
 /* ---------------------------------------------------
-TOGGLE TRIGGER (ACTIVE / PAUSED)
+TOGGLE TRIGGER
 --------------------------------------------------- */
 
 export const toggleCommentTrigger = async (
   req: Request,
   res: Response
 ) => {
-
   try {
-
     const userId = req.user?.id;
     const id = req.params.id as string;
 
@@ -238,10 +263,7 @@ export const toggleCommentTrigger = async (
     }
 
     const trigger = await prisma.commentTrigger.findFirst({
-      where: {
-        id,
-        businessId,
-      },
+      where: { id, businessId },
     });
 
     if (!trigger) {
@@ -263,13 +285,10 @@ export const toggleCommentTrigger = async (
     });
 
   } catch (error) {
-
     console.error("Toggle trigger error:", error);
 
     return res.status(500).json({
       message: "Failed to toggle trigger",
     });
-
   }
-
 };

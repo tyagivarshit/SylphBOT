@@ -1,6 +1,9 @@
 import prisma from "../config/prisma";
 import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
-import { getPlanLimits } from "../config/plan.config";
+import {
+  getPlanLimits,
+  isNearLimit,
+} from "../config/plan.config";
 
 /* ======================================
 KEY
@@ -12,7 +15,24 @@ const getKey = (businessId: string) => {
 };
 
 /* ======================================
-🔥 ATOMIC CHECK + INCREMENT (CORE FIX)
+CUSTOM ERROR
+====================================== */
+
+class UsageError extends Error {
+  code: string;
+  upgradeRequired?: boolean;
+  meta?: any;
+
+  constructor(code: string, message: string, meta?: any) {
+    super(message);
+    this.code = code;
+    this.meta = meta;
+    this.upgradeRequired = true;
+  }
+}
+
+/* ======================================
+🔥 ATOMIC CHECK + INCREMENT
 ====================================== */
 
 export const trackUsage = async (
@@ -27,12 +47,20 @@ export const trackUsage = async (
       include: { plan: true },
     });
 
-    if (!subscription || subscription.status !== "ACTIVE") {
-      throw {
-        code: "NO_ACTIVE_SUBSCRIPTION",
-        message: "No active subscription",
-        upgradeRequired: true,
-      };
+    /* ======================================
+    VALID STATUS (FIXED)
+    ====================================== */
+
+    const validStatuses = ["ACTIVE"]; // ✅ FIXED
+
+    if (
+      !subscription ||
+      !validStatuses.includes(subscription.status)
+    ) {
+      throw new UsageError(
+        "NO_ACTIVE_SUBSCRIPTION",
+        "No active subscription"
+      );
     }
 
     const limits = getPlanLimits(subscription.plan);
@@ -55,18 +83,23 @@ export const trackUsage = async (
     const current = usage[field];
     const max = limits[field];
 
+    /* ======================================
+    HARD LIMIT
+    ====================================== */
+
     if (max !== -1 && current >= max) {
-      throw {
-        code: "LIMIT_REACHED",
-        feature: field,
-        current,
-        max,
-        upgradeRequired: true,
-      };
+      throw new UsageError(
+        "LIMIT_REACHED",
+        "Usage limit reached",
+        { field, current, max }
+      );
     }
 
-    /* 🔥 SAFE INCREMENT INSIDE TX */
-    await tx.usage.update({
+    /* ======================================
+    🔥 SAFE INCREMENT
+    ====================================== */
+
+    const updated = await tx.usage.update({
       where: { id: usage.id },
       data: {
         [field]: {
@@ -75,7 +108,19 @@ export const trackUsage = async (
       },
     });
 
-    return true;
+    /* ======================================
+    SOFT LIMIT (UPSELL ENGINE)
+    ====================================== */
+
+    const nearLimit =
+      max !== -1 && isNearLimit(updated[field], max);
+
+    return {
+      success: true,
+      current: updated[field],
+      max,
+      nearLimit,
+    };
   });
 };
 
@@ -84,13 +129,13 @@ HELPERS
 ====================================== */
 
 export const incrementAiUsage = async (businessId: string) => {
-  await trackUsage(businessId, "aiCallsUsed");
+  return trackUsage(businessId, "aiCallsUsed");
 };
 
 export const incrementMessageUsage = async (businessId: string) => {
-  await trackUsage(businessId, "messagesUsed");
+  return trackUsage(businessId, "messagesUsed");
 };
 
 export const incrementFollowupUsage = async (businessId: string) => {
-  await trackUsage(businessId, "followupsUsed");
+  return trackUsage(businessId, "followupsUsed");
 };

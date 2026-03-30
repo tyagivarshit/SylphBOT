@@ -4,10 +4,7 @@ import {
   getPlanKey,
   PlanFeatures,
 } from "../config/plan.config";
-
-/* ---------------------------------------------------
-TYPES
---------------------------------------------------- */
+import prisma from "../config/prisma";
 
 type Feature =
   | "INSTAGRAM_DM"
@@ -20,9 +17,12 @@ type Feature =
   | "CUSTOM_FOLLOWUPS"
   | "AI_BOOKING_SCHEDULING";
 
-/* ---------------------------------------------------
-🔥 FEATURE MIDDLEWARE (SaaS 10/10)
---------------------------------------------------- */
+const HARD_BLOCK_FEATURES: Feature[] = [
+  "WHATSAPP_AUTOMATION",
+  "FOLLOWUPS",
+  "CUSTOM_FOLLOWUPS",
+  "AI_BOOKING_SCHEDULING",
+];
 
 export const requireFeature =
   (feature: Feature) =>
@@ -37,55 +37,48 @@ export const requireFeature =
         });
       }
 
-      /* ======================================
-      🔥 USE BILLING CONTEXT (NEW SYSTEM)
-      ====================================== */
-
       const billing = (req as any).billing;
 
-      /* FREE USER */
-      if (!billing || billing.status === "NONE") {
-        (req as any).feature = {
-          allowed: false,
-          reason: "NO_SUBSCRIPTION",
-          feature,
-          upgradeRequired: true,
-        };
-
-        return next(); // ✅ DO NOT BLOCK
-      }
-
-      const plan = billing.plan;
-      const planKey = getPlanKey(plan);
+      const plan = billing?.plan || null;
+      const planKey = billing?.planKey || "FREE_LOCKED";
 
       const featureKey = mapFeature(feature);
 
-      const allowed = hasFeature(plan, featureKey);
+      const allowed =
+        planKey === "FREE_LOCKED"
+          ? false
+          : hasFeature(plan, featureKey);
 
-      /* ======================================
-      FEATURE BLOCK (SOFT)
-      ====================================== */
+      (req as any).feature = {
+        allowed,
+        feature,
+        plan: planKey,
+      };
 
-      if (!allowed) {
-        (req as any).feature = {
-          allowed: false,
-          reason: "FEATURE_NOT_ALLOWED",
+      /* 🔴 HARD BLOCK */
+      if (!allowed && HARD_BLOCK_FEATURES.includes(feature)) {
+        return res.status(403).json({
+          code: "FEATURE_NOT_ALLOWED",
           feature,
           plan: planKey,
           upgradeRequired: true,
-        };
-
-        return next(); // ✅ DO NOT BLOCK
+        });
       }
 
-      /* ======================================
-      ✅ ACCESS GRANTED
-      ====================================== */
+      /* 🔥 BASIC LIMIT */
+      if (planKey === "BASIC" && feature === "INSTAGRAM_DM") {
+        const flowCount = await prisma.automationFlow.count({
+          where: { businessId },
+        });
 
-      (req as any).feature = {
-        allowed: true,
-        feature,
-      };
+        if (flowCount >= 5) {
+          return res.status(403).json({
+            code: "LIMIT_REACHED",
+            message: "Automation limit reached (5 max in BASIC)",
+            upgradeRequired: true,
+          });
+        }
+      }
 
       next();
 
@@ -98,25 +91,21 @@ export const requireFeature =
     }
   };
 
-/* ---------------------------------------------------
-🔥 FEATURE MAPPING
---------------------------------------------------- */
-
 const mapFeature = (
   feature: Feature
 ): keyof PlanFeatures => {
   const mapping: Record<Feature, keyof PlanFeatures> = {
-
     INSTAGRAM_DM: "automationEnabled",
     INSTAGRAM_COMMENT_AUTOMATION: "automationEnabled",
     COMMENT_TO_DM: "automationEnabled",
     REEL_AUTOMATION_CONTROL: "automationEnabled",
 
     WHATSAPP_AUTOMATION: "whatsappEnabled",
+
     CRM: "crmEnabled",
 
-    FOLLOWUPS: "automationEnabled",
-    CUSTOM_FOLLOWUPS: "automationEnabled",
+    FOLLOWUPS: "followupsEnabled",
+    CUSTOM_FOLLOWUPS: "followupsEnabled",
 
     AI_BOOKING_SCHEDULING: "bookingEnabled",
   };

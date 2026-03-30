@@ -2,8 +2,12 @@ import prisma from "../config/prisma";
 import axios from "axios";
 import { decrypt } from "../utils/encrypt";
 import { generateAIReply } from "./ai.service";
-import { DELAY_TIME_5 } from "bullmq";
-import { incrementRate } from "../middleware/serviceRateLimiter"
+import { hasFeature } from "../config/plan.config";
+import { incrementRate } from "../redis/rateLimiter.redis";
+
+/* 🔥 ADDED */
+import Redis from "ioredis";
+const redis = new Redis(process.env.REDIS_URL as string);
 
 interface CommentInput {
   businessId: string;
@@ -24,54 +28,81 @@ export const handleCommentAutomation = async ({
     const text = commentText?.toLowerCase()?.trim();
     if (!text) return;
 
-    /* ---------------------------------------------------
-    RATE LIMIT (ANTI-SPAM)
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 RATE LIMIT (SAFE)
+    =================================================== */
+
     try {
-      await incrementRate(`comment:${instagramUserId}`, 5); // 5 req/min
+      await incrementRate(
+        businessId,
+        instagramUserId,
+        "COMMENT",
+        60
+      );
     } catch {
-      console.log("Rate limit hit");
+      console.log("🚫 Comment rate limit hit");
       return;
     }
 
-    /* ---------------------------------------------------
-    PLAN CHECK (FIXED)
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 SUBSCRIPTION CHECK (SAFE + CLEAN)
+    =================================================== */
+
     const subscription = await prisma.subscription.findUnique({
       where: { businessId },
       include: { plan: true },
     });
 
-    const allowedPlans = ["BASIC", "PRO", "PREMIUM"];
+    const plan = subscription?.plan || null;
 
-    if (!subscription || !allowedPlans.includes(subscription.plan?.name)) {
-      console.log("Plan not allowed for comment automation");
+    if (!hasFeature(plan, "automationEnabled")) {
+      console.log("❌ Automation not allowed for this plan");
       return;
     }
 
-    /* ---------------------------------------------------
-    FIND TRIGGERS (MULTI SUPPORT)
-    --------------------------------------------------- */
-    const triggers = await prisma.commentTrigger.findMany({
-      where: {
-        businessId,
-        clientId,
-        reelId,
-        isActive: true,
-      },
-    });
+    /* ===================================================
+    🔥 FETCH TRIGGERS (WITH CACHE)
+    =================================================== */
+
+    const cacheKey = `triggers:${businessId}:${clientId}:${reelId}`;
+
+    let triggers: any = await redis.get(cacheKey);
+
+    if (triggers) {
+      triggers = JSON.parse(triggers);
+    } else {
+      triggers = await prisma.commentTrigger.findMany({
+        where: {
+          businessId,
+          clientId,
+          reelId,
+          isActive: true,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      });
+
+      await redis.set(cacheKey, JSON.stringify(triggers), "EX", 300);
+    }
 
     if (!triggers.length) return;
 
-    const matchedTrigger = triggers.find((t) =>
-      text.includes(t.keyword?.toLowerCase()?.trim() || "")
-    );
+    /* ===================================================
+    🔥 MATCH TRIGGER (OPTIMIZED)
+    =================================================== */
+
+    const matchedTrigger = triggers.find((t: any) => {
+      const keyword = t.keyword?.toLowerCase()?.trim();
+      return keyword && text.includes(keyword);
+    });
 
     if (!matchedTrigger) return;
 
-    /* ---------------------------------------------------
-    LEAD FIND OR CREATE
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 LEAD FIND / CREATE
+    =================================================== */
+
     let lead = await prisma.lead.findFirst({
       where: {
         businessId,
@@ -92,9 +123,10 @@ export const handleCommentAutomation = async ({
       });
     }
 
-    /* ---------------------------------------------------
-    DUPLICATE PROTECTION (IMPROVED)
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 DUPLICATE PROTECTION (STRONG)
+    =================================================== */
+
     const recentAIMessage = await prisma.message.findFirst({
       where: {
         leadId: lead.id,
@@ -107,17 +139,16 @@ export const handleCommentAutomation = async ({
       const diff =
         Date.now() - new Date(recentAIMessage.createdAt).getTime();
 
-      const minutes = diff / (1000 * 60);
-
-      if (minutes < 5) {
-        console.log("Duplicate automation blocked");
+      if (diff < 5 * 60 * 1000) {
+        console.log("🚫 Duplicate blocked");
         return;
       }
     }
 
-    /* ---------------------------------------------------
-    CLIENT
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 CLIENT TOKEN
+    =================================================== */
+
     const client = await prisma.client.findUnique({
       where: { id: clientId },
     });
@@ -126,11 +157,14 @@ export const handleCommentAutomation = async ({
 
     const accessToken = decrypt(client.accessToken);
 
-    /* ---------------------------------------------------
-    AI RESPONSE
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 AI / CUSTOM REPLY (PRIORITY FIXED)
+    =================================================== */
+
     let replyMessage =
-      matchedTrigger.replyText || "Thanks for your comment!";
+      matchedTrigger.dmText ||
+      matchedTrigger.replyText ||
+      "Thanks for your comment!";
 
     if (matchedTrigger.aiPrompt) {
       try {
@@ -143,29 +177,23 @@ export const handleCommentAutomation = async ({
             matchedTrigger.aiPrompt,
         });
 
-        if (aiResponse) {
-          replyMessage = aiResponse;
-        }
-      } catch (error) {
-        console.log("AI failed, using fallback");
+        if (aiResponse) replyMessage = aiResponse;
+      } catch {
+        console.log("⚠️ AI fallback used");
       }
     }
 
-    /* ---------------------------------------------------
-    SMART SPLIT (COMMENT + DM)
-    --------------------------------------------------- */
-    const commentReply = "Check your DM 👀";
-    const dmReply = replyMessage;
+    /* ===================================================
+    🔥 COMMENT REPLY
+    =================================================== */
 
-    /* ---------------------------------------------------
-    COMMENT REPLY
-    --------------------------------------------------- */
+    const commentReply =
+      matchedTrigger.replyText || "Check your DM 👀";
+
     try {
       await axios.post(
         `https://graph.facebook.com/v19.0/${reelId}/comments`,
-        {
-          message: commentReply,
-        },
+        { message: commentReply },
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -173,24 +201,23 @@ export const handleCommentAutomation = async ({
           timeout: 10000,
         }
       );
-
-      console.log("Instagram comment reply sent");
     } catch (error: any) {
       console.error(
-        "Comment reply failed:",
+        "❌ Comment failed:",
         error?.response?.data || error.message
       );
     }
 
-    /* ---------------------------------------------------
-    DM SEND
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 DM SEND (SAFE)
+    =================================================== */
+
     try {
       await axios.post(
         "https://graph.facebook.com/v19.0/me/messages",
         {
           recipient: { id: instagramUserId },
-          message: { text: dmReply },
+          message: { text: replyMessage },
         },
         {
           headers: {
@@ -200,22 +227,21 @@ export const handleCommentAutomation = async ({
           timeout: 10000,
         }
       );
-
-      console.log("Instagram DM sent");
     } catch (error: any) {
       console.error(
-        "DM send failed:",
+        "❌ DM failed:",
         error?.response?.data || error.message
       );
     }
 
-    /* ---------------------------------------------------
-    SAVE MESSAGE
-    --------------------------------------------------- */
+    /* ===================================================
+    🔥 SAVE MESSAGE
+    =================================================== */
+
     await prisma.message.create({
       data: {
         leadId: lead.id,
-        content: dmReply,
+        content: replyMessage,
         sender: "AI",
       },
     });
@@ -228,6 +254,6 @@ export const handleCommentAutomation = async ({
     });
 
   } catch (error) {
-    console.error("Comment automation error:", error);
+    console.error("🚨 Comment automation error:", error);
   }
 };

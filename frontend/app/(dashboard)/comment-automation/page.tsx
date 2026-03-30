@@ -6,18 +6,18 @@ export default function CommentAutomationPage(){
 
 return(
 
-<div className="space-y-6">
+<div className="space-y-6 px-3 sm:px-5 lg:px-8 py-4 sm:py-6">
 
 {/* HEADER */}
 
-<div className="flex items-center justify-between">
+<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 
 <div>
-  <h1 className="text-lg font-semibold text-gray-900">
+  <h1 className="text-lg sm:text-xl font-semibold text-gray-900">
     Comment Automation
   </h1>
 
-  <p className="text-sm text-gray-500 mt-1">
+  <p className="text-xs sm:text-sm text-gray-500 mt-1">
     Automatically reply to comments and send DMs
   </p>
 </div>
@@ -26,7 +26,7 @@ return(
 
 {/* LIST */}
 
-<div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+<div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 lg:p-5 shadow-sm">
   <CommentAutomationList/>
 </div>
 

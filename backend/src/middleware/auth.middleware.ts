@@ -36,7 +36,7 @@ export const clearAuthCookies = (res: Response) => {
 };
 
 /* ======================================
-GET USER (FIXED)
+GET USER
 ====================================== */
 
 const getUserWithBusiness = async (userId: string) => {
@@ -47,13 +47,13 @@ const getUserWithBusiness = async (userId: string) => {
       role: true,
       isActive: true,
       tokenVersion: true,
-      businessId: true, // ✅ FIX
+      businessId: true,
     },
   });
 };
 
 /* ======================================
-PROTECT MIDDLEWARE (FINAL)
+PROTECT MIDDLEWARE (FINAL FIXED)
 ====================================== */
 
 export const protect = async (
@@ -65,6 +65,8 @@ export const protect = async (
     const accessToken = req.cookies?.accessToken;
     const refreshToken = req.cookies?.refreshToken;
 
+    console.log("🍪 Cookies:", req.cookies);
+
     if (!accessToken && !refreshToken) {
       throw unauthorized("Not authorized");
     }
@@ -72,9 +74,18 @@ export const protect = async (
     /* =============================
     ACCESS TOKEN (FAST PATH)
     ============================= */
+
     if (accessToken) {
       try {
-        const decoded = jwt.verify(accessToken, env.JWT_SECRET) as any;
+        const decoded = jwt.verify(
+          accessToken,
+          env.JWT_SECRET
+        ) as any;
+
+        // 🔥 token type check (bonus security)
+        if (decoded.type !== "access") {
+          throw unauthorized("Invalid token type");
+        }
 
         const user = await getUserWithBusiness(decoded.id);
 
@@ -86,12 +97,10 @@ export const protect = async (
           throw unauthorized("Invalid session");
         }
 
-        const businessId = user.businessId || null; // ✅ FIX
-
         (req as any).user = {
           id: user.id,
           role: user.role,
-          businessId,
+          businessId: user.businessId || null,
         };
 
         return next();
@@ -100,6 +109,7 @@ export const protect = async (
         if (err.name !== "TokenExpiredError") {
           throw unauthorized("Invalid access token");
         }
+        // expired → go to refresh flow
       }
     }
 
@@ -114,7 +124,15 @@ export const protect = async (
     let decoded: any;
 
     try {
-      decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET);
+      decoded = jwt.verify(
+        refreshToken,
+        env.JWT_REFRESH_SECRET
+      ) as any;
+
+      if (decoded.type !== "refresh") {
+        throw unauthorized("Invalid token type");
+      }
+
     } catch {
       clearAuthCookies(res);
       throw unauthorized("Invalid refresh token");
@@ -146,16 +164,14 @@ export const protect = async (
       throw unauthorized("Invalid session");
     }
 
-    const businessId = user.businessId || null; // ✅ FIX
-
-    /* ======================================
-    🔥 NEW ACCESS TOKEN
-    ====================================== */
+    /* =============================
+    NEW ACCESS TOKEN
+    ============================= */
 
     const newAccessToken = generateAccessToken(
       user.id,
       user.role,
-      businessId,
+      user.businessId || null,
       user.tokenVersion
     );
 
@@ -164,14 +180,10 @@ export const protect = async (
       maxAge: 15 * 60 * 1000,
     });
 
-    /* ======================================
-    SET USER
-    ====================================== */
-
     (req as any).user = {
       id: user.id,
       role: user.role,
-      businessId,
+      businessId: user.businessId || null,
     };
 
     return next();

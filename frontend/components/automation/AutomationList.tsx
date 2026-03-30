@@ -50,22 +50,21 @@ useEffect(()=>{
 
 return(
 
-<div className="space-y-4">
+<div className="space-y-5">
 
 {/* HEADER */}
 
 <div className="flex justify-between items-center">
 
-<h2 className="text-sm font-semibold text-gray-900">
+<h2 className="text-base font-semibold text-gray-900">
 Your Automations
 </h2>
 
 <button
 onClick={()=>setOpen(true)}
-className="bg-blue-600 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-700 transition"
-
+className="bg-indigo-600 text-white px-5 py-2 text-sm rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition"
 >
-Create Automation
+Create Automation 🚀
 </button>
 
 </div>
@@ -77,7 +76,7 @@ Create Automation
     {Array.from({length:3}).map((_,i)=>(
       <div
         key={i}
-        className="h-24 bg-white border border-gray-200 rounded-xl animate-pulse"
+        className="h-28 bg-white border border-gray-200 rounded-2xl animate-pulse shadow-sm"
       />
     ))}
   </div>
@@ -86,7 +85,7 @@ Create Automation
 {/* ERROR */}
 
 {error && (
-  <div className="text-sm text-red-500">
+  <div className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl p-3">
     {error}
   </div>
 )}
@@ -94,8 +93,23 @@ Create Automation
 {/* EMPTY */}
 
 {!loading && automations.length === 0 && (
-  <div className="text-sm text-gray-500 border border-dashed border-gray-300 rounded-lg p-6 text-center">
-    No automations yet. Create your first one 🚀
+  <div className="text-center border border-dashed border-gray-300 rounded-2xl p-8 bg-white">
+    
+    <p className="text-sm font-medium text-gray-900">
+      No automations yet 🚀
+    </p>
+
+    <p className="text-xs text-gray-500 mt-1">
+      Turn comments into leads automatically
+    </p>
+
+    <button
+      onClick={()=>setOpen(true)}
+      className="mt-4 bg-indigo-600 text-white px-4 py-2 text-sm rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition"
+    >
+      Create your first automation
+    </button>
+
   </div>
 )}
 
@@ -122,12 +136,11 @@ Create Automation
 open={open}
 onClose={()=>{
   setOpen(false)
-  fetchAutomations() // 🔥 auto refresh after create
+  fetchAutomations()
 }}
 />
 
 </div>
 
 )
-
 }

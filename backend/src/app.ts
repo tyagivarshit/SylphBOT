@@ -6,6 +6,8 @@ import cookieParser from "cookie-parser";
 
 /* ========= CONFIG ========= */
 import prisma from "./config/prisma";
+import { protect } from "./middleware/auth.middleware";
+import { attachBillingContext } from "./middleware/subscription.middleware";
 
 /* ========= ROUTES ========= */
 import authRoutes from "./routes/auth.routes";
@@ -37,6 +39,10 @@ import userRoutes from "./routes/user.routes";
 import securityRoutes from "./routes/security.routes";
 import integrationRoutes from "./routes/integration.routes";
 import oauthRoutes from "./routes/oauth.routes";
+
+/* ✅ ADDED ROUTES */
+import bookingRoutes from "./routes/booking.routes";
+import availabilityRoutes from "./routes/availability.routes";
 
 /* ========= MIDDLEWARE ========= */
 import {
@@ -130,39 +136,68 @@ app.use((req, res, next) => {
 app.use(monitoringMiddleware);
 
 /* ======================================
-🔥 WEBHOOKS (CRITICAL ORDER)
+🔥 REQUEST TIMEOUT
+====================================== */
+app.use((req, res, next) => {
+  res.setTimeout(15000, () => {
+    console.error("⏱️ Request timeout:", req.originalUrl);
+    if (!res.headersSent) {
+      res.status(408).send("Request Timeout");
+    }
+  });
+  next();
+});
+
+/* ======================================
+🔥 WEBHOOKS (ORDER IMPORTANT)
 ====================================== */
 
-// STRIPE
 app.use(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
   stripeWebhookRoutes
 );
 
-// WHATSAPP
 app.use(
   "/api/webhook/whatsapp",
   express.raw({ type: "application/json" }),
   whatsappWebhook
 );
 
-// INSTAGRAM (FIXED)
 app.use(
   "/api/webhook/instagram",
   express.raw({
     type: "application/json",
     verify: (req: any, _res, buf) => {
-      req.rawBody = buf; // ✅ IMPORTANT
+      req.rawBody = buf;
     },
   }),
   instagramWebhook
 );
 
 /* ======================================
-🔥 JSON PARSER (ONLY HERE)
+🔥 JSON PARSER
 ====================================== */
 app.use(express.json({ limit: "1mb" }));
+
+/* ======================================
+🔥 GLOBAL AUTH ONLY (FIXED)
+====================================== */
+app.use((req, res, next) => {
+  const publicRoutes = [
+    "/api/auth",
+    "/api/webhooks",
+    "/api/webhook",
+  ];
+
+  const isPublic = publicRoutes.some((route) =>
+    req.originalUrl.startsWith(route)
+  );
+
+  if (isPublic) return next();
+
+  protect(req, res, next);
+});
 
 /* ======================================
 🔥 ROUTES
@@ -176,49 +211,36 @@ app.get("/", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
 
-/* CLIENTS */
-app.use("/api/clients", clientRoutes);
+/* FREE (AUTH ONLY) */
+app.use("/api/dashboard", protect, dashboardRoutes);
+app.use("/api/billing", protect, billingRoutes);
+app.use("/api/user", protect, userRoutes);
+app.use("/api/notifications", protect, notificationRoutes);
 
-/* AI */
-app.use("/api/ai", aiLimiter, aiRoutes);
+/* PREMIUM */
+app.use("/api/ai", protect, attachBillingContext, aiLimiter, aiRoutes);
 
-/* BILLING */
-app.use("/api/billing", billingRoutes);
+app.use("/api/automation", protect, attachBillingContext, automationRoutes);
 
-/* DASHBOARD */
-app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/messages", protect, attachBillingContext, messageRoutes);
 
-/* COMMENT AUTOMATION */
-app.use("/api/comment-triggers", commentTriggerRoutes);
+app.use("/api/comment-triggers", protect, attachBillingContext, commentTriggerRoutes);
 
-/* MESSAGE */
-app.use("/api/messages", messageRoutes);
+/* OTHER (AUTH ONLY) */
+app.use("/api/clients", protect, clientRoutes);
+app.use("/api/instagram", protect, instagramRoutes);
+app.use("/api/knowledge", protect, knowledgeRoutes);
+app.use("/api/training", protect, trainingRoutes);
+app.use("/api/leads", protect, leadRoutes);
+app.use("/api/analytics", protect, analyticsRoutes);
+app.use("/api/search", protect, searchRoutes);
+app.use("/api/security", protect, securityRoutes);
+app.use("/api/integrations", protect, integrationRoutes);
+app.use("/api/oauth", protect, oauthRoutes);
 
-/* AUTOMATION */
-app.use("/api/automation", automationRoutes);
-
-/* INSTAGRAM */
-app.use("/api/instagram", instagramRoutes);
-
-/* KNOWLEDGE */
-app.use("/api/knowledge", knowledgeRoutes);
-
-/* TRAINING */
-app.use("/api/training", trainingRoutes);
-
-/* LEADS */
-app.use("/api/leads", leadRoutes);
-
-/* ANALYTICS */
-app.use("/api/analytics", analyticsRoutes);
-
-/* NEW */
-app.use("/api/search", searchRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/user", userRoutes);
-app.use("/api/security", securityRoutes);
-app.use("/api/integrations", integrationRoutes);
-app.use("/api/oauth", oauthRoutes);
+/* ✅ ADDED BOOKING + AVAILABILITY */
+app.use("/api/booking", protect, attachBillingContext, bookingRoutes);
+app.use("/api/availability", protect, attachBillingContext, availabilityRoutes);
 
 /* ======================================
 🔥 HEALTH
@@ -238,7 +260,7 @@ app.use((_req, res) => {
 });
 
 /* ======================================
-🔥 GLOBAL ERROR HANDLER
+🔥 ERROR HANDLER
 ====================================== */
 app.use((err: any, req: any, res: any, _next: any) => {
   console.error("ERROR:", {
@@ -273,5 +295,16 @@ if (process.env.ENABLE_CRON === "true") {
   startMetaTokenRefreshCron();
   startUsageResetCron();
 }
+
+/* ======================================
+🔥 CRASH SAFETY
+====================================== */
+process.on("uncaughtException", (err) => {
+  console.error("🔥 UNCAUGHT EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("🔥 UNHANDLED REJECTION:", err);
+});
 
 export default app;

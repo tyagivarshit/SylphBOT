@@ -17,9 +17,7 @@ export const executeAutomationActions = async ({
   trigger,
   message,
 }: ActionInput): Promise<string | null> => {
-
   try {
-
     const { step, executionId, flowId } = trigger;
 
     if (!step) return null;
@@ -29,11 +27,25 @@ export const executeAutomationActions = async ({
     /* ============================= */
 
     if (step.stepType === "SEND_MESSAGE") {
-
       if (!step.message) return null;
 
-      return step.message;
+      /* 🔥 MOVE TO NEXT STEP */
+      if (step.nextStep) {
+        await prisma.automationExecution.update({
+          where: { id: executionId },
+          data: {
+            currentStep: step.nextStep,
+          },
+        });
+      } else {
+        /* END FLOW */
+        await prisma.automationExecution.update({
+          where: { id: executionId },
+          data: { status: "COMPLETED" },
+        });
+      }
 
+      return step.message;
     }
 
     /* ============================= */
@@ -41,20 +53,24 @@ export const executeAutomationActions = async ({
     /* ============================= */
 
     if (step.stepType === "CONDITION") {
+      const cleanMessage = message
+        .toLowerCase()
+        .replace(/[^\w\s]/g, "");
 
-      const condition = step.condition?.toLowerCase();
+      const condition = step.condition
+        ?.toLowerCase()
+        .replace(/[^\w\s]/g, "");
 
       if (!condition) return null;
 
-      const conditionMatched = message
-        .toLowerCase()
-        .includes(condition);
+      const regex = new RegExp(`\\b${condition}\\b`);
+      const matched = regex.test(cleanMessage);
 
-      if (!conditionMatched) return null;
+      if (!matched) return null;
 
       const nextStep = await prisma.automationStep.findFirst({
         where: {
-          flowId: flowId,
+          flowId,
           stepKey: step.nextStep || "",
         },
       });
@@ -62,7 +78,6 @@ export const executeAutomationActions = async ({
       if (!nextStep) return null;
 
       /* UPDATE EXECUTION */
-
       await prisma.automationExecution.update({
         where: { id: executionId },
         data: {
@@ -70,24 +85,19 @@ export const executeAutomationActions = async ({
         },
       });
 
-      /* ONLY RETURN MESSAGE IF NEXT STEP SENDS MESSAGE */
-
       if (nextStep.stepType === "SEND_MESSAGE") {
         return nextStep.message || null;
       }
 
       return null;
-
     }
 
     /* ============================= */
-    /* DELAY STEP */
+    /* DELAY STEP (handled by queue later) */
     /* ============================= */
 
     if (step.stepType === "DELAY") {
-
       return null;
-
     }
 
     /* ============================= */
@@ -95,7 +105,6 @@ export const executeAutomationActions = async ({
     /* ============================= */
 
     if (step.stepType === "END") {
-
       await prisma.automationExecution.update({
         where: { id: executionId },
         data: {
@@ -104,17 +113,11 @@ export const executeAutomationActions = async ({
       });
 
       return null;
-
     }
 
     return null;
-
   } catch (error) {
-
     console.error("Automation executor error:", error);
-
     return null;
-
   }
-
 };

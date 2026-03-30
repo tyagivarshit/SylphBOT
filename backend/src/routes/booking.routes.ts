@@ -6,6 +6,7 @@ import {
   rescheduleAppointmentController,
 } from "../controllers/booking.controller";
 import { protect } from "../middleware/auth.middleware";
+import prisma from "../config/prisma";
 
 const router = Router();
 
@@ -14,7 +15,7 @@ const router = Router();
 GET AVAILABLE SLOTS
 =====================================================
 */
-router.get("/slots/:businessId", protect, getAvailableSlots);
+router.get("/slots/:businessId", getAvailableSlots);
 
 /*
 =====================================================
@@ -43,42 +44,52 @@ router.delete("/appointment/:appointmentId", protect, cancelAppointment);
 
 /*
 =====================================================
-GET ALL BOOKINGS (IMPORTANT FOR DASHBOARD)
+🔥 GET ALL BOOKINGS (FIXED)
 =====================================================
 */
-router.get("/list/:businessId", protect, async (req, res) => {
+router.get("/list", protect, async (req: any, res) => {
   try {
-    const businessId = req.params.businessId;
+    const businessId = req.user?.businessId;
 
-    const bookings = await req.app.locals.prisma.appointment.findMany({
+    if (!businessId) {
+      return res.status(400).json({
+        success: false,
+        message: "Business ID missing",
+      });
+    }
+
+    const bookings = await prisma.appointment.findMany({
       where: { businessId },
       orderBy: { startTime: "asc" },
+      select: {
+        id: true,
+        name: true,
+        startTime: true,
+        status: true,
+      },
     });
 
-    res.status(200).json({
+    // 🔥 FIX: convert Date → string for frontend stability
+    const formattedBookings = bookings.map((b) => ({
+      id: b.id,
+      name: b.name,
+      startTime: b.startTime.toISOString(),
+      status: b.status,
+    }));
+
+    return res.status(200).json({
       success: true,
-      bookings,
+      bookings: formattedBookings,
     });
+
   } catch (error: any) {
     console.error("GET BOOKINGS ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch bookings",
     });
   }
-});
-
-/*
-=====================================================
-HEALTH CHECK
-=====================================================
-*/
-router.get("/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Booking service running",
-  });
 });
 
 export default router;

@@ -14,6 +14,9 @@ import { processWebhookEvent } from "../services/webhookDedup.service";
 import { incrementRate } from "../redis/rateLimiter.redis";
 import { createNotification } from "../services/notification.service";
 
+/* 🔥 ADDED (QUEUE) */
+import { automationQueue } from "../queues/automation.queue";
+
 const router = Router();
 
 /* --------------------------------------------------- */
@@ -153,7 +156,8 @@ router.post("/", async (req: any, res: Response) => {
       continue;
     }
 
-    await handleCommentAutomation({
+    /* 🔥 CHANGED: DIRECT → QUEUE */
+    await automationQueue.add("comment", {
       businessId: client.businessId,
       clientId: client.id,
       instagramUserId,
@@ -281,7 +285,7 @@ router.post("/", async (req: any, res: Response) => {
   include: {
     business: {
       select: {
-        ownerId: true, // 
+        ownerId: true,
       },
     },
   },
@@ -339,21 +343,20 @@ router.post("/", async (req: any, res: Response) => {
         sender: "USER",
       },
     });
-    // 🔥 ADD THIS
+
      await createNotification({
       userId: client.business.ownerId,
       title: "New Message",
       message: text,
       type: "MESSAGE",
     });
+
     try {
 
       const io = getIO();
       io.to(`lead_${lead.id}`).emit("new_message", userMessage);
 
     } catch {}
-
-
 
     /* ---------------------------------------------------
     ADD AI JOB

@@ -13,10 +13,11 @@ export const matchAutomationTrigger = async ({
   businessId,
   message,
 }: TriggerInput): Promise<TriggerResult | null> => {
-
   try {
-
-    const text = message.toLowerCase().trim();
+    const cleanText = message
+      .toLowerCase()
+      .replace(/[^\w\s]/g, "")
+      .trim();
 
     /* ==================================================
     FETCH ACTIVE FLOWS
@@ -34,63 +35,56 @@ export const matchAutomationTrigger = async ({
 
     if (!flows.length) return null;
 
+    let bestMatch: { flowId: string; score: number } | null = null;
+
     /* ==================================================
     LOOP FLOWS
     ================================================== */
 
     for (const flow of flows) {
-
       if (!flow.triggerValue) continue;
 
-      const triggerValue = flow.triggerValue
+      const cleanTrigger = flow.triggerValue
         .toLowerCase()
+        .replace(/[^\w\s]/g, "")
         .trim();
 
-      /* EXACT MATCH */
+      let score = 0;
 
-      if (text === triggerValue) {
-
-        return {
-          flowId: flow.id,
-        };
-
+      /* EXACT MATCH (highest priority) */
+      if (cleanText === cleanTrigger) {
+        return { flowId: flow.id };
       }
 
-      /* WORD MATCH */
-
-      const words = text.split(" ");
-
-      if (words.includes(triggerValue)) {
-
-        return {
-          flowId: flow.id,
-        };
-
+      /* WORD BOUNDARY MATCH */
+      const regex = new RegExp(`\\b${cleanTrigger}\\b`);
+      if (regex.test(cleanText)) {
+        score = 2;
       }
 
-      /* PARTIAL MATCH (SAFE) */
-
-      if (
-        text.length > triggerValue.length + 2 &&
-        text.includes(triggerValue)
+      /* PARTIAL MATCH (controlled) */
+      else if (
+        cleanTrigger.length > 3 &&
+        cleanText.includes(cleanTrigger)
       ) {
-
-        return {
-          flowId: flow.id,
-        };
-
+        score = 1;
       }
 
+      /* PICK BEST MATCH */
+      if (score > 0) {
+        if (!bestMatch || score > bestMatch.score) {
+          bestMatch = {
+            flowId: flow.id,
+            score,
+          };
+        }
+      }
     }
 
-    return null;
+    return bestMatch ? { flowId: bestMatch.flowId } : null;
 
   } catch (error) {
-
     console.error("🚨 Trigger matcher error:", error);
-
     return null;
-
   }
-
 };

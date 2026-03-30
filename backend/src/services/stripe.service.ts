@@ -11,6 +11,7 @@ import { getTaxConfig } from "./tax.service";
 
 export const stripe = new Stripe(env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-10-16" as any,
+  timeout: 10000,
 });
 
 /* ============================= */
@@ -20,41 +21,6 @@ export const stripe = new Stripe(env.STRIPE_SECRET_KEY!, {
 type Currency = "INR" | "USD";
 type Billing = "monthly" | "yearly";
 type Plan = "BASIC" | "PRO" | "ELITE";
-
-/* ============================= */
-/* PRICE MAP */
-/* ============================= */
-
-const PRICE_MAP = {
-  BASIC: {} as any,
-  PRO: {} as any,
-  ELITE: {} as any,
-} as const;
-
-/* ============================= */
-/* EARLY USER CACHE */
-/* ============================= */
-
-let earlyUserCache: { value: boolean; expires: number } | null = null;
-
-const isEarlyUser = async () => {
-  if (earlyUserCache && earlyUserCache.expires > Date.now()) {
-    return earlyUserCache.value;
-  }
-
-  const count = await prisma.subscription.count({
-    where: { status: "ACTIVE" },
-  });
-
-  const value = count < 20;
-
-  earlyUserCache = {
-    value,
-    expires: Date.now() + 60 * 1000,
-  };
-
-  return value;
-};
 
 /* ============================= */
 /* GEO DETECTION */
@@ -92,25 +58,18 @@ const getPriceId = async (
   billing: Billing,
   currency: Currency
 ): Promise<string> => {
+  const key = `STRIPE_${plan}_${currency}_${billing.toUpperCase()}`;
+  const price = process.env[key];
 
-  const early = await isEarlyUser();
-
-  const currencyKey = currency as keyof typeof PRICE_MAP[typeof plan];
-  const billingKey =
-    billing as keyof typeof PRICE_MAP[typeof plan][typeof currencyKey];
-
-  const price =
-    PRICE_MAP[plan]?.[currencyKey]?.[billingKey]?.[
-      early ? "early" : "normal"
-    ];
-
-  if (!price) throw new Error("Price ID not found");
+  if (!price) {
+    throw new Error(`Missing Stripe price for ${key}`);
+  }
 
   return price;
 };
 
 /* ============================= */
-/* CREATE CHECKOUT SESSION */
+/* CREATE / UPGRADE SESSION */
 /* ============================= */
 
 export const createCheckoutSession = async (
@@ -122,7 +81,6 @@ export const createCheckoutSession = async (
   currency?: Currency,
   couponCode?: string
 ) => {
-
   const plan = validatePlan(planInput);
 
   const detectedCurrency = detectCurrency(req);
@@ -174,6 +132,34 @@ export const createCheckoutSession = async (
   const priceId = await getPriceId(plan, billing, finalCurrency);
 
   /* ============================= */
+  /* 🔥 UPGRADE FIX (REAL SAAS) */
+  /* ============================= */
+
+  if (existingSub?.stripeSubscriptionId) {
+    const stripeSub = await stripe.subscriptions.retrieve(
+      existingSub.stripeSubscriptionId
+    );
+
+    const itemId = stripeSub.items.data[0]?.id;
+
+    if (itemId) {
+      await stripe.subscriptions.update(existingSub.stripeSubscriptionId, {
+        items: [
+          {
+            id: itemId,
+            price: priceId,
+          },
+        ],
+        proration_behavior: "create_prorations",
+      });
+
+      return {
+        url: `${env.FRONTEND_URL}/billing`,
+      };
+    }
+  }
+
+  /* ============================= */
   /* COUPON */
   /* ============================= */
 
@@ -189,93 +175,54 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
-  /* TRIAL */
+  /* 🔥 TRIAL PROTECTION (IMPORTANT) */
   /* ============================= */
 
-  const isTrialEligible =
-    existingSub?.isTrial && !existingSub?.trialUsed;
+  let isTrialEligible = false;
+
+  if (!existingSub) {
+    isTrialEligible = true;
+  } else if (!existingSub.trialUsed) {
+    isTrialEligible = true;
+  }
 
   /* ============================= */
-  /* IDEMPOTENCY */
+  /* CREATE CHECKOUT */
   /* ============================= */
 
-  const idempotencyKey = `${businessId}_${plan}_${billing}`;
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "subscription",
+      customer: customerId,
 
-  /* ============================= */
-  /* CHECKOUT SESSION */
-/* ============================= */
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
 
- const session = await stripe.checkout.sessions.create(
-  {
-    mode: "subscription",
-    customer: customerId,
+      billing_address_collection: "required",
 
-    line_items: [
-      {
-        price: priceId,
-        quantity: 1,
+      ...getTaxConfig(finalCurrency),
+
+      ...(discounts ? { discounts } : {}),
+
+      subscription_data: isTrialEligible
+        ? { trial_period_days: 7 }
+        : undefined,
+
+      metadata: {
+        businessId,
+        plan,
+        billing,
+        currency: finalCurrency,
       },
-    ],
 
-    billing_address_collection: "required",
-
-    ...getTaxConfig(finalCurrency),
-
-    ...(discounts ? { discounts } : {}),
-
-    subscription_data: isTrialEligible
-      ? { trial_period_days: 7 }
-      : undefined,
-
-    metadata: {
-      businessId,
-      plan,
-      billing,
-      currency: finalCurrency,
-    },
-
-    success_url: `${env.FRONTEND_URL}/billing/success`,
-    cancel_url: `${env.FRONTEND_URL}/billing`,
-  } as Stripe.Checkout.SessionCreateParams, // ⭐⭐⭐ MAIN FIX
-  {
-    idempotencyKey,
-  }
-);
-
-  /* ============================= */
-  /* FREE PLAN */
-/* ============================= */
-
-  const freePlan = await prisma.plan.findFirst({
-    where: { type: "FREE" },
-  });
-
-  if (!freePlan) {
-    throw new Error("Free plan not found");
-  }
-
-  /* ============================= */
-  /* UPSERT */
-/* ============================= */
-
-  await prisma.subscription.upsert({
-    where: { businessId },
-
-    update: {
-      stripeCustomerId: customerId,
-      currency: finalCurrency,
-      billingCycle: billing,
-    },
-
-    create: {
-      businessId,
-      planId: freePlan.id,
-      stripeCustomerId: customerId,
-      currency: finalCurrency,
-      billingCycle: billing,
-      status: "INACTIVE",
-    },
-  });
+      success_url: `${env.FRONTEND_URL}/billing/success`,
+      cancel_url: `${env.FRONTEND_URL}/billing`,
+    } as Stripe.Checkout.SessionCreateParams
+  );
 
   return session;
 };

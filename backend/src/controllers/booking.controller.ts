@@ -32,10 +32,7 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
       });
     }
 
-    const slots = await fetchAvailableSlots(
-      businessId,
-      parsedDate
-    );
+    const slots = await fetchAvailableSlots(businessId, parsedDate);
 
     return res.status(200).json({
       success: true,
@@ -53,13 +50,14 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
 
 /*
 =====================================================
-CREATE APPOINTMENT
+CREATE APPOINTMENT (🔥 FIXED SECURITY)
 =====================================================
 */
-export const createAppointment = async (req: Request, res: Response) => {
+export const createAppointment = async (req: any, res: Response) => {
   try {
+    const businessId = req.user?.businessId; // 🔥 FIX
+
     const {
-      businessId,
       leadId,
       name,
       email,

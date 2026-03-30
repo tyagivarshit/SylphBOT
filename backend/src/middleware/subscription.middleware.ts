@@ -1,34 +1,24 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma";
 import Redis from "ioredis";
+import { getPlanKey } from "../config/plan.config";
 
 const redis = new Redis(process.env.REDIS_URL as string);
 
-const CACHE_TTL = 60 * 5; // 5 min
-
-/* ======================================
-CACHE KEY
-====================================== */
+const CACHE_TTL = 60 * 3;
 
 const getKey = (businessId: string) => `sub:${businessId}`;
-
-/* ======================================
-TYPES
-====================================== */
 
 type BillingContext = {
   subscription: any | null;
   plan: any | null;
-  status: "NONE" | "ACTIVE" | "PAST_DUE" | "CANCELLED" | "TRIAL_EXPIRED";
+  planKey: string;
+  status: "INACTIVE" | "ACTIVE" | "TRIAL";
   isLimited: boolean;
   upgradeRequired: boolean;
 };
 
-/* ======================================
-🔥 SUBSCRIPTION CONTEXT (FINAL 10/10)
-====================================== */
-
-export const requireActiveSubscription = async (
+export const attachBillingContext = async (
   req: Request,
   res: Response,
   next: NextFunction
@@ -45,11 +35,8 @@ export const requireActiveSubscription = async (
 
     let subscription: any = null;
 
-    /* ======================================
-    CACHE FIRST
-    ====================================== */
-
-    const cached = await redis.get(getKey(businessId));
+    const cacheKey = getKey(businessId);
+    const cached = await redis.get(cacheKey);
 
     if (cached) {
       subscription = JSON.parse(cached);
@@ -61,7 +48,7 @@ export const requireActiveSubscription = async (
 
       if (subscription) {
         await redis.set(
-          getKey(businessId),
+          cacheKey,
           JSON.stringify(subscription),
           "EX",
           CACHE_TTL
@@ -69,78 +56,76 @@ export const requireActiveSubscription = async (
       }
     }
 
-    /* ======================================
-    DEFAULT (FREE USER)
-    ====================================== */
+    const now = new Date();
 
     let context: BillingContext = {
       subscription: null,
       plan: null,
-      status: "NONE",
-      isLimited: false, // ✅ FREE user allowed (dashboard open)
-      upgradeRequired: false,
+      planKey: "FREE_LOCKED",
+      status: "INACTIVE",
+      isLimited: true,
+      upgradeRequired: true,
     };
 
-    /* ======================================
-    NO SUBSCRIPTION
-    ====================================== */
+    if (subscription && subscription.plan) {
+      const planKey = getPlanKey(subscription.plan);
 
-    if (!subscription || !subscription.plan) {
-      (req as any).billing = context;
-      (req as any).subscription = null;
-      return next(); // ✅ NEVER BLOCK
+      context = {
+        subscription,
+        plan: subscription.plan,
+        planKey,
+        status: "ACTIVE",
+        isLimited: false,
+        upgradeRequired: false,
+      };
+
+      /* ============================= */
+      /* TRIAL */
+      /* ============================= */
+
+      if (subscription.isTrial) {
+        if (
+          subscription.currentPeriodEnd &&
+          now <= new Date(subscription.currentPeriodEnd)
+        ) {
+          context.status = "TRIAL";
+        } else {
+          context.status = "INACTIVE";
+          context.planKey = "FREE_LOCKED";
+          context.isLimited = true;
+          context.upgradeRequired = true;
+        }
+      }
+
+      /* ============================= */
+      /* GRACE PERIOD (🔥 NEW) */
+      /* ============================= */
+
+      if (subscription.status === "PAST_DUE") {
+        if (
+          subscription.graceUntil &&
+          now <= new Date(subscription.graceUntil)
+        ) {
+          context.status = "ACTIVE"; // allow during grace
+        } else {
+          context.status = "INACTIVE";
+          context.planKey = "FREE_LOCKED";
+          context.isLimited = true;
+          context.upgradeRequired = true;
+        }
+      }
+
+      /* ============================= */
+      /* CANCELLED */
+      /* ============================= */
+
+      if (subscription.status === "CANCELLED") {
+        context.status = "INACTIVE";
+        context.planKey = "FREE_LOCKED";
+        context.isLimited = true;
+        context.upgradeRequired = true;
+      }
     }
-
-    /* ======================================
-    BUILD BASE CONTEXT
-    ====================================== */
-
-    context.subscription = subscription;
-    context.plan = subscription.plan;
-    context.status = subscription.status;
-    context.isLimited = false;
-    context.upgradeRequired = false;
-
-    const now = new Date();
-
-    /* ======================================
-    STATUS HANDLING (CORRECT LOGIC)
-    ====================================== */
-
-    // 🔴 Payment failed
-    if (subscription.status === "PAST_DUE") {
-      context.isLimited = true;
-      context.upgradeRequired = true;
-    }
-
-    // 🔴 Cancelled + expired
-    if (
-      subscription.status === "CANCELLED" &&
-      subscription.currentPeriodEnd &&
-      now > new Date(subscription.currentPeriodEnd)
-    ) {
-      context.status = "CANCELLED";
-      context.isLimited = true;
-      context.upgradeRequired = true;
-    }
-
-    // 🔴 Trial expired
-    if (
-      subscription.isTrial &&
-      subscription.currentPeriodEnd &&
-      now > new Date(subscription.currentPeriodEnd)
-    ) {
-      context.status = "TRIAL_EXPIRED";
-      context.isLimited = true;
-      context.upgradeRequired = true;
-    }
-
-    // 🟢 ACTIVE or TRIAL (valid) → FULL ACCESS
-    // ❗ NO blanket blocking anymore
-
-    /* ======================================
-    ATTACH CONTEXT
-    ====================================== */
 
     (req as any).subscription = subscription;
     (req as any).billing = context;

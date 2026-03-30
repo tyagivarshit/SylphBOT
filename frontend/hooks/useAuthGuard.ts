@@ -17,5 +17,9 @@ export default function useAuthGuard() {
     }
   }, [loading, user, router]);
 
-  return { user, loading };
+  // 🔥 FIX: return clean structure
+  return {
+    user,
+    loading, // boolean (correct usage)
+  };
 }

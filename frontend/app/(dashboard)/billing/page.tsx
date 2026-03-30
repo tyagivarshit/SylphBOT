@@ -19,6 +19,7 @@ export default function BillingPage() {
 
   const [subscription, setSubscription] = useState<any>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [billingContext, setBillingContext] = useState<any>(null); // 🔥 NEW
 
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,13 +36,11 @@ export default function BillingPage() {
           }),
         ]);
 
-        /* GEO */
         if (geoRes.status === "fulfilled") {
           const geo = await geoRes.value.json();
           setCurrency(geo?.country === "IN" ? "INR" : "USD");
         }
 
-        /* BILLING */
         if (billingRes.status === "fulfilled") {
           const res = await billingRes.value.json();
 
@@ -61,6 +60,11 @@ export default function BillingPage() {
           if (res.invoices) {
             setInvoices(res.invoices);
           }
+
+          /* 🔥 ADD */
+          if (res.billing) {
+            setBillingContext(res.billing);
+          }
         }
 
         setIsEarly(true);
@@ -75,6 +79,10 @@ export default function BillingPage() {
 
     init();
   }, []);
+
+  /* ================= PLAN KEY ================= */
+
+  const planKey = billingContext?.planKey || "FREE_LOCKED";
 
   /* ================= PLANS ================= */
 
@@ -98,9 +106,10 @@ export default function BillingPage() {
       INR: { monthly: 1999, yearly: 19990, early: 1599 },
       USD: { monthly: 49, yearly: 490, early: 39 },
       features: [
-        "Everything in Basic",
         "WhatsApp Automation",
         "CRM + Follow-ups",
+        "Unlimited Automation",
+        "Priority Support",
       ],
     },
     {
@@ -110,9 +119,10 @@ export default function BillingPage() {
       INR: { monthly: 3999, yearly: 39990, early: 2999 },
       USD: { monthly: 99, yearly: 990, early: 79 },
       features: [
-        "Everything in Pro",
         "AI Booking System",
         "Advanced Workflows",
+        "Unlimited Usage",
+        "Dedicated Support",
       ],
     },
   ];
@@ -155,7 +165,7 @@ export default function BillingPage() {
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen bg-[#f9fcff] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="w-10 h-10 border-4 border-blue-200 border-t-[#14E1C1] rounded-full animate-spin" />
       </div>
     );
@@ -163,7 +173,7 @@ export default function BillingPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#f9fcff] flex items-center justify-center text-red-500">
+      <div className="min-h-screen flex items-center justify-center text-red-500">
         {error}
       </div>
     );
@@ -172,49 +182,53 @@ export default function BillingPage() {
   /* ================= UI ================= */
 
   return (
-    <div className="min-h-screen bg-[#f9fcff] p-6 space-y-10">
+    <div className="min-h-screen bg-gradient-to-br from-[#f9fcff] via-white to-[#eef6ff] p-4 md:p-8 space-y-10">
 
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
 
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-3xl md:text-4xl font-bold text-gray-900">
             Billing
           </h1>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-gray-500 mt-1">
             Manage your subscription and payments
           </p>
         </div>
 
-        {/* TOGGLE */}
-        <div className="flex bg-white border border-gray-200 rounded-lg p-1 text-sm shadow-sm">
-          <button
-            onClick={() => setBilling("monthly")}
-            className={`px-4 py-1.5 rounded-md transition ${
-              billing === "monthly"
-                ? "bg-gradient-to-r from-[#14E1C1] to-blue-500 text-white"
-                : "text-gray-600"
-            }`}
-          >
-            Monthly
-          </button>
+        {/* 🔥 FREE LOCK BADGE */}
+        {planKey === "FREE_LOCKED" && (
+          <span className="text-xs bg-red-100 text-red-600 px-3 py-1 rounded-full">
+            No Active Plan
+          </span>
+        )}
 
-          <button
-            onClick={() => setBilling("yearly")}
-            className={`px-4 py-1.5 rounded-md transition ${
-              billing === "yearly"
-                ? "bg-gradient-to-r from-[#14E1C1] to-blue-500 text-white"
-                : "text-gray-600"
-            }`}
-          >
-            Yearly
-          </button>
+        {/* TOGGLE */}
+        <div className="flex bg-white/70 backdrop-blur border border-gray-200 rounded-xl p-1 shadow-sm">
+          {["monthly", "yearly"].map((type) => (
+            <button
+              key={type}
+              onClick={() => setBilling(type as any)}
+              className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+                billing === type
+                  ? "bg-gradient-to-r from-[#14E1C1] to-blue-500 text-white shadow"
+                  : "text-gray-600"
+              }`}
+            >
+              {type}
+            </button>
+          ))}
         </div>
 
       </div>
 
+      {/* TEXT */}
+      <p className="text-center text-sm text-gray-500">
+        Most users choose <span className="font-semibold text-black">Pro</span> 🚀
+      </p>
+
       {/* PLANS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
 
         {plans.map((plan) => {
 
@@ -230,94 +244,98 @@ export default function BillingPage() {
             billing === "monthly" ? data.monthly : data.yearly;
 
           const isCurrent =
-            subscription?.plan?.name === plan.id;
+            subscription?.plan?.name === plan.id &&
+            planKey !== "FREE_LOCKED";
 
           return (
             <div
               key={plan.id}
-              className={`relative bg-white border rounded-2xl p-6 transition shadow-sm
-              ${
-                isCurrent
-                  ? "border-[#14E1C1] shadow-lg"
-                  : "border-gray-200 hover:shadow-xl hover:-translate-y-1"
+              className={`relative rounded-2xl p-[1px] ${
+                plan.popular
+                  ? "bg-gradient-to-r from-[#14E1C1] via-blue-500 to-indigo-500"
+                  : "bg-gray-200"
               }`}
             >
+              <div className="bg-white rounded-2xl p-6 h-full flex flex-col justify-between transition-all hover:shadow-2xl hover:-translate-y-1">
 
-              {/* POPULAR */}
-              {plan.popular && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs bg-gradient-to-r from-[#14E1C1] to-blue-500 text-white px-3 py-1 rounded-full shadow">
-                  Most Popular
-                </span>
-              )}
-
-              {/* NAME */}
-              <h2 className="text-lg font-semibold text-gray-900">
-                {plan.name}
-              </h2>
-
-              {isCurrent && (
-                <span className="text-xs text-[#14E1C1] font-medium">
-                  ✔ Current Plan
-                </span>
-              )}
-
-              {/* PRICE */}
-              <div className="mt-4">
-
-                {isEarly && (
-                  <p className="text-xs line-through text-gray-400">
-                    {currency === "INR" ? "₹" : "$"}
-                    {original}
-                  </p>
+                {plan.popular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                    <span className="text-xs bg-black text-white px-3 py-1 rounded-full">
+                      Most Popular
+                    </span>
+                  </div>
                 )}
 
-                <div className="flex items-end gap-1">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {currency === "INR" ? "₹" : "$"}
-                    {price}
-                  </span>
-                  <span className="text-sm text-gray-500">
-                    /{billing}
-                  </span>
+                <div className="space-y-4">
+
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-lg font-semibold text-gray-900">
+                      {plan.name}
+                    </h2>
+
+                    {isCurrent && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md">
+                        Active
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    {isEarly && (
+                      <p className="text-xs line-through text-gray-400">
+                        {currency === "INR" ? "₹" : "$"}
+                        {original}
+                      </p>
+                    )}
+
+                    <div className="flex items-end gap-1">
+                      <span className="text-3xl font-bold text-gray-900">
+                        {currency === "INR" ? "₹" : "$"}
+                        {price}
+                      </span>
+                      <span className="text-sm text-gray-500">
+                        /{billing}
+                      </span>
+                    </div>
+                  </div>
+
+                  <ul className="space-y-2 text-sm text-gray-700">
+                    {plan.features.map((f, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-[#14E1C1]">✔</span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+
                 </div>
 
+                <button
+                  onClick={() => handleUpgrade(plan.id)}
+                  disabled={loading === plan.id || isCurrent}
+                  className={`mt-6 w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                    isCurrent
+                      ? "bg-gray-200 text-gray-600"
+                      : "bg-gradient-to-r from-[#14E1C1] via-blue-500 to-indigo-500 text-white hover:opacity-90 shadow-md"
+                  }`}
+                >
+                  {isCurrent
+                    ? "Current Plan"
+                    : loading === plan.id
+                    ? "Processing..."
+                    : planKey === "FREE_LOCKED"
+                    ? "Start Free Trial"
+                    : "Upgrade Plan"}
+                </button>
+
               </div>
-
-              {/* FEATURES */}
-              <ul className="mt-5 space-y-2 text-sm text-gray-700">
-                {plan.features.map((f, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-[#14E1C1]">✔</span>
-                    {f}
-                  </li>
-                ))}
-              </ul>
-
-              {/* CTA */}
-              <button
-                onClick={() => handleUpgrade(plan.id)}
-                disabled={loading === plan.id || isCurrent}
-                className={`mt-6 w-full py-2.5 rounded-lg text-sm font-semibold transition
-                ${
-                  isCurrent
-                    ? "bg-gray-200 text-gray-600"
-                    : "bg-gradient-to-r from-[#14E1C1] via-blue-500 to-indigo-500 text-white hover:opacity-90"
-                }`}
-              >
-                {isCurrent
-                  ? "Current Plan"
-                  : loading === plan.id
-                  ? "Processing..."
-                  : "Upgrade Plan"}
-              </button>
-
             </div>
           );
         })}
       </div>
 
       {/* PAYMENT HISTORY */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+      <div className="bg-white/80 backdrop-blur border border-gray-200 rounded-2xl p-6 shadow-sm">
         <PaymentHistory invoices={invoices} />
       </div>
 

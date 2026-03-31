@@ -1,8 +1,14 @@
 import prisma from "../config/prisma";
 
+/* 🔥 NEW IMPORTS (IMPORTANT) */
+import { scheduleReminderJobs } from "../queues/bookingReminder.queue";
+import { sendOwnerWhatsAppNotification } from "./ownerNotification.service";
+// future ready
+// import { syncToCRM } from "../integrations/crmSync.service";
+
 /*
 =====================================================
-🔥 FETCH AVAILABLE SLOTS (UTC FIXED)
+🔥 FETCH AVAILABLE SLOTS (UNCHANGED)
 =====================================================
 */
 export const fetchAvailableSlots = async (
@@ -10,7 +16,6 @@ export const fetchAvailableSlots = async (
   date: Date
 ): Promise<Date[]> => {
 
-  /* 🔥 NORMALIZE TO UTC DATE */
   const utcDate = new Date(Date.UTC(
     date.getFullYear(),
     date.getMonth(),
@@ -30,7 +35,6 @@ export const fetchAvailableSlots = async (
 
   if (!slots.length) return [];
 
-  /* 🔥 UTC DAY RANGE */
   const startOfDay = new Date(utcDate);
   startOfDay.setUTCHours(0, 0, 0, 0);
 
@@ -61,7 +65,6 @@ export const fetchAvailableSlots = async (
     const slotDuration = slot.slotDuration || 30;
     const bufferTime = slot.bufferTime || 0;
 
-    /* 🔥 UTC SLOT GENERATION */
     let current = new Date(utcDate);
     current.setUTCHours(startHour, startMinute, 0, 0);
 
@@ -97,7 +100,7 @@ export const fetchAvailableSlots = async (
 
 /*
 =====================================================
-CREATE APPOINTMENT (UNCHANGED)
+🔥 CREATE APPOINTMENT (UPGRADED SaaS VERSION)
 =====================================================
 */
 interface AppointmentInput {
@@ -124,6 +127,7 @@ export const createNewAppointment = async (
   } = data;
 
   return prisma.$transaction(async (tx) => {
+    /* 🔥 DOUBLE BOOKING SAFETY */
     const existing = await tx.appointment.findFirst({
       where: {
         businessId,
@@ -139,6 +143,7 @@ export const createNewAppointment = async (
       throw new Error("Slot already booked");
     }
 
+    /* 🔥 CREATE */
     const appointment = await tx.appointment.create({
       data: {
         businessId,
@@ -152,6 +157,7 @@ export const createNewAppointment = async (
       },
     });
 
+    /* 🔥 UPDATE LEAD */
     if (leadId) {
       await tx.lead.update({
         where: { id: leadId },
@@ -160,6 +166,54 @@ export const createNewAppointment = async (
           lastMessageAt: new Date(),
         },
       });
+    }
+
+    /* =================================================
+    🚀 POST BOOKING AUTOMATIONS (CRITICAL)
+    ================================================= */
+
+    /* 🔔 1. SCHEDULE REMINDERS */
+    try {
+      await scheduleReminderJobs(appointment.id);
+    } catch (err) {
+      console.error("❌ REMINDER SCHEDULE ERROR:", err);
+    }
+
+    /* 📲 2. OWNER NOTIFICATION */
+    try {
+      if (leadId) {
+        await sendOwnerWhatsAppNotification({
+          businessId,
+          leadId,
+          slot: startTime,
+        });
+      }
+    } catch (err) {
+      console.error("❌ OWNER NOTIFICATION ERROR:", err);
+    }
+
+    /* 🧠 3. CRM SYNC (FUTURE READY) */
+    try {
+      // await syncToCRM(appointment);
+    } catch (err) {
+      console.error("❌ CRM SYNC ERROR:", err);
+    }
+
+    /* 📊 ANALYTICS TRACKING (SAFE ADD) */
+    try {
+      await prisma.analytics.create({
+        data: {
+          businessId,
+          type: "BOOKING_CREATED",
+          meta: {
+            leadId,
+            startTime,
+            createdAt: new Date(),
+          },
+        },
+      });
+    } catch (err) {
+      console.error("❌ ANALYTICS ERROR:", err);
     }
 
     return appointment;

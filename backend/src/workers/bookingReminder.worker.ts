@@ -6,7 +6,7 @@ import { BOOKING_REMINDER_QUEUE_NAME } from "../queues/bookingReminder.queue";
 
 /*
 =========================================================
-BOOKING REMINDER WORKER (FINAL PRO)
+BOOKING REMINDER WORKER (SAAS LEVEL)
 =========================================================
 */
 
@@ -16,10 +16,12 @@ type ReminderJob = {
 };
 
 export const bookingReminderWorker = new Worker<ReminderJob>(
-  BOOKING_REMINDER_QUEUE_NAME, // ✅ sync with queue
+  BOOKING_REMINDER_QUEUE_NAME,
   async (job) => {
+    const { type, appointmentId } = job.data;
+
     try {
-      const { type, appointmentId } = job.data;
+      console.log(`🔔 Processing ${type} for ${appointmentId}`);
 
       /* =================================================
       FETCH APPOINTMENT
@@ -29,7 +31,6 @@ export const bookingReminderWorker = new Worker<ReminderJob>(
         where: { id: appointmentId },
         include: {
           lead: true,
-          business: true,
         },
       });
 
@@ -38,28 +39,46 @@ export const bookingReminderWorker = new Worker<ReminderJob>(
         return;
       }
 
-      const { lead, startTime } = appointment;
+      /* =================================================
+      🔥 SAFETY CHECKS (IMPORTANT)
+      ================================================= */
+
+      // ❌ skip if cancelled
+      if (appointment.status !== "BOOKED") {
+        console.log("⚠️ Skipping - not active booking");
+        return;
+      }
+
+      // ❌ skip if already passed (for safety)
+      if (new Date(appointment.startTime).getTime() < Date.now()) {
+        console.log("⚠️ Skipping - past appointment");
+        return;
+      }
+
+      const lead = appointment.lead;
 
       if (!lead?.phone) {
         console.log("❌ No phone number for lead");
         return;
       }
 
-      const formattedTime = new Date(startTime).toLocaleString();
+      const formattedTime = new Date(
+        appointment.startTime
+      ).toLocaleString();
 
       /* =================================================
-      MESSAGE GENERATOR
+      🔥 MESSAGE BUILDER
       ================================================= */
 
       let message = "";
 
       switch (type) {
         case "CONFIRMATION":
-          message = `✅ Your meeting has been booked successfully!
+          message = `✅ Your meeting is confirmed!
 
-📅 Date & Time: ${formattedTime}
+📅 ${formattedTime}
 
-We look forward to speaking with you 🚀`;
+We’ll connect with you soon 🚀`;
           break;
 
         case "MORNING":
@@ -67,17 +86,17 @@ We look forward to speaking with you 🚀`;
 
 Reminder: You have a meeting today.
 
-📅 Time: ${formattedTime}
+📅 ${formattedTime}
 
-Be ready 👍`;
+See you soon 👍`;
           break;
 
         case "BEFORE_30_MIN":
           message = `⏰ Your meeting starts in 30 minutes.
 
-📅 Time: ${formattedTime}
+📅 ${formattedTime}
 
-Please join on time 🚀`;
+Please be ready 🚀`;
           break;
 
         default:
@@ -86,7 +105,7 @@ Please join on time 🚀`;
       }
 
       /* =================================================
-      SEND WHATSAPP
+      📲 SEND MESSAGE
       ================================================= */
 
       const sent = await sendWhatsAppMessage({
@@ -98,10 +117,11 @@ Please join on time 🚀`;
         throw new Error("WhatsApp send failed");
       }
 
-      console.log(`✅ ${type} reminder sent to ${lead.phone}`);
+      console.log(`✅ ${type} sent to ${lead.phone}`);
+
     } catch (error) {
-      console.error("❌ BOOKING REMINDER WORKER ERROR:", error);
-      throw error; // 🔥 important → retry trigger karega
+      console.error("❌ REMINDER WORKER ERROR:", error);
+      throw error; // retry trigger
     }
   },
   {

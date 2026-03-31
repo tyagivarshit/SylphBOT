@@ -659,3 +659,10 @@ model Invoice {
   @@index([businessId])
   @@index([stripeInvoiceId])
 }
+model Analytics {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  businessId String
+  type       String
+  meta       Json?
+  createdAt  DateTime @default(now())
+}

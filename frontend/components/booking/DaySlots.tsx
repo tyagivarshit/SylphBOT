@@ -22,7 +22,6 @@ export default function DaySlots({ onUpdate }: any) {
 
       const res = await api.get(`/api/availability/${businessId}`);
       setSlots(res.data.availability || []);
-
     } catch (err) {
       console.error("FETCH SLOTS ERROR:", err);
     } finally {
@@ -30,10 +29,22 @@ export default function DaySlots({ onUpdate }: any) {
     }
   };
 
+  /* 🔥 FETCH */
   useEffect(() => {
     if (!businessId) return;
     fetchSlots();
   }, [businessId]);
+
+  /* 🔥 GLOBAL TRIGGER (IMPORTANT) */
+  useEffect(() => {
+    const openModal = () => setOpen(true);
+
+    window.addEventListener("open-create-slot", openModal);
+
+    return () => {
+      window.removeEventListener("open-create-slot", openModal);
+    };
+  }, []);
 
   const formatTime = (time: string) => {
     const [h, m] = time.split(":").map(Number);
@@ -51,46 +62,54 @@ export default function DaySlots({ onUpdate }: any) {
   return (
     <div className="h-full flex flex-col">
 
+      {/* HEADER */}
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-sm font-semibold text-gray-900">
+        <h2 className="text-[15px] font-semibold text-[#0f172a]">
           Available Slots
         </h2>
 
         <button
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white"
+          className="flex items-center gap-1 text-[12px] px-3 py-1.5 rounded-xl font-semibold text-white bg-gradient-to-r from-[#C8A96A] to-[#E6C200] shadow-sm hover:opacity-90 transition active:scale-[0.96]"
         >
           <Plus size={14} />
           Add
         </button>
       </div>
 
+      {/* LIST */}
       <div className="flex-1 overflow-y-auto space-y-2">
 
         {!businessId ? (
-          <p className="text-sm text-gray-500 text-center py-6">
+          <p className="text-[13px] text-[#6b7280] text-center py-6 font-medium">
             Loading business...
           </p>
         ) : loading ? (
           <div className="flex justify-center py-6">
-            <div className="w-6 h-6 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-[#e6e6e2] border-t-[#0f172a] rounded-full animate-spin" />
           </div>
         ) : slots.length === 0 ? (
-          <p className="text-sm text-gray-500 text-center py-6">
+          <p className="text-[13px] text-[#6b7280] text-center py-6 font-medium">
             No slots available
           </p>
         ) : (
           slots.map((slot: any) => (
             <div
               key={slot.id}
-              className="flex justify-between border p-2 rounded-xl"
+              className="flex justify-between items-center px-3 py-2 rounded-xl bg-[#ffffffcc] backdrop-blur-md border border-[#e8e8e4] shadow-[0_2px_10px_rgba(0,0,0,0.03)]"
             >
-              <div>
+              <div className="text-[13px] font-medium text-[#374151]">
                 {formatTime(slot.startTime)} –{" "}
                 {formatTime(slot.endTime)}
               </div>
 
-              <span className="text-xs">
+              <span
+                className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                  slot.isActive
+                    ? "bg-[#e7f8ef] text-[#1f9254]"
+                    : "bg-[#f1f1ef] text-[#6b7280]"
+                }`}
+              >
                 {slot.isActive ? "Active" : "Inactive"}
               </span>
             </div>
@@ -99,6 +118,7 @@ export default function DaySlots({ onUpdate }: any) {
 
       </div>
 
+      {/* MODAL */}
       <CreateSlotModal
         open={open}
         onClose={() => setOpen(false)}

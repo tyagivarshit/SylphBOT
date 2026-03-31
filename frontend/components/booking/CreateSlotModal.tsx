@@ -16,9 +16,6 @@ export default function CreateSlotModal({
 
   if (!open) return null;
 
-  /* ============================================
-  CREATE SLOT (FIXED)
-  ============================================ */
   const handleCreate = async () => {
     if (!date || !startTime || !endTime) {
       alert("All fields required");
@@ -35,7 +32,6 @@ export default function CreateSlotModal({
 
       const dayOfWeek = new Date(date).getDay();
 
-      // 🔥 FIX: businessId removed
       await api.post("/api/availability", {
         dayOfWeek,
         startTime,
@@ -47,7 +43,6 @@ export default function CreateSlotModal({
       onSuccess?.();
       onClose();
 
-      // reset
       setDate("");
       setStartTime("");
       setEndTime("");
@@ -61,69 +56,70 @@ export default function CreateSlotModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/30 backdrop-blur-sm">
 
-      <div className="w-full md:max-w-md bg-white rounded-t-2xl md:rounded-2xl p-5 md:p-6 space-y-4 animate-slideUp">
+      {/* MODAL */}
+      <div className="w-full md:max-w-md bg-[#fdfdfb] rounded-t-2xl md:rounded-2xl p-5 md:p-6 space-y-5 shadow-[0_10px_40px_rgba(0,0,0,0.08)] animate-slideUp">
 
         {/* HEADER */}
         <div className="flex justify-between items-center">
-          <h2 className="text-base font-semibold text-gray-900">
+          <h2 className="text-[16px] font-semibold text-[#0f172a]">
             Create Slot
           </h2>
 
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
+            className="p-1 rounded-full hover:bg-gray-100 transition"
           >
-            <X size={18} />
+            <X size={18} className="text-[#6b7280]" />
           </button>
         </div>
 
         {/* DATE */}
         <div>
-          <label className="text-xs font-medium text-gray-700">
+          <label className="text-[12px] font-medium text-[#8a8a8a]">
             Date
           </label>
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#14E1C1] outline-none"
+            className="w-full mt-1 border border-[#e6e6e2] rounded-xl px-3 py-2 text-[14px] text-[#0f172a] font-medium focus:ring-2 focus:ring-[#C8A96A] outline-none bg-white"
           />
         </div>
 
         {/* START */}
         <div>
-          <label className="text-xs font-medium text-gray-700">
+          <label className="text-[12px] font-medium text-[#8a8a8a]">
             Start Time
           </label>
           <input
             type="time"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
-            className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#14E1C1] outline-none"
+            className="w-full mt-1 border border-[#e6e6e2] rounded-xl px-3 py-2 text-[14px] text-[#0f172a] font-semibold focus:ring-2 focus:ring-[#C8A96A] outline-none bg-white"
           />
         </div>
 
         {/* END */}
         <div>
-          <label className="text-xs font-medium text-gray-700">
+          <label className="text-[12px] font-medium text-[#8a8a8a]">
             End Time
           </label>
           <input
             type="time"
             value={endTime}
             onChange={(e) => setEndTime(e.target.value)}
-            className="w-full mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#14E1C1] outline-none"
+            className="w-full mt-1 border border-[#e6e6e2] rounded-xl px-3 py-2 text-[14px] text-[#0f172a] font-semibold focus:ring-2 focus:ring-[#C8A96A] outline-none bg-white"
           />
         </div>
 
         {/* ACTIONS */}
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-3 pt-2">
 
           <button
             onClick={onClose}
-            className="text-sm px-3 py-1.5 text-gray-600 hover:text-gray-800"
+            className="text-[13px] px-3 py-1.5 text-[#6b7280] hover:text-[#0f172a] transition font-medium"
           >
             Cancel
           </button>
@@ -131,7 +127,7 @@ export default function CreateSlotModal({
           <button
             onClick={handleCreate}
             disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] hover:opacity-90 disabled:opacity-60"
+            className="px-4 py-2 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-[#C8A96A] to-[#E6C200] shadow-sm hover:opacity-90 disabled:opacity-60 transition"
           >
             {loading ? "Saving..." : "Save Slot"}
           </button>

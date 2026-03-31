@@ -23,18 +23,21 @@ export default function DashboardLayout({ children }: any) {
   const [open, setOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
-  /* 🔥 FIX: prevent multiple redirects */
+  /* 🔥 AUTH REDIRECT FIX */
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/auth/login");
     }
-  }, [loading, user]); // ❌ router hata diya
+  }, [loading, user]);
 
-  /* 🔥 FIX: stable context (NO re-render spam) */
-  const upgradeValue = useMemo(() => ({
-    openUpgrade: () => setUpgradeOpen(true),
-    closeUpgrade: () => setUpgradeOpen(false),
-  }), []);
+  /* 🔥 STABLE CONTEXT */
+  const upgradeValue = useMemo(
+    () => ({
+      openUpgrade: () => setUpgradeOpen(true),
+      closeUpgrade: () => setUpgradeOpen(false),
+    }),
+    []
+  );
 
   if (loading) {
     return (
@@ -48,21 +51,19 @@ export default function DashboardLayout({ children }: any) {
 
   return (
     <UpgradeContext.Provider value={upgradeValue}>
-      <div className="min-h-screen bg-[#f9fcff] flex flex-col">
+      <div className="min-h-screen bg-[#f9fcff] flex flex-col overflow-hidden">
 
         {/* 🔥 TOPBAR */}
         <Topbar setOpen={setOpen} />
 
         {/* 🔥 BODY */}
-        <div className="flex flex-1">
+        <div className="flex flex-1 relative">
 
-          {/* 🔥 FIX: sidebar stable wrapper */}
-          <div className="h-screen sticky top-0">
-            <Sidebar open={open} setOpen={setOpen} />
-          </div>
+          {/* ✅ SIDEBAR (NO WRAPPER, DIRECT) */}
+          <Sidebar open={open} setOpen={setOpen} />
 
-          {/* 🔥 CONTENT */}
-          <main className="flex-1 p-4 sm:p-6">
+          {/* 🔥 MAIN CONTENT */}
+          <main className="flex-1 p-4 sm:p-6 overflow-auto">
             {children}
           </main>
 
@@ -73,7 +74,7 @@ export default function DashboardLayout({ children }: any) {
          🔥 UPGRADE MODAL
       ========================= */}
       {upgradeOpen && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100]">
 
           <div className="bg-white rounded-2xl p-6 w-[90%] max-w-md shadow-xl">
 

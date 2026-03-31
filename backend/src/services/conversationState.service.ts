@@ -14,17 +14,22 @@ interface SetStateOptions {
 STRICT HELPERS (NO SILENT FAILS)
 ===================================================== */
 
-/* 🔥 ALWAYS PARSE STRING → OBJECT */
+/* 🔥 ALWAYS PARSE STRING → OBJECT (FIXED) */
 const parseContext = (data: any): StateContext => {
   if (!data) return {};
 
   try {
-    if (typeof data === "string") {
-      return JSON.parse(data);
+    let parsed =
+      typeof data === "string"
+        ? JSON.parse(data)
+        : JSON.parse(JSON.stringify(data));
+
+    /* 🔥 FIX: HANDLE OLD NESTED STRUCTURE */
+    if (parsed?.context && typeof parsed.context === "object") {
+      parsed = parsed.context;
     }
 
-    /* 🚨 If object stored directly (old bug), force stringify+parse */
-    return JSON.parse(JSON.stringify(data));
+    return parsed;
   } catch (err) {
     console.error("CONTEXT PARSE ERROR:", err);
     return {};
@@ -64,7 +69,7 @@ export const getConversationState = async (leadId: string) => {
 
   return {
     ...state,
-    context: parseContext(state.context), // ALWAYS OBJECT
+    context: parseContext(state.context), // ALWAYS CLEAN OBJECT
   };
 };
 
@@ -87,7 +92,7 @@ export const setConversationState = async (
       where: { leadId },
       update: {
         state,
-        context: stringifyContext(context), // ALWAYS STRING
+        context: stringifyContext(context),
         expiresAt,
         updatedAt: new Date(),
       },

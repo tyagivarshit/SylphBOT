@@ -4,15 +4,14 @@ import {
   setConversationState,
 } from "./conversationState.service";
 
-/* 🔥 SLOT LOCK */
 import {
   acquireSlotLock,
-  releaseSlotLock, // 🔥 NEW
+  releaseSlotLock,
 } from "./slotLock.service";
 
 /*
 =====================================================
-SLOT SELECTION HANDLER (FINAL + SAFE LOCK SYSTEM)
+SLOT SELECTION HANDLER (FINAL FIXED 🔥)
 =====================================================
 */
 
@@ -33,35 +32,20 @@ export const handleSlotSelection = async ({
       return null;
     }
 
-    /* ---------------- PARSE SLOTS ---------------- */
-    let slots: string[] = [];
-
-    try {
-      slots =
-        typeof state.context === "string"
-          ? JSON.parse(state.context)
-          : [];
-    } catch {
-      await clearConversationState(leadId);
-      return "Something went wrong. Please try booking again.";
-    }
+    /* ---------------- FIX: CORRECT CONTEXT ---------------- */
+    const context = state.context || {};
+    const slots: string[] = context.slots || [];
 
     if (!slots.length) {
       await clearConversationState(leadId);
       return "No slots available anymore.";
     }
 
-    /* ---------------- USER CHANGE HANDLING 🔥 ---------------- */
     const clean = message.toLowerCase();
 
+    /* ---------------- CHANGE HANDLING ---------------- */
     if (clean.includes("change")) {
-      // 🔥 release previous lock if exists
-      if (state.context) {
-        await releaseSlotLock(state.context);
-      }
-
       await clearConversationState(leadId);
-
       return "No problem 👍 Please choose another slot.";
     }
 
@@ -80,7 +64,8 @@ export const handleSlotSelection = async ({
       return `Please select a valid option (1-${slots.length}).`;
     }
 
-    const selectedSlot = new Date(slots[index]);
+    const selectedSlotISO = slots[index];
+    const selectedSlot = new Date(selectedSlotISO);
 
     /* ---------------- VALIDATION ---------------- */
     if (isNaN(selectedSlot.getTime())) {
@@ -93,10 +78,10 @@ export const handleSlotSelection = async ({
     }
 
     /* =====================================================
-    🔒 SLOT LOCK (WITH SAFETY)
+    🔒 SLOT LOCK
     ===================================================== */
     const locked = await acquireSlotLock(
-      selectedSlot.toISOString(),
+      selectedSlotISO,
       leadId
     );
 
@@ -105,14 +90,13 @@ export const handleSlotSelection = async ({
     }
 
     /* =====================================================
-    🔥 MOVE TO CONFIRMATION STATE
+    🔥 MOVE TO CONFIRMATION STATE (FIXED)
     ===================================================== */
-    await setConversationState(
-      leadId,
-      "BOOKING_CONFIRMATION",
-      selectedSlot.toISOString(),
-      15
-    );
+    await setConversationState(leadId, "BOOKING_CONFIRMATION", {
+      context: {
+        slot: selectedSlotISO,
+      },
+    });
 
     /* ---------------- RESPONSE ---------------- */
     return `Great choice 👍

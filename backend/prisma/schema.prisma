@@ -669,3 +669,11 @@ model Analytics {
   meta       Json?
   createdAt  DateTime @default(now())
 }
+model reminderLog {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  appointmentId String
+  type          String
+  createdAt     DateTime @default(now())
+
+  @@index([appointmentId, type])
+}

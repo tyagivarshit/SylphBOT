@@ -1,15 +1,13 @@
 import { handleSlotSelection } from "./slotSectionHandler.service";
 import { handleAIBookingIntent } from "./aiBookingEngine.service";
 import { fetchNext30DaysSlots } from "./fetchNext30DaysSlots.service";
-import {
-  getConversationState,
-} from "./conversationState.service";
+import { getConversationState } from "./conversationState.service";
 
-import { hasFeature } from "../config/plan.config"; // 🔥 ADD THIS
+import { hasFeature } from "../config/plan.config";
 
 /*
 =====================================================
-BOOKING PRIORITY ROUTER (FINAL FIXED VERSION)
+BOOKING PRIORITY ROUTER (LEVEL 4 FINAL SAFE VERSION)
 =====================================================
 */
 
@@ -17,27 +15,60 @@ export const bookingPriorityRouter = async ({
   businessId,
   leadId,
   message,
-  plan, // 🔥 ADD THIS
+  plan,
 }: {
   businessId: string;
   leadId: string;
   message: string;
-  plan: any; // 🔥 ADD THIS
+  plan: any;
 }): Promise<string | null> => {
   try {
     const clean = message.trim().toLowerCase();
 
     /* =====================================================
-    🔥 PLAN CHECK (CRITICAL FIX)
+    🔥 PLAN CHECK (NON-BLOCKING)
     ===================================================== */
     if (!hasFeature(plan, "bookingEnabled")) {
-      return null; // ❗ AI handle karega, booking block nahi karega forcefully
+      return null; // AI handle karega
     }
 
     /* =====================================================
     0️⃣ STATE CHECK
     ===================================================== */
     const state = await getConversationState(leadId);
+
+    /* =====================================================
+    🔁 RESCHEDULE FLOW (SMART FIX)
+    ===================================================== */
+    if (state?.state === "RESCHEDULE_FLOW") {
+      const cleanMsg = clean;
+
+      const isPositive =
+        cleanMsg.includes("yes") ||
+        cleanMsg.includes("ok") ||
+        cleanMsg.includes("sure");
+
+      const isBookingIntent =
+        cleanMsg.includes("book") ||
+        cleanMsg.includes("schedule") ||
+        cleanMsg.includes("appointment");
+
+      if (isPositive || isBookingIntent) {
+        console.log("🔁 RESCHEDULE FLOW TRIGGERED");
+
+        const booking = await handleAIBookingIntent(
+          businessId,
+          leadId,
+          message
+        );
+
+        return booking?.handled ? booking.message : null;
+      }
+    }
+
+    /* =====================================================
+    📌 BOOKING STATES
+    ===================================================== */
 
     if (state?.state === "BOOKING_SELECTION") {
       return await handleSlotSelection({
@@ -105,10 +136,10 @@ or tell me another time 👍`;
     }
 
     /* =====================================================
-    3️⃣ YES / NO
+    3️⃣ YES / NO SAFE HANDLING
     ===================================================== */
     if (clean === "yes" || clean === "confirm") {
-      return null;
+      return null; // confirmation AI engine handle karega
     }
 
     if (clean === "no") {
@@ -116,7 +147,7 @@ or tell me another time 👍`;
     }
 
     /* =====================================================
-    4️⃣ AI BOOKING INTENT
+    4️⃣ AI BOOKING INTENT (SAFE RETURN FIX)
     ===================================================== */
     const booking = await handleAIBookingIntent(
       businessId,
@@ -128,6 +159,9 @@ or tell me another time 👍`;
       return booking.message;
     }
 
+    /* =====================================================
+    FALLBACK
+    ===================================================== */
     return null;
 
   } catch (error) {

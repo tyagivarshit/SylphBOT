@@ -2,18 +2,26 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 
-export const sendOwnerWhatsAppNotification = async ({
-  businessId,
-  leadId,
-  slot,
-}: {
+/* ===================================================== */
+export interface OwnerNotificationPayload {
   businessId: string;
   leadId: string;
-  slot: Date;
-}) => {
+  slot?: Date;
+  type?: "BOOKED" | "CANCELLED" | "RESCHEDULED";
+}
+
+/* ===================================================== */
+export const sendOwnerWhatsAppNotification = async (
+  data: OwnerNotificationPayload
+) => {
+  const { businessId, leadId, slot, type } = data;
+
   try {
     console.log("📤 Sending owner WhatsApp notification...");
 
+    /* =====================================================
+    FETCH BUSINESS
+    ===================================================== */
     const business = await prisma.business.findUnique({
       where: { id: businessId },
       include: {
@@ -38,31 +46,73 @@ export const sendOwnerWhatsAppNotification = async ({
       return;
     }
 
+    /* =====================================================
+    FORMAT PHONE
+    ===================================================== */
+    const formattedPhone = ownerPhone.replace(/\D/g, "");
+
+    const finalPhone =
+      formattedPhone.startsWith("91")
+        ? formattedPhone
+        : `91${formattedPhone}`;
+
+    /* =====================================================
+    TOKEN
+    ===================================================== */
     const accessToken = decrypt(whatsappClient.accessToken);
 
+    /* =====================================================
+    LEAD DATA
+    ===================================================== */
     const lead = await prisma.lead.findUnique({
       where: { id: leadId },
     });
 
-    /* 🔥 FIX: PHONE FORMAT (NO + SIGN) */
-    const formattedPhone = ownerPhone.replace(/\D/g, "");
+    /* =====================================================
+    🧠 MESSAGE BASED ON TYPE
+    ===================================================== */
+    let messageText = "";
 
-    /* 🔥 TEMPLATE DATA */
+    if (type === "BOOKED") {
+      messageText = `📅 New Booking!\n\n👤 ${lead?.name || "Customer"}\n📞 ${
+        lead?.phone || "N/A"
+      }\n🕒 ${slot?.toLocaleString()}`;
+    }
+
+    else if (type === "CANCELLED") {
+      messageText = `❌ Booking Cancelled\n\n👤 ${lead?.name || "Customer"}\n📞 ${
+        lead?.phone || "N/A"
+      }`;
+    }
+
+    else if (type === "RESCHEDULED") {
+      messageText = `🔁 Booking Rescheduled\n\n👤 ${
+        lead?.name || "Customer"
+      }\n📞 ${lead?.phone || "N/A"}\n🕒 ${
+        slot?.toLocaleString() || "Updated time"
+      }`;
+    }
+
+    else {
+      messageText = `📩 Booking Update\n\n👤 ${lead?.name || "Customer"}`;
+    }
+
+    /* =====================================================
+    TEMPLATE BODY PARAMS (SAFE)
+    ===================================================== */
     const bodyParams = [
       lead?.name || "Customer",
       lead?.phone || "N/A",
-      slot.toLocaleString(),
+      slot ? slot.toLocaleString() : "-",
     ];
 
-    const payload = {
+    const templatePayload = {
       messaging_product: "whatsapp",
-      to: formattedPhone,
+      to: finalPhone,
       type: "template",
       template: {
-        name: "booking_notification", // 👈 exact template name
-        language: {
-          code: "en",
-        },
+        name: "booking_notification",
+        language: { code: "en" },
         components: [
           {
             type: "body",
@@ -75,20 +125,57 @@ export const sendOwnerWhatsAppNotification = async ({
       },
     };
 
-    console.log("📦 PAYLOAD:", payload);
+    let res;
 
-    const res = await axios.post(
-      `https://graph.facebook.com/v19.0/${whatsappClient.phoneNumberId}/messages`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
+    /* =====================================================
+    TRY TEMPLATE
+    ===================================================== */
+    try {
+      res = await axios.post(
+        `https://graph.facebook.com/v19.0/${whatsappClient.phoneNumberId}/messages`,
+        templatePayload,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 10000,
+        }
+      );
+
+      console.log("✅ WhatsApp TEMPLATE sent:", res.data);
+
+    } catch (err: any) {
+
+      console.error("⚠️ Template failed, sending fallback");
+
+      if (err.response) {
+        console.error("📛 META TEMPLATE ERROR:", err.response.data);
       }
-    );
 
-    console.log("✅ WhatsApp sent:", res.data);
+      /* =====================================================
+      FALLBACK TEXT MESSAGE
+      ===================================================== */
+      res = await axios.post(
+        `https://graph.facebook.com/v19.0/${whatsappClient.phoneNumberId}/messages`,
+        {
+          messaging_product: "whatsapp",
+          to: finalPhone,
+          type: "text",
+          text: {
+            body: messageText,
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          timeout: 10000,
+        }
+      );
+
+      console.log("✅ WhatsApp FALLBACK sent:", res.data);
+    }
 
   } catch (error: any) {
     console.error("❌ OWNER NOTIFY ERROR");

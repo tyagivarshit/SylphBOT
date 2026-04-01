@@ -1,68 +1,72 @@
 import { isHumanActive } from "./humanTakeoverManager.service";
 import { runAutomationEngine } from "./automationEngine.service";
-import { handleAIBookingIntent } from "./aiBookingEngine.service";
 import { routeAIMessage } from "./aiRouter.service";
 
-import prisma from "../config/prisma";
-
-/* 🔥 FIX */
-import { hasFeature } from "../config/plan.config";
-
-/* ================================================= */
-export enum ExecutionType {
-  HUMAN = "HUMAN",
-  BOOKING = "BOOKING",
-  AUTOMATION = "AUTOMATION",
-  AI = "AI",
-}
+import { bookingPriorityRouter } from "./bookingPriorityRouter.service";
+import { getConversationState } from "./conversationState.service";
 
 /* ================================================= */
 export const handleIncomingMessage = async (data: any) => {
-
   const { businessId, leadId, message, plan } = data;
 
   try {
-
-    const lower = message.toLowerCase();
-
     /* ================= HUMAN ================= */
     const human = await isHumanActive(leadId);
-    if (human) {
-      return null;
-    }
+    if (human) return null;
+
+    const clean = message.toLowerCase();
 
     /* =================================================
-    🔥 BOOKING (PRIORITY ENGINE - FIXED)
+    🧠 INTENT DETECTION
     ================================================= */
+    const bookingIntent =
+      clean.includes("book") ||
+      clean.includes("appointment") ||
+      clean.includes("schedule") ||
+      clean.includes("call") ||
+      clean.includes("slot") ||
+      clean.includes("time") ||
+      clean.includes("aaj") ||
+      clean.includes("kal") ||
+      clean.includes("baje");
 
-    const isBookingIntent =
-      lower.includes("book") ||
-      lower.includes("schedule") ||
-      lower.includes("appointment");
+    const curiosityIntent =
+      clean.includes("price") ||
+      clean.includes("cost") ||
+      clean.includes("details") ||
+      clean.includes("info") ||
+      clean.includes("service");
 
-    if (isBookingIntent) {
+    /* =================================================
+    📌 STATE CHECK
+    ================================================= */
+    const state = await getConversationState(leadId);
 
-      /* ✅ FIX: proper feature check */
-      if (!hasFeature(plan, "bookingEnabled")) {
-        return "Booking not available in your plan.";
-      }
+    const bookingActive =
+      state?.state === "BOOKING_SELECTION" ||
+      state?.state === "BOOKING_CONFIRMATION" ||
+      state?.state === "RESCHEDULE_FLOW";
 
-      const booking = await handleAIBookingIntent(
+    /* =================================================
+    🔥 STEP 1: TRY BOOKING (ONLY IF NEEDED)
+    ================================================= */
+    if (bookingIntent || bookingActive) {
+      const bookingReply = await bookingPriorityRouter({
         businessId,
         leadId,
-        message
-      );
+        message,
+        plan,
+      });
 
-      /* ✅ IMPORTANT: only return if handled */
-      if (booking?.handled) {
-        return booking.message;
+      if (bookingReply) {
+        return bookingReply;
       }
+      // ❗ NO return null here → fallback continue
     }
 
     /* =================================================
-    🤖 AUTOMATION (SAFE - NO CONFLICT)
+    🤖 STEP 2: AUTOMATION
     ================================================= */
-
     const automationReply = await runAutomationEngine({
       businessId,
       leadId,
@@ -74,15 +78,30 @@ export const handleIncomingMessage = async (data: any) => {
     }
 
     /* =================================================
-    🧠 AI ROUTER (FINAL FALLBACK)
+    🧠 STEP 3: AI RESPONSE (ALWAYS RESPOND)
     ================================================= */
-
-    return await routeAIMessage({
+    const aiReply = await routeAIMessage({
       businessId,
       leadId,
       message,
       plan,
     });
+
+    if (!aiReply) {
+      return "Got it 👍 How can I help you?";
+    }
+
+    /* =================================================
+    💰 STEP 4: SOFT BOOKING PUSH (ONLY IF RELEVANT)
+    ================================================= */
+    if (curiosityIntent && !bookingActive) {
+      return (
+        aiReply +
+        "\n\n👉 If you'd like, I can also check available slots for you 👍"
+      );
+    }
+
+    return aiReply;
 
   } catch (error) {
     console.error("EXECUTION ROUTER ERROR:", error);

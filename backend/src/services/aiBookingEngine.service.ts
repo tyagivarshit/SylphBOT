@@ -18,13 +18,12 @@ import {
 } from "../utils/booking-ai.utils";
 
 import {
-  acquireSlotLock,
   releaseSlotLock,
   isSlotLocked,
 } from "./slotLock.service";
 
 import { sendOwnerWhatsAppNotification } from "./ownerNotification.service";
-import { getLeadBehavior } from "./leadBehaviourEngine.service";
+import { scheduleReminderJobs } from "../queues/bookingReminder.queue";
 
 /* ================================================= */
 interface BookingResult {
@@ -34,7 +33,7 @@ interface BookingResult {
 
 /* ================================================= */
 const isCancelIntent = (msg: string) =>
-  ["cancel", "delete booking", "remove appointment"].some((k) =>
+  ["cancel", "delete", "remove", "cancel booking"].some((k) =>
     msg.includes(k)
   );
 
@@ -42,22 +41,6 @@ const isRescheduleIntent = (msg: string) =>
   ["reschedule", "change time", "change slot"].some((k) =>
     msg.includes(k)
   );
-
-/* ================================================= */
-const shouldStartBooking = async (leadId: string, message: string) => {
-  const msg = message.toLowerCase();
-
-  const strongIntent = ["book", "schedule", "appointment", "call"].some((k) =>
-    msg.includes(k)
-  );
-
-  const behavior = await getLeadBehavior({ leadId });
-
-  if (behavior?.urgency && strongIntent) return "DIRECT";
-  if (strongIntent) return "SOFT";
-
-  return "NO";
-};
 
 /* ================================================= */
 const getContext = (state: any) => {
@@ -83,7 +66,18 @@ export const handleAIBookingIntent = async (
     if (isCancelIntent(clean)) {
       try {
         await cancelAppointmentByLead(leadId);
-        return { handled: true, message: "Your booking has been cancelled 👍" };
+        await clearConversationState(leadId);
+
+        await sendOwnerWhatsAppNotification({
+          businessId,
+          leadId,
+          type: "CANCELLED" as any, // ✅ FIX
+        });
+
+        return {
+          handled: true,
+          message: "❌ Your booking has been cancelled.",
+        };
       } catch {
         return { handled: true, message: "No active booking found." };
       }
@@ -92,60 +86,42 @@ export const handleAIBookingIntent = async (
     /* ================= RESCHEDULE ================= */
     if (isRescheduleIntent(clean)) {
       await clearConversationState(leadId);
+
+      await setConversationState(leadId, "RESCHEDULE_FLOW");
+
+      await sendOwnerWhatsAppNotification({
+        businessId,
+        leadId,
+        type: "RESCHEDULED" as any, // ✅ FIX
+      });
+
       return {
         handled: true,
-        message:
-          "Sure 👍 Tell me your preferred date & time and I'll reschedule it.",
+        message: "Sure 👍 Tell me new date & time.",
       };
     }
 
     /* =================================================
-    🔥 CONFIRMATION (PRO LEVEL)
+    🔥 CONFIRMATION (NO FAIL)
     ================================================= */
     if (state?.state === "BOOKING_CONFIRMATION") {
       const slotISO = context?.slot;
 
       if (!slotISO) {
         await clearConversationState(leadId);
-        return { handled: true, message: "Session expired. Try again." };
+        return { handled: true, message: "Session expired." };
       }
 
       const selectedSlot = new Date(slotISO);
 
       if (clean.includes("yes") || clean.includes("confirm")) {
-
-        /* 🔒 CHECK LOCK OWNER */
         const lockedBy = await isSlotLocked(slotISO);
 
         if (lockedBy && lockedBy !== leadId) {
           await clearConversationState(leadId);
           return {
             handled: true,
-            message: "⚠️ Slot already booked by someone else.",
-          };
-        }
-
-        /* 🔍 FINAL AVAILABILITY CHECK */
-        const normalizedDate = new Date(Date.UTC(
-          selectedSlot.getUTCFullYear(),
-          selectedSlot.getUTCMonth(),
-          selectedSlot.getUTCDate()
-        ));
-
-        const freshSlots = await fetchAvailableSlots(
-          businessId,
-          normalizedDate
-        );
-
-        const exists = freshSlots.some(
-          (s) => s.getTime() === selectedSlot.getTime()
-        );
-
-        if (!exists) {
-          await clearConversationState(leadId);
-          return {
-            handled: true,
-            message: "⚠️ Slot no longer available.",
+            message: "⚠️ Slot already booked.",
           };
         }
 
@@ -156,7 +132,7 @@ export const handleAIBookingIntent = async (
             where: { id: leadId },
           });
 
-          await createNewAppointment({
+          const appointment = await createNewAppointment({
             businessId,
             leadId,
             name: lead?.name || "Customer",
@@ -166,6 +142,8 @@ export const handleAIBookingIntent = async (
             endTime,
           });
 
+          scheduleReminderJobs(appointment.id).catch(() => {});
+
           await releaseSlotLock(slotISO);
           await clearConversationState(leadId);
 
@@ -173,27 +151,27 @@ export const handleAIBookingIntent = async (
             businessId,
             leadId,
             slot: selectedSlot,
+            type: "BOOKED" as any, // ✅ FIX
           });
 
           return {
             handled: true,
             message: `✅ Booked for ${selectedSlot.toLocaleString()}`,
           };
-        } catch (err: any) {
-          await releaseSlotLock(slotISO);
 
-          if (err.message?.includes("Slot already booked")) {
-            return {
-              handled: true,
-              message: "⚠️ Slot just got booked. Try another.",
-            };
-          }
+        } catch {
+          await releaseSlotLock(slotISO);
 
           return {
             handled: true,
-            message: "⚠️ Booking failed. Try again.",
+            message: "⚠️ Booking failed. Try another slot.",
           };
         }
+      }
+
+      if (clean.includes("change")) {
+        await setConversationState(leadId, "BOOKING_SELECTION");
+        return { handled: true, message: "Okay 👍 Select another slot." };
       }
 
       return {
@@ -202,25 +180,42 @@ export const handleAIBookingIntent = async (
       };
     }
 
-    /* ================= DECISION ================= */
-    const decision = await shouldStartBooking(leadId, message);
+    /* ================= SMART PARSING ================= */
 
-    if (decision === "NO") return { handled: false, message: "" };
+    let parsedDate = parseDateFromText(message);
+    let parsedTime = parseTimeFromText(message);
 
-    if (decision === "SOFT" && !clean.includes("yes")) {
-      return {
-        handled: true,
-        message:
-          "I can check available slots 👍\n\nWant me to show them?",
-      };
+    const lower = message.toLowerCase();
+
+    if (!parsedDate && lower.includes("aaj")) {
+      parsedDate = new Date();
+    }
+
+    if (!parsedDate && lower.includes("kal")) {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      parsedDate = d;
+    }
+
+    if (!parsedDate && parsedTime) {
+      parsedDate = new Date();
+    }
+
+    if (parsedTime && lower.includes("evening")) {
+      if (parsedTime.hours < 12) parsedTime.hours += 12;
+    }
+
+    if (parsedTime && lower.includes("night")) {
+      if (parsedTime.hours < 12) parsedTime.hours += 12;
+    }
+
+    if (parsedTime && lower.includes("morning")) {
+      if (parsedTime.hours >= 12) parsedTime.hours -= 12;
     }
 
     /* =================================================
-    🧠 SMART INPUT
+    🎯 DIRECT SLOT MATCH
     ================================================= */
-    const parsedDate = parseDateFromText(message);
-    const parsedTime = parseTimeFromText(message);
-
     if (parsedDate && parsedTime) {
       const requested = new Date(parsedDate);
       requested.setHours(parsedTime.hours, parsedTime.minutes, 0, 0);
@@ -257,7 +252,7 @@ export const handleAIBookingIntent = async (
     }
 
     /* =================================================
-    🔵 FETCH SLOTS
+    📅 SHOW SLOTS
     ================================================= */
     const today = new Date();
     const slotResults: Date[] = [];

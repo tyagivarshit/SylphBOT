@@ -3,7 +3,9 @@ import crypto from "crypto";
 import prisma from "../config/prisma";
 
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
-import { addAIJob } from "../queues/ai.queue";
+
+/* 🔥 CHANGED: AI → ROUTER */
+import { addRouterJob } from "../queues/ai.queue";
 
 import { getIO } from "../sockets/socket.server";
 
@@ -30,9 +32,7 @@ const log = (...args: any[]) => {
 /* --------------------------------------------------- */
 
 const verifySignature = (req: any): boolean => {
-
   try {
-
     const signature = req.headers["x-hub-signature-256"] as string;
     const appSecret = process.env.META_APP_SECRET;
 
@@ -46,13 +46,9 @@ const verifySignature = (req: any): boolean => {
         .digest("hex");
 
     return signature === expected;
-
   } catch {
-
     return false;
-
   }
-
 };
 
 /* --------------------------------------------------- */
@@ -60,23 +56,17 @@ const verifySignature = (req: any): boolean => {
 /* --------------------------------------------------- */
 
 router.get("/", (req: Request, res: Response) => {
-
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === process.env.INSTAGRAM_VERIFY_TOKEN) {
-
     log("Webhook verified");
-
     return res.status(200).send(challenge);
-
   }
 
   log("Webhook verification failed");
-
   return res.sendStatus(403);
-
 });
 
 /* --------------------------------------------------- */
@@ -85,38 +75,26 @@ router.get("/", (req: Request, res: Response) => {
 
 router.post("/", async (req: any, res: Response) => {
   console.log("🔥 RAW BODY:", JSON.stringify(req.body, null, 2));
-
   console.log("🔥 INSTAGRAM WEBHOOK HIT");
 
   let body: any;
 
   try {
-
-    body =
-      Buffer.isBuffer(req.body)
-        ? JSON.parse(req.body.toString("utf8"))
-        : req.body;
-
+    body = Buffer.isBuffer(req.body)
+      ? JSON.parse(req.body.toString("utf8"))
+      : req.body;
   } catch {
-
     log("Body parse failed");
-
     return res.sendStatus(400);
-
   }
 
   try {
-
     if (process.env.NODE_ENV === "production" && !verifySignature(req)) {
-
       log("Invalid signature");
-
       return res.sendStatus(403);
-
     }
 
     const entry = body.entry?.[0];
-
     if (!entry) return res.sendStatus(200);
 
     /* ---------------------------------------------------
@@ -124,49 +102,33 @@ router.post("/", async (req: any, res: Response) => {
     --------------------------------------------------- */
 
     for (const change of entry?.changes || []) {
+      if (change.field === "comments") {
+        const commentText = change.value.comment?.text;
+        const instagramUserId = change.value.from?.id;
+        const reelId = change.value.media?.id;
+        const pageId = change.value.id;
 
-  if (change.field === "comments") {
+        if (!commentText || !instagramUserId || !reelId) continue;
 
-    const commentText = change.value.comment?.text;
-    const instagramUserId = change.value.from?.id;
-    const reelId = change.value.media?.id;
-    const pageId = change.value.id;
+        const client = await prisma.client.findFirst({
+          where: {
+            platform: "INSTAGRAM",
+            pageId,
+            isActive: true,
+          },
+        });
 
-    console.log("🔥 COMMENT EVENT:", {
-      commentText,
-      instagramUserId,
-      reelId,
-      pageId
-    });
+        if (!client) continue;
 
-    if (!commentText || !instagramUserId || !reelId) {
-      continue;
+        await automationQueue.add("comment", {
+          businessId: client.businessId,
+          clientId: client.id,
+          instagramUserId,
+          reelId,
+          commentText,
+        });
+      }
     }
-
-    const client = await prisma.client.findFirst({
-      where: {
-        platform: "INSTAGRAM",
-        pageId,
-        isActive: true,
-      },
-    });
-
-    if (!client) {
-      log("Client not found for comment automation");
-      continue;
-    }
-
-    /* 🔥 CHANGED: DIRECT → QUEUE */
-    await automationQueue.add("comment", {
-      businessId: client.businessId,
-      clientId: client.id,
-      instagramUserId,
-      reelId,
-      commentText,
-    });
-
-  }
-}
 
     /* ---------------------------------------------------
     MESSAGE DETECTION
@@ -180,124 +142,67 @@ router.post("/", async (req: any, res: Response) => {
     const messaging = entry?.messaging?.[0];
 
     if (messaging?.message?.text && !messaging?.message?.is_echo) {
-
       senderId = messaging.sender?.id;
       text = messaging.message.text;
       pageId = messaging.recipient?.id || entry.id;
       eventId = messaging.message.mid;
-
     }
 
     const changeMessage = entry?.changes?.[0]?.value?.messages?.[0];
 
     if (!text && changeMessage?.text?.body) {
-
       senderId = changeMessage.from;
       text = changeMessage.text.body;
       pageId = entry.id;
       eventId = changeMessage.id;
-
     }
 
-    console.log("DEBUG MESSAGE:", {
-      senderId,
-      text,
-      eventId,
-      pageId
-    });
+    if (!senderId || !text) return res.sendStatus(200);
 
-    /* ---------------------------------------------------
-    BASIC VALIDATION
-    --------------------------------------------------- */
-
-    if (!senderId || !text) {
-
-      console.log("Message ignored (missing sender/text)");
-
-      return res.sendStatus(200);
-
-    }
-
-    /* ---------------------------------------------------
-    SELF MESSAGE FILTER
-    --------------------------------------------------- */
-
-    if (pageId && senderId === pageId) {
-
-      console.log("Message ignored (self message)");
-
-      return res.sendStatus(200);
-
-    }
-
-    /* ---------------------------------------------------
-    SYSTEM MESSAGE FILTER
-    --------------------------------------------------- */
+    if (pageId && senderId === pageId) return res.sendStatus(200);
 
     const lowerText = text.toLowerCase();
-
     if (
       lowerText.includes("please wait") ||
       lowerText.includes("moment before sending")
     ) {
-
-      console.log("System message ignored:", text);
-
       return res.sendStatus(200);
-
     }
 
-    /* ---------------------------------------------------
-    WEBHOOK DEDUP
-    --------------------------------------------------- */
-
-    if (!eventId) {
-
-      console.log("Event ID missing");
-
-      return res.sendStatus(200);
-
-    }
+    if (!eventId) return res.sendStatus(200);
 
     const shouldProcess = await processWebhookEvent({
       eventId,
       platform: "INSTAGRAM",
     });
 
-    if (!shouldProcess) {
-
-      log("Duplicate webhook ignored");
-
-      return res.sendStatus(200);
-
-    }
+    if (!shouldProcess) return res.sendStatus(200);
 
     /* ---------------------------------------------------
-    CLIENT
+    CLIENT (🔥 FIXED PLAN FETCH)
     --------------------------------------------------- */
 
     const client = await prisma.client.findFirst({
-  where: {
-    platform: "INSTAGRAM",
-    pageId,
-    isActive: true,
-  },
-  include: {
-    business: {
-      select: {
-        ownerId: true,
+      where: {
+        platform: "INSTAGRAM",
+        pageId,
+        isActive: true,
       },
-    },
-  },
-});
+      include: {
+        business: {
+          select: {
+            ownerId: true,
+            subscription: {
+              include: {
+                plan: true, // 🔥 FIX
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (!client) {
-
-      log("Client not found:", pageId);
-
-      return res.sendStatus(200);
-
-    }
+    if (!client) return res.sendStatus(200);
 
     /* ---------------------------------------------------
     LEAD
@@ -311,7 +216,6 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     if (!lead) {
-
       lead = await prisma.lead.create({
         data: {
           businessId: client.businessId,
@@ -322,18 +226,16 @@ router.post("/", async (req: any, res: Response) => {
         },
       });
 
-      log("Lead created:", lead.id);
       await createNotification({
         userId: client.business.ownerId,
         title: "New Lead",
         message: "A new Instagram lead has been created",
         type: "LEAD",
       });
-
     }
 
     /* ---------------------------------------------------
-    SAVE USER MESSAGE
+    SAVE MESSAGE
     --------------------------------------------------- */
 
     const userMessage = await prisma.message.create({
@@ -344,7 +246,7 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
-     await createNotification({
+    await createNotification({
       userId: client.business.ownerId,
       title: "New Message",
       message: text,
@@ -352,29 +254,29 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     try {
-
       const io = getIO();
       io.to(`lead_${lead.id}`).emit("new_message", userMessage);
-
     } catch {}
 
     /* ---------------------------------------------------
-    ADD AI JOB
+    🧠 ROUTER JOB (FINAL FIX)
     --------------------------------------------------- */
 
-    console.log("AI JOB DATA:", {
+    const plan = client.business?.subscription?.plan || null;
+    console.log("PLAN DEBUG FULL:", JSON.stringify(plan, null, 2));
+
+    console.log("ROUTER JOB DATA:", {
       businessId: client.businessId,
       leadId: lead.id,
       message: text,
-      platform: "INSTAGRAM",
-      senderId,
-      pageId,
+      plan,
     });
 
-    await addAIJob({
+    await addRouterJob({
       businessId: client.businessId,
       leadId: lead.id,
       message: text,
+      plan, // ✅ FINAL FIX
       platform: "INSTAGRAM",
       senderId,
       pageId,
@@ -394,23 +296,15 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
-    /* ---------------------------------------------------
-    FOLLOWUP RESET
-    --------------------------------------------------- */
-
     await cancelFollowups(lead.id);
     await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);
 
   } catch (error) {
-
     log("Webhook error:", error);
-
     return res.sendStatus(500);
-
   }
-
 });
 
 export default router;

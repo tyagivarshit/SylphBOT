@@ -22,33 +22,31 @@ export const runAutomationEngine = async ({
   leadId,
   message,
 }: AutomationInput) => {
-
   try {
-
     const lowerMessage = message.toLowerCase().trim();
 
     /* ==================================================
-    ACTIVE EXECUTION CHECK
+    🔒 FAST ACTIVE EXECUTION CHECK (INDEX FRIENDLY)
     ================================================== */
 
     const activeExecution = await prisma.automationExecution.findFirst({
       where: {
         leadId,
-        flow: {
-          businessId,
-        },
         status: "ACTIVE",
       },
-      orderBy: {
-        updatedAt: "desc",
-      },
-      include: {
-        flow: true,
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        flowId: true,
+        currentStep: true,
       },
     });
 
-    if (activeExecution) {
+    /* ==================================================
+    CONTINUE EXISTING FLOW
+    ================================================== */
 
+    if (activeExecution) {
       const step = await prisma.automationStep.findFirst({
         where: {
           flowId: activeExecution.flowId,
@@ -58,11 +56,8 @@ export const runAutomationEngine = async ({
 
       if (!step) return null;
 
-      /* -------- ANALYTICS -------- */
-
-      await trackStepView(activeExecution.flowId, step.stepKey);
-
-      /* -------- EXECUTE STEP -------- */
+      /* 🔥 fire & forget analytics (non-blocking) */
+      trackStepView(activeExecution.flowId, step.stepKey).catch(() => {});
 
       const result = await executeAutomationActions({
         businessId,
@@ -76,11 +71,13 @@ export const runAutomationEngine = async ({
       });
 
       if (result) {
-        await trackStepConversion(activeExecution.flowId, step.stepKey);
+        trackStepConversion(
+          activeExecution.flowId,
+          step.stepKey
+        ).catch(() => {});
       }
 
       return result || null;
-
     }
 
     /* ==================================================
@@ -99,24 +96,34 @@ export const runAutomationEngine = async ({
         id: trigger.flowId,
         status: "ACTIVE",
       },
+      select: {
+        id: true,
+        steps: {
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
     });
 
-    if (!flow) return null;
+    if (!flow || flow.steps.length === 0) return null;
+
+    const firstStep = flow.steps[0];
 
     /* ==================================================
-    GET FIRST STEP (SAFER)
+    🔒 DUPLICATE FLOW GUARD (CRITICAL)
     ================================================== */
 
-    const firstStep = await prisma.automationStep.findFirst({
+    const alreadyRunning = await prisma.automationExecution.findFirst({
       where: {
+        leadId,
         flowId: flow.id,
+        status: "ACTIVE",
       },
-      orderBy: {
-        createdAt: "asc",
-      },
+      select: { id: true },
     });
 
-    if (!firstStep) return null;
+    if (alreadyRunning) return null;
 
     /* ==================================================
     CREATE EXECUTION
@@ -129,18 +136,19 @@ export const runAutomationEngine = async ({
         currentStep: firstStep.stepKey,
         status: "ACTIVE",
       },
+      select: {
+        id: true,
+      },
     });
 
-    /* -------- EVENT BUS -------- */
-
+    /* 🔥 non-blocking event */
     emitAutomationStarted(leadId, flow.id);
 
-    /* -------- ANALYTICS -------- */
-
-    await trackStepView(flow.id, firstStep.stepKey);
+    /* 🔥 analytics async */
+    trackStepView(flow.id, firstStep.stepKey).catch(() => {});
 
     /* ==================================================
-    EXECUTE FIRST STEP
+    EXECUTE FLOW
     ================================================== */
 
     const reply = await executeAutomationActions({
@@ -155,17 +163,12 @@ export const runAutomationEngine = async ({
     });
 
     if (reply) {
-      await trackStepConversion(flow.id, firstStep.stepKey);
+      trackStepConversion(flow.id, firstStep.stepKey).catch(() => {});
     }
 
     return reply || null;
-
   } catch (error) {
-
     console.error("🚨 Automation engine error:", error);
-
     return null;
-
   }
-
 };

@@ -5,9 +5,11 @@ import {
   getConversationState,
 } from "./conversationState.service";
 
+import { hasFeature } from "../config/plan.config"; // 🔥 ADD THIS
+
 /*
 =====================================================
-BOOKING PRIORITY ROUTER (FINAL CLEAN VERSION)
+BOOKING PRIORITY ROUTER (FINAL FIXED VERSION)
 =====================================================
 */
 
@@ -15,20 +17,28 @@ export const bookingPriorityRouter = async ({
   businessId,
   leadId,
   message,
+  plan, // 🔥 ADD THIS
 }: {
   businessId: string;
   leadId: string;
   message: string;
+  plan: any; // 🔥 ADD THIS
 }): Promise<string | null> => {
   try {
     const clean = message.trim().toLowerCase();
 
     /* =====================================================
-    0️⃣ STATE CHECK (IMPORTANT)
+    🔥 PLAN CHECK (CRITICAL FIX)
+    ===================================================== */
+    if (!hasFeature(plan, "bookingEnabled")) {
+      return null; // ❗ AI handle karega, booking block nahi karega forcefully
+    }
+
+    /* =====================================================
+    0️⃣ STATE CHECK
     ===================================================== */
     const state = await getConversationState(leadId);
 
-    // 👉 Agar booking flow me hai → AI ko bypass karo
     if (state?.state === "BOOKING_SELECTION") {
       return await handleSlotSelection({
         businessId,
@@ -38,12 +48,11 @@ export const bookingPriorityRouter = async ({
     }
 
     if (state?.state === "BOOKING_CONFIRMATION") {
-      // 👉 Confirmation AI Router handle karega
       return null;
     }
 
     /* =====================================================
-    1️⃣ DIRECT SLOT SELECTION (SMART PARSE)
+    1️⃣ DIRECT SLOT SELECTION
     ===================================================== */
     const isSlotSelection =
       /^\d+$/.test(clean) ||
@@ -61,7 +70,7 @@ export const bookingPriorityRouter = async ({
     }
 
     /* =====================================================
-    2️⃣ NEXT AVAILABLE (SMART TRIGGER)
+    2️⃣ NEXT AVAILABLE
     ===================================================== */
     if (
       clean.includes("next available") ||
@@ -96,11 +105,9 @@ or tell me another time 👍`;
     }
 
     /* =====================================================
-    3️⃣ STRICT YES/NO HANDLING (SAFE)
+    3️⃣ YES / NO
     ===================================================== */
     if (clean === "yes" || clean === "confirm") {
-      // ❌ DO NOT auto-book here
-      // ✅ let state / AI handle
       return null;
     }
 
@@ -109,7 +116,7 @@ or tell me another time 👍`;
     }
 
     /* =====================================================
-    4️⃣ AI BOOKING INTENT (SMART ENTRY)
+    4️⃣ AI BOOKING INTENT
     ===================================================== */
     const booking = await handleAIBookingIntent(
       businessId,
@@ -121,9 +128,6 @@ or tell me another time 👍`;
       return booking.message;
     }
 
-    /* =====================================================
-    FALLBACK
-    ===================================================== */
     return null;
 
   } catch (error) {

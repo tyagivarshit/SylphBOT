@@ -1,146 +1,122 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import AutomationCard from "./AutomationCard"
-import CreateAutomationModal from "./CreateAutomationModal"
+import { useEffect, useState, useCallback } from "react";
+import AutomationCard from "./AutomationCard";
+import CreateAutomationModal from "./CreateAutomationModal";
 
-export default function AutomationList(){
+export default function AutomationList() {
+  const [open, setOpen] = useState(false);
+  const [automations, setAutomations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-const [open,setOpen] = useState(false)
-const [automations,setAutomations] = useState<any[]>([])
-const [loading,setLoading] = useState(true)
-const [error,setError] = useState("")
+  /* ---------------- FETCH ---------------- */
 
-/* ---------------- FETCH AUTOMATIONS ---------------- */
+  const fetchAutomations = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-const fetchAutomations = async () => {
+      const res = await fetch("/api/automation/flows");
 
-  try{
+      if (!res.ok) throw new Error();
 
-    setLoading(true)
-    setError("")
+      const data = await res.json();
 
-    const res = await fetch("/api/automation/flows")
+      setAutomations(data || []);
+    } catch {
+      setError("Failed to load automations");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    if(!res.ok) throw new Error("Failed to fetch")
+  /* ---------------- INIT ---------------- */
 
-    const data = await res.json()
+  useEffect(() => {
+    fetchAutomations();
+  }, [fetchAutomations]);
 
-    setAutomations(data || [])
+  /* ---------------- UI ---------------- */
 
-  }catch(err:any){
+  return (
+    <div className="space-y-5">
+      {/* HEADER */}
+      <div className="flex justify-between items-center">
+        <h2 className="text-base font-semibold text-gray-900">
+          Your Automations
+        </h2>
 
-    setError("Failed to load automations")
+        <button
+          onClick={() => setOpen(true)}
+          className="bg-indigo-600 text-white px-5 py-2 text-sm rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition"
+        >
+          Create Automation 🚀
+        </button>
+      </div>
 
-  }finally{
+      {/* LOADING */}
+      {loading && (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-28 bg-white border border-gray-200 rounded-2xl animate-pulse shadow-sm"
+            />
+          ))}
+        </div>
+      )}
 
-    setLoading(false)
+      {/* ERROR */}
+      {error && (
+        <div className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl p-3 flex justify-between items-center">
+          <span>{error}</span>
+          <button
+            onClick={fetchAutomations}
+            className="text-xs underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-  }
+      {/* EMPTY */}
+      {!loading && automations.length === 0 && (
+        <div className="text-center border border-dashed border-gray-300 rounded-2xl p-8 bg-white">
+          <p className="text-sm font-medium text-gray-900">
+            No automations yet 🚀
+          </p>
 
-}
+          <p className="text-xs text-gray-500 mt-1">
+            Turn messages into leads automatically
+          </p>
 
-/* ---------------- INIT ---------------- */
+          <button
+            onClick={() => setOpen(true)}
+            className="mt-4 bg-indigo-600 text-white px-4 py-2 text-sm rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition"
+          >
+            Create your first automation
+          </button>
+        </div>
+      )}
 
-useEffect(()=>{
-  fetchAutomations()
-},[])
+      {/* LIST */}
+      {!loading && automations.length > 0 && (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {automations.map((a) => (
+            <AutomationCard key={a.id} automation={a} />
+          ))}
+        </div>
+      )}
 
-/* ---------------- UI ---------------- */
-
-return(
-
-<div className="space-y-5">
-
-{/* HEADER */}
-
-<div className="flex justify-between items-center">
-
-<h2 className="text-base font-semibold text-gray-900">
-Your Automations
-</h2>
-
-<button
-onClick={()=>setOpen(true)}
-className="bg-indigo-600 text-white px-5 py-2 text-sm rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition"
->
-Create Automation 🚀
-</button>
-
-</div>
-
-{/* LOADING */}
-
-{loading && (
-  <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-    {Array.from({length:3}).map((_,i)=>(
-      <div
-        key={i}
-        className="h-28 bg-white border border-gray-200 rounded-2xl animate-pulse shadow-sm"
+      {/* MODAL */}
+      <CreateAutomationModal
+        open={open}
+        onClose={() => {
+          setOpen(false);
+          fetchAutomations();
+        }}
       />
-    ))}
-  </div>
-)}
-
-{/* ERROR */}
-
-{error && (
-  <div className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl p-3">
-    {error}
-  </div>
-)}
-
-{/* EMPTY */}
-
-{!loading && automations.length === 0 && (
-  <div className="text-center border border-dashed border-gray-300 rounded-2xl p-8 bg-white">
-    
-    <p className="text-sm font-medium text-gray-900">
-      No automations yet 🚀
-    </p>
-
-    <p className="text-xs text-gray-500 mt-1">
-      Turn comments into leads automatically
-    </p>
-
-    <button
-      onClick={()=>setOpen(true)}
-      className="mt-4 bg-indigo-600 text-white px-4 py-2 text-sm rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition"
-    >
-      Create your first automation
-    </button>
-
-  </div>
-)}
-
-{/* LIST */}
-
-{!loading && automations.length > 0 && (
-
-<div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-
-{automations.map((a)=>(
-  <AutomationCard
-    key={a.id}
-    automation={a}
-  />
-))}
-
-</div>
-
-)}
-
-{/* MODAL */}
-
-<CreateAutomationModal
-open={open}
-onClose={()=>{
-  setOpen(false)
-  fetchAutomations()
-}}
-/>
-
-</div>
-
-)
+    </div>
+  );
 }

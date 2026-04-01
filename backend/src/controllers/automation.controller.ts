@@ -7,9 +7,7 @@ export const createAutomationFlow = async (
   req: Request,
   res: Response
 ) => {
-
   try {
-
     const userId = req.user?.id;
 
     if (!userId) {
@@ -18,11 +16,22 @@ export const createAutomationFlow = async (
       });
     }
 
-    /* GET BUSINESS */
+    /* 🔥 GET BUSINESS + PLAN (OPTIMIZED SELECT) */
 
     const business = await prisma.business.findFirst({
       where: { ownerId: userId },
-      select: { id: true },
+      select: {
+        id: true,
+        subscription: {
+          select: {
+            plan: {
+              select: {
+                type: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!business) {
@@ -31,41 +40,108 @@ export const createAutomationFlow = async (
       });
     }
 
-    const { name, triggerValue } = req.body;
+    const planType =
+      business.subscription?.plan?.type || "FREE";
 
-    if (!name || !triggerValue) {
+    const {
+      name,
+      triggerValue,
+      triggerType = "KEYWORD",
+      channel = "INSTAGRAM",
+      steps = [],
+    } = req.body;
+
+    /* ---------------- VALIDATION ---------------- */
+
+    const cleanName = name?.trim();
+    const cleanTrigger = triggerValue?.toLowerCase().trim();
+
+    if (!cleanName || !cleanTrigger) {
       return res.status(400).json({
-        message: "name and triggerValue required",
+        message: "Name and triggerValue are required",
       });
     }
 
-    const flow = await prisma.automationFlow.create({
-      data: {
-        businessId: business.id,
-        name,
-        channel: "INSTAGRAM",
-        triggerType: "KEYWORD",
-        triggerValue: triggerValue.toLowerCase().trim(),
-        status: "ACTIVE", // ✅ FIX
-      },
+    if (!Array.isArray(steps) || steps.length === 0) {
+      return res.status(400).json({
+        message: "At least 1 step is required",
+      });
+    }
+
+    /* 🔥 STEP SANITIZATION (IMPORTANT) */
+
+    const sanitizedSteps = steps.map((step: any, index: number) => ({
+      stepKey: `STEP_${index + 1}`,
+      stepType: step.type,
+      message: step.config?.message || null,
+      condition: step.config?.condition || null,
+      nextStep:
+        index < steps.length - 1
+          ? `STEP_${index + 2}`
+          : null,
+      metadata: step.config || {},
+    }));
+
+    /* ---------------- PLAN RESTRICTIONS ---------------- */
+
+    const restrictedTypesBasic = ["DELAY", "CONDITION", "BOOKING"];
+
+    if (planType === "BASIC") {
+      const invalidStep = sanitizedSteps.find((s: any) =>
+        restrictedTypesBasic.includes(s.stepType)
+      );
+
+      if (invalidStep) {
+        return res.status(403).json({
+          message: `Step '${invalidStep.stepType}' not allowed in BASIC plan`,
+        });
+      }
+    }
+
+    /* ---------------- CREATE FLOW + STEPS ---------------- */
+
+    const flow = await prisma.$transaction(async (tx) => {
+      const createdFlow = await tx.automationFlow.create({
+        data: {
+          businessId: business.id,
+          name: cleanName,
+          channel,
+          triggerType,
+          triggerValue: cleanTrigger,
+          status: "ACTIVE",
+        },
+        select: { id: true },
+      });
+
+      await tx.automationStep.createMany({
+        data: sanitizedSteps.map((step) => ({
+          ...step,
+          flowId: createdFlow.id,
+        })),
+      });
+
+      return tx.automationFlow.findUnique({
+        where: { id: createdFlow.id },
+        include: {
+          steps: {
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
     });
 
     return res.status(201).json({
       success: true,
       flow,
     });
-
   } catch (error) {
-
     console.error("Create flow error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to create flow",
     });
-
   }
-
 };
 
 /* ---------------- GET FLOWS ---------------- */
@@ -74,9 +150,7 @@ export const getFlows = async (
   req: Request,
   res: Response
 ) => {
-
   try {
-
     const userId = req.user?.id;
 
     if (!userId) {
@@ -100,21 +174,36 @@ export const getFlows = async (
       where: {
         businessId: business.id,
       },
+      select: {
+        id: true,
+        name: true,
+        channel: true,
+        triggerType: true,
+        triggerValue: true,
+        status: true,
+        createdAt: true,
+        steps: {
+          select: {
+            stepKey: true,
+            stepType: true,
+            message: true,
+            condition: true,
+            nextStep: true,
+          },
+          orderBy: { createdAt: "asc" },
+        },
+      },
       orderBy: {
         createdAt: "desc",
       },
     });
 
     return res.json(flows);
-
   } catch (error) {
-
     console.error("Fetch flows error:", error);
 
     return res.status(500).json({
       message: "Failed to fetch flows",
     });
-
   }
-
 };

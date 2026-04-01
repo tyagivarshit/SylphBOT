@@ -5,16 +5,16 @@ import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
 /* FUNNEL */
 import { generateAIFunnelReply } from "./aiFunnel.service";
 
-/* MEMORY ENGINE */
+/* MEMORY */
 import {
   buildMemoryContext,
-  updateMemory
+  updateMemory,
 } from "./aiMemoryEngine.service";
 
-/* SUMMARY ENGINE */
+/* SUMMARY */
 import { generateConversationSummary } from "./conversationSummary.service";
 
-/* ✅ RAG SERVICE */
+/* RAG */
 import { generateRAGReply } from "./rag.service";
 
 const openai = new OpenAI({
@@ -28,9 +28,8 @@ interface AIInput {
   message: string;
 }
 
-/* ---------------------------------------------------
-🔥 SYSTEM MESSAGE FILTER (STRONG)
---------------------------------------------------- */
+/* ---------------- SYSTEM FILTER ---------------- */
+
 const isSystemMessage = (message: string) => {
   const msg = message.toLowerCase();
 
@@ -42,9 +41,8 @@ const isSystemMessage = (message: string) => {
   );
 };
 
-/* ---------------------------------------------------
-🔥 ABUSE PROTECTION (NO LOOP)
---------------------------------------------------- */
+/* ---------------- ABUSE CHECK ---------------- */
+
 const checkAIAbuse = async (leadId: string, message: string) => {
   const normalized = message.toLowerCase().trim();
 
@@ -73,9 +71,8 @@ const checkAIAbuse = async (leadId: string, message: string) => {
   return { blocked: false };
 };
 
-/* ---------------------------------------------------
-USAGE CHECK
---------------------------------------------------- */
+/* ---------------- USAGE ---------------- */
+
 const checkUsage = async (businessId: string) => {
   const { month, year } = getCurrentMonthYear();
 
@@ -128,24 +125,20 @@ const incrementUsage = async (businessId: string) => {
   });
 };
 
-/* ---------------------------------------------------
-MAIN AI
---------------------------------------------------- */
+/* ---------------- MAIN AI ---------------- */
+
 export const generateAIReply = async ({
   businessId,
   leadId,
   message,
 }: AIInput): Promise<string | null> => {
   try {
-    const clean = message?.trim();
+    const cleanMessage = message?.trim();
 
-    /* ❌ EMPTY */
-    if (!clean) return null;
+    if (!cleanMessage) return null;
 
-    /* ❌ SYSTEM IGNORE */
-    if (isSystemMessage(clean)) return null;
+    if (isSystemMessage(cleanMessage)) return null;
 
-    /* ❌ HUMAN ACTIVE */
     const lead = await prisma.lead.findUnique({
       where: { id: leadId },
       select: { isHumanActive: true },
@@ -153,54 +146,53 @@ export const generateAIReply = async ({
 
     if (lead?.isHumanActive) return null;
 
-    /* ❌ ABUSE */
-    const abuse = await checkAIAbuse(leadId, clean);
+    const abuse = await checkAIAbuse(leadId, cleanMessage);
     if (abuse.blocked) {
       if (abuse.reason === "SPAM") {
         return "Please avoid repeating the same message.";
       }
-      return null; // 🔥 no loop
+      return null;
     }
 
-    /* ❌ USAGE */
     const usage = await checkUsage(businessId);
-    if (usage.blocked) {
-      return null; // 🔥 no loop spam
-    }
+    if (usage.blocked) return null;
 
     const plan = usage.plan || "FREE";
 
-    /* =================================================
-    🔥 PRIORITY 1: FUNNEL AI (SALES)
-    ================================================= */
+    let finalReply: string | null = null;
+
+    /* ============================= */
+    /* FUNNEL */
+    /* ============================= */
+
     if (plan === "PRO" || plan === "ENTERPRISE") {
       const reply = await generateAIFunnelReply({
         businessId,
         leadId,
-        message: clean,
+        message: cleanMessage,
       });
 
-      await incrementUsage(businessId);
-
-      return reply || null;
+      if (typeof reply === "string") {
+        const cleaned = reply.trim();
+        if (cleaned.length > 0) {
+          finalReply = cleaned;
+        }
+      }
     }
 
-    /* =================================================
-    🔥 PRIORITY 2: RAG (INFO)
-    ================================================= */
-    const reply = await generateRAGReply(
-      businessId,
-      clean,
-      leadId
-    );
+    /* ============================= */
+    /* FINAL CHECK */
+    /* ============================= */
 
-    if (!reply) return null;
+    if (!finalReply) return null;
+
+    const safeReply = finalReply;
 
     /* SAVE */
     await prisma.message.create({
       data: {
         leadId,
-        content: reply,
+        content: safeReply,
         sender: "AI",
       },
     });
@@ -208,8 +200,10 @@ export const generateAIReply = async ({
     await incrementUsage(businessId);
 
     /* MEMORY */
+    const cleanForMemory = safeReply.toLowerCase().trim();
+
     await buildMemoryContext(leadId);
-    await updateMemory(leadId, clean);
+    await updateMemory(leadId, cleanForMemory);
 
     /* SUMMARY */
     const count = await prisma.message.count({
@@ -220,10 +214,9 @@ export const generateAIReply = async ({
       await generateConversationSummary(leadId);
     }
 
-    return reply;
-
+    return safeReply;
   } catch (error) {
-    console.error("AI SERVICE ERROR:", error);
+    console.error("🚨 AI SERVICE ERROR:", error);
     return null;
   }
 };

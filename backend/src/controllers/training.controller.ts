@@ -9,7 +9,6 @@ interface CustomRequest extends Request {
 /* ================= HELPER ================= */
 
 const getOrCreateClient = async (businessId: string) => {
-
   let client = await prisma.client.findFirst({
     where: { businessId, isActive: true }
   });
@@ -47,9 +46,36 @@ export const saveBusinessInfo = async (req: CustomRequest, res: Response) => {
 
     const client = await getOrCreateClient(businessId);
 
+    /* 🔥 SAVE IN CLIENT */
     await prisma.client.update({
       where: { id: client.id },
       data: { businessInfo: content }
+    });
+
+    /* 🔥 CREATE EMBEDDING */
+    const embedding = await createEmbedding(content);
+
+    /* 🔥 UPSERT INTO KNOWLEDGE BASE (RAG) */
+    await prisma.knowledgeBase.upsert({
+      where: {
+        businessId_title: {
+          businessId,
+          title: "BUSINESS_INFO"
+        }
+      },
+      update: {
+        content,
+        embedding,
+        isActive: true
+      },
+      create: {
+        businessId,
+        title: "BUSINESS_INFO",
+        content,
+        embedding,
+        sourceType: "SYSTEM",
+        isActive: true
+      }
     });
 
     return res.json({ message: "Business info saved" });
@@ -57,6 +83,33 @@ export const saveBusinessInfo = async (req: CustomRequest, res: Response) => {
   } catch (error) {
     console.error("Business info error:", error);
     return res.status(500).json({ message: "Failed to save business info" });
+  }
+};
+
+/* ================= GET BUSINESS INFO ================= */
+
+export const getBusinessInfo = async (req: CustomRequest, res: Response) => {
+  try {
+    const businessId = req.user?.businessId;
+
+    if (!businessId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const client = await prisma.client.findFirst({
+      where: { businessId, isActive: true },
+      select: {
+        businessInfo: true
+      }
+    });
+
+    return res.json({
+      content: client?.businessInfo || ""
+    });
+
+  } catch (error) {
+    console.error("Get business info error:", error);
+    return res.status(500).json({ message: "Failed to fetch business info" });
   }
 };
 
@@ -85,15 +138,63 @@ export const saveFAQ = async (req: CustomRequest, res: Response) => {
         title: question,
         content,
         embedding,
-        sourceType: "FAQ"
+        sourceType: "FAQ",
+        isActive: true
       }
     });
 
-    return res.json({ message: "FAQ saved" });
+    return res.json({
+      id: "new",
+      question,
+      answer
+    });
 
   } catch (error) {
     console.error("FAQ error:", error);
     return res.status(500).json({ message: "Failed to save FAQ" });
+  }
+};
+
+/* ================= GET FAQs ================= */
+
+export const getFAQs = async (req: CustomRequest, res: Response) => {
+  try {
+    const businessId = req.user?.businessId;
+
+    if (!businessId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const faqs = await prisma.knowledgeBase.findMany({
+      where: {
+        businessId,
+        sourceType: "FAQ",
+        isActive: true
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      select: {
+        id: true,
+        title: true,
+        content: true
+      }
+    });
+
+    const formatted = faqs.map(faq => {
+      const parts = faq.content.split("\n");
+      return {
+        id: faq.id,
+        question: faq.title,
+        answer: parts[1]?.replace("A: ", "") || ""
+      };
+    });
+
+    return res.json(formatted);
+
+  } catch (error) {
+    console.error("Get FAQs error:", error);
+    return res.status(500).json({ message: "Failed to fetch FAQs" });
   }
 };
 
@@ -123,5 +224,31 @@ export const saveAISettings = async (req: CustomRequest, res: Response) => {
   } catch (error) {
     console.error("AI settings error:", error);
     return res.status(500).json({ message: "Failed to save AI settings" });
+  }
+};
+
+/* ================= GET AI SETTINGS ================= */
+
+export const getAISettings = async (req: CustomRequest, res: Response) => {
+  try {
+    const businessId = req.user?.businessId;
+
+    if (!businessId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const client = await prisma.client.findFirst({
+      where: { businessId, isActive: true },
+      select: {
+        aiTone: true,
+        salesInstructions: true
+      }
+    });
+
+    return res.json(client || {});
+
+  } catch (error) {
+    console.error("Get settings error:", error);
+    return res.status(500).json({ message: "Failed to fetch settings" });
   }
 };

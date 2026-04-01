@@ -8,16 +8,35 @@ interface KnowledgeResult {
   score: number;
 }
 
-/* ------------------------------------------
-CONFIG
------------------------------------------- */
+/* ------------------------------------------ */
+/* CONFIG */
+/* ------------------------------------------ */
 
-const SIMILARITY_THRESHOLD = 0.65;
+const SIMILARITY_THRESHOLD = 0.5; // 🔥 lower for better recall
 const MAX_RESULTS = 5;
 
-/* ------------------------------------------
-SEARCH KNOWLEDGE
------------------------------------------- */
+/* ------------------------------------------ */
+/* 🔥 KEYWORD SCORE */
+/* ------------------------------------------ */
+
+const keywordScore = (query: string, content: string): number => {
+  const qWords = query.toLowerCase().split(" ");
+  const cText = content.toLowerCase();
+
+  let match = 0;
+
+  for (const word of qWords) {
+    if (cText.includes(word)) {
+      match++;
+    }
+  }
+
+  return match / qWords.length; // normalized
+};
+
+/* ------------------------------------------ */
+/* SEARCH KNOWLEDGE */
+/* ------------------------------------------ */
 
 export const searchKnowledge = async (
   businessId: string,
@@ -26,12 +45,10 @@ export const searchKnowledge = async (
 
   try {
 
-    /* CREATE EMBEDDING */
-
+    /* 🔥 CREATE EMBEDDING */
     const messageEmbedding = await createEmbedding(message);
 
-    /* GET KNOWLEDGE BASE */
-
+    /* 🔥 GET KNOWLEDGE */
     const knowledge = await prisma.knowledgeBase.findMany({
       where: {
         businessId,
@@ -46,46 +63,44 @@ export const searchKnowledge = async (
 
     if (!knowledge.length) return [];
 
-    /* SCORE KNOWLEDGE */
+    /* 🔥 SCORE (HYBRID) */
 
-    const scored = knowledge
-      .map((item) => {
+    const scored = knowledge.map((item) => {
 
-        if (!item.embedding) {
-          return { ...item, score: 0 };
-        }
+      let semantic = 0;
+      let keyword = 0;
 
-        const score = cosineSimilarity(
+      if (item.embedding) {
+        semantic = cosineSimilarity(
           messageEmbedding,
           item.embedding as number[]
         );
+      }
 
-        return {
-          ...item,
-          score,
-        };
+      keyword = keywordScore(message, item.content);
 
-      })
+      /* 🔥 FINAL SCORE (weighted) */
+      const finalScore = (semantic * 0.7) + (keyword * 0.3);
 
-      /* FILTER LOW SCORES */
+      return {
+        id: item.id,
+        content: item.content,
+        score: finalScore,
+      };
 
+    });
+
+    /* 🔥 FILTER */
+    const filtered = scored
       .filter((item) => item.score >= SIMILARITY_THRESHOLD)
-
-      /* SORT BEST MATCH */
-
       .sort((a, b) => b.score - a.score)
-
-      /* LIMIT RESULTS */
-
       .slice(0, MAX_RESULTS);
 
-    return scored;
+    return filtered;
 
   } catch (error) {
-
     console.error("Knowledge search error:", error);
     return [];
-
   }
 
 };

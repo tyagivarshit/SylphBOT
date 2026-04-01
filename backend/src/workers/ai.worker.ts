@@ -5,7 +5,9 @@ import { redisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
 import { retryAsync } from "../utils/retry.utils";
 
-import { routeAIMessage } from "../services/aiRouter.service";
+import { handleIncomingMessage } from "../services/executionRouter.servce"; // 🔥 FINAL ROUTER
+
+import { routeAIMessage } from "../services/aiRouter.service"; // fallback only
 import { runAutomationEngine } from "../services/automationEngine.service";
 import { checkAIRateLimit } from "../services/aiRateLimiter.service";
 import { bookingPriorityRouter } from "../services/bookingPriorityRouter.service";
@@ -21,199 +23,42 @@ const delay = (ms: number) =>
 const worker = new Worker(
   "aiQueue",
   async (job) => {
-    const {
-      businessId,
-      leadId,
-      message,
-      platform,
-      senderId,
-      phoneNumberId,
-      accessTokenEncrypted,
-    } = job.data;
 
-    let aiReply: string | null = null;
-
-    try {
-      /* =====================================================
-      🔴 LOOP PROTECTION (VERY IMPORTANT)
-      ===================================================== */
-      const lowerMsg = message?.toLowerCase() || "";
-
-      if (
-        lowerMsg.includes("conversation limit reached") ||
-        lowerMsg.includes("our team will assist") ||
-        lowerMsg.includes("please wait")
-      ) {
-        logger.warn("🚫 Blocked loop/system message");
-        return;
-      }
-
-      /* =====================================================
-      👤 HUMAN TAKEOVER CHECK
-      ===================================================== */
-      const lead = await prisma.lead.findUnique({
-        where: { id: leadId },
-        select: { isHumanActive: true },
-      });
-
-      if (lead?.isHumanActive) return;
-
-      /* =====================================================
-      🧠 STEP 1: BOOKING PRIORITY (HIGHEST)
-      ===================================================== */
+    /* =====================================================
+    🧠 LEVEL 4 ROUTER ENTRY (MAIN SYSTEM)
+    ===================================================== */
+    if (job.name === "router") {
       try {
-        const bookingReply = await bookingPriorityRouter({
-          businessId,
-          leadId,
-          message,
+        const reply = await handleIncomingMessage({
+          ...job.data,
+          plan: job.data.plan || null, // 🔥 FORCE PLAN PASS
         });
 
-        if (bookingReply) {
-          aiReply = bookingReply;
-        }
-      } catch (err) {
-        logger.warn({ err }, "Booking router failed");
+        if (!reply) return;
+
+        return await processAndSendReply(job.data, reply);
+
+      } catch (err: any) {
+        logger.error(
+          {
+            error: err?.message || err,
+            stack: err?.stack,
+            jobData: job.data,
+          },
+          "❌ Router execution failed"
+        );
+        throw err;
       }
-
-      /* =====================================================
-      ⚙️ STEP 2: AUTOMATION (SECOND)
-      ===================================================== */
-      if (!aiReply) {
-        try {
-          const automationReply = await runAutomationEngine({
-            businessId,
-            leadId,
-            message,
-          });
-
-          if (automationReply) {
-            aiReply = automationReply;
-          }
-        } catch (err) {
-          logger.warn({ err }, "Automation failed");
-        }
-      }
-
-      /* =====================================================
-      🤖 STEP 3: AI BRAIN (FINAL)
-      ===================================================== */
-      if (!aiReply) {
-        aiReply = await routeAIMessage({
-          businessId,
-          leadId,
-          message,
-        });
-      }
-
-      /* =====================================================
-      🛟 FALLBACK
-      ===================================================== */
-      if (!aiReply || !aiReply.trim()) {
-        aiReply = "Thanks for your message! 😊";
-      }
-
-      /* 🔴 LENGTH LIMIT */
-      if (aiReply.length > 1000) {
-        aiReply = aiReply.slice(0, 1000);
-      }
-
-      /* =====================================================
-      🚦 RATE LIMIT
-      ===================================================== */
-      const rate = await checkAIRateLimit({
-        businessId,
-        leadId,
-        platform,
-      });
-
-      if (rate.blocked) {
-        logger.warn("🚫 Rate limit hit");
-        return;
-      }
-
-      /* =====================================================
-      💾 SAVE MESSAGE
-      ===================================================== */
-      const aiMessage = await prisma.message.create({
-        data: {
-          leadId,
-          content: aiReply,
-          sender: "AI",
-        },
-      });
-
-      /* =====================================================
-      🔌 SOCKET EMIT
-      ===================================================== */
-      try {
-        const io = getIO();
-        io.to(`lead_${leadId}`).emit("new_message", aiMessage);
-      } catch {}
-
-      const accessToken = decrypt(accessTokenEncrypted);
-
-      /* =====================================================
-      📤 SEND MESSAGE (INSTAGRAM / WHATSAPP)
-      ===================================================== */
-      const sendMessage = async () => {
-        if (platform === "WHATSAPP") {
-          await axios.post(
-            `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
-            {
-              messaging_product: "whatsapp",
-              to: senderId,
-              type: "text",
-              text: { body: aiReply },
-            },
-            {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-              timeout: 10000,
-            }
-          );
-        }
-
-        if (platform === "INSTAGRAM") {
-          if (!senderId) return;
-
-          await delay(500 + Math.random() * 1000);
-
-          await axios.post(
-            "https://graph.facebook.com/v19.0/me/messages",
-            {
-              recipient: { id: senderId },
-              message: { text: aiReply },
-            },
-            {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-              timeout: 10000,
-            }
-          );
-        }
-      };
-
-      /* 🔁 RETRY SYSTEM */
-      await retryAsync(sendMessage, 3, 800);
-
-      /* =====================================================
-      📊 UPDATE LEAD
-      ===================================================== */
-      await prisma.lead.update({
-        where: { id: leadId },
-        data: {
-          lastMessageAt: new Date(),
-          unreadCount: { increment: 1 },
-        },
-      });
-
-    } catch (error: any) {
-      logger.error("Worker crash", error);
-      Sentry.captureException(error);
-      throw error;
     }
+
+    /* =====================================================
+    🔁 FALLBACK FLOW (OLD SYSTEM - SAFE MODE)
+    ===================================================== */
+
+    return await legacyExecution({
+      ...job.data,
+      plan: job.data.plan || null, // 🔥 ALSO FIX HERE
+    });
   },
   {
     connection: redisConnection,
@@ -221,8 +66,206 @@ const worker = new Worker(
   }
 );
 
+/* =====================================================
+📤 COMMON RESPONSE HANDLER
+===================================================== */
+
+const processAndSendReply = async (data: any, aiReply: string) => {
+
+  const {
+    businessId,
+    leadId,
+    platform,
+    senderId,
+    phoneNumberId,
+    accessTokenEncrypted,
+  } = data;
+
+  try {
+
+    if (!aiReply || !aiReply.trim()) {
+      aiReply = "Thanks for your message! 😊";
+    }
+
+    if (aiReply.length > 1000) {
+      aiReply = aiReply.slice(0, 1000);
+    }
+
+    const rate = await checkAIRateLimit({
+      businessId,
+      leadId,
+      platform,
+    });
+
+    if (rate.blocked) {
+      logger.warn("🚫 Rate limit hit");
+      return;
+    }
+
+    const aiMessage = await prisma.message.create({
+      data: {
+        leadId,
+        content: aiReply,
+        sender: "AI",
+      },
+    });
+
+    try {
+      const io = getIO();
+      io.to(`lead_${leadId}`).emit("new_message", aiMessage);
+    } catch {}
+
+    const accessToken = decrypt(accessTokenEncrypted);
+
+    const sendMessage = async () => {
+
+      if (platform === "WHATSAPP") {
+        await axios.post(
+          `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+          {
+            messaging_product: "whatsapp",
+            to: senderId,
+            type: "text",
+            text: { body: aiReply },
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            timeout: 10000,
+          }
+        );
+      }
+
+      if (platform === "INSTAGRAM") {
+        if (!senderId) return;
+
+        await delay(500 + Math.random() * 1000);
+
+        await axios.post(
+          "https://graph.facebook.com/v19.0/me/messages",
+          {
+            recipient: { id: senderId },
+            message: { text: aiReply },
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            timeout: 10000,
+          }
+        );
+      }
+    };
+
+    await retryAsync(sendMessage, 3, 800);
+
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        lastMessageAt: new Date(),
+        unreadCount: { increment: 1 },
+      },
+    });
+
+  } catch (error: any) {
+    logger.error("❌ Send reply failed", error);
+    Sentry.captureException(error);
+    throw error;
+  }
+};
+
+/* =====================================================
+🧠 LEGACY EXECUTION (FIXED PLAN PASS)
+===================================================== */
+
+const legacyExecution = async (data: any) => {
+
+  const {
+    businessId,
+    leadId,
+    message,
+    plan,
+  } = data;
+
+  let aiReply: string | null = null;
+
+  try {
+
+    const lowerMsg = message?.toLowerCase() || "";
+
+    if (
+      lowerMsg.includes("conversation limit reached") ||
+      lowerMsg.includes("our team will assist") ||
+      lowerMsg.includes("please wait")
+    ) {
+      logger.warn("🚫 Blocked loop/system message");
+      return;
+    }
+
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { isHumanActive: true },
+    });
+
+    if (lead?.isHumanActive) return;
+
+    /* ---------------- BOOKING ---------------- */
+    try {
+      const bookingReply = await bookingPriorityRouter({
+        businessId,
+        leadId,
+        message,
+        plan, // 🔥 FIXED
+      });
+
+      if (bookingReply) aiReply = bookingReply;
+
+    } catch (err) {
+      logger.warn({ err }, "Booking failed");
+    }
+
+    /* ---------------- AUTOMATION ---------------- */
+    if (!aiReply) {
+      try {
+        const automationReply = await runAutomationEngine({
+          businessId,
+          leadId,
+          message,
+        });
+
+        if (automationReply) aiReply = automationReply;
+
+      } catch (err) {
+        logger.warn({ err }, "Automation failed");
+      }
+    }
+
+    /* ---------------- AI ---------------- */
+    if (!aiReply) {
+      aiReply = await routeAIMessage({
+        businessId,
+        leadId,
+        message,
+        plan, // 🔥 FIXED
+      });
+    }
+
+    if (!aiReply) return;
+
+    return await processAndSendReply(data, aiReply);
+
+  } catch (error: any) {
+    logger.error("❌ Legacy flow failed", error);
+    Sentry.captureException(error);
+    throw error;
+  }
+};
+
+/* ===================================================== */
+
 worker.on("failed", (job, err) => {
   logger.error({ jobId: job?.id, err }, "Worker failed");
 });
 
-logger.info("🔥 AI Worker Started");
+logger.info("🔥 AI Worker Started (Level 4 Fixed)");

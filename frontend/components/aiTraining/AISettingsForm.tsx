@@ -1,12 +1,39 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 export default function AISettingsForm(){
 
 const [tone,setTone] = useState("Friendly")
 const [instructions,setInstructions] = useState("")
+
 const [loading,setLoading] = useState(false)
+const [fetching,setFetching] = useState(true)
+
+/* ================= LOAD SETTINGS ================= */
+
+useEffect(() => {
+  const loadSettings = async () => {
+    try {
+      const res = await fetch("/api/training/settings")
+      const data = await res.json()
+
+      if(res.ok && data){
+        setTone(data.aiTone || "Friendly")
+        setInstructions(data.salesInstructions || "")
+      }
+
+    } catch (err) {
+      console.error("Load settings error:", err)
+    } finally {
+      setFetching(false)
+    }
+  }
+
+  loadSettings()
+}, [])
+
+/* ================= SAVE ================= */
 
 const handleSave = async () => {
 
@@ -34,11 +61,18 @@ const handleSave = async () => {
     alert("✅ AI settings saved")
 
   }catch(err){
+    console.error(err)
     alert("❌ Failed to save settings")
   }finally{
     setLoading(false)
   }
 
+}
+
+/* ================= UI ================= */
+
+if(fetching){
+  return <p className="text-sm text-gray-500">Loading settings...</p>
 }
 
 return(

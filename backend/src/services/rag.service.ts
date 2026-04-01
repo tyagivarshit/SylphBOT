@@ -23,6 +23,17 @@ const detectIntent = (message: string) => {
   return "GENERAL";
 };
 
+/* ---------------- MULTI QUERY ---------------- */
+
+const generateQueries = (message: string): string[] => {
+  const base = message.toLowerCase();
+  return [
+    base,
+    base + " details",
+    base + " information",
+  ];
+};
+
 /* ---------------- CACHE HELPERS ---------------- */
 
 const getCache = async (key: string) => {
@@ -34,11 +45,27 @@ const getCache = async (key: string) => {
   }
 };
 
-const setCache = async (key: string, value: any, ttl = 60) => {
+const setCache = async (key: string, value: any, ttl = 120) => {
   try {
     await redis.set(key, JSON.stringify(value), "EX", ttl);
   } catch {}
 };
+
+/* ---------------- SYSTEM PROMPT ---------------- */
+
+const SYSTEM_PROMPT = `
+You are an elite AI assistant.
+
+STRICT RULES:
+- Answer ONLY from the Knowledge section
+- If answer not found → reply EXACTLY: "No information available"
+- Do NOT guess
+
+STYLE:
+- Short replies
+- Human-like tone
+- Clear and helpful
+`;
 
 /* ---------------- MAIN ---------------- */
 
@@ -48,74 +75,53 @@ export const generateRAGReply = async (
   leadId?: string
 ) => {
   try {
+
     const intent = detectIntent(message);
 
-    /* =========================
-       🔥 CACHE KEYS
-    ========================= */
-
-    const memoryKey = `mem:${leadId}`;
-    const summaryKey = `sum:${leadId}`;
     const businessKey = `biz:${businessId}`;
 
-    /* =========================
-       🔥 PARALLEL FETCH
-    ========================= */
+    /* ================= MULTI QUERY SEARCH ================= */
 
-    const [knowledgeResults, cachedMemory, cachedSummary, cachedBusiness] =
-      await Promise.all([
-        searchKnowledge(businessId, message),
+    const queries = generateQueries(message);
 
-        leadId ? getCache(memoryKey) : null,
-        leadId ? getCache(summaryKey) : null,
-        getCache(businessKey),
-      ]);
+    let allResults: any[] = [];
 
-    /* =========================
-       🔥 LIMIT KNOWLEDGE
-    ========================= */
+    for (const q of queries) {
+      const res = await searchKnowledge(businessId, q);
+      allResults.push(...res);
+    }
 
-    const knowledgeContext = (knowledgeResults || [])
-      .slice(0, 5) // 🔥 LIMIT
-      .map((r) => `- ${r.content}`)
+    /* ================= DEDUPE ================= */
+
+    const uniqueMap = new Map();
+
+    for (const item of allResults) {
+      if (!uniqueMap.has(item.content)) {
+        uniqueMap.set(item.content, item);
+      }
+    }
+
+    const finalResults = Array.from(uniqueMap.values())
+      .sort((a: any, b: any) => b.score - a.score)
+      .slice(0, 5);
+
+    const knowledgeContext = finalResults
+      .map((r: any) => `• ${r.content}`)
       .join("\n");
 
-    /* =========================
-       🔥 MEMORY (WITH CACHE)
-    ========================= */
+    /* ❗ NO KNOWLEDGE → RETURN NULL */
 
-    let memoryText = cachedMemory || "";
-    let summaryText = cachedSummary || "";
-
-    if (leadId && !cachedMemory) {
-      const memories = await prisma.memory.findMany({
-        where: { leadId },
-        take: 3, // 🔥 reduced
-        orderBy: { createdAt: "desc" },
-      });
-
-      memoryText = memories
-        .map((m) => `${m.key}: ${m.value}`)
-        .join("\n");
-
-      await setCache(memoryKey, memoryText, 120);
+    if (!knowledgeContext.trim()) {
+      return {
+        found: false,
+        reply: null,
+        context: "",
+      };
     }
 
-    if (leadId && !cachedSummary) {
-      const summary = await prisma.conversationSummary.findFirst({
-        where: { leadId },
-        orderBy: { updatedAt: "desc" },
-      });
+    /* ================= BUSINESS CACHE ================= */
 
-      summaryText = summary?.summary || "";
-      await setCache(summaryKey, summaryText, 120);
-    }
-
-    /* =========================
-       🔥 BUSINESS CACHE
-    ========================= */
-
-    let businessData = cachedBusiness;
+    let businessData = await getCache(businessKey);
 
     if (!businessData) {
       const client = await prisma.client.findFirst({
@@ -132,20 +138,17 @@ export const generateRAGReply = async (
       await setCache(businessKey, businessData, 300);
     }
 
-    /* =========================
-       🔥 INTENT INSTRUCTION
-    ========================= */
+    /* ================= INTENT INSTRUCTION ================= */
 
     const intentMap: any = {
-      PRICE: "Explain pricing clearly and guide user to best plan.",
+      PRICE: "Explain pricing clearly and guide user.",
       OBJECTION_PRICE: "Handle objection and justify value.",
-      HESITATION: "Build trust and reduce hesitation.",
-      READY: "Push strongly to close the deal.",
+      HESITATION: "Build trust and remove hesitation.",
+      READY: "Push toward conversion.",
+      GENERAL: "Be helpful and guide user.",
     };
 
-    /* =========================
-       🔥 SHORT PROMPT (OPTIMIZED)
-    ========================= */
+    /* ================= FINAL PROMPT ================= */
 
     const prompt = `
 Business:
@@ -154,50 +157,49 @@ ${businessData.businessInfo || ""}
 Pricing:
 ${businessData.pricingInfo || ""}
 
+Tone:
+${businessData.aiTone || "Friendly"}
+
+Instructions:
+${businessData.salesInstructions || ""}
+
 Knowledge:
 ${knowledgeContext}
-
-Memory:
-${memoryText}
-
-Summary:
-${summaryText}
 
 User:
 ${message}
 
-Instruction:
-${intentMap[intent] || "Be helpful and convert user"}
-
-Rules:
-- Short replies
-- Human tone
-- Move toward conversion
+Intent:
+${intentMap[intent]}
 `;
 
-    /* =========================
-       🔥 TIMEOUT + RETRY SAFE
-    ========================= */
+    /* ================= AI CALL ================= */
 
-    const response: any = await Promise.race([
-  groq.chat.completions.create({
-    model: "llama-3.1-8b-instant",
-    messages: [
-      { role: "system", content: "You are a sales closer" },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.7,
-  }),
+    const response: any = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      temperature: 0.2,
+      max_tokens: 200,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: prompt },
+      ],
+    });
 
-  new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("AI timeout")), 8000)
-  ),
-]);
+    const reply = response?.choices?.[0]?.message?.content?.trim();
 
-return response?.choices?.[0]?.message?.content || "Let me help you!";
+    return {
+      found: true,
+      reply: reply || null,
+      context: knowledgeContext,
+    };
 
   } catch (error) {
     console.error("RAG ERROR:", error);
-    return "Let me help you with that!";
+
+    return {
+      found: false,
+      reply: null,
+      context: "",
+    };
   }
 };

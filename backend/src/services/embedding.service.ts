@@ -5,7 +5,7 @@ import { pipeline } from "@xenova/transformers";
 /* CONFIG */
 /* ============================= */
 
-const MODE = process.env.EMBEDDING_MODE || "local";
+const MODE = "local"; // 🔥 FORCE SAME MODEL ALWAYS
 
 /* ============================= */
 /* OPENAI */
@@ -43,7 +43,6 @@ const getFromCache = (key: string) => {
   const val = embeddingCache.get(key);
   if (!val) return null;
 
-  // refresh LRU
   embeddingCache.delete(key);
   embeddingCache.set(key, val);
 
@@ -53,9 +52,7 @@ const getFromCache = (key: string) => {
 const saveToCache = (key: string, value: number[]) => {
   if (embeddingCache.size >= MAX_CACHE_SIZE) {
     const firstKey = embeddingCache.keys().next().value;
-    if (firstKey) {
-      embeddingCache.delete(firstKey);
-    }
+    if (firstKey) embeddingCache.delete(firstKey);
   }
   embeddingCache.set(key, value);
 };
@@ -65,7 +62,26 @@ const saveToCache = (key: string, value: number[]) => {
 /* ============================= */
 
 const normalizeText = (text: string) => {
-  return text.toLowerCase().trim();
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, "") // remove noise
+    .trim();
+};
+
+/* ============================= */
+/* 🔥 MULTI QUERY GENERATION */
+/* ============================= */
+
+const generateVariants = (text: string): string[] => {
+  const base = normalizeText(text);
+
+  return [
+    base,
+    base.replace("price", "cost"),
+    base.replace("cost", "price"),
+    base.replace("buy", "purchase"),
+    base.replace("purchase", "buy"),
+  ];
 };
 
 /* ============================= */
@@ -73,50 +89,62 @@ const normalizeText = (text: string) => {
 /* ============================= */
 
 export const createEmbedding = async (text: string) => {
-
   try {
+    const variants = generateVariants(text);
 
-    const normalized = normalizeText(text);
+    const embeddings: number[][] = [];
 
-    /* ⚡ CACHE HIT */
+    for (const variant of variants) {
+      const cached = getFromCache(variant);
+      if (cached) {
+        embeddings.push(cached);
+        continue;
+      }
 
-    const cached = getFromCache(normalized);
-    if (cached) return cached;
+      let embedding: number[] = [];
 
-    /* 🔥 LOCAL MODE */
+      /* 🔥 LOCAL MODE */
+      if (MODE === "local") {
+        const model = await getModel();
 
-    if (MODE === "local") {
+        const output: any = await model(variant, {
+          pooling: "mean",
+          normalize: true,
+        });
 
-      const model = await getModel();
+        embedding = Array.from(output.data as Float32Array);
+      }
 
-      const output: any = await model(normalized, {
-        pooling: "mean",
-        normalize: true,
-      });
+      /* 🔥 OPENAI MODE (fallback only) */
+      else {
+        const response = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: variant,
+        });
 
-      const embedding = Array.from(output.data as Float32Array);
+        embedding = response.data[0].embedding;
+      }
 
-      saveToCache(normalized, embedding);
-
-      return embedding;
-
+      saveToCache(variant, embedding);
+      embeddings.push(embedding);
     }
 
-    /* 🔥 OPENAI MODE */
+    /* ============================= */
+    /* 🔥 MERGE EMBEDDINGS (AVG) */
+    /* ============================= */
 
-    const response = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: normalized,
+    const finalEmbedding = embeddings[0].map((_, i) => {
+      let sum = 0;
+      for (const emb of embeddings) {
+        sum += emb[i];
+      }
+      return sum / embeddings.length;
     });
 
-    return response.data[0].embedding;
+    return finalEmbedding;
 
   } catch (error) {
-
     console.error("Embedding error:", error);
-
     return [];
-
   }
-
 };

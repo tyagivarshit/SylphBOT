@@ -1,11 +1,36 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 export default function BusinessInfoForm(){
 
 const [info,setInfo] = useState("")
 const [loading,setLoading] = useState(false)
+const [fetching,setFetching] = useState(true)
+
+/* ================= LOAD DATA ================= */
+
+useEffect(() => {
+  const loadData = async () => {
+    try {
+      const res = await fetch("/api/training/business")
+      const data = await res.json()
+
+      if (res.ok && data?.content) {
+        setInfo(data.content)
+      }
+
+    } catch (err) {
+      console.error("Load error:", err)
+    } finally {
+      setFetching(false)
+    }
+  }
+
+  loadData()
+}, [])
+
+/* ================= SAVE ================= */
 
 const handleSave = async () => {
 
@@ -40,6 +65,12 @@ const handleSave = async () => {
     setLoading(false)
   }
 
+}
+
+/* ================= UI ================= */
+
+if(fetching){
+  return <p className="text-sm text-gray-500">Loading...</p>
 }
 
 return(

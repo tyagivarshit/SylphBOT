@@ -24,11 +24,10 @@ export const aiQueue = new Queue("aiQueue", {
 });
 
 /* ----------------------------------
-ADD AI JOB
+ADD AI JOB (OLD - KEEP AS FALLBACK)
 ---------------------------------- */
 
 export const addAIJob = async (data: any) => {
-
   const { leadId, message } = data;
 
   if (!leadId) {
@@ -42,29 +41,56 @@ export const addAIJob = async (data: any) => {
   }
 
   try {
-
     console.log("📥 ADDING AI JOB:", {
       leadId,
-      message
+      message,
     });
 
-    const job = await aiQueue.add(
-      "processAI",
-      data,
-      {
-        jobId: `ai:${leadId}:${Date.now()}`,
-        priority: 2,
-        delay: 100,
-        removeOnComplete: true,
-      }
-    );
+    const job = await aiQueue.add("processAI", data, {
+      jobId: `ai:${leadId}:${Date.now()}`,
+      priority: 2, // lower priority than router
+      delay: 100,
+      removeOnComplete: true,
+    });
 
     console.log("✅ AI JOB ADDED:", job.id);
-
   } catch (error) {
-
     console.error("🚨 AI QUEUE ERROR:", error);
+  }
+};
 
+/* ----------------------------------
+ADD ROUTER JOB (NEW - MAIN ENTRY)
+---------------------------------- */
+
+export const addRouterJob = async (data: any) => {
+  const { leadId, message } = data;
+
+  if (!leadId) {
+    console.log("🚨 ROUTER JOB BLOCKED: missing leadId");
+    return;
   }
 
+  if (!message || message.trim().length === 0) {
+    console.log("🚨 ROUTER JOB BLOCKED: empty message");
+    return;
+  }
+
+  try {
+    console.log("🧠 ADDING ROUTER JOB:", {
+      leadId,
+      message,
+    });
+
+    const job = await aiQueue.add("router", data, {
+      jobId: `router:${leadId}:${Date.now()}`,
+      priority: 1, // 🔥 highest priority
+      delay: 50,
+      removeOnComplete: true,
+    });
+
+    console.log("✅ ROUTER JOB ADDED:", job.id);
+  } catch (error) {
+    console.error("🚨 ROUTER QUEUE ERROR:", error);
+  }
 };

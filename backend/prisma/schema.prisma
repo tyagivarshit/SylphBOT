@@ -587,7 +587,7 @@ model KnowledgeBase {
   title       String
   content     String
 
-  embedding   Json?    // 🔹 Vector Embedding
+  embedding   Json?
 
   sourceType  String
   sourceUrl   String?
@@ -598,6 +598,9 @@ model KnowledgeBase {
   updatedAt   DateTime @updatedAt
 
   @@index([businessId])
+
+  /* 🔥 ADD THIS */
+  @@unique([businessId, title])
 }
 model Notification {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId

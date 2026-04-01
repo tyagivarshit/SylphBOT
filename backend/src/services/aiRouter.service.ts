@@ -13,11 +13,14 @@ import { applyConversionBooster } from "./aiConversionBooster.service";
 import { processLeadIntelligence } from "./leadIntelligence.service";
 import { getLeadBehavior } from "./leadBehaviourEngine.service";
 
+import { hasFeature } from "../config/plan.config";
+
 /* ================================================= */
 interface RouterInput {
   businessId: string;
   leadId: string;
   message: string;
+  plan: any;
 }
 
 /* ================================================= */
@@ -28,6 +31,11 @@ const isContextSwitch = (msg: string) =>
   ["wait", "stop", "leave it", "not now", "later"].some((k) =>
     msg.includes(k)
   );
+
+/* 🔥 FEATURE CHECK */
+const canUseBooking = (plan: any) => {
+  return hasFeature(plan, "bookingEnabled");
+};
 
 /* 🔥 SAFE CONTEXT PARSER */
 const getContext = (state: any) => {
@@ -41,11 +49,21 @@ const getContext = (state: any) => {
   }
 };
 
+/* 🔥 SAFE WRAPPER */
+const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
+  try {
+    return await fn();
+  } catch {
+    return fallback;
+  }
+};
+
 /* ================================================= */
 export const routeAIMessage = async ({
   businessId,
   leadId,
   message,
+  plan,
 }: RouterInput): Promise<string | null> => {
   try {
     const lowerMessage = message.toLowerCase().trim();
@@ -53,9 +71,11 @@ export const routeAIMessage = async ({
     /* ================= HUMAN ================= */
     if (await isHumanActive(leadId)) return null;
 
-    /* ================= LEAD ================= */
-    await processLeadIntelligence({ leadId, message });
-    const behavior = await getLeadBehavior({ leadId });
+    /* ================= PARALLEL ================= */
+    const [_, behavior] = await Promise.all([
+      safe(() => processLeadIntelligence({ leadId, message }), null),
+      safe(() => getLeadBehavior({ leadId }), {} as any),
+    ]);
 
     /* ================= GREETING ================= */
     if (isGreeting(lowerMessage)) {
@@ -64,15 +84,15 @@ export const routeAIMessage = async ({
     }
 
     /* ================= INTENT ================= */
-    let intent: IntentResponse | null = null;
-
-    try {
-      intent = await generateIntentReply({
-        businessId,
-        leadId,
-        message,
-      });
-    } catch {}
+    const intent = await safe<IntentResponse | null>(
+      () =>
+        generateIntentReply({
+          businessId,
+          leadId,
+          message,
+        }),
+      null
+    );
 
     /* ================= CONTEXT SWITCH ================= */
     if (isContextSwitch(lowerMessage)) {
@@ -80,14 +100,19 @@ export const routeAIMessage = async ({
     }
 
     /* =================================================
-    📦 STATE ENGINE (CLEAN + DETERMINISTIC)
+    📦 STATE ENGINE
     ================================================= */
-    const state = await getConversationState(leadId);
+    const state = await safe(() => getConversationState(leadId), null);
     const context = getContext(state);
 
     if (state) {
       /* -------- SLOT SELECTION -------- */
       if (state.state === "BOOKING_SELECTION") {
+        if (!canUseBooking(plan)) {
+          await clearConversationState(leadId);
+          return "Currently, booking is not available. Please contact us directly for scheduling.";
+        }
+
         try {
           const slots: string[] = context?.slots || [];
 
@@ -115,7 +140,6 @@ export const routeAIMessage = async ({
             return "Please select a valid slot number (1, 2, 3...).";
           }
 
-          /* 🔥 STORE ISO ONLY */
           await setConversationState(leadId, "BOOKING_CONFIRMATION", {
             context: { slot: selectedSlot },
           });
@@ -136,16 +160,19 @@ or CHANGE to pick another time.`;
 
       /* -------- CONFIRMATION -------- */
       if (state.state === "BOOKING_CONFIRMATION") {
+        if (!canUseBooking(plan)) {
+          await clearConversationState(leadId);
+          return "Currently, booking is not available. Please contact us directly for scheduling.";
+        }
+
         if (lowerMessage.includes("change")) {
           await clearConversationState(leadId);
           return "No worries 👍 Let's pick another slot.";
         }
 
-        /* 🔥 ALL CONFIRMATION HANDLED BY ENGINE */
-        const result = await handleAIBookingIntent(
-          businessId,
-          leadId,
-          message
+        const result = await safe(
+          () => handleAIBookingIntent(businessId, leadId, message),
+          { handled: false, message: "" }
         );
 
         if (result.handled) return result.message;
@@ -159,15 +186,20 @@ or CHANGE to pick another time.`;
     ================================================= */
     let bookingResult = { handled: false, message: "" };
 
-    if (
+    const isBookingIntent =
       intent?.intent === "BOOKING" ||
       lowerMessage.includes("book") ||
-      lowerMessage.includes("schedule")
-    ) {
-      bookingResult = await handleAIBookingIntent(
-        businessId,
-        leadId,
-        message
+      lowerMessage.includes("schedule") ||
+      lowerMessage.includes("appointment");
+
+    if (isBookingIntent) {
+      if (!canUseBooking(plan)) {
+        return "Currently, booking is not available. Please contact us directly for scheduling.";
+      }
+
+      bookingResult = await safe(
+        () => handleAIBookingIntent(businessId, leadId, message),
+        { handled: false, message: "" }
       );
     }
 
@@ -178,42 +210,56 @@ or CHANGE to pick another time.`;
     /* =================================================
     🧲 FUNNEL
     ================================================= */
-    try {
-      const funnelReply = await generateAIFunnelReply({
-        businessId,
-        leadId,
-        message,
-      });
+    const funnelReply = await safe(
+      () =>
+        generateAIFunnelReply({
+          businessId,
+          leadId,
+          message,
+        }),
+      null
+    );
 
-      if (funnelReply) {
-        const boosted = behavior.urgency
-          ? await applyConversionBooster({
-              leadId,
-              message: funnelReply,
-              behavior,
-            })
-          : { boostedMessage: funnelReply };
+    if (funnelReply) {
+      const boosted = behavior?.urgency
+        ? await safe(
+            () =>
+              applyConversionBooster({
+                leadId,
+                message: funnelReply,
+                behavior,
+              }),
+            { boostedMessage: funnelReply } as any
+          )
+        : { boostedMessage: funnelReply };
 
-        return boosted.boostedMessage;
-      }
-    } catch {}
+      return boosted.boostedMessage;
+    }
 
     /* =================================================
     💬 FALLBACK
     ================================================= */
-    const fallback = await generateAIReply({
-      businessId,
-      leadId,
-      message,
-    });
-
-    const boosted = behavior.urgency
-      ? await applyConversionBooster({
+    const fallback = await safe(
+      () =>
+        generateAIReply({
+          businessId,
           leadId,
-          message: fallback || "",
-          behavior,
-        })
-      : { boostedMessage: fallback || "" };
+          message,
+        }),
+      "" as any
+    );
+
+    const boosted = behavior?.urgency
+      ? await safe(
+          () =>
+            applyConversionBooster({
+              leadId,
+              message: fallback,
+              behavior,
+            }),
+          { boostedMessage: fallback } as any
+        )
+      : { boostedMessage: fallback };
 
     return boosted.boostedMessage;
 

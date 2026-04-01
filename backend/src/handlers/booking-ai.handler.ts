@@ -1,25 +1,23 @@
 import {
   handleAIBookingIntent,
-  confirmAIBooking,
 } from "../services/aiBookingEngine.service";
+
 import {
   getConversationState,
   clearConversationState,
 } from "../services/conversationState.service";
+
 import {
   parseDateFromText,
   parseTimeFromText,
-  findClosestSlot,
 } from "../utils/booking-ai.utils";
-import { fetchAvailableSlots } from "../services/booking.service";
 
 /*
 =====================================================
-MAIN AI BOOKING HANDLER (ADVANCED - FIXED)
-- safe parsing
-- strong validation
-- better slot selection
-- production ready
+MAIN AI BOOKING HANDLER (FIXED - SINGLE SOURCE LOGIC)
+- no duplicate booking logic
+- uses aiBookingEngine as single source
+- safe + production ready
 =====================================================
 */
 
@@ -33,109 +31,56 @@ export const bookingAIHandler = async ({
   message: string;
 }) => {
   try {
-    /* --------------------------------------------
-    SAFETY CHECK
-    -------------------------------------------- */
+    /* -------------------------------------------- */
+    /* SAFETY CHECK */
+    /* -------------------------------------------- */
     if (!businessId || !leadId || !message) {
       throw new Error("Missing required fields in bookingAIHandler");
     }
 
     const cleanMessage = message.trim();
+    const lower = cleanMessage.toLowerCase();
 
-    /* --------------------------------------------
-    GET STATE
-    -------------------------------------------- */
+    /* -------------------------------------------- */
+    /* STATE */
+    /* -------------------------------------------- */
     const state = await getConversationState(leadId);
 
-    /* --------------------------------------------
-    SAFE SLOT PARSER
+    /* -------------------------------------------- */
+    /* 🔥 ACTIVE BOOKING FLOW (MOST IMPORTANT)
     -------------------------------------------- */
-    const safeParseSlots = (data: any): string[] => {
-      try {
-        return typeof data === "string" ? JSON.parse(data) : [];
-      } catch (err) {
-        console.error("SLOT PARSE ERROR:", err);
-        return [];
-      }
-    };
-
-    /* --------------------------------------------
-    SLOT SELECTION FLOW
-    -------------------------------------------- */
-    if (state?.state === "BOOKING_SELECTION") {
-      const slots = safeParseSlots(state && "data" in state ? state.data : null);
-
-      // allow "1", "1.", "option 1", etc.
-      const selectedIndex = parseInt(cleanMessage.replace(/\D/g, ""));
-
-      if (
-        !isNaN(selectedIndex) &&
-        selectedIndex > 0 &&
-        selectedIndex <= slots.length
-      ) {
-        const selectedSlot = new Date(slots[selectedIndex - 1]);
-
-        const result = await confirmAIBooking(
-          businessId,
-          leadId,
-          selectedSlot
-        );
-
-        await clearConversationState(leadId);
-
-        return result.message;
-      }
-
-      return "Please reply with a valid slot number (e.g. 1, 2, 3).";
-    }
-
-    /* --------------------------------------------
-    SMART DATE + TIME UNDERSTANDING
-    -------------------------------------------- */
-    const parsedDate = parseDateFromText(cleanMessage);
-    const parsedTime = parseTimeFromText(cleanMessage);
-
-    if (parsedDate && parsedTime) {
-      const requestedDate = new Date(parsedDate);
-      requestedDate.setHours(
-        parsedTime.hours,
-        parsedTime.minutes,
-        0,
-        0
-      );
-
-      const availableSlots = await fetchAvailableSlots(
-        businessId,
-        parsedDate
-      );
-
-      if (!availableSlots.length) {
-        return "No slots available for that date.";
-      }
-
-      const closest = findClosestSlot(
-        requestedDate,
-        availableSlots
-      );
-
-      if (!closest) {
-        return "No suitable slot found.";
-      }
-
-      const result = await confirmAIBooking(
+    if (
+      state?.state === "BOOKING_SELECTION" ||
+      state?.state === "BOOKING_CONFIRMATION"
+    ) {
+      const result = await handleAIBookingIntent(
         businessId,
         leadId,
-        closest
+        cleanMessage
       );
 
       return result.message;
     }
 
-    /* --------------------------------------------
-    INTENT DETECTION
+    /* -------------------------------------------- */
+    /* SMART DATE + TIME UNDERSTANDING
     -------------------------------------------- */
-    const lower = cleanMessage.toLowerCase();
+    const parsedDate = parseDateFromText(cleanMessage);
+    const parsedTime = parseTimeFromText(cleanMessage);
 
+    if (parsedDate && parsedTime) {
+      const result = await handleAIBookingIntent(
+        businessId,
+        leadId,
+        cleanMessage
+      );
+
+      return result.message;
+    }
+
+    /* -------------------------------------------- */
+    /* INTENT DETECTION
+    -------------------------------------------- */
     const bookingKeywords = [
       "book",
       "appointment",
@@ -171,16 +116,24 @@ export const bookingAIHandler = async ({
 
     /* RESCHEDULE */
     if (rescheduleKeywords.some((k) => lower.includes(k))) {
-      return "Please tell me your preferred new date and time.";
+      await clearConversationState(leadId);
+
+      return "Sure 👍 Tell me your preferred new date & time.";
     }
 
     /* CANCEL */
     if (cancelKeywords.some((k) => lower.includes(k))) {
-      return "Please confirm you want to cancel your booking.";
+      const result = await handleAIBookingIntent(
+        businessId,
+        leadId,
+        cleanMessage
+      );
+
+      return result.message;
     }
 
-    /* --------------------------------------------
-    FALLBACK
+    /* -------------------------------------------- */
+    /* FALLBACK
     -------------------------------------------- */
     return null;
 

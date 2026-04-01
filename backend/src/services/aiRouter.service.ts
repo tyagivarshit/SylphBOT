@@ -6,7 +6,6 @@ import {
   setConversationState,
 } from "./conversationState.service";
 import { generateAIFunnelReply } from "./aiFunnel.service";
-import { generateAIReply } from "./ai.service";
 import { isHumanActive } from "./humanTakeoverManager.service";
 
 import { applyConversionBooster } from "./aiConversionBooster.service";
@@ -14,6 +13,10 @@ import { processLeadIntelligence } from "./leadIntelligence.service";
 import { getLeadBehavior } from "./leadBehaviourEngine.service";
 
 import { hasFeature } from "../config/plan.config";
+
+/* 🔥 NEW IMPORTS */
+import { generateRAGReply } from "./rag.service";
+import { generateSmartFallback } from "./smartFallback.service";
 
 /* ================================================= */
 interface RouterInput {
@@ -32,12 +35,10 @@ const isContextSwitch = (msg: string) =>
     msg.includes(k)
   );
 
-/* 🔥 FEATURE CHECK */
 const canUseBooking = (plan: any) => {
   return hasFeature(plan, "bookingEnabled");
 };
 
-/* 🔥 SAFE CONTEXT PARSER */
 const getContext = (state: any) => {
   try {
     if (!state?.context) return {};
@@ -49,7 +50,6 @@ const getContext = (state: any) => {
   }
 };
 
-/* 🔥 SAFE WRAPPER */
 const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
   try {
     return await fn();
@@ -100,13 +100,12 @@ export const routeAIMessage = async ({
     }
 
     /* =================================================
-    📦 STATE ENGINE
+    📦 STATE ENGINE (BOOKING SAFE 🔒)
     ================================================= */
     const state = await safe(() => getConversationState(leadId), null);
     const context = getContext(state);
 
     if (state) {
-      /* -------- SLOT SELECTION -------- */
       if (state.state === "BOOKING_SELECTION") {
         if (!canUseBooking(plan)) {
           await clearConversationState(leadId);
@@ -130,8 +129,7 @@ export const routeAIMessage = async ({
 
           if (!selectedSlot) {
             if (lowerMessage.includes("first")) selectedSlot = slots[0];
-            else if (lowerMessage.includes("second"))
-              selectedSlot = slots[1];
+            else if (lowerMessage.includes("second")) selectedSlot = slots[1];
             else if (lowerMessage.includes("last"))
               selectedSlot = slots[slots.length - 1];
           }
@@ -158,11 +156,10 @@ or CHANGE to pick another time.`;
         }
       }
 
-      /* -------- CONFIRMATION -------- */
       if (state.state === "BOOKING_CONFIRMATION") {
         if (!canUseBooking(plan)) {
           await clearConversationState(leadId);
-          return "Currently, booking is not available. Please contact us directly for scheduling.";
+          return "Currently, booking is not available.";
         }
 
         if (lowerMessage.includes("change")) {
@@ -182,7 +179,7 @@ or CHANGE to pick another time.`;
     }
 
     /* =================================================
-    🔥 BOOKING ENTRY
+    🔥 BOOKING ENTRY (SAFE 🔒)
     ================================================= */
     let bookingResult = { handled: false, message: "" };
 
@@ -194,7 +191,7 @@ or CHANGE to pick another time.`;
 
     if (isBookingIntent) {
       if (!canUseBooking(plan)) {
-        return "Currently, booking is not available. Please contact us directly for scheduling.";
+        return "Currently, booking is not available.";
       }
 
       bookingResult = await safe(
@@ -205,6 +202,30 @@ or CHANGE to pick another time.`;
 
     if (bookingResult?.handled) {
       return bookingResult.message;
+    }
+
+    /* =================================================
+    🧠 KNOWLEDGE FIRST (RAG 🔥🔥🔥)
+    ================================================= */
+    const ragResult = await safe(
+      () => generateRAGReply(businessId, message, leadId),
+      { found: false, reply: null, context: "" }
+    );
+
+    if (ragResult?.found && ragResult?.reply) {
+      const boosted = behavior?.urgency
+        ? await safe(
+            () =>
+              applyConversionBooster({
+                leadId,
+                message: ragResult.reply,
+                behavior,
+              }),
+            { boostedMessage: ragResult.reply } as any
+          )
+        : { boostedMessage: ragResult.reply };
+
+      return boosted.boostedMessage;
     }
 
     /* =================================================
@@ -237,17 +258,9 @@ or CHANGE to pick another time.`;
     }
 
     /* =================================================
-    💬 FALLBACK
+    💬 SMART FALLBACK (NO AI HALLUCINATION ❌)
     ================================================= */
-    const fallback = await safe(
-      () =>
-        generateAIReply({
-          businessId,
-          leadId,
-          message,
-        }),
-      "" as any
-    );
+    const fallback = generateSmartFallback(message);
 
     const boosted = behavior?.urgency
       ? await safe(

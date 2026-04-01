@@ -33,9 +33,7 @@ interface BookingResult {
 
 /* ================================================= */
 const isCancelIntent = (msg: string) =>
-  ["cancel", "delete", "remove", "cancel booking"].some((k) =>
-    msg.includes(k)
-  );
+  ["cancel", "delete", "remove"].some((k) => msg.includes(k));
 
 const isRescheduleIntent = (msg: string) =>
   ["reschedule", "change time", "change slot"].some((k) =>
@@ -43,13 +41,7 @@ const isRescheduleIntent = (msg: string) =>
   );
 
 /* ================================================= */
-const getContext = (state: any) => {
-  try {
-    return state?.context || {};
-  } catch {
-    return {};
-  }
-};
+const getContext = (state: any) => state?.context || {};
 
 /* ================================================= */
 export const handleAIBookingIntent = async (
@@ -71,7 +63,7 @@ export const handleAIBookingIntent = async (
         await sendOwnerWhatsAppNotification({
           businessId,
           leadId,
-          type: "CANCELLED" as any, // ✅ FIX
+          type: "CANCELLED",
         });
 
         return {
@@ -85,24 +77,33 @@ export const handleAIBookingIntent = async (
 
     /* ================= RESCHEDULE ================= */
     if (isRescheduleIntent(clean)) {
-      await clearConversationState(leadId);
+      try {
+        /* 🔥 CANCEL OLD BOOKING FIRST */
+        await cancelAppointmentByLead(leadId);
 
-      await setConversationState(leadId, "RESCHEDULE_FLOW");
+        await clearConversationState(leadId);
+        await setConversationState(leadId, "RESCHEDULE_FLOW", {});
 
-      await sendOwnerWhatsAppNotification({
-        businessId,
-        leadId,
-        type: "RESCHEDULED" as any, // ✅ FIX
-      });
+        await sendOwnerWhatsAppNotification({
+          businessId,
+          leadId,
+          type: "RESCHEDULED",
+        });
 
-      return {
-        handled: true,
-        message: "Sure 👍 Tell me new date & time.",
-      };
+        return {
+          handled: true,
+          message: "Sure 👍 Tell me new date & time.",
+        };
+      } catch {
+        return {
+          handled: true,
+          message: "Tell me new date & time 👍",
+        };
+      }
     }
 
     /* =================================================
-    🔥 CONFIRMATION (NO FAIL)
+    🔥 CONFIRMATION
     ================================================= */
     if (state?.state === "BOOKING_CONFIRMATION") {
       const slotISO = context?.slot;
@@ -122,6 +123,21 @@ export const handleAIBookingIntent = async (
           return {
             handled: true,
             message: "⚠️ Slot already booked.",
+          };
+        }
+
+        /* 🔥 PREVENT DOUBLE BOOKING */
+        const existing = await prisma.appointment.findFirst({
+          where: {
+            leadId,
+            status: "CONFIRMED",
+          },
+        });
+
+        if (existing) {
+          return {
+            handled: true,
+            message: "⚠️ You already have a booking.",
           };
         }
 
@@ -151,14 +167,13 @@ export const handleAIBookingIntent = async (
             businessId,
             leadId,
             slot: selectedSlot,
-            type: "BOOKED" as any, // ✅ FIX
+            type: "BOOKED",
           });
 
           return {
             handled: true,
             message: `✅ Booked for ${selectedSlot.toLocaleString()}`,
           };
-
         } catch {
           await releaseSlotLock(slotISO);
 
@@ -170,7 +185,7 @@ export const handleAIBookingIntent = async (
       }
 
       if (clean.includes("change")) {
-        await setConversationState(leadId, "BOOKING_SELECTION");
+        await setConversationState(leadId, "BOOKING_SELECTION", {});
         return { handled: true, message: "Okay 👍 Select another slot." };
       }
 
@@ -181,15 +196,12 @@ export const handleAIBookingIntent = async (
     }
 
     /* ================= SMART PARSING ================= */
-
     let parsedDate = parseDateFromText(message);
     let parsedTime = parseTimeFromText(message);
 
     const lower = message.toLowerCase();
 
-    if (!parsedDate && lower.includes("aaj")) {
-      parsedDate = new Date();
-    }
+    if (!parsedDate && lower.includes("aaj")) parsedDate = new Date();
 
     if (!parsedDate && lower.includes("kal")) {
       const d = new Date();
@@ -197,21 +209,16 @@ export const handleAIBookingIntent = async (
       parsedDate = d;
     }
 
-    if (!parsedDate && parsedTime) {
-      parsedDate = new Date();
-    }
+    if (!parsedDate && parsedTime) parsedDate = new Date();
 
-    if (parsedTime && lower.includes("evening")) {
-      if (parsedTime.hours < 12) parsedTime.hours += 12;
-    }
+    if (parsedTime && lower.includes("evening") && parsedTime.hours < 12)
+      parsedTime.hours += 12;
 
-    if (parsedTime && lower.includes("night")) {
-      if (parsedTime.hours < 12) parsedTime.hours += 12;
-    }
+    if (parsedTime && lower.includes("night") && parsedTime.hours < 12)
+      parsedTime.hours += 12;
 
-    if (parsedTime && lower.includes("morning")) {
-      if (parsedTime.hours >= 12) parsedTime.hours -= 12;
-    }
+    if (parsedTime && lower.includes("morning") && parsedTime.hours >= 12)
+      parsedTime.hours -= 12;
 
     /* =================================================
     🎯 DIRECT SLOT MATCH
@@ -220,11 +227,13 @@ export const handleAIBookingIntent = async (
       const requested = new Date(parsedDate);
       requested.setHours(parsedTime.hours, parsedTime.minutes, 0, 0);
 
-      const normalizedDate = new Date(Date.UTC(
-        parsedDate.getFullYear(),
-        parsedDate.getMonth(),
-        parsedDate.getDate()
-      ));
+      const normalizedDate = new Date(
+        Date.UTC(
+          parsedDate.getFullYear(),
+          parsedDate.getMonth(),
+          parsedDate.getDate()
+        )
+      );
 
       const available = await fetchAvailableSlots(
         businessId,
@@ -258,11 +267,13 @@ export const handleAIBookingIntent = async (
     const slotResults: Date[] = [];
 
     for (let i = 0; i < 3; i++) {
-      const checkDate = new Date(Date.UTC(
-        today.getUTCFullYear(),
-        today.getUTCMonth(),
-        today.getUTCDate() + i
-      ));
+      const checkDate = new Date(
+        Date.UTC(
+          today.getUTCFullYear(),
+          today.getUTCMonth(),
+          today.getUTCDate() + i
+        )
+      );
 
       const slots = await fetchAvailableSlots(businessId, checkDate);
 
@@ -278,28 +289,25 @@ export const handleAIBookingIntent = async (
       return { handled: true, message: "No slots available." };
     }
 
-    const slotISOs = slotResults.map((s) => s.toISOString());
-
     await setConversationState(leadId, "BOOKING_SELECTION", {
-      context: { slots: slotISOs },
+      context: { slots: slotResults.map((s) => s.toISOString()) },
     });
-
-    const formatted = slotResults.map(
-      (slot, i) =>
-        `${i + 1}. ${slot.toLocaleDateString()} at ${slot.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`
-    );
 
     return {
       handled: true,
       message:
         "Available slots:\n\n" +
-        formatted.join("\n") +
+        slotResults
+          .map(
+            (slot, i) =>
+              `${i + 1}. ${slot.toLocaleDateString()} at ${slot.toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}`
+          )
+          .join("\n") +
         "\n\nReply with slot number 👍",
     };
-
   } catch (error) {
     console.error("BOOKING ENGINE ERROR:", error);
     return { handled: false, message: "" };

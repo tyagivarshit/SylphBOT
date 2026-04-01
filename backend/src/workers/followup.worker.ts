@@ -5,33 +5,91 @@ import { redisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
 import { getIO } from "../sockets/socket.server";
 
-/* 🔥 SMART FOLLOWUP GENERATOR */
+/* 🔥 SMART FOLLOWUP GENERATOR (UPGRADED 🔥) */
 const generateSmartFollowup = (
   type: string,
   stage: string,
   aiStage?: string
 ) => {
 
-  /* HOT LEADS (🔥 close fast) */
-  if (stage === "READY_TO_BUY" || aiStage === "HOT") {
-    return "Hey 👋 Just checking — want me to lock a slot for you before it fills up?";
-  }
+  const isHot = stage === "READY_TO_BUY" || aiStage === "HOT";
+  const isWarm = stage === "INTERESTED" || aiStage === "WARM";
 
-  /* WARM LEADS */
-  if (stage === "INTERESTED" || aiStage === "WARM") {
+  /* ================= HOT (CLOSE FAST 🔥) ================= */
+  if (isHot) {
+
     if (type === "2hr") {
-      return "Hey 😊 Just wanted to follow up — any questions I can help you with?";
+      return `Hey 👋
+
+I can lock this for you right now before it gets booked.
+
+👉 Want me to confirm it for you?`;
     }
 
     if (type === "12hr") {
-      return "Quick check — would you like me to show you how this works on a short call?";
+      return `Quick heads up ⏳
+
+This is getting booked quickly right now.
+
+👉 Should I reserve a slot for you?`;
     }
 
-    return "Slots are filling fast today ⚡ Want me to book one for you?";
+    return `Last reminder ⚡
+
+I can still help you secure this before it's gone.
+
+👉 Want me to lock it now?`;
   }
 
-  /* COLD LEADS */
-  return "Hey 👋 Just checking if you're still interested. Happy to help!";
+  /* ================= WARM (GUIDE + NURTURE) ================= */
+  if (isWarm) {
+
+    if (type === "2hr") {
+      return `Hey 😊
+
+I can suggest the best option based on your requirement.
+
+👉 Want me to help you choose?`;
+    }
+
+    if (type === "12hr") {
+      return `Most people at this stage usually go for a quick walkthrough 🙂
+
+I can guide you step-by-step.
+
+👉 Want me to show you how it works?`;
+    }
+
+    return `Just a quick note ⚡
+
+People usually move forward at this point to avoid missing out.
+
+👉 Want me to check availability for you?`;
+  }
+
+  /* ================= COLD (REMOVE FRICTION) ================= */
+
+  if (type === "2hr") {
+    return `Hey 👋
+
+No rush at all 🙂
+
+👉 Tell me what you're looking for and I'll guide you.`;
+  }
+
+  if (type === "12hr") {
+    return `Just checking in 😊
+
+I can explain everything simply if you want.
+
+👉 Want me to help you understand?`;
+  }
+
+  return `Final follow-up 👍
+
+Whenever you're ready, I’m here to help.
+
+👉 Just tell me your requirement.`;
 };
 
 /* 🔥 SYSTEM MESSAGE FILTER */

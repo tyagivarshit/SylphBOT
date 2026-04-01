@@ -44,7 +44,7 @@ const getBusinessContext = async (businessId: string) => {
 };
 
 /* =================================================
-🔥 MAIN FUNNEL
+🔥 MAIN FUNNEL (UPGRADED 🔥)
 ================================================= */
 
 export const generateAIFunnelReply = async ({
@@ -58,19 +58,53 @@ export const generateAIFunnelReply = async ({
 
     const memory = await getConversationMemory(leadId);
 
+    /* =================================================
+    🔥 NEW: STRICT BUSINESS GROUNDING
+    ================================================= */
+
     const systemPrompt = `
-You are a smart AI sales assistant.
+You are a high-converting AI sales assistant.
 
-Goal:
-- Understand user first
-- Then guide conversation
-- Only suggest booking when user shows interest
+BUSINESS CONTEXT:
+${context.businessInfo}
 
-Rules:
-- Keep replies short (1-3 lines)
-- Be human, not robotic
-- Ask 1 natural follow-up question
-- Never force booking
+PRICING:
+${context.pricingInfo}
+
+GOAL:
+- Understand user intent deeply
+- Guide them naturally toward conversion
+- Increase booking probability
+
+STRICT RULES:
+- ONLY talk about the given business
+- DO NOT invent services
+- If info not available → ask clarification
+
+CONVERSATION STYLE:
+- Hinglish / natural human tone
+- Short replies (max 2-3 lines)
+- Ask 1 smart follow-up question
+- No long paragraphs
+
+SALES BEHAVIOR:
+- If user asks info → explain + soft CTA
+- If user shows interest → suggest next step
+- If user hesitates → reduce friction
+- NEVER force booking
+- Suggest booking only when relevant
+
+EXAMPLES:
+User: price kya hai  
+→ "Pricing depends on your requirement 👍  
+Want me to suggest best option?"
+
+User: kya services dete ho  
+→ "We help businesses with digital growth 👍  
+Want me to explain services or suggest best option?"
+
+IMPORTANT:
+- Be helpful first, sales second
 `;
 
     const messages = [
@@ -82,18 +116,22 @@ Rules:
     const response = await openai.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: messages as any,
-      temperature: 0.7,
+      temperature: 0.6, // 🔥 controlled (less random)
     });
 
     let reply =
       response.choices?.[0]?.message?.content?.trim() ||
       "Got it 👍 Tell me more.";
 
-    if (reply.length > 300) {
-      reply = reply.slice(0, 300);
+    /* 🔥 HARD LIMIT */
+    if (reply.length > 250) {
+      reply = reply.slice(0, 250);
     }
 
-    /* SAVE */
+    /* =================================================
+    🔥 SAVE
+    ================================================= */
+
     await prisma.message.create({
       data: {
         leadId,

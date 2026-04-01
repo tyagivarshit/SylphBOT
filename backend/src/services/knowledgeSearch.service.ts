@@ -12,7 +12,7 @@ interface KnowledgeResult {
 /* CONFIG */
 /* ------------------------------------------ */
 
-const SIMILARITY_THRESHOLD = 0.5; // 🔥 lower for better recall
+const SIMILARITY_THRESHOLD = 0.25; // 🔥 FIX: lower for better recall
 const MAX_RESULTS = 5;
 
 /* ------------------------------------------ */
@@ -79,8 +79,22 @@ export const searchKnowledge = async (
 
       keyword = keywordScore(message, item.content);
 
-      /* 🔥 FINAL SCORE (weighted) */
-      const finalScore = (semantic * 0.7) + (keyword * 0.3);
+      /* 🔥 FIX: BOOST FOR GENERIC BUSINESS MATCH */
+      let boost = 0;
+
+      const text = item.content.toLowerCase();
+
+      if (
+        text.includes("service") ||
+        text.includes("business") ||
+        text.includes("company") ||
+        text.includes("digital")
+      ) {
+        boost = 0.1;
+      }
+
+      /* 🔥 FINAL SCORE (weighted + boost) */
+      const finalScore = (semantic * 0.7) + (keyword * 0.3) + boost;
 
       return {
         id: item.id,
@@ -90,7 +104,27 @@ export const searchKnowledge = async (
 
     });
 
-    /* 🔥 FILTER */
+    /* ------------------------------------------
+    🔥 FIX: FORCE MATCH FOR GENERIC QUERIES
+    ------------------------------------------ */
+
+    const lowerMsg = message.toLowerCase();
+
+    if (
+      lowerMsg.includes("business") ||
+      lowerMsg.includes("service") ||
+      lowerMsg.includes("kya karte") ||
+      lowerMsg.includes("what do you do")
+    ) {
+      return scored
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+    }
+
+    /* ------------------------------------------ */
+    /* 🔥 FILTER NORMAL */
+    /* ------------------------------------------ */
+
     const filtered = scored
       .filter((item) => item.score >= SIMILARITY_THRESHOLD)
       .sort((a, b) => b.score - a.score)

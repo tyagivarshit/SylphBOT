@@ -52,31 +52,39 @@ export const saveBusinessInfo = async (req: CustomRequest, res: Response) => {
       data: { businessInfo: content }
     });
 
-    /* 🔥 CREATE EMBEDDING */
-    const embedding = await createEmbedding(content);
-
-    /* 🔥 UPSERT INTO KNOWLEDGE BASE (RAG) */
-    await prisma.knowledgeBase.upsert({
+    /* =================================================
+    🔥 NEW: DELETE OLD BUSINESS INFO (SAFE CLEAN)
+    ================================================= */
+    await prisma.knowledgeBase.deleteMany({
       where: {
-        businessId_title: {
-          businessId,
-          title: "BUSINESS_INFO"
-        }
-      },
-      update: {
-        content,
-        embedding,
-        isActive: true
-      },
-      create: {
         businessId,
-        title: "BUSINESS_INFO",
-        content,
-        embedding,
         sourceType: "SYSTEM",
-        isActive: true
+        title: "BUSINESS_INFO"
       }
     });
+
+    /* =================================================
+    🔥 NEW: CHUNKING FOR BETTER RAG MATCH
+    ================================================= */
+    const chunks = content
+      .split(/\.|\n/)
+      .map((c: string) => c.trim())
+      .filter((c: string) => c.length > 20);
+
+    for (const chunk of chunks) {
+      const embedding = await createEmbedding(chunk);
+
+      await prisma.knowledgeBase.create({
+        data: {
+          businessId,
+          title: "BUSINESS_INFO",
+          content: chunk,
+          embedding,
+          sourceType: "SYSTEM",
+          isActive: true
+        }
+      });
+    }
 
     return res.json({ message: "Business info saved" });
 

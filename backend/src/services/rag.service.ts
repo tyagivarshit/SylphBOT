@@ -109,14 +109,35 @@ export const generateRAGReply = async (
       .map((r: any) => `• ${r.content}`)
       .join("\n");
 
-    /* ❗ NO KNOWLEDGE → RETURN NULL */
+    /* =================================================
+    🔥 FIX 1: SMART FORCE MATCH FOR BUSINESS QUESTIONS
+    ================================================= */
+    const lowerMsg = message.toLowerCase();
 
-    if (!knowledgeContext.trim()) {
+    const isBusinessQuery =
+      lowerMsg.includes("business") ||
+      lowerMsg.includes("service") ||
+      lowerMsg.includes("kya karte") ||
+      lowerMsg.includes("what do you do");
+
+    if (!knowledgeContext.trim() && !isBusinessQuery) {
       return {
         found: false,
         reply: null,
         context: "",
       };
+    }
+
+    /* =================================================
+    🔥 FIX 2: FALLBACK CONTEXT (PREVENT EMPTY RAG)
+    ================================================= */
+    let finalContext = knowledgeContext;
+
+    if (!finalContext.trim()) {
+      const top = finalResults[0];
+      if (top) {
+        finalContext = `• ${top.content}`;
+      }
     }
 
     /* ================= BUSINESS CACHE ================= */
@@ -164,7 +185,7 @@ Instructions:
 ${businessData.salesInstructions || ""}
 
 Knowledge:
-${knowledgeContext}
+${finalContext}
 
 User:
 ${message}
@@ -190,7 +211,7 @@ ${intentMap[intent]}
     return {
       found: true,
       reply: reply || null,
-      context: knowledgeContext,
+      context: finalContext,
     };
 
   } catch (error) {

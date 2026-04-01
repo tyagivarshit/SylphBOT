@@ -1,14 +1,10 @@
 import prisma from "../config/prisma";
-
-/* 🔥 NEW IMPORTS (IMPORTANT) */
 import { scheduleReminderJobs } from "../queues/bookingReminder.queue";
 import { sendOwnerWhatsAppNotification } from "./ownerNotification.service";
-// future ready
-// import { syncToCRM } from "../integrations/crmSync.service";
 
 /*
 =====================================================
-🔥 FETCH AVAILABLE SLOTS (UNCHANGED)
+🔥 FETCH AVAILABLE SLOTS (FIXED)
 =====================================================
 */
 export const fetchAvailableSlots = async (
@@ -45,7 +41,7 @@ export const fetchAvailableSlots = async (
     where: {
       businessId,
       startTime: { gte: startOfDay, lte: endOfDay },
-      status: "BOOKED",
+      status: "CONFIRMED", // ✅ FIXED
     },
     select: { startTime: true, endTime: true },
   });
@@ -100,7 +96,7 @@ export const fetchAvailableSlots = async (
 
 /*
 =====================================================
-🔥 CREATE APPOINTMENT (UPGRADED SaaS VERSION)
+🔥 CREATE APPOINTMENT (FINAL FIXED)
 =====================================================
 */
 interface AppointmentInput {
@@ -127,11 +123,26 @@ export const createNewAppointment = async (
   } = data;
 
   return prisma.$transaction(async (tx) => {
-    /* 🔥 DOUBLE BOOKING SAFETY */
+
+    /* 🔥 PREVENT MULTIPLE BOOKINGS PER USER */
+    if (leadId) {
+      const existingUserBooking = await tx.appointment.findFirst({
+        where: {
+          leadId,
+          status: "CONFIRMED",
+        },
+      });
+
+      if (existingUserBooking) {
+        throw new Error("User already has active booking");
+      }
+    }
+
+    /* 🔥 SLOT CONFLICT CHECK */
     const existing = await tx.appointment.findFirst({
       where: {
         businessId,
-        status: "BOOKED",
+        status: "CONFIRMED",
         AND: [
           { startTime: { lt: endTime } },
           { endTime: { gt: startTime } },
@@ -153,67 +164,21 @@ export const createNewAppointment = async (
         phone,
         startTime,
         endTime,
-        status: "BOOKED",
+        status: "CONFIRMED", // ✅ FIXED
       },
     });
 
-    /* 🔥 UPDATE LEAD */
+    /* 🔥 REMINDERS */
+    scheduleReminderJobs(appointment.id).catch(() => {});
+
+    /* 🔥 OWNER NOTIFY */
     if (leadId) {
-      await tx.lead.update({
-        where: { id: leadId },
-        data: {
-          stage: "BOOKED_CALL",
-          lastMessageAt: new Date(),
-        },
-      });
-    }
-
-    /* =================================================
-    🚀 POST BOOKING AUTOMATIONS (CRITICAL)
-    ================================================= */
-
-    /* 🔔 1. SCHEDULE REMINDERS */
-    try {
-      await scheduleReminderJobs(appointment.id);
-    } catch (err) {
-      console.error("❌ REMINDER SCHEDULE ERROR:", err);
-    }
-
-    /* 📲 2. OWNER NOTIFICATION */
-    try {
-      if (leadId) {
-        await sendOwnerWhatsAppNotification({
-          businessId,
-          leadId,
-          slot: startTime,
-        });
-      }
-    } catch (err) {
-      console.error("❌ OWNER NOTIFICATION ERROR:", err);
-    }
-
-    /* 🧠 3. CRM SYNC (FUTURE READY) */
-    try {
-      // await syncToCRM(appointment);
-    } catch (err) {
-      console.error("❌ CRM SYNC ERROR:", err);
-    }
-
-    /* 📊 ANALYTICS TRACKING (SAFE ADD) */
-    try {
-      await prisma.analytics.create({
-        data: {
-          businessId,
-          type: "BOOKING_CREATED",
-          meta: {
-            leadId,
-            startTime,
-            createdAt: new Date(),
-          },
-        },
-      });
-    } catch (err) {
-      console.error("❌ ANALYTICS ERROR:", err);
+      sendOwnerWhatsAppNotification({
+        businessId,
+        leadId,
+        slot: startTime,
+        type: "BOOKED",
+      }).catch(() => {});
     }
 
     return appointment;
@@ -222,15 +187,15 @@ export const createNewAppointment = async (
 
 /*
 =====================================================
-GET UPCOMING APPOINTMENT
+GET UPCOMING APPOINTMENT (FIXED)
 =====================================================
 */
 export const getUpcomingAppointment = async (leadId: string) => {
   return prisma.appointment.findFirst({
     where: {
       leadId,
-      status: "BOOKED",
-      startTime: { gte: new Date() },
+      status: "CONFIRMED",
+      startTime: { gte: new Date() }, // ✅ FIX
     },
     orderBy: { startTime: "asc" },
   });
@@ -238,7 +203,7 @@ export const getUpcomingAppointment = async (leadId: string) => {
 
 /*
 =====================================================
-CANCEL APPOINTMENT
+CANCEL APPOINTMENT (FIXED)
 =====================================================
 */
 export const cancelAppointmentByLead = async (leadId: string) => {
@@ -256,7 +221,7 @@ export const cancelAppointmentByLead = async (leadId: string) => {
 
 /*
 =====================================================
-RESCHEDULE APPOINTMENT
+🔥 RESCHEDULE (BEST PRACTICE — UPDATE SAME ROW)
 =====================================================
 */
 export const rescheduleByLead = async (
@@ -275,10 +240,12 @@ export const rescheduleByLead = async (
   }
 
   return prisma.$transaction(async (tx) => {
+
+    /* 🔥 SLOT CONFLICT CHECK */
     const conflict = await tx.appointment.findFirst({
       where: {
         businessId: appointment.businessId,
-        status: "BOOKED",
+        status: "CONFIRMED",
         id: { not: appointment.id },
         AND: [
           { startTime: { lt: newEnd } },
@@ -291,13 +258,39 @@ export const rescheduleByLead = async (
       throw new Error("New slot not available");
     }
 
-    return tx.appointment.update({
+    const updated = await tx.appointment.update({
       where: { id: appointment.id },
       data: {
         startTime: newStart,
         endTime: newEnd,
-        status: "RESCHEDULED",
       },
     });
+
+    /* 🔥 NOTIFY */
+    await sendOwnerWhatsAppNotification({
+      businessId: appointment.businessId,
+      leadId,
+      slot: newStart,
+      type: "RESCHEDULED",
+    });
+
+    return updated;
+  });
+};
+
+/*
+=====================================================
+🔥 AUTO COMPLETE OLD BOOKINGS (USE IN CRON)
+=====================================================
+*/
+export const autoCompleteAppointments = async () => {
+  return prisma.appointment.updateMany({
+    where: {
+      endTime: { lt: new Date() },
+      status: "CONFIRMED",
+    },
+    data: {
+      status: "COMPLETED",
+    },
   });
 };

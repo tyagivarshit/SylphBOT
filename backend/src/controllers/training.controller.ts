@@ -52,9 +52,7 @@ export const saveBusinessInfo = async (req: CustomRequest, res: Response) => {
       data: { businessInfo: content }
     });
 
-    /* =================================================
-    🔥 NEW: DELETE OLD BUSINESS INFO (SAFE CLEAN)
-    ================================================= */
+    /* 🔥 DELETE OLD */
     await prisma.knowledgeBase.deleteMany({
       where: {
         businessId,
@@ -63,9 +61,7 @@ export const saveBusinessInfo = async (req: CustomRequest, res: Response) => {
       }
     });
 
-    /* =================================================
-    🔥 NEW: CHUNKING FOR BETTER RAG MATCH
-    ================================================= */
+    /* 🔥 CHUNKING */
     const chunks = content
       .split(/\.|\n/)
       .map((c: string) => c.trim())
@@ -80,7 +76,8 @@ export const saveBusinessInfo = async (req: CustomRequest, res: Response) => {
           title: "BUSINESS_INFO",
           content: chunk,
           embedding,
-          sourceType: "SYSTEM",
+          sourceType: "SYSTEM",   // ✅ NEW
+          priority: "HIGH",       // ✅ IMPORTANT
           isActive: true
         }
       });
@@ -146,7 +143,8 @@ export const saveFAQ = async (req: CustomRequest, res: Response) => {
         title: question,
         content,
         embedding,
-        sourceType: "FAQ",
+        sourceType: "FAQ",  // ✅ NEW
+        priority: "HIGH",     // ✅ FAQ important hota hai
         isActive: true
       }
     });

@@ -12,15 +12,22 @@ interface KnowledgeResult {
 /* CONFIG */
 /* ------------------------------------------ */
 
-const SIMILARITY_THRESHOLD = 0.25; // 🔥 FIX: lower for better recall
+const SIMILARITY_THRESHOLD = 0.25;
 const MAX_RESULTS = 5;
+
+/* 🔥 PRIORITY WEIGHTS (TUNED) */
+const PRIORITY_WEIGHT: Record<string, number> = {
+  HIGH: 0.3,
+  MEDIUM: 0.15,
+  LOW: 0,
+};
 
 /* ------------------------------------------ */
 /* 🔥 KEYWORD SCORE */
 /* ------------------------------------------ */
 
 const keywordScore = (query: string, content: string): number => {
-  const qWords = query.toLowerCase().split(" ");
+  const qWords = query.toLowerCase().split(" ").filter(Boolean);
   const cText = content.toLowerCase();
 
   let match = 0;
@@ -31,42 +38,48 @@ const keywordScore = (query: string, content: string): number => {
     }
   }
 
-  return match / qWords.length; // normalized
+  return qWords.length ? match / qWords.length : 0;
 };
 
 /* ------------------------------------------ */
-/* SEARCH KNOWLEDGE */
-/* ------------------------------------------ */
+/* 🔥 SEARCH KNOWLEDGE (FINAL CLEAN)
+------------------------------------------- */
 
 export const searchKnowledge = async (
   businessId: string,
   message: string
 ): Promise<KnowledgeResult[]> => {
-
   try {
-
     /* 🔥 CREATE EMBEDDING */
     const messageEmbedding = await createEmbedding(message);
 
-    /* 🔥 GET KNOWLEDGE */
+    /* =================================================
+    🔥 CRITICAL FIX: ONLY TRAINED + TRUSTED DATA
+    ================================================= */
+
     const knowledge = await prisma.knowledgeBase.findMany({
       where: {
         businessId,
         isActive: true,
+        sourceType: {
+          in: ["SYSTEM", "FAQ", "MANUAL"], // ✅ NO AUTO_LEARN
+        },
       },
       select: {
         id: true,
         content: true,
         embedding: true,
+        priority: true,
       },
     });
 
     if (!knowledge.length) return [];
 
-    /* 🔥 SCORE (HYBRID) */
+    /* =================================================
+    🔥 SCORING ENGINE (ELITE LEVEL)
+    ================================================= */
 
     const scored = knowledge.map((item) => {
-
       let semantic = 0;
       let keyword = 0;
 
@@ -79,9 +92,8 @@ export const searchKnowledge = async (
 
       keyword = keywordScore(message, item.content);
 
-      /* 🔥 FIX: BOOST FOR GENERIC BUSINESS MATCH */
+      /* 🔥 GENERIC BOOST */
       let boost = 0;
-
       const text = item.content.toLowerCase();
 
       if (
@@ -93,20 +105,28 @@ export const searchKnowledge = async (
         boost = 0.1;
       }
 
-      /* 🔥 FINAL SCORE (weighted + boost) */
-      const finalScore = (semantic * 0.7) + (keyword * 0.3) + boost;
+      /* 🔥 PRIORITY BOOST (SAFE) */
+      const priorityKey = item.priority || "MEDIUM";
+      const priorityBoost =
+        PRIORITY_WEIGHT[priorityKey as keyof typeof PRIORITY_WEIGHT] || 0;
+
+      /* 🔥 FINAL SCORE */
+      const finalScore =
+        semantic * 0.7 +
+        keyword * 0.3 +
+        boost +
+        priorityBoost;
 
       return {
         id: item.id,
         content: item.content,
         score: finalScore,
       };
-
     });
 
-    /* ------------------------------------------
-    🔥 FIX: FORCE MATCH FOR GENERIC QUERIES
-    ------------------------------------------ */
+    /* =================================================
+    🔥 FORCE MATCH (SMART UX FIX)
+    ================================================= */
 
     const lowerMsg = message.toLowerCase();
 
@@ -121,9 +141,9 @@ export const searchKnowledge = async (
         .slice(0, 3);
     }
 
-    /* ------------------------------------------ */
-    /* 🔥 FILTER NORMAL */
-    /* ------------------------------------------ */
+    /* =================================================
+    🔥 NORMAL FILTER
+    ================================================= */
 
     const filtered = scored
       .filter((item) => item.score >= SIMILARITY_THRESHOLD)
@@ -131,10 +151,8 @@ export const searchKnowledge = async (
       .slice(0, MAX_RESULTS);
 
     return filtered;
-
   } catch (error) {
     console.error("Knowledge search error:", error);
     return [];
   }
-
 };

@@ -34,7 +34,7 @@ const generateQueries = (message: string): string[] => {
   ];
 };
 
-/* ---------------- CACHE HELPERS ---------------- */
+/* ---------------- CACHE ---------------- */
 
 const getCache = async (key: string) => {
   try {
@@ -54,7 +54,7 @@ const setCache = async (key: string, value: any, ttl = 120) => {
 /* ---------------- SYSTEM PROMPT ---------------- */
 
 const SYSTEM_PROMPT = `
-You are an elite AI assistant.
+You are an elite AI sales assistant.
 
 STRICT RULES:
 - Answer ONLY from the Knowledge section
@@ -64,8 +64,61 @@ STRICT RULES:
 STYLE:
 - Short replies
 - Human-like tone
-- Clear and helpful
+- Conversion focused
 `;
+
+/* =================================================
+🔥 NEW: STAGE BASED TONE ENGINE
+================================================= */
+
+const applyStageTone = (
+  reply: string,
+  stage: string,
+  intent: string
+) => {
+
+  if (!reply) return reply;
+
+  /* ❄️ COLD */
+  if (stage === "COLD" || stage === "NEW") {
+    return reply;
+  }
+
+  /* 🌤 WARM */
+  if (stage === "WARM" || stage === "INTERESTED") {
+    return reply + "\n\nWant me to guide you step by step?";
+  }
+
+  /* 🔥 HOT */
+  if (stage === "HOT" || stage === "READY_TO_BUY") {
+
+    if (intent === "PRICE") {
+      return reply + "\n\nI can suggest the best plan and book it for you 👍";
+    }
+
+    return reply + "\n\nI can book this for you right now 👍";
+  }
+
+  return reply;
+};
+
+/* =================================================
+🔥 GET LEAD STAGE
+================================================= */
+
+const getLeadStage = async (leadId?: string) => {
+  if (!leadId) return "NEW";
+
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: {
+      stage: true,
+      aiStage: true,
+    },
+  });
+
+  return lead?.aiStage || lead?.stage || "NEW";
+};
 
 /* ---------------- MAIN ---------------- */
 
@@ -80,7 +133,7 @@ export const generateRAGReply = async (
 
     const businessKey = `biz:${businessId}`;
 
-    /* ================= MULTI QUERY SEARCH ================= */
+    /* ================= SEARCH ================= */
 
     const queries = generateQueries(message);
 
@@ -90,8 +143,6 @@ export const generateRAGReply = async (
       const res = await searchKnowledge(businessId, q);
       allResults.push(...res);
     }
-
-    /* ================= DEDUPE ================= */
 
     const uniqueMap = new Map();
 
@@ -109,9 +160,8 @@ export const generateRAGReply = async (
       .map((r: any) => `• ${r.content}`)
       .join("\n");
 
-    /* =================================================
-    🔥 FIX 1: SMART FORCE MATCH FOR BUSINESS QUESTIONS
-    ================================================= */
+    /* ---------------- BUSINESS QUERY FIX ---------------- */
+
     const lowerMsg = message.toLowerCase();
 
     const isBusinessQuery =
@@ -128,9 +178,6 @@ export const generateRAGReply = async (
       };
     }
 
-    /* =================================================
-    🔥 FIX 2: FALLBACK CONTEXT (PREVENT EMPTY RAG)
-    ================================================= */
     let finalContext = knowledgeContext;
 
     if (!finalContext.trim()) {
@@ -159,7 +206,7 @@ export const generateRAGReply = async (
       await setCache(businessKey, businessData, 300);
     }
 
-    /* ================= INTENT INSTRUCTION ================= */
+    /* ================= PROMPT ================= */
 
     const intentMap: any = {
       PRICE: "Explain pricing clearly and guide user.",
@@ -168,8 +215,6 @@ export const generateRAGReply = async (
       READY: "Push toward conversion.",
       GENERAL: "Be helpful and guide user.",
     };
-
-    /* ================= FINAL PROMPT ================= */
 
     const prompt = `
 Business:
@@ -206,7 +251,15 @@ ${intentMap[intent]}
       ],
     });
 
-    const reply = response?.choices?.[0]?.message?.content?.trim();
+    let reply = response?.choices?.[0]?.message?.content?.trim();
+
+    /* =================================================
+    🔥 APPLY SALES BRAIN (NEW)
+    ================================================= */
+
+    const stage = await getLeadStage(leadId);
+
+    reply = applyStageTone(reply, stage, intent);
 
     return {
       found: true,

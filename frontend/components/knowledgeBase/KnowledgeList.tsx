@@ -11,6 +11,7 @@ const [open,setOpen] = useState(false)
 const [selected,setSelected] = useState<any>(null)
 const [knowledge,setKnowledge] = useState<any[]>([])
 const [loading,setLoading] = useState(false)
+const [deletingId,setDeletingId] = useState<string | null>(null)
 
 /* ============================= */
 /* FETCH KNOWLEDGE */
@@ -45,12 +46,17 @@ const handleDelete = async (id: string) => {
 
   try{
 
+    setDeletingId(id)
+
     await api.delete(`/api/knowledge/${id}`)
 
+    /* 🔥 INSTANT UI UPDATE */
     setKnowledge(prev => prev.filter(item => item.id !== id))
 
   }catch(err){
     console.error("Delete error:", err)
+  }finally{
+    setDeletingId(null)
   }
 
 }
@@ -71,6 +77,8 @@ const handleEdit = (item: any) => {
 const handleClose = () => {
   setOpen(false)
   setSelected(null)
+
+  /* 🔥 REFRESH AFTER SAVE */
   fetchKnowledge()
 }
 
@@ -96,7 +104,9 @@ Add Knowledge
 
 </div>
 
-{/* LOADING */}
+{/* ============================= */
+/* LOADING STATE */
+/* ============================= */}
 
 {loading ? (
   <p className="text-sm text-gray-500">Loading...</p>
@@ -106,12 +116,24 @@ Add Knowledge
   <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
 
     {knowledge.map((item)=>(
-      <KnowledgeCard 
-        key={item.id} 
-        item={item} 
-        onDelete={handleDelete}
-        onEdit={handleEdit}
-      />
+
+      <div key={item.id} className="relative">
+
+        <KnowledgeCard 
+          item={item} 
+          onDelete={handleDelete}
+          onEdit={handleEdit}
+        />
+
+        {/* 🔥 DELETE LOADING OVERLAY */}
+        {deletingId === item.id && (
+          <div className="absolute inset-0 bg-white/60 flex items-center justify-center text-xs text-gray-600 rounded-xl">
+            Deleting...
+          </div>
+        )}
+
+      </div>
+
     ))}
 
   </div>

@@ -276,6 +276,8 @@ model Message {
   content   String
   sender    String
 
+  metadata  Json? 
+
   createdAt DateTime @default(now())
 
   @@index([leadId])
@@ -591,6 +593,7 @@ model KnowledgeBase {
 
   sourceType  String
   sourceUrl   String?
+  priority String @default("MEDIUM")
 
   isActive    Boolean  @default(true)
 

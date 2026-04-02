@@ -22,7 +22,7 @@ useEffect(()=>{
     setTitle("")
     setContent("")
   }
-},[selected])
+},[selected, open]) // 🔥 FIX: modal open pe bhi reset
 
 if(!open) return null
 
@@ -32,7 +32,7 @@ if(!open) return null
 
 const handleSubmit = async () => {
 
-  if(!title || !content){
+  if(!title.trim() || !content.trim()){
     setError("Title and content are required")
     return
   }
@@ -43,27 +43,35 @@ const handleSubmit = async () => {
     setError("")
 
     if(selected){
-      /* 🔥 UPDATE */
-      await api.put(`/knowledge/${selected.id}`,{
+      /* 🔥 UPDATE (FIXED API PATH) */
+      await api.put(`/api/knowledge/${selected.id}`,{
         title,
         content
       })
     }else{
-      /* 🔥 CREATE */
-      await api.post("/knowledge",{
+      /* 🔥 CREATE (FIXED API PATH) */
+      await api.post("/api/knowledge",{
         title,
         content
       })
     }
 
+    /* 🔥 RESET */
     setTitle("")
     setContent("")
 
+    /* 🔥 CLOSE + REFRESH */
     onClose()
 
   }catch(err:any){
+
     console.error("Error:", err)
-    setError(err?.response?.data?.message || "Something went wrong")
+
+    setError(
+      err?.response?.data?.message ||
+      "Something went wrong"
+    )
+
   }finally{
     setLoading(false)
   }
@@ -94,7 +102,7 @@ Title
 value={title}
 onChange={(e)=>setTitle(e.target.value)}
 placeholder="Example: Pricing"
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900"
+className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
 />
 
 </div>
@@ -109,7 +117,7 @@ Content
 value={content}
 onChange={(e)=>setContent(e.target.value)}
 placeholder="Enter knowledge content..."
-className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900"
+className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
 rows={4}
 />
 
@@ -120,7 +128,7 @@ rows={4}
 <button
 onClick={onClose}
 disabled={loading}
-className="text-sm text-gray-700"
+className="text-sm text-gray-700 hover:text-gray-900"
 >
 Cancel
 </button>

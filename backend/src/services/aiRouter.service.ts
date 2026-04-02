@@ -3,20 +3,15 @@ import { handleAIBookingIntent } from "./aiBookingEngine.service";
 import {
   getConversationState,
   clearConversationState,
-  setConversationState,
 } from "./conversationState.service";
 import { generateAIFunnelReply } from "./aiFunnel.service";
 import { isHumanActive } from "./humanTakeoverManager.service";
 
-import { applyConversionBooster } from "./aiConversionBooster.service";
-import { processLeadIntelligence } from "./leadIntelligence.service";
-import { getLeadBehavior } from "./leadBehaviourEngine.service";
-
 import { hasFeature } from "../config/plan.config";
 
-/* 🔥 NEW IMPORTS */
 import { generateRAGReply } from "./rag.service";
 import { generateSmartFallback } from "./smartFallback.service";
+import prisma from "../config/prisma";
 
 /* ================================================= */
 interface RouterInput {
@@ -27,29 +22,49 @@ interface RouterInput {
 }
 
 /* ================================================= */
+/* 🔥 SMART STAGE ENGINE (FIXED) */
+const getStageFromHistory = async (leadId: string, message: string) => {
+  const messages = await prisma.message.findMany({
+    where: { leadId },
+    orderBy: { createdAt: "asc" },
+    take: 10,
+  });
+
+  const count = messages.length;
+  const lower = message.toLowerCase();
+
+  const intentSignals = [
+    "price",
+    "cost",
+    "how much",
+    "demo",
+    "trial",
+    "book",
+    "call",
+  ];
+
+  const interestScore = intentSignals.reduce((acc, word) => {
+    return lower.includes(word) ? acc + 1 : acc;
+  }, 0);
+
+  if (count <= 3 && interestScore === 0) return "COLD";
+  if (count <= 7 || interestScore === 1) return "WARM";
+  if (interestScore >= 2 || count > 7) return "HOT";
+
+  return "COLD";
+};
+
+/* 🔥 CTA CONTROL */
+const getCTA = (stage: string) => {
+  if (stage === "HOT") return "BOOK_NOW";
+  return "NONE";
+};
+
+/* 🔹 GREETING DETECT */
 const isGreeting = (msg: string) =>
   ["hi", "hello", "hey", "hii", "yo"].includes(msg);
 
-const isContextSwitch = (msg: string) =>
-  ["wait", "stop", "leave it", "not now", "later"].some((k) =>
-    msg.includes(k)
-  );
-
-const canUseBooking = (plan: any) => {
-  return hasFeature(plan, "bookingEnabled");
-};
-
-const getContext = (state: any) => {
-  try {
-    if (!state?.context) return {};
-    return typeof state.context === "string"
-      ? JSON.parse(state.context)
-      : state.context;
-  } catch {
-    return {};
-  }
-};
-
+/* 🔹 SAFE WRAPPER */
 const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
   try {
     return await fn();
@@ -58,29 +73,46 @@ const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
   }
 };
 
+/* 🔥 HUMAN-LIKE RANDOM PROMPTS */
+const coldPrompts = [
+  "Got it 👍 can you tell me a bit more about your use case?",
+  "Interesting 👀 what exactly are you trying to achieve?",
+  "Okay, help me understand your requirement a bit better",
+];
+
+const warmPrompts = [
+  "I can explain how this would work for you 👍",
+  "Want me to break this down for your use case?",
+  "I can show you how people usually use this",
+];
+
+const pick = (arr: string[]) =>
+  arr[Math.floor(Math.random() * arr.length)];
+
 /* ================================================= */
 export const routeAIMessage = async ({
   businessId,
   leadId,
   message,
   plan,
-}: RouterInput): Promise<string | null> => {
+}: RouterInput): Promise<{ message: string; cta?: string } | null> => {
   try {
     const lowerMessage = message.toLowerCase().trim();
 
     /* ================= HUMAN ================= */
     if (await isHumanActive(leadId)) return null;
 
-    /* ================= PARALLEL ================= */
-    const [_, behavior] = await Promise.all([
-      safe(() => processLeadIntelligence({ leadId, message }), null),
-      safe(() => getLeadBehavior({ leadId }), {} as any),
-    ]);
+    /* ================= STAGE ================= */
+    const stage = await getStageFromHistory(leadId, message);
 
     /* ================= GREETING ================= */
     if (isGreeting(lowerMessage)) {
       await clearConversationState(leadId);
-      return "Hey 👋 How can I help you today?";
+
+      return {
+        message: "Hey 👋 how can I help you today?",
+        cta: "NONE",
+      };
     }
 
     /* ================= INTENT ================= */
@@ -94,118 +126,22 @@ export const routeAIMessage = async ({
       null
     );
 
-    /* ================= CONTEXT SWITCH ================= */
-    if (isContextSwitch(lowerMessage)) {
-      await clearConversationState(leadId);
-    }
+    /* ================= BOOKING (ONLY HOT) ================= */
+    const isBookingIntent = intent?.intent === "BOOKING";
 
-    /* =================================================
-    📦 STATE ENGINE (BOOKING SAFE 🔒)
-    ================================================= */
-    const state = await safe(() => getConversationState(leadId), null);
-    const context = getContext(state);
-
-    if (state) {
-      if (state.state === "BOOKING_SELECTION") {
-        if (!canUseBooking(plan)) {
-          await clearConversationState(leadId);
-          return "Currently, booking is not available. Please contact us directly for scheduling.";
-        }
-
-        try {
-          const slots: string[] = context?.slots || [];
-
-          if (!slots.length) {
-            await clearConversationState(leadId);
-            return "Session expired. Please try again.";
-          }
-
-          let selectedSlot: string | null = null;
-
-          const index = parseInt(lowerMessage);
-          if (!isNaN(index) && index > 0 && index <= slots.length) {
-            selectedSlot = slots[index - 1];
-          }
-
-          if (!selectedSlot) {
-            if (lowerMessage.includes("first")) selectedSlot = slots[0];
-            else if (lowerMessage.includes("second")) selectedSlot = slots[1];
-            else if (lowerMessage.includes("last"))
-              selectedSlot = slots[slots.length - 1];
-          }
-
-          if (!selectedSlot) {
-            return "Please select a valid slot number (1, 2, 3...).";
-          }
-
-          await setConversationState(leadId, "BOOKING_CONFIRMATION", {
-            context: { slot: selectedSlot },
-          });
-
-          const date = new Date(selectedSlot);
-
-          return `Great choice 👍
-
-📅 ${date.toLocaleString()}
-
-Reply YES to confirm  
-or CHANGE to pick another time.`;
-        } catch {
-          await clearConversationState(leadId);
-          return "Something went wrong. Please try again.";
-        }
-      }
-
-      if (state.state === "BOOKING_CONFIRMATION") {
-        if (!canUseBooking(plan)) {
-          await clearConversationState(leadId);
-          return "Currently, booking is not available.";
-        }
-
-        if (lowerMessage.includes("change")) {
-          await clearConversationState(leadId);
-          return "No worries 👍 Let's pick another slot.";
-        }
-
-        const result = await safe(
-          () => handleAIBookingIntent(businessId, leadId, message),
-          { handled: false, message: "" }
-        );
-
-        if (result.handled) return result.message;
-
-        return "Reply YES to confirm or CHANGE.";
-      }
-    }
-
-    /* =================================================
-    🔥 BOOKING ENTRY (SAFE 🔒)
-    ================================================= */
-    let bookingResult = { handled: false, message: "" };
-
-    const isBookingIntent =
-      intent?.intent === "BOOKING" ||
-      lowerMessage.includes("book") ||
-      lowerMessage.includes("schedule") ||
-      lowerMessage.includes("appointment");
-
-    if (isBookingIntent) {
-      if (!canUseBooking(plan)) {
-        return "Currently, booking is not available.";
-      }
-
-      bookingResult = await safe(
+    if (isBookingIntent && stage === "HOT") {
+      const bookingResult = await safe(
         () => handleAIBookingIntent(businessId, leadId, message),
         { handled: false, message: "" }
       );
-    }
 
-    if (bookingResult?.handled) {
-      return bookingResult.message;
+      if (bookingResult?.handled) {
+        return { message: bookingResult.message, cta: "NONE" };
+      }
     }
 
     /* =================================================
-    🧠 KNOWLEDGE FIRST (RAG 🔥🔥🔥)
+    🧠 RAG (PRIMARY)
     ================================================= */
     const ragResult = await safe(
       () => generateRAGReply(businessId, message, leadId),
@@ -213,71 +149,84 @@ or CHANGE to pick another time.`;
     );
 
     if (ragResult?.found && ragResult?.reply) {
-      const boosted = behavior?.urgency
-        ? await safe(
-            () =>
-              applyConversionBooster({
-                leadId,
-                message: ragResult.reply,
-                behavior,
-              }),
-            { boostedMessage: ragResult.reply } as any
-          )
-        : { boostedMessage: ragResult.reply };
+      let base = ragResult.reply;
 
-      return boosted.boostedMessage;
+      /* ❄️ COLD */
+      if (stage === "COLD") {
+        return {
+          message: base + "\n\n" + pick(coldPrompts),
+          cta: "NONE",
+        };
+      }
+
+      /* 🌤 WARM */
+      if (stage === "WARM") {
+        return {
+          message: base + "\n\n" + pick(warmPrompts),
+          cta: "NONE",
+        };
+      }
+
+      /* 🔥 HOT */
+      if (stage === "HOT") {
+        return {
+          message:
+            base +
+            "\n\nMakes sense for you 👍 want me to set up a quick call?",
+          cta: getCTA(stage),
+        };
+      }
     }
 
     /* =================================================
-    🧲 FUNNEL
+    🧲 FUNNEL (WARM + HOT ONLY)
     ================================================= */
-    const funnelReply = await safe(
-      () =>
-        generateAIFunnelReply({
-          businessId,
-          leadId,
-          message,
-        }),
-      null
-    );
+    if (stage !== "COLD") {
+      const funnelReply = await safe(
+        () =>
+          generateAIFunnelReply({
+            businessId,
+            leadId,
+            message,
+          }),
+        null
+      );
 
-    if (funnelReply) {
-      const boosted = behavior?.urgency
-        ? await safe(
-            () =>
-              applyConversionBooster({
-                leadId,
-                message: funnelReply,
-                behavior,
-              }),
-            { boostedMessage: funnelReply } as any
-          )
-        : { boostedMessage: funnelReply };
+      if (funnelReply) {
+        /* 🌤 WARM → NO CTA */
+        if (stage === "WARM") {
+          return {
+            message: funnelReply,
+            cta: "NONE",
+          };
+        }
 
-      return boosted.boostedMessage;
+        /* 🔥 HOT → CTA ALLOWED */
+        return {
+          message: funnelReply,
+          cta: getCTA(stage),
+        };
+      }
     }
 
     /* =================================================
-    💬 SMART FALLBACK (NO AI HALLUCINATION ❌)
+    💬 FALLBACK
     ================================================= */
     const fallback = generateSmartFallback(message);
 
-    const boosted = behavior?.urgency
-      ? await safe(
-          () =>
-            applyConversionBooster({
-              leadId,
-              message: fallback,
-              behavior,
-            }),
-          { boostedMessage: fallback } as any
-        )
-      : { boostedMessage: fallback };
-
-    return boosted.boostedMessage;
-
+    return {
+      message:
+        stage === "COLD"
+          ? fallback + "\n\n" + pick(coldPrompts)
+          : fallback,
+      cta: "NONE",
+    };
   } catch (error) {
     console.error("AI ROUTER ERROR:", error);
-    return "Sorry, something went wrong.";
+
+    return {
+      message: "Sorry, something went wrong.",
+      cta: "NONE",
+    };
   }
 };

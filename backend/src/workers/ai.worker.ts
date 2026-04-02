@@ -70,7 +70,7 @@ const worker = new Worker(
 📤 COMMON RESPONSE HANDLER
 ===================================================== */
 
-const processAndSendReply = async (data: any, aiReply: string) => {
+const processAndSendReply = async (data: any, aiReply: any) => {
 
   const {
     businessId,
@@ -83,12 +83,27 @@ const processAndSendReply = async (data: any, aiReply: string) => {
 
   try {
 
-    if (!aiReply || !aiReply.trim()) {
-      aiReply = "Thanks for your message! 😊";
-    }
+    /* =====================================================
+    🔥 SAFE PARSE (NEW FIX - NO LOGIC CHANGE)
+    ===================================================== */
 
-    if (aiReply.length > 1000) {
-      aiReply = aiReply.slice(0, 1000);
+    let replyText =
+      typeof aiReply === "string"
+        ? aiReply
+        : aiReply?.message || "Thanks for your message! 😊";
+
+    const cta =
+      typeof aiReply === "object" ? aiReply?.cta : undefined;
+
+    /* 🔥 TRIM SAME (YOUR ORIGINAL LOGIC SAFE) */
+    replyText = replyText.trim();
+
+    if (!replyText) return;
+
+    /* ===================================================== */
+
+    if (replyText.length > 1000) {
+      replyText = replyText.slice(0, 1000);
     }
 
     const rate = await checkAIRateLimit({
@@ -105,14 +120,20 @@ const processAndSendReply = async (data: any, aiReply: string) => {
     const aiMessage = await prisma.message.create({
       data: {
         leadId,
-        content: aiReply,
+        content: replyText,
         sender: "AI",
+        metadata: {
+          cta: cta || null, // 🔥 STORE CTA
+        },
       },
     });
 
     try {
       const io = getIO();
-      io.to(`lead_${leadId}`).emit("new_message", aiMessage);
+      io.to(`lead_${leadId}`).emit("new_message", {
+        ...aiMessage,
+        cta: cta || null, // 🔥 SEND CTA REALTIME
+      });
     } catch {}
 
     const accessToken = decrypt(accessTokenEncrypted);
@@ -126,7 +147,7 @@ const processAndSendReply = async (data: any, aiReply: string) => {
             messaging_product: "whatsapp",
             to: senderId,
             type: "text",
-            text: { body: aiReply },
+            text: { body: replyText },
           },
           {
             headers: {
@@ -146,7 +167,7 @@ const processAndSendReply = async (data: any, aiReply: string) => {
           "https://graph.facebook.com/v19.0/me/messages",
           {
             recipient: { id: senderId },
-            message: { text: aiReply },
+            message: { text: replyText },
           },
           {
             headers: {
@@ -243,12 +264,17 @@ const legacyExecution = async (data: any) => {
 
     /* ---------------- AI ---------------- */
     if (!aiReply) {
-      aiReply = await routeAIMessage({
-        businessId,
-        leadId,
-        message,
-        plan, // 🔥 FIXED
-      });
+      const aiResponse = await routeAIMessage({
+  businessId,
+  leadId,
+  message,
+  plan,
+});
+
+aiReply =
+  typeof aiResponse === "string"
+    ? aiResponse
+    : (aiResponse as any)?.message;
     }
 
     if (!aiReply) return;

@@ -1,4 +1,3 @@
-// CommentAutomationCard.tsx
 "use client"
 
 import { api } from "@/lib/api"
@@ -16,7 +15,8 @@ const handleToggle = async () => {
     setLoading(true)
     await api.patch(`/api/comment-triggers/${automation.id}/toggle`)
     onRefresh?.()
-  }catch{
+  }catch(e){
+    console.error(e)
     alert("Failed to update status")
   }finally{
     setLoading(false)
@@ -31,7 +31,9 @@ const handleDelete = async () => {
   try{
     await api.delete(`/api/comment-triggers/${automation.id}`)
     onDelete?.(automation.id)
-  }catch{
+    onRefresh?.()   // 🔥 ADD
+  }catch(e){
+    console.error(e)
     alert("Delete failed")
   }
 

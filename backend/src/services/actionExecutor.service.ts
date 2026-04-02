@@ -26,7 +26,10 @@ export const executeAutomationActions = async ({
     /* SEND MESSAGE STEP */
     /* ============================= */
 
-    if (step.stepType === "SEND_MESSAGE") {
+    if (
+      step.stepType === "MESSAGE" ||
+      step.stepType === "SEND_MESSAGE"
+    ) {
       if (!step.message) return null;
 
       /* 🔥 MOVE TO NEXT STEP */
@@ -85,7 +88,10 @@ export const executeAutomationActions = async ({
         },
       });
 
-      if (nextStep.stepType === "SEND_MESSAGE") {
+      if (
+        nextStep.stepType === "MESSAGE" ||
+        nextStep.stepType === "SEND_MESSAGE"
+      ) {
         return nextStep.message || null;
       }
 
@@ -93,7 +99,7 @@ export const executeAutomationActions = async ({
     }
 
     /* ============================= */
-    /* DELAY STEP (handled by queue later) */
+    /* DELAY STEP */
     /* ============================= */
 
     if (step.stepType === "DELAY") {

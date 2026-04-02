@@ -26,7 +26,7 @@ export const runAutomationEngine = async ({
     const lowerMessage = message.toLowerCase().trim();
 
     /* ==================================================
-    🔒 FAST ACTIVE EXECUTION CHECK (INDEX FRIENDLY)
+    🔒 FAST ACTIVE EXECUTION CHECK
     ================================================== */
 
     const activeExecution = await prisma.automationExecution.findFirst({
@@ -56,7 +56,6 @@ export const runAutomationEngine = async ({
 
       if (!step) return null;
 
-      /* 🔥 fire & forget analytics (non-blocking) */
       trackStepView(activeExecution.flowId, step.stepKey).catch(() => {});
 
       const result = await executeAutomationActions({
@@ -110,8 +109,11 @@ export const runAutomationEngine = async ({
 
     const firstStep = flow.steps[0];
 
+    /* 🔥 SAFETY FIX */
+    if (!firstStep || !firstStep.stepType) return null;
+
     /* ==================================================
-    🔒 DUPLICATE FLOW GUARD (CRITICAL)
+    🔒 DUPLICATE FLOW GUARD
     ================================================== */
 
     const alreadyRunning = await prisma.automationExecution.findFirst({
@@ -141,10 +143,8 @@ export const runAutomationEngine = async ({
       },
     });
 
-    /* 🔥 non-blocking event */
     emitAutomationStarted(leadId, flow.id);
 
-    /* 🔥 analytics async */
     trackStepView(flow.id, firstStep.stepKey).catch(() => {});
 
     /* ==================================================

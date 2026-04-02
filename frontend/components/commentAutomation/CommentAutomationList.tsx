@@ -12,8 +12,12 @@ const [automations,setAutomations] = useState<any[]>([])
 const [loading,setLoading] = useState(true)
 const [error,setError] = useState("")
 
-const fetchTriggers = async () => {
+/* 🔥 NEW */
+const [editData,setEditData] = useState<any>(null)
 
+/* ---------------- FETCH ---------------- */
+
+const fetchTriggers = async () => {
   try{
     setLoading(true)
     setError("")
@@ -26,28 +30,41 @@ const fetchTriggers = async () => {
 
     setAutomations(data)
 
-  }catch(err: any){
+  }catch{
     setError("Failed to load triggers")
   }finally{
     setLoading(false)
   }
-
 }
 
 useEffect(()=>{
   fetchTriggers()
 },[])
 
-const handleDelete = async (id:string) => {
+/* ---------------- DELETE ---------------- */
 
+const handleDelete = async (id:string) => {
   try{
-    // ✅ FIXED
     await api.delete(`/api/comment-triggers/${id}`)
     setAutomations(prev => prev.filter(a => a.id !== id))
   }catch{
     alert("Delete failed")
   }
+}
 
+/* ---------------- EDIT ---------------- */
+
+const handleEdit = (automation:any) => {
+  setEditData(automation)
+  setOpen(true)
+}
+
+/* ---------------- CLOSE MODAL ---------------- */
+
+const handleClose = () => {
+  setOpen(false)
+  setEditData(null)
+  fetchTriggers()
 }
 
 return(
@@ -63,7 +80,10 @@ Comment Automations
 </h2>
 
 <button
-onClick={()=>setOpen(true)}
+onClick={()=>{
+  setEditData(null) // 🔥 create mode
+  setOpen(true)
+}}
 className="w-full sm:w-auto bg-indigo-600 text-white px-5 py-2 text-sm font-semibold rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition"
 >
 Create Trigger 🚀
@@ -92,7 +112,7 @@ Create Trigger 🚀
   </div>
 )}
 
-{/* EMPTY STATE */}
+{/* EMPTY */}
 
 {!loading && automations.length === 0 && (
   <div className="text-center border border-dashed border-gray-300 rounded-2xl p-6 sm:p-8 bg-white">
@@ -106,7 +126,10 @@ Create Trigger 🚀
     </p>
 
     <button
-      onClick={()=>setOpen(true)}
+      onClick={()=>{
+        setEditData(null)
+        setOpen(true)
+      }}
       className="mt-4 bg-indigo-600 text-white px-4 py-2 text-sm rounded-xl hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition w-full sm:w-auto"
     >
       Create your first automation
@@ -126,6 +149,7 @@ Create Trigger 🚀
     key={a.id}
     automation={a}
     onDelete={()=>handleDelete(a.id)}
+    onEdit={()=>handleEdit(a)} // 🔥 NEW
     onRefresh={fetchTriggers}
   />
 ))}
@@ -138,14 +162,11 @@ Create Trigger 🚀
 
 <CreateCommentAutomationModal
 open={open}
-onClose={()=>{
-  setOpen(false)
-  fetchTriggers()
-}}
+editData={editData} // 🔥 NEW
+onClose={handleClose}
 />
 
 </div>
 
 )
-
 }

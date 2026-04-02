@@ -17,7 +17,7 @@ interface Step {
 }
 
 export default function AutomationBuilder({
-  plan = "BASIC", // BASIC | PRO | ELITE
+  plan = "BASIC",
   onChange,
 }: {
   plan?: "BASIC" | "PRO" | "ELITE";
@@ -32,8 +32,6 @@ export default function AutomationBuilder({
     },
   ]);
 
-  /* ---------------- PLAN RULES ---------------- */
-
   const allowedSteps = useMemo(() => {
     if (plan === "BASIC") return ["MESSAGE"];
     if (plan === "PRO") return ["MESSAGE", "DELAY", "CONDITION"];
@@ -45,11 +43,19 @@ export default function AutomationBuilder({
   const updateSteps = (newSteps: Step[]) => {
     setSteps(newSteps);
 
-    /* 🔥 convert to backend format */
-    const formatted = newSteps.map((s) => ({
-      type: s.type,
-      config: s.config,
-    }));
+    /* 🔥 CLEAN BACKEND FORMAT */
+    const formatted = newSteps.map((s) => {
+      const cleanConfig: any = {};
+
+      if (s.config.message) cleanConfig.message = s.config.message;
+      if (s.config.condition) cleanConfig.condition = s.config.condition;
+      if (s.config.delay) cleanConfig.delay = s.config.delay;
+
+      return {
+        type: s.type,
+        config: cleanConfig,
+      };
+    });
 
     onChange?.(formatted);
   };
@@ -125,11 +131,8 @@ export default function AutomationBuilder({
     updateSteps(newSteps);
   };
 
-  /* ---------------- UI ---------------- */
-
   return (
     <div className="space-y-5">
-      {/* STEPS */}
       <div className="space-y-3">
         {steps.map((step, i) => (
           <AutomationStep
@@ -145,7 +148,6 @@ export default function AutomationBuilder({
         ))}
       </div>
 
-      {/* ADD BUTTONS */}
       <div className="flex flex-wrap gap-2 pt-3">
         <button
           onClick={() => addStep("MESSAGE")}

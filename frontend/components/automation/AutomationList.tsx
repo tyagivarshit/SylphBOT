@@ -23,8 +23,9 @@ export default function AutomationList() {
 
       const data = await res.json();
 
-      setAutomations(data || []);
-    } catch {
+      setAutomations(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error(e);
       setError("Failed to load automations");
     } finally {
       setLoading(false);
@@ -41,7 +42,6 @@ export default function AutomationList() {
 
   return (
     <div className="space-y-5">
-      {/* HEADER */}
       <div className="flex justify-between items-center">
         <h2 className="text-base font-semibold text-gray-900">
           Your Automations
@@ -55,7 +55,6 @@ export default function AutomationList() {
         </button>
       </div>
 
-      {/* LOADING */}
       {loading && (
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -67,7 +66,6 @@ export default function AutomationList() {
         </div>
       )}
 
-      {/* ERROR */}
       {error && (
         <div className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl p-3 flex justify-between items-center">
           <span>{error}</span>
@@ -80,7 +78,6 @@ export default function AutomationList() {
         </div>
       )}
 
-      {/* EMPTY */}
       {!loading && automations.length === 0 && (
         <div className="text-center border border-dashed border-gray-300 rounded-2xl p-8 bg-white">
           <p className="text-sm font-medium text-gray-900">
@@ -100,16 +97,18 @@ export default function AutomationList() {
         </div>
       )}
 
-      {/* LIST */}
       {!loading && automations.length > 0 && (
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {automations.map((a) => (
-            <AutomationCard key={a.id} automation={a} />
+            <AutomationCard
+              key={a.id}
+              automation={a}
+              onRefresh={fetchAutomations}   // 🔥 IMPORTANT
+            />
           ))}
         </div>
       )}
 
-      {/* MODAL */}
       <CreateAutomationModal
         open={open}
         onClose={() => {

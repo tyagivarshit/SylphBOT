@@ -43,16 +43,12 @@ export default function AutomationStep({
         </div>
       </div>
 
-      {/* ============================= */}
-      {/* CONFIG UI */}
-      {/* ============================= */}
-
       {/* MESSAGE */}
       {step.type === "MESSAGE" && (
         <textarea
           value={step.config?.message || ""}
           onChange={(e) =>
-            onConfigChange("message", e.target.value)
+            onConfigChange("message", e.target.value || "")
           }
           placeholder="Enter message to send..."
           className="w-full text-sm bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
@@ -77,7 +73,7 @@ export default function AutomationStep({
           type="number"
           value={step.config?.delay || ""}
           onChange={(e) =>
-            onConfigChange("delay", Number(e.target.value))
+            onConfigChange("delay", Number(e.target.value) || 0)
           }
           placeholder="Delay in seconds"
           className="w-full text-sm bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-yellow-500/30"

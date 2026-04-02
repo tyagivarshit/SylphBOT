@@ -37,13 +37,17 @@ export default function CreateAutomationModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name,
-          triggerValue: trigger,
-          steps, // 🔥 IMPORTANT (builder data)
+          name: name.trim(),
+          triggerValue: trigger.toLowerCase().trim(), // 🔥 FIX
+          steps,
         }),
       });
 
-      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to create");
+      }
 
       /* RESET */
       setName("");
@@ -51,8 +55,8 @@ export default function CreateAutomationModal({
       setSteps([]);
 
       onClose();
-    } catch {
-      setError("Failed to create automation");
+    } catch (err: any) {
+      setError(err.message || "Failed to create automation");
     } finally {
       setLoading(false);
     }
@@ -64,7 +68,6 @@ export default function CreateAutomationModal({
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto">
       <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-xl space-y-5 border border-gray-200">
         
-        {/* HEADER */}
         <h2 className="text-lg font-semibold text-gray-900">
           Create Automation 🚀
         </h2>
@@ -73,7 +76,6 @@ export default function CreateAutomationModal({
           <p className="text-sm text-red-500">{error}</p>
         )}
 
-        {/* NAME */}
         <div>
           <label className="text-sm font-medium text-gray-900">
             Automation Name
@@ -87,7 +89,6 @@ export default function CreateAutomationModal({
           />
         </div>
 
-        {/* TRIGGER */}
         <div>
           <label className="text-sm font-medium text-gray-900">
             Trigger Keyword
@@ -101,7 +102,6 @@ export default function CreateAutomationModal({
           />
         </div>
 
-        {/* BUILDER 🔥 */}
         <div>
           <p className="text-sm font-medium text-gray-900 mb-2">
             Automation Flow
@@ -113,7 +113,6 @@ export default function CreateAutomationModal({
           />
         </div>
 
-        {/* ACTIONS */}
         <div className="flex justify-end gap-3 pt-2">
           <button
             onClick={onClose}

@@ -13,6 +13,9 @@ import { generateRAGReply } from "./rag.service";
 import { generateSmartFallback } from "./smartFallback.service";
 import prisma from "../config/prisma";
 
+/* 🔥 ADD */
+import { runAutomationEngine } from "./automationEngine.service";
+
 /* ================================================= */
 interface RouterInput {
   businessId: string;
@@ -22,7 +25,7 @@ interface RouterInput {
 }
 
 /* ================================================= */
-/* 🔥 SMART STAGE ENGINE (FIXED) */
+/* 🔥 STAGE ENGINE (UNCHANGED) */
 const getStageFromHistory = async (leadId: string, message: string) => {
   const messages = await prisma.message.findMany({
     where: { leadId },
@@ -54,17 +57,14 @@ const getStageFromHistory = async (leadId: string, message: string) => {
   return "COLD";
 };
 
-/* 🔥 CTA CONTROL */
 const getCTA = (stage: string) => {
   if (stage === "HOT") return "BOOK_NOW";
   return "NONE";
 };
 
-/* 🔹 GREETING DETECT */
 const isGreeting = (msg: string) =>
   ["hi", "hello", "hey", "hii", "yo"].includes(msg);
 
-/* 🔹 SAFE WRAPPER */
 const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
   try {
     return await fn();
@@ -73,7 +73,6 @@ const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
   }
 };
 
-/* 🔥 HUMAN-LIKE RANDOM PROMPTS */
 const coldPrompts = [
   "Got it 👍 can you tell me a bit more about your use case?",
   "Interesting 👀 what exactly are you trying to achieve?",
@@ -99,8 +98,26 @@ export const routeAIMessage = async ({
   try {
     const lowerMessage = message.toLowerCase().trim();
 
+    const isBasic = plan?.type === "BASIC";
+    const isPro = plan?.type === "PRO";
+    const isElite = plan?.type === "ELITE";
+
     /* ================= HUMAN ================= */
     if (await isHumanActive(leadId)) return null;
+
+    /* ================= AUTOMATION FIRST ================= */
+    const automationReply = await runAutomationEngine({
+      businessId,
+      leadId,
+      message,
+    });
+
+    if (automationReply) {
+      return {
+        message: automationReply,
+        cta: "NONE",
+      };
+    }
 
     /* ================= STAGE ================= */
     const stage = await getStageFromHistory(leadId, message);
@@ -126,10 +143,10 @@ export const routeAIMessage = async ({
       null
     );
 
-    /* ================= BOOKING (ONLY HOT) ================= */
+    /* ================= BOOKING ================= */
     const isBookingIntent = intent?.intent === "BOOKING";
 
-    if (isBookingIntent && stage === "HOT") {
+    if (isBookingIntent && isElite && stage === "HOT") {
       const bookingResult = await safe(
         () => handleAIBookingIntent(businessId, leadId, message),
         { handled: false, message: "" }
@@ -141,7 +158,7 @@ export const routeAIMessage = async ({
     }
 
     /* =================================================
-    🧠 RAG (PRIMARY)
+    🧠 RAG
     ================================================= */
     const ragResult = await safe(
       () => generateRAGReply(businessId, message, leadId),
@@ -151,7 +168,15 @@ export const routeAIMessage = async ({
     if (ragResult?.found && ragResult?.reply) {
       let base = ragResult.reply;
 
-      /* ❄️ COLD */
+      /* 🟢 BASIC → LIGHT */
+      if (isBasic) {
+        return {
+          message: base + "\n\n" + pick(coldPrompts),
+          cta: "NONE",
+        };
+      }
+
+      /* 🔵 PRO / 🔴 ELITE → FULL AI */
       if (stage === "COLD") {
         return {
           message: base + "\n\n" + pick(coldPrompts),
@@ -159,7 +184,6 @@ export const routeAIMessage = async ({
         };
       }
 
-      /* 🌤 WARM */
       if (stage === "WARM") {
         return {
           message: base + "\n\n" + pick(warmPrompts),
@@ -167,21 +191,20 @@ export const routeAIMessage = async ({
         };
       }
 
-      /* 🔥 HOT */
       if (stage === "HOT") {
         return {
           message:
             base +
             "\n\nMakes sense for you 👍 want me to set up a quick call?",
-          cta: getCTA(stage),
+          cta: isElite ? "BOOK_NOW" : "NONE",
         };
       }
     }
 
     /* =================================================
-    🧲 FUNNEL (WARM + HOT ONLY)
+    🧲 FUNNEL (PRO + ELITE ONLY)
     ================================================= */
-    if (stage !== "COLD") {
+    if (!isBasic && stage !== "COLD") {
       const funnelReply = await safe(
         () =>
           generateAIFunnelReply({
@@ -193,18 +216,9 @@ export const routeAIMessage = async ({
       );
 
       if (funnelReply) {
-        /* 🌤 WARM → NO CTA */
-        if (stage === "WARM") {
-          return {
-            message: funnelReply,
-            cta: "NONE",
-          };
-        }
-
-        /* 🔥 HOT → CTA ALLOWED */
         return {
           message: funnelReply,
-          cta: getCTA(stage),
+          cta: isElite ? getCTA(stage) : "NONE",
         };
       }
     }

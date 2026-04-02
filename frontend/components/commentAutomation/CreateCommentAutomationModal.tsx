@@ -3,7 +3,13 @@
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
 
-export default function CreateCommentAutomationModal({ open, onClose }: any){
+export default function CreateCommentAutomationModal({
+  open,
+  onClose,
+  editData, // 🔥 NEW
+}: any){
+
+const isEdit = !!editData
 
 const [keyword,setKeyword] = useState("")
 const [reply,setReply] = useState("")
@@ -21,7 +27,19 @@ const [loadingMedia,setLoadingMedia] = useState(false)
 
 const [error,setError] = useState("")
 
-/* ---------------- RESET ON CLOSE ---------------- */
+/* ---------------- PREFILL (EDIT MODE) ---------------- */
+
+useEffect(()=>{
+  if(editData){
+    setKeyword(editData.keyword || "")
+    setReply(editData.replyText || "")
+    setDm(editData.dmText || "")
+    setClientId(editData.clientId || "")
+    setSelectedPost(editData.reelId || "")
+  }
+},[editData])
+
+/* ---------------- RESET ---------------- */
 
 useEffect(()=>{
   if(!open){
@@ -42,11 +60,9 @@ useEffect(()=>{
   if(!open) return
 
   const fetchClients = async () => {
-
     try{
       setLoadingClients(true)
 
-      // ✅ FIXED
       const res = await api.get("/api/clients")
 
       const data = Array.isArray(res.data)
@@ -60,7 +76,6 @@ useEffect(()=>{
     }finally{
       setLoadingClients(false)
     }
-
   }
 
   fetchClients()
@@ -74,11 +89,9 @@ useEffect(()=>{
   if(!clientId) return
 
   const fetchMedia = async () => {
-
     try{
       setLoadingMedia(true)
 
-      // ✅ FIXED
       const res = await api.get(`/api/instagram/media?clientId=${clientId}`)
 
       setMedia(res.data?.data || [])
@@ -88,23 +101,17 @@ useEffect(()=>{
     }finally{
       setLoadingMedia(false)
     }
-
   }
 
   fetchMedia()
 
 },[clientId])
 
-/* ---------------- CREATE ---------------- */
+/* ---------------- SUBMIT ---------------- */
 
-const handleCreate = async () => {
+const handleSubmit = async () => {
 
-  if(
-    !clientId ||
-    !selectedPost ||
-    !keyword.trim() ||
-    !reply.trim()
-  ){
+  if(!clientId || !selectedPost || !keyword.trim() || !reply.trim()){
     setError("All fields are required")
     return
   }
@@ -113,22 +120,27 @@ const handleCreate = async () => {
     setLoading(true)
     setError("")
 
-    await api.post("/api/comment-triggers",{
+    const payload = {
       clientId,
       reelId: selectedPost,
       keyword: keyword.trim(),
       replyText: reply.trim(),
-      dmText: dm.trim()
-    })
+      dmText: dm.trim(),
+    }
+
+    if(isEdit){
+      await api.patch(`/api/comment-triggers/${editData.id}`, payload)
+    }else{
+      await api.post("/api/comment-triggers", payload)
+    }
 
     onClose()
 
   }catch{
-    setError("Failed to create automation")
+    setError(isEdit ? "Failed to update" : "Failed to create")
   }finally{
     setLoading(false)
   }
-
 }
 
 const selectedMedia = media.find((m:any)=>m.id === selectedPost)
@@ -142,13 +154,14 @@ return(
 <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md p-4 sm:p-6 shadow-xl space-y-5 border border-gray-200 max-h-[90vh] overflow-y-auto">
 
 <h2 className="text-base sm:text-lg font-semibold text-gray-900">
-Create Comment Automation 🚀
+{isEdit ? "Edit Automation ✏️" : "Create Comment Automation 🚀"}
 </h2>
 
 {error && (
   <p className="text-xs sm:text-sm text-red-500">{error}</p>
 )}
 
+{/* CLIENT */}
 <div>
 <label className="text-xs sm:text-sm font-medium text-gray-900">
 Instagram Account
@@ -160,9 +173,8 @@ onChange={(e)=>{
   setClientId(e.target.value)
   setSelectedPost("")
   setMedia([])
-  setError("")
 }}
-className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm"
 >
 <option value="">
 {loadingClients ? "Loading..." : "Select account"}
@@ -173,12 +185,11 @@ className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 te
     {c.name || c.pageId}
   </option>
 ))}
-
 </select>
 </div>
 
+{/* MEDIA */}
 {clientId && (
-
 <div>
 <label className="text-xs sm:text-sm font-medium text-gray-900">
 Select Post / Reel
@@ -186,14 +197,11 @@ Select Post / Reel
 
 <select
 value={selectedPost}
-onChange={(e)=>{
-  setSelectedPost(e.target.value)
-  setError("")
-}}
-className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
+onChange={(e)=>setSelectedPost(e.target.value)}
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm"
 >
 <option value="">
-{loadingMedia ? "Loading posts..." : "Select post"}
+{loadingMedia ? "Loading..." : "Select post"}
 </option>
 
 {media.map((m:any)=>(
@@ -201,99 +209,78 @@ className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 te
     {(m.caption || "No caption").slice(0,40)}
   </option>
 ))}
-
 </select>
 </div>
-
 )}
 
+{/* PREVIEW */}
 {selectedMedia && (
-<div className="border border-gray-200 rounded-xl p-2 bg-gray-50">
+<div className="border rounded-xl p-2 bg-gray-50">
   {selectedMedia.media_url && (
-    <img
-      src={selectedMedia.media_url}
-      alt=""
-      className="w-full h-28 sm:h-32 object-cover rounded-lg"
-    />
+    <img src={selectedMedia.media_url} className="w-full h-28 object-cover rounded-lg"/>
   )}
-  <p className="text-[10px] sm:text-xs text-gray-600 mt-1">
-    {(selectedMedia.caption || "No caption").slice(0,80)}
-  </p>
 </div>
 )}
 
+{/* KEYWORD */}
 <div>
-<label className="text-xs sm:text-sm font-medium text-gray-900">
-Keyword
+<label className="text-xs font-medium text-gray-900">
+Keyword (comma separated)
 </label>
 
 <input
 value={keyword}
-onChange={(e)=>{
-  setKeyword(e.target.value)
-  setError("")
-}}
-placeholder="Example: price"
-className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
+onChange={(e)=>setKeyword(e.target.value)}
+placeholder="price, cost, fees"
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-sm"
 />
 </div>
 
+{/* REPLY */}
 <div>
-<label className="text-xs sm:text-sm font-medium text-gray-900">
+<label className="text-xs font-medium text-gray-900">
 Comment Reply
 </label>
 
 <input
 value={reply}
-onChange={(e)=>{
-  setReply(e.target.value)
-  setError("")
-}}
-placeholder="Example: Check your DM 👀"
-className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500/30"
+onChange={(e)=>setReply(e.target.value)}
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-sm"
 />
 </div>
 
+{/* DM */}
 <div>
-<label className="text-xs sm:text-sm font-medium text-gray-900">
+<label className="text-xs font-medium text-gray-900">
 DM Message
 </label>
 
 <textarea
 value={dm}
-onChange={(e)=>{
-  setDm(e.target.value)
-  setError("")
-}}
-placeholder="Example: Hi! Sending details..."
-className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-xs sm:text-sm text-gray-900 resize-none focus:ring-2 focus:ring-indigo-500/30"
+onChange={(e)=>setDm(e.target.value)}
+className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-sm"
 rows={3}
 />
 </div>
 
-<div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 pt-2">
+{/* ACTIONS */}
+<div className="flex justify-end gap-3">
 
-<button
-onClick={onClose}
-className="w-full sm:w-auto text-sm text-gray-600 hover:text-gray-900"
->
+<button onClick={onClose} className="text-sm text-gray-600">
 Cancel
 </button>
 
 <button
-onClick={handleCreate}
-disabled={loading || !clientId || !selectedPost}
-className="w-full sm:w-auto bg-indigo-600 text-white px-5 py-2 rounded-xl text-sm font-medium hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 transition disabled:opacity-50"
+onClick={handleSubmit}
+disabled={loading}
+className="bg-indigo-600 text-white px-5 py-2 rounded-xl text-sm"
 >
-{loading ? "Creating..." : "Create Automation"}
+{loading ? "Saving..." : isEdit ? "Update" : "Create"}
 </button>
 
 </div>
 
 </div>
-
 </div>
-
 )
-
 }

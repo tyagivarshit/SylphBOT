@@ -17,4 +17,11 @@ router.post("/flows", createAutomationFlow);
 
 router.get("/flows", getFlows);
 
+/* 🔥 FUTURE READY (EDIT FLOW SUPPORT) */
+router.patch("/flows/:id", async (req, res) => {
+  return res.status(501).json({
+    message: "Update flow not implemented yet",
+  });
+});
+
 export default router;

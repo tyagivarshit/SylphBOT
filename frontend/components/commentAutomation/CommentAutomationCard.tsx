@@ -3,16 +3,19 @@
 import { api } from "@/lib/api"
 import { useState } from "react"
 
-export default function CommentAutomationCard({ automation, onDelete, onRefresh }: any){
+export default function CommentAutomationCard({
+  automation,
+  onDelete,
+  onRefresh,
+  onEdit, // 🔥 NEW
+}: any){
 
 const [loading,setLoading] = useState(false)
 
 /* ---------------- TOGGLE ---------------- */
 
 const handleToggle = async () => {
-
   try{
-
     setLoading(true)
 
     await api.patch(`/api/comment-triggers/${automation.id}/toggle`)
@@ -24,23 +27,19 @@ const handleToggle = async () => {
   }finally{
     setLoading(false)
   }
-
 }
 
 /* ---------------- DELETE ---------------- */
 
 const handleDelete = async () => {
-
   try{
-
     await api.delete(`/api/comment-triggers/${automation.id}`)
 
-    onDelete?.(automation.id)
+    onDelete?.(automation.id) // 🔥 only one place handle
 
   }catch{
     alert("Delete failed")
   }
-
 }
 
 /* ---------------- STATUS ---------------- */
@@ -105,7 +104,10 @@ Triggered: {automation.triggerCount}
 
 <div className="flex gap-3">
 
-<button className="text-xs sm:text-sm font-medium text-blue-600 hover:underline">
+<button
+onClick={() => onEdit?.(automation)} // 🔥 FIXED
+className="text-xs sm:text-sm font-medium text-blue-600 hover:underline"
+>
 Edit
 </button>
 
@@ -137,5 +139,4 @@ isActive
 </div>
 
 )
-
 }

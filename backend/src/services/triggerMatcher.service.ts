@@ -46,7 +46,6 @@ export const matchAutomationTrigger = async ({
 
       triggerCache.set(businessId, flows);
 
-      /* auto clear cache */
       setTimeout(() => {
         triggerCache.delete(businessId);
       }, CACHE_TTL);
@@ -57,10 +56,12 @@ export const matchAutomationTrigger = async ({
     let bestMatch: { flowId: string; score: number } | null = null;
 
     /* ==================================================
-    LOOP FLOWS (LIGHTWEIGHT)
+    LOOP FLOWS
     ================================================== */
 
     for (const flow of flows) {
+      if (!flow.triggerValue) continue;
+
       const cleanTrigger = flow.triggerValue
         .toLowerCase()
         .replace(/[^\w\s]/g, "")
@@ -73,9 +74,8 @@ export const matchAutomationTrigger = async ({
         return { flowId: flow.id };
       }
 
-      /* FAST WORD MATCH (no regex) */
-      const words = cleanText.split(" ");
-      if (words.includes(cleanTrigger)) {
+      /* 🔥 SMART MATCH (FIXED) */
+      if (cleanText.includes(cleanTrigger)) {
         score = 2;
       }
 
@@ -87,7 +87,6 @@ export const matchAutomationTrigger = async ({
         score = 1;
       }
 
-      /* BEST MATCH PICK */
       if (score > 0) {
         if (!bestMatch || score > bestMatch.score) {
           bestMatch = {

@@ -59,7 +59,7 @@ return(
 Connected Platforms
 </h1>
 
-<p className="text-sm text-gray-600 mt-1">
+<p className="text-sm text-gray-500 mt-1">
 Manage your connected messaging platforms
 </p>
 
@@ -67,7 +67,7 @@ Manage your connected messaging platforms
 
 <button
 onClick={()=>setOpen(true)}
-className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition"
+className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm font-semibold rounded-xl hover:shadow-lg transition"
 >
 
 <Plus size={16}/>
@@ -92,7 +92,7 @@ className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
 value={search}
 onChange={(e)=>setSearch(e.target.value)}
 placeholder="Search platforms..."
-className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+className="w-full px-4 py-2.5 pl-10 border border-blue-100 rounded-xl text-sm bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
 />
 
 </div>
@@ -104,9 +104,9 @@ className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus
 
 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6 animate-pulse">
 
-<div className="h-32 bg-gray-200 rounded-xl"/>
-<div className="h-32 bg-gray-200 rounded-xl"/>
-<div className="h-32 bg-gray-200 rounded-xl"/>
+<div className="h-32 bg-white/70 border border-blue-100 rounded-2xl"/>
+<div className="h-32 bg-white/70 border border-blue-100 rounded-2xl"/>
+<div className="h-32 bg-white/70 border border-blue-100 rounded-2xl"/>
 
 </div>
 

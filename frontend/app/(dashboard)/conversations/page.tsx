@@ -45,7 +45,7 @@ export default function ConversationsPage() {
     const fetchLeads = async () => {
       try {
         const res = await fetch(`${API}/api/conversations`, {
-          credentials: "include", // 🔥 MOST IMPORTANT FIX
+          credentials: "include",
         });
 
         const data = await res.json();
@@ -71,7 +71,7 @@ export default function ConversationsPage() {
         const res = await fetch(
           `${API}/api/conversations/${selectedLead.id}/messages`,
           {
-            credentials: "include", // 🔥 IMPORTANT
+            credentials: "include",
           }
         );
 
@@ -95,7 +95,7 @@ export default function ConversationsPage() {
 
     const socket = io(API, {
       transports: ["websocket"],
-      withCredentials: true, // 🔥 IMPORTANT FOR COOKIE AUTH
+      withCredentials: true,
     });
 
     socket.emit("join", `lead_${selectedLead.id}`);
@@ -128,19 +128,26 @@ export default function ConversationsPage() {
   };
 
   return (
-    <div className="h-[calc(100vh-64px)] flex bg-[#f9fcff]">
-      <ChatSidebar
-        leads={leads}
-        selectedLead={selectedLead}
-        setSelectedLead={setSelectedLead}
-      />
+    <div className="h-[calc(100vh-64px)] flex bg-gradient-to-br from-white via-blue-50 to-cyan-50">
 
-      <ChatWindow
-        selectedLead={selectedLead}
-        messages={messages}
-        setMessages={setMessages}
-        onBack={isMobileView ? handleBack : undefined}
-      />
+      {/* WRAPPER CARD */}
+      <div className="flex w-full bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl overflow-hidden shadow-sm">
+
+        <ChatSidebar
+          leads={leads}
+          selectedLead={selectedLead}
+          setSelectedLead={setSelectedLead}
+        />
+
+        <ChatWindow
+          selectedLead={selectedLead}
+          messages={messages}
+          setMessages={setMessages}
+          onBack={isMobileView ? handleBack : undefined}
+        />
+
+      </div>
+
     </div>
   );
 }

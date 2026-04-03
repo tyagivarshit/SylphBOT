@@ -102,14 +102,14 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
       />
 
       {/* DRAWER */}
-      <div className="relative w-full sm:w-[420px] h-full bg-white border-l shadow-xl flex flex-col">
+      <div className="relative w-full sm:w-[420px] h-full bg-white/80 backdrop-blur-xl border-l border-blue-100 shadow-xl flex flex-col">
 
         {/* HEADER */}
-        <div className="flex items-center justify-between px-5 py-4 border-b">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-blue-100">
 
           <div className="flex items-center gap-3">
 
-            <div className="w-10 h-10 rounded-full bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] flex items-center justify-center text-white text-sm font-semibold">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 flex items-center justify-center text-white text-sm font-semibold">
               {lead?.name?.charAt(0)?.toUpperCase() || "?"}
             </div>
 
@@ -117,7 +117,7 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
               <h2 className="text-sm font-semibold text-gray-900">
                 {lead?.name || "Lead"}
               </h2>
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-gray-500">
                 Live conversation
               </p>
             </div>
@@ -126,7 +126,7 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
 
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-100"
+            className="p-2 rounded-xl hover:bg-blue-50 transition"
           >
             <X size={18}/>
           </button>
@@ -134,7 +134,7 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
         </div>
 
         {/* CHAT */}
-        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3 bg-[#f7fbff]">
+        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3 bg-blue-50/40">
 
           {messages.length > 0 ? (
 
@@ -151,7 +151,7 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
                 <div key={msg.id}>
 
                   {showDate && (
-                    <div className="text-center text-[11px] text-gray-500 my-3">
+                    <div className="text-center text-[11px] text-gray-400 my-3">
                       {date}
                     </div>
                   )}
@@ -159,10 +159,10 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
                   <div className={`flex ${isUser ? "" : "justify-end"}`}>
 
                     <div
-                      className={`px-4 py-2 rounded-xl text-sm max-w-[80%] break-words ${
+                      className={`px-4 py-2 rounded-2xl text-sm max-w-[80%] break-words shadow-sm ${
                         isUser
-                          ? "bg-white text-gray-900 border shadow-sm"
-                          : "bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white"
+                          ? "bg-white/80 backdrop-blur border border-blue-100 text-gray-900"
+                          : "bg-gradient-to-r from-blue-600 to-cyan-500 text-white"
                       }`}
                     >
 
@@ -191,13 +191,13 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
           ) : (
 
             <div className="text-center text-sm text-gray-500 py-10">
-              No conversation yet 🚀
+              No conversation yet
             </div>
 
           )}
 
           {typing && (
-            <div className="text-xs text-gray-600 animate-pulse">
+            <div className="text-xs text-gray-500 animate-pulse">
               typing...
             </div>
           )}
@@ -207,7 +207,7 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
         </div>
 
         {/* STAGE */}
-        <div className="border-t p-4">
+        <div className="border-t border-blue-100 p-4">
 
           <label className="text-sm font-medium text-gray-800">
             Lead Stage
@@ -216,7 +216,7 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
           <select
             value={stage}
             onChange={(e)=>updateStage(e.target.value)}
-            className="mt-2 w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-2 w-full border border-blue-100 rounded-xl px-4 py-2.5 text-sm bg-white/70 focus:outline-none focus:ring-2 focus:ring-blue-400"
           >
 
             <option value="NEW">NEW</option>

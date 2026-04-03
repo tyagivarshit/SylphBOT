@@ -17,7 +17,7 @@ return(
     Automation
   </h1>
 
-  <p className="text-sm text-gray-600 mt-1">
+  <p className="text-sm text-gray-500 mt-1">
     Create and manage your Instagram automations
   </p>
 </div>
@@ -26,7 +26,7 @@ return(
 
 {/* LIST */}
 
-<div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
+<div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm hover:shadow-lg transition">
   <AutomationList/>
 </div>
 

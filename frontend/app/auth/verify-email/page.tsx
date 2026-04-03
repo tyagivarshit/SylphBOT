@@ -13,15 +13,10 @@ export default function VerifyEmailPage() {
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
   const [message, setMessage] = useState("")
   const [email, setEmail] = useState("")
-
   const [cooldown, setCooldown] = useState(0)
 
   const mounted = useRef(true)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
-
-  /* ======================================
-  CLEANUP
-  ====================================== */
 
   useEffect(() => {
     return () => {
@@ -29,10 +24,6 @@ export default function VerifyEmailPage() {
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [])
-
-  /* ======================================
-  COOLDOWN TIMER
-  ====================================== */
 
   useEffect(() => {
     if (cooldown <= 0) return
@@ -48,10 +39,6 @@ export default function VerifyEmailPage() {
 
   const startCooldown = () => setCooldown(30)
 
-  /* ======================================
-  VERIFY EMAIL
-  ====================================== */
-
   useEffect(() => {
 
     const token = params.get("token")
@@ -64,7 +51,6 @@ export default function VerifyEmailPage() {
 
     const runVerification = async () => {
       try {
-
         await verifyEmail(token)
 
         if (mounted.current) {
@@ -95,10 +81,6 @@ export default function VerifyEmailPage() {
 
   }, [params])
 
-  /* ======================================
-  RESEND
-  ====================================== */
-
   const handleResend = async () => {
 
     if (!email) {
@@ -109,85 +91,94 @@ export default function VerifyEmailPage() {
     if (cooldown > 0) return
 
     try {
-
       await resendVerification(email.trim().toLowerCase())
-
       toast.success("Verification email sent")
-
       startCooldown()
-
     } catch {
       toast.error("Try again later")
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4 sm:px-6">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-[#f5f9ff] via-white to-[#eef4ff]">
 
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-6 sm:p-10 max-w-sm sm:max-w-md w-full text-center">
+      {/* 🔥 AUTOMEXA BRAND */}
+      <div className="fixed top-6 left-6 sm:left-10 z-20">
+        <h1
+          className="text-3xl sm:text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent"
+          style={{ fontFamily: "Orbitron" }}
+        >
+          Automexa
+        </h1>
+      </div>
 
-        {status === "loading" && (
-          <>
-            <div className="flex justify-center mb-6">
-              <div className="w-14 h-14 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin"/>
-            </div>
+      <div className="h-full flex items-center justify-center px-4">
 
-            <h1 className="text-xl font-bold text-gray-900">
-              Verifying Email...
-            </h1>
-          </>
-        )}
+        <div className="w-full max-w-sm bg-white/70 backdrop-blur-xl border border-blue-100 rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)] text-center">
 
-        {status === "success" && (
-          <>
-            <h1 className="text-xl font-bold text-green-600">
-              Email Verified 🎉
-            </h1>
+          {status === "loading" && (
+            <>
+              <div className="flex justify-center mb-5">
+                <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"/>
+              </div>
 
-            <p className="mt-3 text-sm">{message}</p>
+              <h1 className="text-lg font-bold text-gray-800">
+                Verifying Email...
+              </h1>
+            </>
+          )}
 
-            <Link
-              href="/auth/login"
-              className="mt-6 inline-block bg-blue-600 text-white px-5 py-2.5 rounded-lg"
-            >
-              Go to Login
-            </Link>
-          </>
-        )}
+          {status === "success" && (
+            <>
+              <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
+                Email Verified 🎉
+              </h1>
 
-        {status === "error" && (
-          <>
-            <h1 className="text-xl font-bold text-red-600">
-              Verification Failed
-            </h1>
+              <p className="mt-3 text-sm text-gray-600">{message}</p>
 
-            <p className="mt-3 text-sm">{message}</p>
+              <Link
+                href="/auth/login"
+                className="mt-5 inline-block w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold"
+              >
+                Go to Login
+              </Link>
+            </>
+          )}
 
-            <input
-              type="email"
-              placeholder="Enter your email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full mt-4 border px-3 py-2 rounded-lg"
-            />
+          {status === "error" && (
+            <>
+              <h1 className="text-lg font-bold text-red-600">
+                Verification Failed
+              </h1>
 
-            <button
-              onClick={handleResend}
-              disabled={cooldown > 0}
-              className="mt-3 w-full bg-blue-600 text-white py-2 rounded-lg disabled:opacity-70"
-            >
-              {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend verification"}
-            </button>
+              <p className="mt-3 text-sm text-gray-600">{message}</p>
 
-            <Link
-              href="/auth/login"
-              className="mt-4 block text-blue-600 text-sm"
-            >
-              Back to Login
-            </Link>
-          </>
-        )}
+              <input
+                type="email"
+                placeholder="Enter your email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full mt-4 bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
+              />
 
+              <button
+                onClick={handleResend}
+                disabled={cooldown > 0}
+                className="mt-3 w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-70"
+              >
+                {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend verification"}
+              </button>
+
+              <Link
+                href="/auth/login"
+                className="mt-4 block text-blue-600 text-sm"
+              >
+                Back to Login
+              </Link>
+            </>
+          )}
+
+        </div>
       </div>
     </div>
   )

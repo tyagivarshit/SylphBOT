@@ -84,18 +84,21 @@ function TopbarComponent({ setOpen }: TopbarProps) {
     <div
       className="
         sticky top-0 z-30
-        h-16 bg-[#fdfdfb]
-        border-b border-[#e6e6e2]
+        h-16
+
+        bg-white/70 backdrop-blur-xl
+        border-b border-blue-100
+
         flex items-center justify-between
         px-4 sm:px-6
       "
     >
-      {/* 🔥 LEFT (BRAND) */}
-      <h1 className="text-[16px] sm:text-[18px] font-semibold tracking-wide whitespace-nowrap">
-        <span className="bg-gradient-to-r from-[#C8A96A] to-[#E6C200] bg-clip-text text-transparent">
-          LEVORA
-        </span>
-        <span className="ml-1 text-[#0f172a]">AI</span>
+      {/* 🔥 LEFT (BRANDING FIXED) */}
+      <h1
+        className="text-2xl sm:text-3xl font-extrabold tracking-wide bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent whitespace-nowrap"
+        style={{ fontFamily: "Orbitron" }}
+      >
+        Automexa
       </h1>
 
       {/* 🔥 RIGHT */}
@@ -108,7 +111,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
         >
           <Search
             size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9ca3af]"
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
           />
 
           <input
@@ -118,18 +121,18 @@ function TopbarComponent({ setOpen }: TopbarProps) {
               setOpenSearch(true);
             }}
             placeholder="Search..."
-            className="w-full border border-[#e6e6e2] rounded-xl pl-9 pr-3 py-2 text-sm text-[#0f172a] bg-white focus:outline-none focus:ring-2 focus:ring-[#C8A96A]"
+            className="w-full border border-blue-100 rounded-xl pl-9 pr-3 py-2 text-sm text-gray-900 bg-white/80 backdrop-blur-md focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
 
           {openSearch && (
-            <div className="absolute mt-2 w-full bg-white border border-[#e6e6e2] rounded-xl shadow-lg z-50 max-h-72 overflow-y-auto">
+            <div className="absolute mt-2 w-full bg-white border border-blue-100 rounded-xl shadow-lg z-50 max-h-72 overflow-y-auto">
               
               {isLoading && (
-                <div className="p-3 text-sm text-[#6b7280]">Searching...</div>
+                <div className="p-3 text-sm text-gray-500">Searching...</div>
               )}
 
               {!isLoading && results.length === 0 && (
-                <div className="p-3 text-sm text-[#6b7280]">No results</div>
+                <div className="p-3 text-sm text-gray-500">No results</div>
               )}
 
               {results.map((item: any, index: number) => (
@@ -138,8 +141,8 @@ function TopbarComponent({ setOpen }: TopbarProps) {
                   onClick={() => router.push(item.url)}
                   className={`p-3 text-sm cursor-pointer ${
                     index === activeIndex
-                      ? "bg-[#f1f1ef]"
-                      : "hover:bg-[#f1f1ef]"
+                      ? "bg-blue-50"
+                      : "hover:bg-blue-50"
                   }`}
                 >
                   {item.title}
@@ -162,12 +165,12 @@ function TopbarComponent({ setOpen }: TopbarProps) {
           <ProfileDropdown />
         </div>
 
-        {/* 🍔 MENU BUTTON (MOBILE ONLY) */}
+        {/* 🍔 MENU BUTTON */}
         <button
           onClick={() => setOpen((prev) => !prev)}
-          className="lg:hidden p-2 rounded-xl hover:bg-[#f1f1ef] active:scale-95 transition duration-200"
+          className="lg:hidden p-2 rounded-xl hover:bg-blue-50 active:scale-95 transition duration-200"
         >
-          <Menu size={20} className="text-[#0f172a]" />
+          <Menu size={20} className="text-gray-800" />
         </button>
 
       </div>

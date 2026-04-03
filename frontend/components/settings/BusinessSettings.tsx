@@ -79,18 +79,22 @@ export default function BusinessSettings() {
   };
 
   if (isLoading) {
-    return <div className="text-sm text-gray-500">Loading...</div>;
+    return (
+      <div className="text-sm text-gray-500 animate-pulse">
+        Loading...
+      </div>
+    );
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-5">
+    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 space-y-6 shadow-sm">
 
       {/* TITLE */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">
+        <h3 className="text-base font-semibold text-gray-900">
           Business Information
         </h3>
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="text-sm text-gray-500 mt-1">
           Update your workspace details
         </p>
       </div>
@@ -103,7 +107,7 @@ export default function BusinessSettings() {
           placeholder="Business Name"
           value={form.business}
           onChange={handleChange}
-          className="input"
+          className="w-full px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         />
 
         <input
@@ -111,7 +115,7 @@ export default function BusinessSettings() {
           placeholder="Industry"
           value={form.industry}
           onChange={handleChange}
-          className="input"
+          className="w-full px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         />
 
         <input
@@ -119,14 +123,14 @@ export default function BusinessSettings() {
           placeholder="Website URL"
           value={form.website}
           onChange={handleChange}
-          className="input"
+          className="w-full px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         />
 
         <select
           name="teamSize"
           value={form.teamSize}
           onChange={handleChange}
-          className="input"
+          className="w-full px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         >
           <option value="">Team Size</option>
           <option value="1">Solo</option>
@@ -139,7 +143,7 @@ export default function BusinessSettings() {
           name="type"
           value={form.type}
           onChange={handleChange}
-          className="input"
+          className="w-full px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         >
           <option value="">Business Type</option>
           <option value="agency">Agency</option>
@@ -152,7 +156,7 @@ export default function BusinessSettings() {
           name="timezone"
           value={form.timezone}
           onChange={handleChange}
-          className="input"
+          className="w-full px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         >
           <option value="">Timezone</option>
           <option value="IST">India (IST)</option>
@@ -166,38 +170,11 @@ export default function BusinessSettings() {
         <button
           onClick={handleSave}
           disabled={mutation.isPending}
-          className="btn-primary"
+          className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:shadow-lg transition disabled:opacity-70"
         >
           {mutation.isPending ? "Saving..." : "Save Changes"}
         </button>
       </div>
-
-      {/* STYLES */}
-      <style jsx>{`
-        .input {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          font-size: 14px;
-          color: #111827;
-          background: white;
-        }
-
-        .input:focus {
-          border-color: #14e1c1;
-          box-shadow: 0 0 0 2px rgba(20, 225, 193, 0.2);
-        }
-
-        .btn-primary {
-          background: #14e1c1;
-          color: white;
-          padding: 10px 16px;
-          border-radius: 10px;
-          font-size: 14px;
-          font-weight: 500;
-        }
-      `}</style>
 
     </div>
   );

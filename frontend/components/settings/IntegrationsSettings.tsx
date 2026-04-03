@@ -100,18 +100,22 @@ export default function IntegrationsSettings() {
   };
 
   if (isLoading) {
-    return <div className="text-sm text-gray-500">Loading...</div>;
+    return (
+      <div className="text-sm text-gray-500 animate-pulse">
+        Loading...
+      </div>
+    );
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-5">
+    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 space-y-6 shadow-sm">
 
       {/* HEADER */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">
+        <h3 className="text-base font-semibold text-gray-900">
           Integrations
         </h3>
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="text-sm text-gray-500 mt-1">
           Connect your external platforms
         </p>
       </div>
@@ -155,7 +159,7 @@ function IntegrationCard({
   onDisconnect,
 }: any) {
   return (
-    <div className="border border-gray-200 rounded-lg p-4 flex items-center justify-between">
+    <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 flex items-center justify-between hover:shadow-md transition">
 
       <div>
         <p className="text-sm font-semibold text-gray-900">
@@ -167,14 +171,14 @@ function IntegrationCard({
       {connected ? (
         <button
           onClick={onDisconnect}
-          className="border border-red-500 text-red-500 px-3 py-1.5 rounded-lg text-sm"
+          className="bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl text-sm font-semibold hover:shadow-md transition"
         >
           Disconnect
         </button>
       ) : (
         <button
           onClick={onConnect}
-          className="bg-[#14E1C1] text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+          className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:shadow-lg transition"
         >
           {loading ? "Connecting..." : "Connect"}
         </button>
@@ -191,7 +195,7 @@ function ApiKeySection() {
   const apiKey = "sk_live_xxxxxxxxxxxxxx";
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+    <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 space-y-4">
 
       <div>
         <p className="text-sm font-semibold text-gray-900">
@@ -202,7 +206,7 @@ function ApiKeySection() {
         </p>
       </div>
 
-      <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+      <div className="flex items-center justify-between bg-white border border-blue-100 rounded-xl px-4 py-2.5">
 
         <span className="text-sm text-gray-700 truncate">
           {apiKey}
@@ -210,7 +214,7 @@ function ApiKeySection() {
 
         <button
           onClick={() => navigator.clipboard.writeText(apiKey)}
-          className="text-xs text-[#14E1C1] font-medium"
+          className="text-xs font-semibold bg-blue-50 text-gray-700 px-3 py-1.5 rounded-lg hover:shadow-sm transition"
         >
           Copy
         </button>

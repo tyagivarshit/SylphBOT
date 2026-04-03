@@ -11,8 +11,8 @@ export default function BookingTabs() {
   return (
     <div className="flex flex-col h-full">
 
-      {/* 🔥 iOS SEGMENT CONTROL */}
-      <div className="flex bg-[#f1f1ef] rounded-xl p-1 mb-4 border border-[#e6e6e2]">
+      {/* 🔥 SEGMENT CONTROL */}
+      <div className="flex bg-blue-50 rounded-xl p-1.5 mb-5 border border-blue-100 backdrop-blur-sm">
 
         {tabs.map((t) => {
           const isActive = active === t;
@@ -21,10 +21,10 @@ export default function BookingTabs() {
             <button
               key={t}
               onClick={() => setActive(t)}
-              className={`flex-1 text-[12px] py-2 rounded-lg font-medium transition-all duration-200 ${
+              className={`flex-1 text-xs py-2.5 rounded-xl font-semibold transition-all duration-200 ${
                 isActive
-                  ? "bg-white text-[#0f172a] shadow-[0_2px_10px_rgba(0,0,0,0.05)]"
-                  : "text-[#6b7280] hover:text-[#0f172a]"
+                  ? "bg-white text-blue-600 shadow-sm"
+                  : "text-gray-500 hover:text-gray-800"
               }`}
             >
               {t}
@@ -34,8 +34,10 @@ export default function BookingTabs() {
 
       </div>
 
-      {/* CONTENT */}
-      <BookedAppointments filter={active} />
+      {/* 🔥 CONTENT */}
+      <div className="flex-1 overflow-hidden">
+        <BookedAppointments filter={active} />
+      </div>
 
     </div>
   );

@@ -56,61 +56,61 @@ export default function CreateSlotModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm">
 
       {/* MODAL */}
-      <div className="w-full md:max-w-md bg-[#fdfdfb] rounded-t-2xl md:rounded-2xl p-5 md:p-6 space-y-5 shadow-[0_10px_40px_rgba(0,0,0,0.08)] animate-slideUp">
+      <div className="w-full md:max-w-md bg-white/80 backdrop-blur-xl border border-blue-100 rounded-t-2xl md:rounded-2xl p-6 space-y-5 shadow-xl animate-slideUp">
 
         {/* HEADER */}
         <div className="flex justify-between items-center">
-          <h2 className="text-[16px] font-semibold text-[#0f172a]">
+          <h2 className="text-base font-semibold text-gray-900">
             Create Slot
           </h2>
 
           <button
             onClick={onClose}
-            className="p-1 rounded-full hover:bg-gray-100 transition"
+            className="p-2 rounded-xl hover:bg-blue-50 transition"
           >
-            <X size={18} className="text-[#6b7280]" />
+            <X size={18} className="text-gray-600" />
           </button>
         </div>
 
         {/* DATE */}
         <div>
-          <label className="text-[12px] font-medium text-[#8a8a8a]">
+          <label className="text-xs font-medium text-gray-500">
             Date
           </label>
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="w-full mt-1 border border-[#e6e6e2] rounded-xl px-3 py-2 text-[14px] text-[#0f172a] font-medium focus:ring-2 focus:ring-[#C8A96A] outline-none bg-white"
+            className="w-full mt-1 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:ring-2 focus:ring-blue-400 outline-none bg-white/70"
           />
         </div>
 
         {/* START */}
         <div>
-          <label className="text-[12px] font-medium text-[#8a8a8a]">
+          <label className="text-xs font-medium text-gray-500">
             Start Time
           </label>
           <input
             type="time"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
-            className="w-full mt-1 border border-[#e6e6e2] rounded-xl px-3 py-2 text-[14px] text-[#0f172a] font-semibold focus:ring-2 focus:ring-[#C8A96A] outline-none bg-white"
+            className="w-full mt-1 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:ring-2 focus:ring-blue-400 outline-none bg-white/70"
           />
         </div>
 
         {/* END */}
         <div>
-          <label className="text-[12px] font-medium text-[#8a8a8a]">
+          <label className="text-xs font-medium text-gray-500">
             End Time
           </label>
           <input
             type="time"
             value={endTime}
             onChange={(e) => setEndTime(e.target.value)}
-            className="w-full mt-1 border border-[#e6e6e2] rounded-xl px-3 py-2 text-[14px] text-[#0f172a] font-semibold focus:ring-2 focus:ring-[#C8A96A] outline-none bg-white"
+            className="w-full mt-1 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:ring-2 focus:ring-blue-400 outline-none bg-white/70"
           />
         </div>
 
@@ -119,7 +119,7 @@ export default function CreateSlotModal({
 
           <button
             onClick={onClose}
-            className="text-[13px] px-3 py-1.5 text-[#6b7280] hover:text-[#0f172a] transition font-medium"
+            className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-50 text-gray-700 hover:bg-blue-100 transition"
           >
             Cancel
           </button>
@@ -127,7 +127,7 @@ export default function CreateSlotModal({
           <button
             onClick={handleCreate}
             disabled={loading}
-            className="px-4 py-2 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-[#C8A96A] to-[#E6C200] shadow-sm hover:opacity-90 disabled:opacity-60 transition"
+            className="px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md disabled:opacity-60 transition"
           >
             {loading ? "Saving..." : "Save Slot"}
           </button>

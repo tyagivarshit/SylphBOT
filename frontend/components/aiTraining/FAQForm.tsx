@@ -94,36 +94,35 @@ return(
 
 <div className="space-y-6">
 
-{/* ADD FORM */}
-
-<div className="space-y-4">
+{/* 🔥 ADD FORM CARD */}
+<div className="space-y-4 bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
 
 <input
 value={question}
 onChange={(e)=>setQuestion(e.target.value)}
 placeholder="Question"
-className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"
+className="w-full bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
 />
 
 <textarea
 value={answer}
 onChange={(e)=>setAnswer(e.target.value)}
 placeholder="Answer"
-className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"
+className="w-full bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
 rows={4}
 />
 
 <button
 onClick={handleAdd}
 disabled={loading}
-className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition active:scale-[0.98] disabled:opacity-70"
 >
 {loading ? "Adding..." : "Add FAQ"}
 </button>
 
 </div>
 
-{/* FAQ LIST */}
+{/* 🔥 FAQ LIST */}
 
 <div className="space-y-3">
 
@@ -134,9 +133,9 @@ className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-
 {faqs.map((faq) => (
   <div
     key={faq.id}
-    className="border border-gray-200 rounded-lg p-3"
+    className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-xl p-4 shadow-sm hover:shadow-md transition"
   >
-    <p className="font-medium text-sm text-gray-900">
+    <p className="font-semibold text-sm text-gray-900">
       {faq.question}
     </p>
     <p className="text-sm text-gray-600 mt-1">

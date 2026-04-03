@@ -77,16 +77,16 @@ if(fetching){
 
 return(
 
-<div className="space-y-4">
+<div className="space-y-5 bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
 
-<label className="text-sm font-medium text-gray-800">
+<label className="text-sm font-semibold text-gray-700">
 AI Tone
 </label>
 
 <select
 value={tone}
 onChange={(e)=>setTone(e.target.value)}
-className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+className="w-full bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-400 outline-none transition"
 >
 <option>Friendly</option>
 <option>Professional</option>
@@ -98,14 +98,14 @@ className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
 value={instructions}
 onChange={(e)=>setInstructions(e.target.value)}
 placeholder="Custom sales instructions..."
-className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+className="w-full bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
 rows={4}
 />
 
 <button
 onClick={handleSave}
 disabled={loading}
-className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition active:scale-[0.98] disabled:opacity-70"
 >
 {loading ? "Saving..." : "Save Settings"}
 </button>

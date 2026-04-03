@@ -21,46 +21,59 @@ export default function SettingsPage() {
       </div>
 
       {/* INTEGRATIONS (TOP PRIORITY) */}
-      <div className="space-y-6">
-        <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+      <div className="space-y-4">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Integrations
         </h2>
-        <IntegrationsSettings />
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+          <IntegrationsSettings />
+        </div>
       </div>
 
       {/* BUSINESS */}
-      <div className="space-y-6">
-        <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+      <div className="space-y-4">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Business
         </h2>
-        <BusinessSettings />
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+          <BusinessSettings />
+        </div>
       </div>
 
       {/* BILLING */}
-      <div className="space-y-6">
-        <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+      <div className="space-y-4">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Billing
         </h2>
-        <BillingSettings />
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+          <BillingSettings />
+        </div>
       </div>
 
       {/* NOTIFICATIONS */}
-      <div className="space-y-6">
-        <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+      <div className="space-y-4">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Notifications
         </h2>
-        <NotificationSettings />
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+          <NotificationSettings />
+        </div>
       </div>
 
-      {/* ACCOUNT ACTIONS (LAST - SIDE BY SIDE) */}
-      <div className="space-y-6">
+      {/* ACCOUNT ACTIONS */}
+      <div className="space-y-4">
         <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
           Account Actions
         </h2>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ChangePassword />
-          <DeleteAccount />
+          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+            <ChangePassword />
+          </div>
+
+          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+            <DeleteAccount />
+          </div>
         </div>
       </div>
 

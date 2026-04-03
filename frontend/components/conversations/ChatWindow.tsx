@@ -67,7 +67,7 @@ export default function ChatWindow({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            content: msg, // ✅ FIX
+            content: msg,
             sender: "USER",
           }),
         }
@@ -122,9 +122,10 @@ export default function ChatWindow({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#f9fcff] h-full">
+    <div className="flex-1 flex flex-col bg-blue-50/40 h-full">
+
       {/* HEADER */}
-      <div className="h-[60px] border-b border-gray-200 flex items-center px-4 bg-white gap-3">
+      <div className="h-[60px] border-b border-blue-100 flex items-center px-4 bg-white/80 backdrop-blur-xl gap-3">
         <button onClick={onBack} className="md:hidden text-gray-700">
           <ArrowLeft size={18} />
         </button>
@@ -139,6 +140,7 @@ export default function ChatWindow({
 
       {/* MESSAGES */}
       <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 space-y-3">
+
         {(messages || []).map((msg) => {
           const isUser = msg.sender === "USER";
 
@@ -148,11 +150,11 @@ export default function ChatWindow({
               className={`flex ${isUser ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[80%] md:max-w-[70%] px-4 py-2 text-sm rounded-2xl
+                className={`max-w-[80%] md:max-w-[70%] px-4 py-2 text-sm rounded-2xl shadow-sm
                 ${
                   isUser
-                    ? "bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white"
-                    : "bg-white border border-gray-200 text-gray-900"
+                    ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white"
+                    : "bg-white/80 backdrop-blur border border-blue-100 text-gray-900"
                 }`}
               >
                 <p>{msg.content}</p>
@@ -163,7 +165,7 @@ export default function ChatWindow({
                     {msg.cta === "BOOK_NOW" && (
                       <button
                         onClick={handleBooking}
-                        className="bg-green-600 text-white px-3 py-1 rounded-lg text-xs"
+                        className="bg-green-100 text-green-700 px-3 py-1 rounded-xl text-xs font-semibold"
                       >
                         Book Now
                       </button>
@@ -172,7 +174,7 @@ export default function ChatWindow({
                     {msg.cta === "SHOW_OPTIONS" && (
                       <button
                         onClick={handleOptions}
-                        className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs"
+                        className="bg-blue-50 text-blue-600 px-3 py-1 rounded-xl text-xs font-semibold"
                       >
                         View Options
                       </button>
@@ -196,13 +198,13 @@ export default function ChatWindow({
       </div>
 
       {/* INPUT */}
-      <div className="border-t border-gray-200 bg-white p-3 md:p-4">
+      <div className="border-t border-blue-100 bg-white/80 backdrop-blur-xl p-3 md:p-4">
         <div className="flex items-center gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value || "")}
             placeholder="Message..."
-            className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-[#14E1C1]"
+            className="flex-1 bg-white/70 border border-blue-100 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-400"
             onKeyDown={(e) => {
               if (e.key === "Enter") sendMessage();
             }}
@@ -211,12 +213,13 @@ export default function ChatWindow({
           <button
             onClick={sendMessage}
             disabled={sending}
-            className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white p-2 rounded-full disabled:opacity-50"
+            className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white p-2.5 rounded-xl disabled:opacity-50 shadow-sm hover:shadow-md transition"
           >
             <Send size={16} />
           </button>
         </div>
       </div>
+
     </div>
   );
 }

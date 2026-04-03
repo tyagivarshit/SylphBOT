@@ -57,19 +57,19 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="w-full bg-[#f7fbff] min-h-screen relative">
+    <div className="w-full bg-gradient-to-br from-white via-blue-50 to-cyan-50 min-h-screen relative">
 
       {/* 🔒 LIMIT OVERLAY */}
       {limited && (
         <div className="absolute inset-0 bg-white/80 backdrop-blur flex items-center justify-center z-50">
-          <div className="bg-white border p-6 rounded-xl text-center shadow-lg">
-            <h2 className="text-lg font-bold text-gray-900">
+          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 p-6 rounded-2xl text-center shadow-sm">
+            <h2 className="text-lg font-semibold text-gray-900">
               Upgrade Required 🔒
             </h2>
-            <p className="text-sm text-gray-700 mt-2">
+            <p className="text-sm text-gray-500 mt-2">
               You’ve reached your plan limit
             </p>
-            <button className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg">
+            <button className="mt-4 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-xl text-sm font-semibold hover:shadow-lg transition">
               Upgrade Plan
             </button>
           </div>
@@ -79,49 +79,49 @@ export default function DashboardPage() {
       {/* ================= MOBILE ================= */}
       <div className="md:hidden p-3 space-y-4">
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           <MiniCard title="Leads" value={stats.totalLeads} />
           <MiniCard title="Today" value={stats.leadsToday} />
           <MiniCard title="Month" value={stats.leadsThisMonth} />
           <MiniCard title="Msgs" value={stats.messagesToday} />
         </div>
 
-        <div className="bg-white border rounded-lg p-3">
-          <p className="text-[11px] text-gray-800 font-medium">AI Usage</p>
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 font-medium">AI Usage</p>
           <h2 className="text-base font-bold text-gray-900">
             {stats.aiCallsUsed} /{" "}
             {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
           </h2>
 
-          <div className="w-full h-1.5 bg-gray-200 rounded-full mt-2">
+          <div className="w-full h-2 bg-blue-50 rounded-full mt-3">
             <div
-              className="h-full bg-gradient-to-r from-[#14E1C1] to-[#3b82f6]"
+              className="h-full bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full"
               style={{ width: `${usagePercent}%` }}
             />
           </div>
         </div>
 
         {convo && (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-3">
             <MiniCard title="Active" value={convo.active} />
             <MiniCard title="Waiting" value={convo.waitingReplies} />
             <MiniCard title="Done" value={convo.resolved} />
           </div>
         )}
 
-        <div className="bg-white border rounded-lg p-3">
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4">
           <LeadsChart data={stats.chartData} />
         </div>
 
-        <div className="bg-white border rounded-lg p-3">
-          <h2 className="text-xs font-semibold text-gray-900 mb-2">
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4">
+          <h2 className="text-sm font-semibold text-gray-900 mb-3">
             Activity
           </h2>
 
           {stats.recentActivity.map((item: any) => (
-            <div key={item.id} className="py-1 border-b last:border-none">
-              <p className="text-[11px] text-gray-900">{item.text}</p>
-              <span className="text-[10px] text-gray-600">
+            <div key={item.id} className="py-2 border-b border-blue-100 last:border-none">
+              <p className="text-xs text-gray-900">{item.text}</p>
+              <span className="text-[10px] text-gray-500">
                 {new Date(item.time).toLocaleTimeString()}
               </span>
             </div>
@@ -144,15 +144,15 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          <div className="lg:col-span-2 bg-white border rounded-2xl p-5">
+          <div className="lg:col-span-2 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
             <h2 className="font-semibold text-gray-900 mb-4">
               Leads Growth
             </h2>
             <LeadsChart data={stats.chartData} />
           </div>
 
-          <div className="bg-white border rounded-2xl p-5">
-            <p className="text-sm text-gray-800 font-medium">
+          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
+            <p className="text-sm text-gray-500 font-medium">
               AI Usage
             </p>
             <h2 className="text-2xl font-bold text-gray-900">
@@ -160,15 +160,15 @@ export default function DashboardPage() {
               {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
             </h2>
 
-            <div className="w-full h-2 bg-gray-200 rounded-full mt-3">
+            <div className="w-full h-2 bg-blue-50 rounded-full mt-3">
               <div
-                className="h-full bg-gradient-to-r from-[#14E1C1] to-[#3b82f6]"
+                className="h-full bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full"
                 style={{ width: `${usagePercent}%` }}
               />
             </div>
 
             {stats.nearLimit && (
-              <p className="text-xs text-red-600 mt-2 font-medium">
+              <p className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-md inline-block mt-3">
                 Near usage limit ⚠️
               </p>
             )}
@@ -184,15 +184,15 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="bg-white border rounded-2xl p-5">
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
           <h2 className="font-semibold text-gray-900 mb-4">
             Recent Activity
           </h2>
 
           {stats.recentActivity.map((item: any) => (
-            <div key={item.id} className="flex justify-between py-2 border-b last:border-none">
-              <p className="text-gray-900">{item.text}</p>
-              <span className="text-sm text-gray-600">
+            <div key={item.id} className="flex justify-between py-3 border-b border-blue-100 last:border-none">
+              <p className="text-gray-900 text-sm">{item.text}</p>
+              <span className="text-sm text-gray-500">
                 {new Date(item.time).toLocaleTimeString()}
               </span>
             </div>
@@ -208,18 +208,18 @@ export default function DashboardPage() {
 
 function Card({ title, value }: any) {
   return (
-    <div className="bg-white border rounded-2xl p-4 shadow-sm">
-      <p className="text-sm text-gray-800 font-medium">{title}</p>
-      <h2 className="text-xl font-bold text-gray-900 mt-1">{value}</h2>
+    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition">
+      <p className="text-sm text-gray-500 font-medium">{title}</p>
+      <h2 className="text-xl font-semibold text-gray-900 mt-1">{value}</h2>
     </div>
   );
 }
 
 function MiniCard({ title, value }: any) {
   return (
-    <div className="bg-white border rounded-lg p-2 shadow-sm">
-      <p className="text-[10px] text-gray-700 font-medium">{title}</p>
-      <h2 className="text-sm font-bold text-gray-900">{value}</h2>
+    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-xl p-3 shadow-sm">
+      <p className="text-[10px] text-gray-500 font-medium">{title}</p>
+      <h2 className="text-sm font-semibold text-gray-900">{value}</h2>
     </div>
   );
 }

@@ -66,39 +66,36 @@ export default function ForgotPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f9fcff]">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-[#f5f9ff] via-white to-[#eef4ff]">
 
-      {/* 🔥 BRAND */}
-      <div className="fixed top-5 left-6 sm:left-10 z-20">
-        <h1 className="flex items-center text-2xl sm:text-3xl font-bold tracking-[0.25em] font-[Poppins]">
-          <span className="text-[#14E1C1]">S</span>
-          <span className="text-[#14E1C1]">Y</span>
-          <span className="text-gray-800">LPH</span>
+      {/* 🔥 AUTOMEXA BRAND */}
+      <div className="fixed top-6 left-6 sm:left-10 z-20">
+        <h1
+          className="text-3xl sm:text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent"
+          style={{ fontFamily: "Orbitron" }}
+        >
+          Automexa
         </h1>
       </div>
 
-      {/* 🔥 CENTER */}
-      <div className="min-h-screen flex items-center justify-center px-4">
+      <div className="h-full flex items-center justify-center px-4">
 
-        <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl p-7">
+        <div className="w-full max-w-sm bg-white/70 backdrop-blur-xl border border-blue-100 rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
 
           {sent ? (
             <div className="text-center">
 
               {/* ICON */}
-              <div className="mx-auto w-16 h-16 rounded-full bg-[#14E1C1]/10 flex items-center justify-center mb-6">
-                <Mail className="text-[#14E1C1]" size={26} />
+              <div className="mx-auto w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center mb-5">
+                <Mail className="text-blue-600" size={22} />
               </div>
 
               {/* HEADING */}
-              <h2 className="text-xl font-bold mb-2">
-                <span className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] bg-clip-text text-transparent">
-                  Check
-                </span>{" "}
-                <span className="text-gray-800">your email</span>
+              <h2 className="text-lg font-bold mb-2 bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
+                Check your email
               </h2>
 
-              <p className="text-sm text-gray-700">
+              <p className="text-sm text-gray-600">
                 If an account exists, we sent a reset link.
               </p>
 
@@ -106,14 +103,14 @@ export default function ForgotPage() {
               <button
                 onClick={handleReset}
                 disabled={cooldown > 0}
-                className="mt-6 w-full bg-gradient-to-r from-[#14E1C1] via-[#3b82f6] to-[#6366f1] text-white py-2.5 rounded-lg disabled:opacity-70"
+                className="mt-5 w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-70"
               >
                 {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend link"}
               </button>
 
               <Link
                 href="/auth/login"
-                className="inline-block mt-6 text-sm text-blue-600 font-medium"
+                className="inline-block mt-5 text-sm text-blue-600 font-medium"
               >
                 Back to login
               </Link>
@@ -122,46 +119,37 @@ export default function ForgotPage() {
             <form onSubmit={handleReset} className="space-y-4">
 
               {/* HEADING */}
-              <div className="text-center mb-6">
-                <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
-                  <span className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] bg-clip-text text-transparent">
-                    Forgot
-                  </span>{" "}
-                  <span className="text-gray-800">password?</span>
+              <div className="text-center mb-4">
+                <h2 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
+                  Forgot password?
                 </h2>
 
-                <p className="text-sm text-gray-700 mt-2">
+                <p className="text-xs text-gray-600 mt-1">
                   Enter your email to receive a reset link
                 </p>
               </div>
 
               {/* INPUT */}
-              <div>
-                <label className="text-xs font-medium text-gray-900">
-                  Email
-                </label>
+              <div className="relative">
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 pl-10 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
+                />
 
-                <div className="relative mt-1">
-                  <input
-                    type="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pl-10 text-sm text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-[#14E1C1] outline-none"
-                  />
-
-                  <Mail
-                    size={16}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-                  />
-                </div>
+                <Mail
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
+                />
               </div>
 
               {/* BUTTON */}
               <button
                 type="submit"
                 disabled={loading || cooldown > 0}
-                className="w-full bg-gradient-to-r from-[#14E1C1] via-[#3b82f6] to-[#6366f1] text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-70"
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-70"
               >
                 {loading
                   ? "Sending..."
@@ -171,7 +159,7 @@ export default function ForgotPage() {
               </button>
 
               {/* FOOTER */}
-              <p className="text-xs text-gray-700 text-center pt-2">
+              <p className="text-xs text-gray-600 text-center">
                 Remember your password?{" "}
                 <Link
                   href="/auth/login"

@@ -27,7 +27,6 @@ export default function NotificationsDropdown({
 
         console.log("NOTIFICATIONS API:", data);
 
-        // ✅ FIXED
         const notificationsData = data?.notifications || [];
         const unreadCount = data?.unreadCount ?? 0;
 
@@ -77,45 +76,56 @@ export default function NotificationsDropdown({
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen(!open)} // ✅ FIX (no auto mark)
-        className="relative p-2 rounded-lg hover:bg-gray-100"
+        onClick={() => setOpen(!open)}
+        className="relative p-2 rounded-xl hover:bg-blue-50 transition"
       >
         <Bell size={18} className="text-gray-700" />
 
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 text-xs bg-red-500 text-white px-1.5 rounded-full">
+          <span className="absolute -top-1 -right-1 text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full">
             {unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-80 bg-white border border-gray-200 rounded-xl shadow-lg p-4 max-h-96 overflow-y-auto z-50">
-          
-          {/* 🔥 MARK ALL READ BUTTON */}
+        <div className="absolute right-0 mt-3 w-80 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-lg p-4 max-h-96 overflow-y-auto z-50">
+
+          {/* HEADER ACTION */}
           {notifications.length > 0 && (
-            <div className="flex justify-end mb-2">
+            <div className="flex justify-between items-center mb-3">
+              <p className="text-sm font-semibold text-gray-900">
+                Notifications
+              </p>
               <button
                 onClick={markAllRead}
-                className="text-xs text-[#14E1C1] font-medium hover:underline"
+                className="text-xs font-semibold bg-blue-50 text-gray-700 px-2.5 py-1 rounded-lg hover:shadow-sm transition"
               >
-                Mark all as read
+                Mark all
               </button>
             </div>
           )}
 
           {notifications.length === 0 ? (
-            <p className="text-sm text-gray-500">No notifications</p>
+            <p className="text-sm text-gray-500 text-center py-4">
+              No notifications
+            </p>
           ) : (
             notifications.map((n) => (
               <div
                 key={n.id}
-                className={`p-2 rounded-lg mb-2 ${
-                  !n.read ? "bg-gray-100" : ""
+                className={`p-3 rounded-xl mb-2 border border-blue-100 transition ${
+                  !n.read
+                    ? "bg-blue-50"
+                    : "bg-white/60 backdrop-blur"
                 }`}
               >
-                <p className="text-sm font-medium">{n.title}</p>
-                <p className="text-xs text-gray-500">{n.message}</p>
+                <p className="text-sm font-semibold text-gray-900">
+                  {n.title}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {n.message}
+                </p>
               </div>
             ))
           )}

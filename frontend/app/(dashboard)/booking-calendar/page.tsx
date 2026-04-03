@@ -72,32 +72,35 @@ export default function BookingCalendarPage() {
   };
 
   return (
-    <div className="p-6 bg-white rounded-xl border border-gray-200">
-      <h1 className="text-lg font-semibold mb-4">
+    <div className="p-6 bg-white/80 backdrop-blur-xl rounded-2xl border border-blue-100 shadow-sm space-y-5 max-w-xl">
+
+      <h1 className="text-lg font-semibold text-gray-900">
         Booking Calendar
       </h1>
 
       {/* DATE PICKER */}
       <input
         type="date"
-        className="border px-3 py-2 rounded-lg mb-4"
+        className="w-full px-4 py-2.5 border border-blue-100 rounded-xl text-sm bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         value={date}
         onChange={(e) => setDate(e.target.value)}
       />
 
       {/* SLOTS */}
       {loading ? (
-        <p>Loading slots...</p>
+        <p className="text-sm text-gray-500 animate-pulse">
+          Loading slots...
+        </p>
       ) : (
-        <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="grid grid-cols-3 gap-3">
           {slots.map((slot, i) => (
             <button
               key={i}
               onClick={() => setSelectedSlot(slot)}
-              className={`border px-3 py-2 rounded-lg text-sm ${
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${
                 selectedSlot === slot
-                  ? "bg-blue-600 text-white"
-                  : "bg-white"
+                  ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white border-transparent shadow-md"
+                  : "bg-white/70 border-blue-100 text-gray-700 hover:bg-blue-50"
               }`}
             >
               {slot}
@@ -110,10 +113,11 @@ export default function BookingCalendarPage() {
       <button
         onClick={handleBooking}
         disabled={!selectedSlot}
-        className="bg-black text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+        className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:shadow-lg transition disabled:opacity-60"
       >
         Confirm Booking
       </button>
+
     </div>
   );
 }

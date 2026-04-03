@@ -49,7 +49,7 @@ function QuickActionsComponent() {
   const router = useRouter();
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
 
       <h3 className="text-sm font-semibold text-gray-900 mb-5">
         Quick Actions
@@ -64,26 +64,24 @@ function QuickActionsComponent() {
             <Link
               key={action.title}
               href={action.href}
-              prefetch // 🔥 NEXT OPTIMIZATION
+              prefetch
               aria-label={action.title}
-              className="group flex items-start gap-3 border border-gray-200 rounded-lg p-4 transition-all hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="group flex items-start gap-3 border border-blue-100 rounded-2xl p-4 bg-white/70 backdrop-blur transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400"
               onMouseEnter={() => {
-                // 🔥 PREFETCH ON HOVER (INSTANT NAV)
                 router.prefetch(action.href);
               }}
               onClick={() => {
-                // 🔥 FUTURE ANALYTICS HOOK
                 console.log("QuickAction Click:", action.title);
               }}
             >
               {/* ICON */}
-              <div className="p-2 rounded-md bg-blue-100 text-blue-600 group-hover:bg-blue-200 transition">
+              <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-100 transition">
                 <Icon size={18} />
               </div>
 
               {/* TEXT */}
               <div>
-                <p className="text-sm font-medium text-gray-900">
+                <p className="text-sm font-semibold text-gray-900">
                   {action.title}
                 </p>
 

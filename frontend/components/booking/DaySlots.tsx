@@ -63,14 +63,14 @@ export default function DaySlots({ onUpdate }: any) {
     <div className="h-full flex flex-col">
 
       {/* HEADER */}
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-[15px] font-semibold text-[#0f172a]">
+      <div className="flex justify-between items-center mb-5">
+        <h2 className="text-sm font-semibold text-gray-900">
           Available Slots
         </h2>
 
         <button
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1 text-[12px] px-3 py-1.5 rounded-xl font-semibold text-white bg-gradient-to-r from-[#C8A96A] to-[#E6C200] shadow-sm hover:opacity-90 transition active:scale-[0.96]"
+          className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md transition active:scale-[0.96]"
         >
           <Plus size={14} />
           Add
@@ -78,36 +78,41 @@ export default function DaySlots({ onUpdate }: any) {
       </div>
 
       {/* LIST */}
-      <div className="flex-1 overflow-y-auto space-y-2">
+      <div className="flex-1 overflow-y-auto space-y-3">
 
         {!businessId ? (
-          <p className="text-[13px] text-[#6b7280] text-center py-6 font-medium">
+          <p className="text-xs text-gray-500 text-center py-8 font-medium">
             Loading business...
           </p>
         ) : loading ? (
-          <div className="flex justify-center py-6">
-            <div className="w-6 h-6 border-2 border-[#e6e6e2] border-t-[#0f172a] rounded-full animate-spin" />
+          <div className="flex justify-center py-8">
+            <div className="w-6 h-6 border-2 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
           </div>
         ) : slots.length === 0 ? (
-          <p className="text-[13px] text-[#6b7280] text-center py-6 font-medium">
-            No slots available
-          </p>
+          <div className="text-center py-8 border border-dashed border-blue-200 rounded-2xl bg-white/70 backdrop-blur-xl">
+            <p className="text-sm font-medium text-gray-800">
+              No slots available
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Create your first availability slot
+            </p>
+          </div>
         ) : (
           slots.map((slot: any) => (
             <div
               key={slot.id}
-              className="flex justify-between items-center px-3 py-2 rounded-xl bg-[#ffffffcc] backdrop-blur-md border border-[#e8e8e4] shadow-[0_2px_10px_rgba(0,0,0,0.03)]"
+              className="flex justify-between items-center px-4 py-3 rounded-2xl bg-white/80 backdrop-blur-xl border border-blue-100 shadow-sm hover:shadow-md transition"
             >
-              <div className="text-[13px] font-medium text-[#374151]">
+              <div className="text-sm font-medium text-gray-800">
                 {formatTime(slot.startTime)} –{" "}
                 {formatTime(slot.endTime)}
               </div>
 
               <span
-                className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                className={`text-xs px-3 py-1 rounded-full font-semibold ${
                   slot.isActive
-                    ? "bg-[#e7f8ef] text-[#1f9254]"
-                    : "bg-[#f1f1ef] text-[#6b7280]"
+                    ? "bg-green-100 text-green-700"
+                    : "bg-gray-100 text-gray-500"
                 }`}
               >
                 {slot.isActive ? "Active" : "Inactive"}

@@ -43,11 +43,11 @@ export default function DeleteAccount() {
   };
 
   return (
-    <div className="bg-white border border-red-200 rounded-xl p-4 sm:p-6 shadow-sm space-y-6 max-w-lg">
+    <div className="bg-white/80 backdrop-blur-xl border border-red-100 rounded-2xl p-5 sm:p-6 shadow-sm space-y-6 max-w-lg">
 
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
+        <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
           <AlertTriangle size={18} className="text-red-600" />
         </div>
 
@@ -60,7 +60,7 @@ export default function DeleteAccount() {
       </div>
 
       {/* Warning */}
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-gray-600 leading-relaxed">
         This action cannot be undone. All your data, leads, connected platforms,
         and automation settings will be permanently deleted.
       </p>
@@ -77,7 +77,7 @@ export default function DeleteAccount() {
       </label>
 
       {/* Input */}
-      <div className="space-y-1">
+      <div className="space-y-2">
         <p className="text-xs text-gray-500">
           Type <span className="font-semibold text-gray-700">DELETE</span> to confirm
         </p>
@@ -86,7 +86,7 @@ export default function DeleteAccount() {
           value={text}
           onChange={(e) => setText(e.target.value.toUpperCase())}
           placeholder="DELETE"
-          className="border border-gray-300 rounded-lg px-3 py-2 w-full text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+          className="w-full px-4 py-2.5 border border-red-100 rounded-xl text-sm bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-red-400 outline-none"
         />
       </div>
 
@@ -94,10 +94,10 @@ export default function DeleteAccount() {
       <button
         onClick={handleDelete}
         disabled={!canDelete || loading}
-        className={`px-4 py-2 rounded-lg text-sm font-medium transition
+        className={`w-full px-5 py-2.5 rounded-xl text-sm font-semibold transition
         ${
           canDelete
-            ? "bg-red-600 hover:bg-red-700 text-white"
+            ? "bg-red-600 hover:bg-red-700 text-white hover:shadow-md"
             : "bg-gray-200 text-gray-500 cursor-not-allowed"
         }`}
       >

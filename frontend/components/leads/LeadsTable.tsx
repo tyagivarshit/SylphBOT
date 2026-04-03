@@ -58,14 +58,14 @@ export default function LeadsTable({ leads }: any) {
 
   return(
 
-    <div className="relative bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+    <div className="relative bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-sm overflow-hidden">
 
       <div className="overflow-x-auto">
 
         <table className="min-w-full text-sm">
 
           {/* HEADER */}
-          <thead className="bg-gray-100 border-b text-gray-800 sticky top-0 z-10">
+          <thead className="bg-blue-50 border-b border-blue-100 text-gray-800 sticky top-0 z-10">
 
             <tr>
               <th className="px-4 py-3 text-left font-semibold">
@@ -88,7 +88,7 @@ export default function LeadsTable({ leads }: any) {
           </thead>
 
           {/* BODY */}
-          <tbody className="divide-y bg-white">
+          <tbody className="divide-y divide-blue-50 bg-white/70">
 
             {Array.isArray(tableLeads) && tableLeads.length > 0 ? (
 
@@ -96,7 +96,7 @@ export default function LeadsTable({ leads }: any) {
 
                 <tr
                   key={lead.id}
-                  className="hover:bg-gray-50 cursor-pointer transition-all duration-150"
+                  className="hover:bg-blue-50/60 cursor-pointer transition-all duration-150"
                   onClick={() => setSelectedLead(lead)}
                 >
 
@@ -105,7 +105,7 @@ export default function LeadsTable({ leads }: any) {
 
                     <div className="flex items-center gap-3">
 
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] flex items-center justify-center text-xs font-semibold text-white shrink-0">
+                      <div className="w-9 h-9 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 flex items-center justify-center text-xs font-semibold text-white shrink-0">
                         {lead.name?.charAt(0)?.toUpperCase() || "?"}
                       </div>
 
@@ -115,7 +115,7 @@ export default function LeadsTable({ leads }: any) {
                           {lead.name || `Lead ${lead.id.slice(-4)}`}
                         </span>
 
-                        <span className="text-xs text-gray-600 truncate">
+                        <span className="text-xs text-gray-500 truncate">
                           ID: {lead.id}
                         </span>
 
@@ -128,7 +128,7 @@ export default function LeadsTable({ leads }: any) {
                   {/* PLATFORM */}
                   <td className="px-4 py-4">
 
-                    <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800 capitalize">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-gray-700 capitalize">
                       {lead.platform}
                     </span>
 
@@ -149,7 +149,7 @@ export default function LeadsTable({ leads }: any) {
                       </span>
 
                       {lead.unreadCount > 0 && (
-                        <span className="bg-red-500 text-white text-[11px] px-2 py-0.5 rounded-full font-semibold">
+                        <span className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-[11px] px-2 py-0.5 rounded-full font-semibold">
                           {lead.unreadCount}
                         </span>
                       )}
@@ -166,7 +166,7 @@ export default function LeadsTable({ leads }: any) {
 
               <tr>
                 <td colSpan={4} className="text-center py-12 text-gray-500 text-sm">
-                  No leads yet 🚀
+                  No leads yet
                 </td>
               </tr>
 

@@ -32,7 +32,6 @@ export default function BookedAppointments({
 
       let data = res.data.bookings || [];
 
-      // 🔥 FILTER LOGIC
       if (filter === "UPCOMING") {
         data = data.filter((b: Booking) => b.status === "BOOKED");
       } else if (filter === "CANCELLED") {
@@ -54,10 +53,11 @@ export default function BookedAppointments({
     fetchBookings();
   }, [authLoading, filter]);
 
+  /* 🔥 AUTH LOADING */
   if (authLoading) {
     return (
-      <div className="flex justify-center py-6">
-        <div className="w-6 h-6 border-2 border-[#e6e6e2] border-t-[#0f172a] rounded-full animate-spin" />
+      <div className="flex justify-center items-center py-10">
+        <div className="w-7 h-7 border-2 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
       </div>
     );
   }
@@ -65,25 +65,36 @@ export default function BookedAppointments({
   return (
     <div className="h-full flex flex-col">
 
-      {/* LIST */}
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+      {/* 🔥 LIST */}
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1">
 
         {loading ? (
-          <div className="flex justify-center py-6">
-            <div className="w-6 h-6 border-2 border-[#e6e6e2] border-t-[#0f172a] rounded-full animate-spin" />
+          <div className="flex justify-center items-center py-10">
+            <div className="w-7 h-7 border-2 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
           </div>
         ) : bookings.length === 0 ? (
-          <p className="text-[13px] text-[#6b7280] text-center py-6 font-medium">
-            No bookings found
-          </p>
+          <div className="text-center py-10 px-6 border border-dashed border-blue-200 rounded-2xl bg-white/80 backdrop-blur-xl shadow-sm">
+            <p className="text-sm font-semibold text-gray-800">
+              No bookings found
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Your appointments will appear here
+            </p>
+          </div>
         ) : (
-          bookings.map((b) => (
-            <BookingCard
-              key={b.id}
-              booking={b}
-              onClick={() => setSelected(b)}
-            />
-          ))
+          <div className="space-y-3">
+            {bookings.map((b) => (
+              <div
+                key={b.id}
+                className="rounded-2xl bg-white/70 backdrop-blur-xl border border-blue-100 shadow-sm hover:shadow-md transition-all"
+              >
+                <BookingCard
+                  booking={b}
+                  onClick={() => setSelected(b)}
+                />
+              </div>
+            ))}
+          </div>
         )}
 
       </div>

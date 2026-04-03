@@ -26,12 +26,11 @@ return(
 
 {/* LIST */}
 
-<div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 lg:p-5 shadow-sm">
+<div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 sm:p-5 lg:p-6 shadow-sm hover:shadow-lg transition">
   <CommentAutomationList/>
 </div>
 
 </div>
 
 )
-
 }

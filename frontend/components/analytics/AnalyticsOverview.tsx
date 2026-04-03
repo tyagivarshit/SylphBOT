@@ -6,7 +6,9 @@ import StatCard from "./StatCard";
 export default function AnalyticsOverview({ range }: any) {
   const { data, isLoading } = useOverview(range);
 
-  if (isLoading) return <p className="text-gray-600">Loading...</p>;
+  if (isLoading) {
+    return <p className="text-sm text-gray-500">Loading...</p>;
+  }
 
   const stats = [
     { title: "Total Leads", value: data.totalLeads, change: "+0%" },
@@ -16,7 +18,7 @@ export default function AnalyticsOverview({ range }: any) {
   ];
 
   return (
-    <div className="grid md:grid-cols-4 gap-4 text-gray-900">
+    <div className="grid md:grid-cols-4 gap-4">
       {stats.map((s, i) => (
         <StatCard key={i} stat={s} />
       ))}

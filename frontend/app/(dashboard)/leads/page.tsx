@@ -65,7 +65,7 @@ export default function LeadsPage(){
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 
-        <h1 className="text-lg md:text-xl font-bold text-gray-900">
+        <h1 className="text-xl font-semibold text-gray-900">
           Leads CRM
         </h1>
 
@@ -75,7 +75,7 @@ export default function LeadsPage(){
             setStage(e.target.value)
             setPage(1)
           }}
-          className="border border-gray-300 text-gray-900 bg-white rounded-lg px-3 py-2 text-sm font-medium shadow-sm hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
         >
           <option value="">All Stages</option>
           <option value="NEW">New</option>
@@ -88,21 +88,21 @@ export default function LeadsPage(){
 
       {/* CONTENT */}
       {loading ? (
-        <div className="bg-white border rounded-xl p-6 text-gray-700 shadow-sm">
+        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 text-gray-500 shadow-sm">
           Loading leads...
         </div>
       ) : (
 
         <FeatureGate feature="CRM">
 
-          <div className="bg-white border rounded-xl p-4 md:p-6 shadow-sm">
+          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 md:p-6 shadow-sm">
 
             {!isAllowed ? (
-              <p className="text-sm text-gray-600 text-center py-10">
+              <p className="text-sm text-gray-500 text-center py-10">
                 Preview of your leads will appear here 🚀
               </p>
             ) : leads.length === 0 ? (
-              <p className="text-sm text-gray-600 text-center py-10">
+              <p className="text-sm text-gray-500 text-center py-10">
                 No leads yet. Start automations to capture leads 🚀
               </p>
             ) : (
@@ -110,24 +110,24 @@ export default function LeadsPage(){
                 <LeadsTable leads={leads} />
 
                 {/* PAGINATION */}
-                <div className="flex justify-between items-center mt-4">
+                <div className="flex justify-between items-center mt-5">
 
                   <button
                     disabled={page === 1}
                     onClick={()=>setPage((p)=>p-1)}
-                    className="px-3 py-1.5 text-sm bg-gray-100 rounded-md disabled:opacity-50"
+                    className="px-4 py-2 text-sm font-medium bg-blue-50 text-gray-700 rounded-xl hover:shadow-sm transition disabled:opacity-50"
                   >
                     Prev
                   </button>
 
-                  <span className="text-sm text-gray-700">
+                  <span className="text-sm text-gray-500">
                     Page {page} of {totalPages}
                   </span>
 
                   <button
                     disabled={page === totalPages}
                     onClick={()=>setPage((p)=>p+1)}
-                    className="px-3 py-1.5 text-sm bg-gray-100 rounded-md disabled:opacity-50"
+                    className="px-4 py-2 text-sm font-medium bg-blue-50 text-gray-700 rounded-xl hover:shadow-sm transition disabled:opacity-50"
                   >
                     Next
                   </button>

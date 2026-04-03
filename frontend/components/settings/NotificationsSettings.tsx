@@ -80,30 +80,34 @@ export default function NotificationSettings() {
   };
 
   if (isLoading)
-    return <div className="text-sm text-gray-500">Loading...</div>;
+    return (
+      <div className="text-sm text-gray-500 animate-pulse">
+        Loading...
+      </div>
+    );
 
   if (isError)
     return (
-      <div className="text-sm text-red-500">
+      <div className="text-sm bg-red-100 text-red-600 px-3 py-2 rounded-md inline-block">
         Failed to load settings
       </div>
     );
 
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-6">
+    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm space-y-6">
 
       {/* HEADER */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900">
           Notification Preferences
         </h3>
-        <p className="text-sm text-gray-600 mt-1">
+        <p className="text-sm text-gray-500 mt-1">
           Control how you receive updates and alerts
         </p>
       </div>
 
       {/* TOGGLES */}
-      <div className="space-y-5">
+      <div className="space-y-4">
 
         <Toggle
           label="Email Notifications"
@@ -147,7 +151,7 @@ function Toggle({
   onChange: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition">
+    <div className="flex items-center justify-between p-4 border border-blue-100 rounded-2xl bg-white/70 backdrop-blur-xl hover:shadow-md transition">
 
       {/* TEXT */}
       <div>
@@ -163,7 +167,9 @@ function Toggle({
       <button
         onClick={onChange}
         className={`relative w-11 h-6 rounded-full transition-all duration-300 ${
-          value ? "bg-[#14E1C1]" : "bg-gray-300"
+          value
+            ? "bg-gradient-to-r from-blue-600 to-cyan-500"
+            : "bg-gray-300"
         }`}
       >
         <span

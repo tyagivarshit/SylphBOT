@@ -111,8 +111,10 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
           top-0 left-0
           h-screen lg:h-full
           w-64 max-w-[85%]
-          bg-[#fdfdfb]
-          border-r border-[#e6e6e2]
+
+          bg-white/70 backdrop-blur-xl
+          border border-blue-100
+
           flex flex-col
           z-50
 
@@ -124,8 +126,8 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
         `}
       >
         {/* 🔥 MOBILE HEADER */}
-        <div className="lg:hidden h-16 flex items-center justify-between px-4 border-b">
-          <span className="font-semibold text-sm">Menu</span>
+        <div className="lg:hidden h-16 flex items-center justify-between px-4 border-b border-blue-100">
+          <span className="font-semibold text-sm text-gray-700">Menu</span>
           <button onClick={() => setOpen(false)}>
             <X size={18} />
           </button>
@@ -140,7 +142,7 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
           {menu.map((group) => (
             <div key={group.section}>
               {/* SECTION TITLE */}
-              <p className="px-3 mb-2 text-[11px] font-semibold text-[#9ca3af] uppercase tracking-wider">
+              <p className="px-3 mb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
                 {group.section}
               </p>
 
@@ -159,12 +161,12 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
                       className={`
                         flex items-center gap-3
                         px-3 py-2.5 rounded-xl text-[13px] font-medium
-                        transition-all duration-200
+                        transition-all duration-200 hover:shadow-sm
 
                         ${
                           active
-                            ? "bg-gradient-to-r from-[#C8A96A]/20 to-[#E6C200]/20 text-[#0f172a]"
-                            : "text-[#374151] hover:bg-[#f1f1ef]"
+                            ? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700"
+                            : "text-gray-600 hover:bg-blue-50"
                         }
                       `}
                     >
@@ -179,9 +181,9 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
         </nav>
 
         {/* 🔥 FOOTER */}
-        <div className="h-[60px] flex items-center justify-center border-t border-[#e6e6e2]">
-          <p className="text-[12px] text-[#6b7280] font-medium">
-            Levora v1.0
+        <div className="h-[60px] flex items-center justify-center border-t border-blue-100">
+          <p className="text-[12px] text-gray-500 font-medium">
+            Automexa v1.0
           </p>
         </div>
       </aside>

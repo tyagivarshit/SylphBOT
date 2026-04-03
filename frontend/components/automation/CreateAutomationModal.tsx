@@ -38,7 +38,7 @@ export default function CreateAutomationModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          triggerValue: trigger.toLowerCase().trim(), // 🔥 FIX
+          triggerValue: trigger.toLowerCase().trim(),
           steps,
         }),
       });
@@ -49,7 +49,6 @@ export default function CreateAutomationModal({
         throw new Error(data?.message || "Failed to create");
       }
 
-      /* RESET */
       setName("");
       setTrigger("");
       setSteps([]);
@@ -65,19 +64,26 @@ export default function CreateAutomationModal({
   /* ---------------- UI ---------------- */
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto">
-      <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-xl space-y-5 border border-gray-200">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto p-4">
+      
+      {/* 🔥 MODAL */}
+      <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl w-full max-w-2xl p-6 shadow-xl space-y-5">
         
-        <h2 className="text-lg font-semibold text-gray-900">
+        {/* HEADER */}
+        <h2 className="text-xl font-semibold text-gray-800">
           Create Automation 🚀
         </h2>
 
+        {/* ERROR */}
         {error && (
-          <p className="text-sm text-red-500">{error}</p>
+          <div className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            {error}
+          </div>
         )}
 
+        {/* NAME */}
         <div>
-          <label className="text-sm font-medium text-gray-900">
+          <label className="text-sm font-semibold text-gray-700">
             Automation Name
           </label>
 
@@ -85,12 +91,13 @@ export default function CreateAutomationModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Enter automation name"
-            className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            className="w-full mt-1 bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
           />
         </div>
 
+        {/* TRIGGER */}
         <div>
-          <label className="text-sm font-medium text-gray-900">
+          <label className="text-sm font-semibold text-gray-700">
             Trigger Keyword
           </label>
 
@@ -98,12 +105,13 @@ export default function CreateAutomationModal({
             value={trigger}
             onChange={(e) => setTrigger(e.target.value)}
             placeholder="Example: hi / price / start"
-            className="w-full bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            className="w-full mt-1 bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
           />
         </div>
 
+        {/* BUILDER */}
         <div>
-          <p className="text-sm font-medium text-gray-900 mb-2">
+          <p className="text-sm font-semibold text-gray-700 mb-2">
             Automation Flow
           </p>
 
@@ -113,10 +121,12 @@ export default function CreateAutomationModal({
           />
         </div>
 
+        {/* ACTIONS */}
         <div className="flex justify-end gap-3 pt-2">
+          
           <button
             onClick={onClose}
-            className="text-sm text-gray-600 hover:text-gray-900"
+            className="text-sm text-gray-500 hover:text-gray-800 transition"
           >
             Cancel
           </button>
@@ -124,10 +134,11 @@ export default function CreateAutomationModal({
           <button
             onClick={handleCreate}
             disabled={loading}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-medium shadow-md disabled:opacity-50"
+            className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-5 py-2 rounded-xl text-sm font-semibold shadow-md hover:shadow-lg transition active:scale-[0.98] disabled:opacity-50"
           >
             {loading ? "Creating..." : "Create Automation"}
           </button>
+
         </div>
       </div>
     </div>

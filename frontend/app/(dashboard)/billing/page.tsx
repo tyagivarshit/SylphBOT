@@ -83,7 +83,6 @@ export default function BillingPage() {
 
   const planKey = billingContext?.planKey || "FREE_LOCKED";
 
-  // 🔥 FIX 1: trial check robust
   const hasUsedTrial =
     subscription?.hasUsedTrial ||
     subscription?.trialUsed ||
@@ -201,14 +200,14 @@ export default function BillingPage() {
   if (pageLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-blue-200 border-t-[#14E1C1] rounded-full animate-spin" />
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-red-500">
+      <div className="min-h-screen flex items-center justify-center text-red-600">
         {error}
       </div>
     );
@@ -217,7 +216,7 @@ export default function BillingPage() {
   /* ================= UI ================= */
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#f9fcff] via-white to-[#eef6ff] p-4 md:p-8 space-y-10">
+    <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-cyan-50 p-4 md:p-8 space-y-10">
 
       {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
@@ -231,17 +230,15 @@ export default function BillingPage() {
           </p>
         </div>
 
-        {/* ❌ REMOVED: No Active Plan badge */}
-
         {/* TOGGLE */}
-        <div className="flex bg-white/70 backdrop-blur border border-gray-200 rounded-xl p-1 shadow-sm">
+        <div className="flex bg-white/80 backdrop-blur-xl border border-blue-100 rounded-xl p-1 shadow-sm">
           {["monthly", "yearly"].map((type) => (
             <button
               key={type}
               onClick={() => setBilling(type as any)}
-              className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
                 billing === type
-                  ? "bg-gradient-to-r from-[#14E1C1] to-blue-500 text-white shadow"
+                  ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow"
                   : "text-gray-600"
               }`}
             >
@@ -254,7 +251,7 @@ export default function BillingPage() {
 
       {/* TEXT */}
       <p className="text-center text-sm text-gray-500">
-        Most users choose <span className="font-semibold text-black">Pro</span> 🚀
+        Most users choose <span className="font-semibold text-gray-900">Pro</span> 🚀
       </p>
 
       {/* PLANS */}
@@ -283,95 +280,92 @@ export default function BillingPage() {
           return (
             <div
               key={plan.id}
-              className={`relative rounded-2xl p-[1px] ${
+              className={`relative rounded-2xl border ${
                 plan.popular
-                  ? "bg-gradient-to-r from-[#14E1C1] via-blue-500 to-indigo-500"
-                  : "bg-gray-200"
-              }`}
+                  ? "border-blue-200"
+                  : "border-blue-100"
+              } bg-white/80 backdrop-blur-xl p-6 flex flex-col justify-between hover:shadow-lg transition`}
             >
-              <div className="bg-white rounded-2xl p-6 h-full flex flex-col justify-between transition-all hover:shadow-2xl hover:-translate-y-1">
 
-                {plan.popular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span className="text-xs bg-black text-white px-3 py-1 rounded-full">
-                      Most Popular
+              {plan.popular && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <span className="text-xs bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-3 py-1 rounded-full">
+                    Most Popular
+                  </span>
+                </div>
+              )}
+
+              <div className="space-y-4">
+
+                <div className="flex justify-between items-center">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    {plan.name}
+                  </h2>
+
+                  {isCurrent && (
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md">
+                      Active
                     </span>
-                  </div>
-                )}
-
-                <div className="space-y-4">
-
-                  <div className="flex justify-between items-center">
-                    <h2 className="text-lg font-semibold text-gray-900">
-                      {plan.name}
-                    </h2>
-
-                    {isCurrent && (
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md">
-                        Active
-                      </span>
-                    )}
-                  </div>
-
-                  <div>
-                    {isEarly && (
-                      <p className="text-xs line-through text-gray-400">
-                        {currency === "INR" ? "₹" : "$"}
-                        {original}
-                      </p>
-                    )}
-
-                    <div className="flex items-end gap-1">
-                      <span className="text-3xl font-bold text-gray-900">
-                        {currency === "INR" ? "₹" : "$"}
-                        {price}
-                      </span>
-                      <span className="text-sm text-gray-500">
-                        /{billing}
-                      </span>
-                    </div>
-                  </div>
-
-                  <ul className="space-y-2 text-sm text-gray-700">
-                    {plan.features.map((f, i) => (
-                      <li key={i} className="flex gap-2">
-                        <span className="text-[#14E1C1]">✔</span>
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-
+                  )}
                 </div>
 
-                {/* ✅ BUTTON FIX */}
-                <button
-                  onClick={() => handleUpgrade(plan.id)}
-                  disabled={loading === plan.id || isCurrent}
-                  className={`mt-6 w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                    isCurrent
-                      ? "bg-gray-200 text-gray-600"
-                      : "bg-gradient-to-r from-[#14E1C1] via-blue-500 to-indigo-500 text-white hover:opacity-90 shadow-md"
-                  }`}
-                >
-                  {isCurrent
-                    ? "Current Plan"
-                    : loading === plan.id
-                    ? "Processing..."
-                    : planKey === "FREE_LOCKED"
-                    ? hasUsedTrial
-                      ? "Buy Now"
-                      : "Start Free Trial"
-                    : "Upgrade Plan"}
-                </button>
+                <div>
+                  {isEarly && (
+                    <p className="text-xs line-through text-gray-400">
+                      {currency === "INR" ? "₹" : "$"}
+                      {original}
+                    </p>
+                  )}
+
+                  <div className="flex items-end gap-1">
+                    <span className="text-3xl font-bold text-gray-900">
+                      {currency === "INR" ? "₹" : "$"}
+                      {price}
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      /{billing}
+                    </span>
+                  </div>
+                </div>
+
+                <ul className="space-y-2 text-sm text-gray-700">
+                  {plan.features.map((f, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-blue-500">✔</span>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
 
               </div>
+
+              <button
+                onClick={() => handleUpgrade(plan.id)}
+                disabled={loading === plan.id || isCurrent}
+                className={`mt-6 w-full py-2.5 rounded-xl text-sm font-semibold transition ${
+                  isCurrent
+                    ? "bg-gray-200 text-gray-600"
+                    : "bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:shadow-lg"
+                }`}
+              >
+                {isCurrent
+                  ? "Current Plan"
+                  : loading === plan.id
+                  ? "Processing..."
+                  : planKey === "FREE_LOCKED"
+                  ? hasUsedTrial
+                    ? "Buy Now"
+                    : "Start Free Trial"
+                  : "Upgrade Plan"}
+              </button>
+
             </div>
           );
         })}
       </div>
 
       {/* PAYMENT HISTORY */}
-      <div className="bg-white/80 backdrop-blur border border-gray-200 rounded-2xl p-6 shadow-sm">
+      <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
         <PaymentHistory invoices={invoices} />
       </div>
 

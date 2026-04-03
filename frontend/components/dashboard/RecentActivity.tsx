@@ -45,14 +45,14 @@ function RecentActivityComponent({ activity = [] }: Props) {
   const safeActivity = activity.slice(0, 20);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
 
       <h2 className="text-sm font-semibold text-gray-900 mb-5">
         Recent Activity
       </h2>
 
       {safeActivity.length === 0 ? (
-        <div className="text-sm text-gray-400 py-8 text-center">
+        <div className="text-sm text-gray-400 py-10 text-center border border-dashed border-blue-200 rounded-xl bg-white/70">
           No activity yet
         </div>
       ) : (
@@ -65,11 +65,11 @@ function RecentActivityComponent({ activity = [] }: Props) {
             >
 
               {/* LEFT */}
-              <div className="flex items-start gap-2">
+              <div className="flex items-start gap-3">
 
-                <span className="w-2 h-2 mt-1.5 rounded-full bg-blue-500 shrink-0" />
+                <span className="w-2 h-2 mt-1.5 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 shrink-0" />
 
-                <span className="leading-snug break-words">
+                <span className="leading-snug break-words text-gray-800">
                   {item.text || "—"}
                 </span>
 

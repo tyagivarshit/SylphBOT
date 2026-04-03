@@ -6,7 +6,7 @@ type Invoice = {
   id: string;
   amount?: number;
   subtotal?: number;
-  taxAmount?: number; // 🔥 FIX (backend aligned)
+  taxAmount?: number;
   currency?: string;
   created?: number;
   status?: string;
@@ -44,14 +44,15 @@ export default function PaymentHistory({
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: currency?.toUpperCase() || "USD",
-    }).format(amount / 100); // 🔥 FIX (Stripe cents → rupees/dollars)
+    }).format(amount / 100);
   };
 
   return (
-    <div className="bg-white/80 backdrop-blur border border-gray-200 rounded-2xl p-5 md:p-6 shadow-sm space-y-6">
+    <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 md:p-6 shadow-sm space-y-6">
 
+      {/* HEADER */}
       <div>
-        <h3 className="text-sm md:text-base font-semibold text-gray-900">
+        <h3 className="text-base font-semibold text-gray-800">
           Payment History
         </h3>
         <p className="text-xs text-gray-500 mt-1">
@@ -59,12 +60,14 @@ export default function PaymentHistory({
         </p>
       </div>
 
+      {/* EMPTY */}
       {sorted.length === 0 && (
-        <div className="text-center py-10 text-gray-500 text-sm border border-dashed rounded-xl">
+        <div className="text-center py-10 text-gray-500 text-sm border border-dashed border-blue-200 rounded-xl">
           No payments yet
         </div>
       )}
 
+      {/* LIST */}
       <div className="space-y-3">
         {sorted.map((inv) => {
           const date = inv.created
@@ -74,7 +77,7 @@ export default function PaymentHistory({
           return (
             <div
               key={inv.id}
-              className="rounded-xl border border-gray-200 bg-white p-4 transition-all hover:shadow-md hover:bg-gray-50"
+              className="rounded-xl border border-blue-100 bg-white/80 backdrop-blur p-4 transition-all hover:shadow-md"
             >
 
               {/* MOBILE */}

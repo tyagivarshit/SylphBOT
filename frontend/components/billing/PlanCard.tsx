@@ -53,12 +53,12 @@ export default function PlanCard({
       className={`relative rounded-2xl p-[1px] transition-all duration-300
       ${
         plan.popular
-          ? "bg-gradient-to-r from-[#14E1C1] via-blue-500 to-indigo-500"
-          : "bg-gray-200"
+          ? "bg-gradient-to-r from-blue-600 via-cyan-500 to-blue-500"
+          : "bg-blue-100"
       }`}
     >
       <div
-        className={`bg-white rounded-2xl p-5 md:p-6 h-full flex flex-col justify-between transition-all
+        className={`bg-white/80 backdrop-blur-xl rounded-2xl p-6 h-full flex flex-col justify-between transition-all
         ${
           plan.isCurrent
             ? "shadow-xl scale-[1.02]"
@@ -66,10 +66,10 @@ export default function PlanCard({
         }`}
       >
 
-        {/* POPULAR */}
+        {/* 🔥 POPULAR */}
         {plan.popular && (
           <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-            <span className="text-xs bg-black text-white px-3 py-1 rounded-full shadow">
+            <span className="text-xs bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-3 py-1 rounded-full shadow-md">
               Most Popular
             </span>
           </div>
@@ -77,7 +77,7 @@ export default function PlanCard({
 
         <div className="space-y-5">
 
-          {/* HEADER */}
+          {/* 🔥 HEADER */}
           <div className="flex items-center justify-between">
             <h2 className="text-lg md:text-xl font-semibold text-gray-900">
               {plan.name}
@@ -90,9 +90,9 @@ export default function PlanCard({
             )}
           </div>
 
-          {/* PRICE */}
+          {/* 🔥 PRICE */}
           <div>
-            <p className="text-3xl md:text-4xl font-bold text-gray-900">
+            <p className="text-3xl md:text-4xl font-bold text-gray-900 tracking-tight">
               {plan.price}
             </p>
             <p className="text-xs text-gray-500 mt-1">
@@ -100,17 +100,17 @@ export default function PlanCard({
             </p>
           </div>
 
-          {/* DIVIDER */}
-          <div className="h-px bg-gray-200" />
+          {/* 🔥 DIVIDER */}
+          <div className="h-px bg-blue-100" />
 
-          {/* FEATURES */}
+          {/* 🔥 FEATURES */}
           <ul className="space-y-3">
             {features.map((f, index) => (
               <li
                 key={index}
                 className="flex items-start gap-3 text-sm text-gray-700"
               >
-                <span className="text-[#14E1C1] mt-[2px]">✔</span>
+                <span className="text-blue-600 mt-[2px]">✔</span>
                 <span>{f}</span>
               </li>
             ))}
@@ -118,7 +118,7 @@ export default function PlanCard({
 
         </div>
 
-        {/* CTA */}
+        {/* 🔥 CTA */}
         <button
           onClick={onClick}
           disabled={loading || plan.isCurrent}
@@ -126,7 +126,7 @@ export default function PlanCard({
           ${
             plan.isCurrent
               ? "bg-gray-200 text-gray-600 cursor-not-allowed"
-              : "bg-gradient-to-r from-[#14E1C1] via-blue-500 to-indigo-500 text-white hover:opacity-90 shadow-md"
+              : "bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:shadow-lg shadow-md active:scale-[0.98]"
           }`}
         >
           {plan.isCurrent

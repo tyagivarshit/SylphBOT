@@ -7,146 +7,157 @@ import { api } from "@/lib/api"
 
 export default function KnowledgeList(){
 
-const [open,setOpen] = useState(false)
-const [selected,setSelected] = useState<any>(null)
-const [knowledge,setKnowledge] = useState<any[]>([])
-const [loading,setLoading] = useState(false)
-const [deletingId,setDeletingId] = useState<string | null>(null)
+  const [open,setOpen] = useState(false)
+  const [selected,setSelected] = useState<any>(null)
+  const [knowledge,setKnowledge] = useState<any[]>([])
+  const [loading,setLoading] = useState(false)
+  const [deletingId,setDeletingId] = useState<string | null>(null)
 
-/* ============================= */
-/* FETCH KNOWLEDGE */
-/* ============================= */
+  /* ============================= */
+  /* FETCH KNOWLEDGE */
+  /* ============================= */
 
-const fetchKnowledge = async () => {
+  const fetchKnowledge = async () => {
 
-  try{
-    setLoading(true)
+    try{
+      setLoading(true)
 
-    const res = await api.get("/api/knowledge")
+      const res = await api.get("/api/knowledge")
 
-    setKnowledge(res.data.knowledge || [])
+      setKnowledge(res.data.knowledge || [])
 
-  }catch(err){
-    console.error("Fetch knowledge error:", err)
-  }finally{
-    setLoading(false)
+    }catch(err){
+      console.error("Fetch knowledge error:", err)
+    }finally{
+      setLoading(false)
+    }
+
   }
 
-}
+  useEffect(()=>{
+    fetchKnowledge()
+  },[])
 
-useEffect(()=>{
-  fetchKnowledge()
-},[])
+  /* ============================= */
+  /* DELETE KNOWLEDGE */
+  /* ============================= */
 
-/* ============================= */
-/* DELETE KNOWLEDGE */
-/* ============================= */
+  const handleDelete = async (id: string) => {
 
-const handleDelete = async (id: string) => {
+    try{
 
-  try{
+      setDeletingId(id)
 
-    setDeletingId(id)
+      await api.delete(`/api/knowledge/${id}`)
 
-    await api.delete(`/api/knowledge/${id}`)
+      setKnowledge(prev => prev.filter(item => item.id !== id))
 
-    /* 🔥 INSTANT UI UPDATE */
-    setKnowledge(prev => prev.filter(item => item.id !== id))
+    }catch(err){
+      console.error("Delete error:", err)
+    }finally{
+      setDeletingId(null)
+    }
 
-  }catch(err){
-    console.error("Delete error:", err)
-  }finally{
-    setDeletingId(null)
   }
 
-}
+  /* ============================= */
+  /* EDIT HANDLER */
+  /* ============================= */
 
-/* ============================= */
-/* EDIT HANDLER */
-/* ============================= */
+  const handleEdit = (item: any) => {
+    setSelected(item)
+    setOpen(true)
+  }
 
-const handleEdit = (item: any) => {
-  setSelected(item)
-  setOpen(true)
-}
+  /* ============================= */
+  /* CLOSE MODAL */
+  /* ============================= */
 
-/* ============================= */
-/* CLOSE MODAL */
-/* ============================= */
+  const handleClose = () => {
+    setOpen(false)
+    setSelected(null)
+    fetchKnowledge()
+  }
 
-const handleClose = () => {
-  setOpen(false)
-  setSelected(null)
+  return(
 
-  /* 🔥 REFRESH AFTER SAVE */
-  fetchKnowledge()
-}
+    <div className="space-y-5">
 
-return(
+      <div className="flex justify-between items-center">
 
-<div className="space-y-4">
+        <h2 className="text-sm font-semibold text-gray-900">
+          Knowledge Entries
+        </h2>
 
-<div className="flex justify-between items-center">
-
-<h2 className="text-sm font-semibold text-gray-900">
-Knowledge Entries
-</h2>
-
-<button
-onClick={()=>{
-  setSelected(null)
-  setOpen(true)
-}}
-className="bg-blue-600 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-700"
->
-Add Knowledge
-</button>
-
-</div>
-
-{/* ============================= */
-/* LOADING STATE */
-/* ============================= */}
-
-{loading ? (
-  <p className="text-sm text-gray-500">Loading...</p>
-) : knowledge.length === 0 ? (
-  <p className="text-sm text-gray-500">No knowledge added yet</p>
-) : (
-  <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-
-    {knowledge.map((item)=>(
-
-      <div key={item.id} className="relative">
-
-        <KnowledgeCard 
-          item={item} 
-          onDelete={handleDelete}
-          onEdit={handleEdit}
-        />
-
-        {/* 🔥 DELETE LOADING OVERLAY */}
-        {deletingId === item.id && (
-          <div className="absolute inset-0 bg-white/60 flex items-center justify-center text-xs text-gray-600 rounded-xl">
-            Deleting...
-          </div>
-        )}
+        <button
+          onClick={()=>{
+            setSelected(null)
+            setOpen(true)
+          }}
+          className="px-5 py-2 text-sm font-semibold rounded-xl text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md transition"
+        >
+          Add Knowledge
+        </button>
 
       </div>
 
-    ))}
+      {/* ============================= */}
+      {/* LOADING STATE */}
+      {/* ============================= */}
 
-  </div>
-)}
+      {loading ? (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {Array.from({length:3}).map((_,i)=>(
+            <div
+              key={i}
+              className="h-28 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl animate-pulse"
+            />
+          ))}
+        </div>
+      ) : knowledge.length === 0 ? (
+        <div className="text-center border border-dashed border-blue-200 rounded-2xl p-8 bg-white/70 backdrop-blur-xl">
+          <p className="text-sm font-semibold text-gray-900">
+            No knowledge added yet
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Start training your AI by adding knowledge
+          </p>
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
 
-<CreateKnowledgeModal
-open={open}
-onClose={handleClose}
-selected={selected}
-/>
+          {knowledge.map((item)=>(
 
-</div>
+            <div key={item.id} className="relative">
 
-)
+              <KnowledgeCard 
+                item={item} 
+                onDelete={handleDelete}
+                onEdit={handleEdit}
+              />
+
+              {/* 🔥 DELETE LOADING OVERLAY */}
+              {deletingId === item.id && (
+                <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center text-xs text-gray-600 rounded-2xl">
+                  Deleting...
+                </div>
+              )}
+
+            </div>
+
+          ))}
+
+        </div>
+      )}
+
+      <CreateKnowledgeModal
+        open={open}
+        onClose={handleClose}
+        selected={selected}
+      />
+
+    </div>
+
+  )
 
 }

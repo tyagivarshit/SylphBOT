@@ -11,18 +11,18 @@ const [tab,setTab] = useState("business")
 
 return(
 
-<div className="bg-white border border-gray-200 rounded-xl">
+<div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-sm">
 
-{/* TABS */}
+{/* 🔥 TABS */}
 
-<div className="flex border-b">
+<div className="flex border-b border-blue-100 px-2">
 
 <button
 onClick={()=>setTab("business")}
-className={`px-4 py-3 text-sm ${
+className={`px-4 py-3 text-sm rounded-xl transition ${
 tab==="business"
-? "border-b-2 border-blue-600 text-blue-600 font-medium"
-: "text-gray-600"
+? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 font-semibold"
+: "text-gray-600 hover:bg-blue-50"
 }`}
 >
 Business Info
@@ -30,10 +30,10 @@ Business Info
 
 <button
 onClick={()=>setTab("faq")}
-className={`px-4 py-3 text-sm ${
+className={`px-4 py-3 text-sm rounded-xl transition ${
 tab==="faq"
-? "border-b-2 border-blue-600 text-blue-600 font-medium"
-: "text-gray-600"
+? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 font-semibold"
+: "text-gray-600 hover:bg-blue-50"
 }`}
 >
 FAQs
@@ -41,10 +41,10 @@ FAQs
 
 <button
 onClick={()=>setTab("settings")}
-className={`px-4 py-3 text-sm ${
+className={`px-4 py-3 text-sm rounded-xl transition ${
 tab==="settings"
-? "border-b-2 border-blue-600 text-blue-600 font-medium"
-: "text-gray-600"
+? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 font-semibold"
+: "text-gray-600 hover:bg-blue-50"
 }`}
 >
 AI Settings
@@ -52,7 +52,7 @@ AI Settings
 
 </div>
 
-{/* CONTENT */}
+{/* 🔥 CONTENT */}
 
 <div className="p-6">
 

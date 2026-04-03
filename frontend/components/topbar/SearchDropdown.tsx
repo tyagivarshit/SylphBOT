@@ -14,10 +14,10 @@ export default function SearchDropdown({
   onSelect,
 }: Props) {
   return (
-    <div className="w-full bg-white border-t border-gray-200">
+    <div className="w-full bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-sm overflow-hidden">
 
       {loading && (
-        <div className="p-3 text-sm text-gray-500">
+        <div className="p-3 text-sm text-gray-500 animate-pulse">
           Searching...
         </div>
       )}
@@ -32,10 +32,10 @@ export default function SearchDropdown({
         <div
           key={item.id}
           onClick={() => onSelect(item)}
-          className={`p-3 text-sm text-gray-800 cursor-pointer ${
+          className={`px-4 py-3 text-sm text-gray-800 cursor-pointer transition ${
             index === activeIndex
-              ? "bg-gray-100"
-              : "hover:bg-gray-100"
+              ? "bg-blue-50"
+              : "hover:bg-blue-50"
           }`}
         >
           {item.title}

@@ -43,7 +43,6 @@ export default function AutomationBuilder({
   const updateSteps = (newSteps: Step[]) => {
     setSteps(newSteps);
 
-    /* 🔥 CLEAN BACKEND FORMAT */
     const formatted = newSteps.map((s) => {
       const cleanConfig: any = {};
 
@@ -96,8 +95,7 @@ export default function AutomationBuilder({
   const moveStep = (index: number, direction: "up" | "down") => {
     const newSteps = [...steps];
 
-    const target =
-      direction === "up" ? index - 1 : index + 1;
+    const target = direction === "up" ? index - 1 : index + 1;
 
     if (target < 0 || target >= steps.length) return;
 
@@ -132,50 +130,68 @@ export default function AutomationBuilder({
   };
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-3">
+    <div className="space-y-6">
+
+      {/* 🔥 STEPS CONTAINER */}
+      <div className="space-y-4">
         {steps.map((step, i) => (
-          <AutomationStep
-            key={step.id}
-            step={step}
-            onDelete={() => removeStep(step.id)}
-            onMoveUp={() => moveStep(i, "up")}
-            onMoveDown={() => moveStep(i, "down")}
-            onConfigChange={(key: string, value: any) =>
-              updateConfig(step.id, key, value)
-            }
-          />
+          <div key={step.id} className="relative">
+            
+            {/* STEP CARD WRAPPER */}
+            <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition">
+              <AutomationStep
+                step={step}
+                onDelete={() => removeStep(step.id)}
+                onMoveUp={() => moveStep(i, "up")}
+                onMoveDown={() => moveStep(i, "down")}
+                onConfigChange={(key: string, value: any) =>
+                  updateConfig(step.id, key, value)
+                }
+              />
+            </div>
+
+            {/* 🔥 CONNECTOR LINE */}
+            {i !== steps.length - 1 && (
+              <div className="flex justify-center my-2">
+                <div className="w-px h-6 bg-blue-100" />
+              </div>
+            )}
+
+          </div>
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2 pt-3">
+      {/* 🔥 ADD STEP BUTTONS */}
+      <div className="flex flex-wrap gap-2 pt-2">
+
         <button
           onClick={() => addStep("MESSAGE")}
-          className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-xl hover:bg-indigo-200"
+          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
         >
           + Message
         </button>
 
         <button
           onClick={() => addStep("DELAY")}
-          className="text-xs bg-yellow-100 text-yellow-700 px-3 py-1.5 rounded-xl hover:bg-yellow-200"
+          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
         >
           + Delay
         </button>
 
         <button
           onClick={() => addStep("CONDITION")}
-          className="text-xs bg-purple-100 text-purple-700 px-3 py-1.5 rounded-xl hover:bg-purple-200"
+          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
         >
           + Condition
         </button>
 
         <button
           onClick={() => addStep("BOOKING")}
-          className="text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-xl hover:bg-green-200"
+          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
         >
           + Booking
         </button>
+
       </div>
     </div>
   );

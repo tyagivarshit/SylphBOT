@@ -1,65 +1,78 @@
 "use client"
 
 import {
-LineChart,
-Line,
-XAxis,
-YAxis,
-Tooltip,
-ResponsiveContainer,
-CartesianGrid
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid
 } from "recharts"
 
-export default function LeadsChart({data}:{data:any[]}){
+export default function LeadsChart({ data }: { data: any[] }) {
 
-return(
+  return (
 
-<div className="w-full h-56">
+    <div className="w-full h-56 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 shadow-sm">
 
-<ResponsiveContainer>
+      <ResponsiveContainer>
 
-<LineChart data={data}>
+        <LineChart data={data}>
 
-<CartesianGrid
-stroke="#9ca3af"
-strokeDasharray="3 3"
-/>
+          <CartesianGrid
+            stroke="#dbeafe"
+            strokeDasharray="3 3"
+          />
 
-<XAxis
-dataKey="date"
-stroke="#111827"
-tick={{ fill:"#111827", fontSize:12 }}
-/>
+          <XAxis
+            dataKey="date"
+            stroke="#6b7280"
+            tick={{ fill: "#6b7280", fontSize: 12 }}
+            axisLine={false}
+            tickLine={false}
+          />
 
-<YAxis
-stroke="#111827"
-tick={{ fill:"#111827", fontSize:12 }}
-/>
+          <YAxis
+            stroke="#6b7280"
+            tick={{ fill: "#6b7280", fontSize: 12 }}
+            axisLine={false}
+            tickLine={false}
+          />
 
-<Tooltip
-contentStyle={{
-background:"#ffffff",
-border:"1px solid #d1d5db",
-borderRadius:"8px",
-color:"#111827"
-}}
-/>
+          <Tooltip
+            contentStyle={{
+              background: "rgba(255,255,255,0.9)",
+              border: "1px solid #dbeafe",
+              borderRadius: "12px",
+              color: "#111827",
+              backdropFilter: "blur(8px)"
+            }}
+          />
 
-<Line
-type="monotone"
-dataKey="leads"
-stroke="#1d4ed8"
-strokeWidth={4}
-dot={{ r:5, stroke:"#1d4ed8", strokeWidth:2 }}
-activeDot={{ r:7 }}
-/>
+          <Line
+            type="monotone"
+            dataKey="leads"
+            stroke="url(#colorGradient)"
+            strokeWidth={3}
+            dot={{ r: 4, stroke: "#2563eb", strokeWidth: 2, fill: "#fff" }}
+            activeDot={{ r: 6 }}
+          />
 
-</LineChart>
+          {/* Gradient */}
+          <defs>
+            <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#2563eb" />
+              <stop offset="100%" stopColor="#06b6d4" />
+            </linearGradient>
+          </defs>
 
-</ResponsiveContainer>
+        </LineChart>
 
-</div>
+      </ResponsiveContainer>
 
-)
+    </div>
+
+  )
 
 }

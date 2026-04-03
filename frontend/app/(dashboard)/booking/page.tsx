@@ -18,36 +18,36 @@ export default function BookingPage() {
   };
 
   return (
-    <div className="p-4 md:p-6 bg-[#f7f7f5] min-h-[calc(100vh-64px)]">
+    <div className="p-4 md:p-6 bg-gradient-to-br from-blue-50 to-white min-h-[calc(100vh-64px)]">
 
       {/* HEADER */}
       <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
 
         <div>
-          <h1 className="text-2xl font-bold text-[#0f172a] tracking-tight">
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
             Booking
           </h1>
 
-          <p className="text-[13px] text-[#6b7280] mt-1 font-medium">
+          <p className="text-sm text-gray-500 mt-1">
             Manage your availability, appointments and scheduling
           </p>
         </div>
 
         {/* ACTION BUTTONS */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
 
-          {/* VIEW CALENDAR (scroll to slots for now) */}
+          {/* VIEW CALENDAR */}
           <button
             onClick={handleScrollToSlots}
-            className="px-4 py-2 text-[13px] font-semibold rounded-xl border border-[#e6e6e2] bg-white hover:bg-[#f1f1ef] transition"
+            className="px-4 py-2 text-sm font-semibold rounded-xl bg-blue-50 text-gray-700 border border-blue-100 hover:bg-blue-100 transition"
           >
             View Calendar
           </button>
 
-          {/* NEW SLOT (OPEN MODAL) */}
+          {/* NEW SLOT */}
           <button
             onClick={handleOpenSlot}
-            className="px-4 py-2 text-[13px] font-semibold rounded-xl text-white bg-gradient-to-r from-[#C8A96A] to-[#E6C200] shadow-sm hover:opacity-90 transition active:scale-[0.96]"
+            className="px-5 py-2 text-sm font-semibold rounded-xl text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md transition active:scale-[0.96]"
           >
             + New Slot
           </button>
@@ -56,7 +56,7 @@ export default function BookingPage() {
       </div>
 
       {/* MAIN CARD */}
-      <div className="bg-[#ffffffcc] backdrop-blur-md border border-[#e8e8e4] rounded-2xl p-4 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
+      <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 md:p-6 shadow-sm">
 
         <FeatureGate feature="AI_BOOKING_SCHEDULING">
           <div id="availability-section">

@@ -54,7 +54,7 @@ export default function StatCard({
 
   return (
     <div
-      className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 shadow-sm hover:shadow-md transition flex items-center justify-between"
+      className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 sm:p-6 shadow-sm hover:shadow-lg transition flex items-center justify-between"
       aria-label={`${title} stat`}
     >
 
@@ -65,14 +65,14 @@ export default function StatCard({
           {title}
         </p>
 
-        <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
+        <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-1">
           {displayValue}
         </h2>
 
         {trendText && (
           <p
-            className={`text-xs mt-1 ${
-              isNegative ? "text-red-600" : "text-green-600"
+            className={`text-xs mt-1 font-medium ${
+              isNegative ? "text-red-600" : "text-green-700"
             }`}
           >
             {trendText}
@@ -83,7 +83,7 @@ export default function StatCard({
 
       {/* RIGHT ICON */}
       {icon && (
-        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+        <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
           {icon}
         </div>
       )}

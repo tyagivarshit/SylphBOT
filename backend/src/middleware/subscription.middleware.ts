@@ -16,6 +16,10 @@ type BillingContext = {
   status: "INACTIVE" | "ACTIVE" | "TRIAL";
   isLimited: boolean;
   upgradeRequired: boolean;
+
+  // 🔥 NEW
+  allowEarly?: boolean;
+  remainingEarly?: number;
 };
 
 export const attachBillingContext = async (
@@ -65,6 +69,8 @@ export const attachBillingContext = async (
       status: "INACTIVE",
       isLimited: true,
       upgradeRequired: true,
+      allowEarly: false,
+      remainingEarly: 0,
     };
 
     if (subscription && subscription.plan) {
@@ -77,6 +83,8 @@ export const attachBillingContext = async (
         status: "ACTIVE",
         isLimited: false,
         upgradeRequired: false,
+        allowEarly: false,
+        remainingEarly: 0,
       };
 
       /* ============================= */
@@ -98,7 +106,7 @@ export const attachBillingContext = async (
       }
 
       /* ============================= */
-      /* GRACE PERIOD (🔥 NEW) */
+      /* GRACE PERIOD */
       /* ============================= */
 
       if (subscription.status === "PAST_DUE") {
@@ -106,7 +114,7 @@ export const attachBillingContext = async (
           subscription.graceUntil &&
           now <= new Date(subscription.graceUntil)
         ) {
-          context.status = "ACTIVE"; // allow during grace
+          context.status = "ACTIVE";
         } else {
           context.status = "INACTIVE";
           context.planKey = "FREE_LOCKED";
@@ -126,6 +134,39 @@ export const attachBillingContext = async (
         context.upgradeRequired = true;
       }
     }
+
+    /* ============================= */
+    /* 🔥 EARLY PRICING LOGIC */
+    /* ============================= */
+
+    const planData = await prisma.plan.findMany({
+      where: {
+        type: { in: ["BASIC", "PRO", "ELITE"] },
+      },
+      select: {
+        type: true,
+        earlyUsed: true,
+        earlyLimit: true,
+      },
+    });
+
+    const totalEarlyUsed = planData.reduce(
+      (acc, p) => acc + (p.earlyUsed || 0),
+      0
+    );
+
+    const earlyLimit = 20;
+
+    const hasPaidBefore = !!subscription?.stripeSubscriptionId;
+
+    const allowEarly = totalEarlyUsed < earlyLimit && !hasPaidBefore;
+
+    const remainingEarly = Math.max(earlyLimit - totalEarlyUsed, 0);
+
+    context.allowEarly = allowEarly;
+    context.remainingEarly = remainingEarly;
+
+    /* ============================= */
 
     (req as any).subscription = subscription;
     (req as any).billing = context;

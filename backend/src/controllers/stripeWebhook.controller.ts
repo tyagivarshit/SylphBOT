@@ -119,6 +119,23 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
         if (!plan) break;
 
+        /* ============================= */
+        /* 🔥 EARLY COUNT UPDATE */
+        /* ============================= */
+
+        const usedEarly = session.metadata?.usedEarly === "true";
+
+        if (usedEarly) {
+          await prisma.plan.updateMany({
+            where: {
+              OR: [{ name: planType }, { type: planType }],
+            },
+            data: {
+              earlyUsed: { increment: 1 },
+            },
+          });
+        }
+
         const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
 
         const periodEnd = getPeriodEnd(stripeSub);
@@ -204,7 +221,7 @@ export const stripeWebhook = async (req: Request, res: Response) => {
           where: { stripeSubscriptionId: subscriptionId },
           data: {
             status: "ACTIVE",
-            graceUntil: null, // 🔥 clear grace
+            graceUntil: null,
           },
         });
 

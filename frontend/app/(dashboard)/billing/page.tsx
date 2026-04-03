@@ -19,7 +19,7 @@ export default function BillingPage() {
 
   const [subscription, setSubscription] = useState<any>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
-  const [billingContext, setBillingContext] = useState<any>(null); // 🔥 NEW
+  const [billingContext, setBillingContext] = useState<any>(null);
 
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +61,6 @@ export default function BillingPage() {
             setInvoices(res.invoices);
           }
 
-          /* 🔥 ADD */
           if (res.billing) {
             setBillingContext(res.billing);
           }
@@ -80,9 +79,15 @@ export default function BillingPage() {
     init();
   }, []);
 
-  /* ================= PLAN KEY ================= */
+  /* ================= FLAGS ================= */
 
   const planKey = billingContext?.planKey || "FREE_LOCKED";
+
+  // 🔥 FIX 1: trial check robust
+  const hasUsedTrial =
+    subscription?.hasUsedTrial ||
+    subscription?.trialUsed ||
+    false;
 
   /* ================= PLANS ================= */
 
@@ -91,8 +96,18 @@ export default function BillingPage() {
       id: "BASIC",
       name: "Basic",
       popular: false,
-      INR: { monthly: 999, yearly: 9990, early: 799 },
-      USD: { monthly: 19, yearly: 190, early: 15 },
+      INR: {
+        monthly: 999,
+        yearly: 9990,
+        earlyMonthly: 799,
+        earlyYearly: 7990,
+      },
+      USD: {
+        monthly: 19,
+        yearly: 190,
+        earlyMonthly: 15,
+        earlyYearly: 150,
+      },
       features: [
         "Instagram DM Automation",
         "Comment → DM Automation",
@@ -103,8 +118,18 @@ export default function BillingPage() {
       id: "PRO",
       name: "Pro",
       popular: true,
-      INR: { monthly: 1999, yearly: 19990, early: 1599 },
-      USD: { monthly: 49, yearly: 490, early: 39 },
+      INR: {
+        monthly: 1999,
+        yearly: 19990,
+        earlyMonthly: 1599,
+        earlyYearly: 15990,
+      },
+      USD: {
+        monthly: 49,
+        yearly: 490,
+        earlyMonthly: 39,
+        earlyYearly: 390,
+      },
       features: [
         "WhatsApp Automation",
         "CRM + Follow-ups",
@@ -116,8 +141,18 @@ export default function BillingPage() {
       id: "ELITE",
       name: "Elite",
       popular: false,
-      INR: { monthly: 3999, yearly: 39990, early: 2999 },
-      USD: { monthly: 99, yearly: 990, early: 79 },
+      INR: {
+        monthly: 3999,
+        yearly: 39990,
+        earlyMonthly: 2999,
+        earlyYearly: 29990,
+      },
+      USD: {
+        monthly: 99,
+        yearly: 990,
+        earlyMonthly: 79,
+        earlyYearly: 790,
+      },
       features: [
         "AI Booking System",
         "Advanced Workflows",
@@ -196,12 +231,7 @@ export default function BillingPage() {
           </p>
         </div>
 
-        {/* 🔥 FREE LOCK BADGE */}
-        {planKey === "FREE_LOCKED" && (
-          <span className="text-xs bg-red-100 text-red-600 px-3 py-1 rounded-full">
-            No Active Plan
-          </span>
-        )}
+        {/* ❌ REMOVED: No Active Plan badge */}
 
         {/* TOGGLE */}
         <div className="flex bg-white/70 backdrop-blur border border-gray-200 rounded-xl p-1 shadow-sm">
@@ -234,11 +264,14 @@ export default function BillingPage() {
 
           const data = plan[currency];
 
-          const price = isEarly
-            ? data.early
-            : billing === "monthly"
-            ? data.monthly
-            : data.yearly;
+          const price =
+            billing === "monthly"
+              ? isEarly
+                ? data.earlyMonthly
+                : data.monthly
+              : isEarly
+              ? data.earlyYearly
+              : data.yearly;
 
           const original =
             billing === "monthly" ? data.monthly : data.yearly;
@@ -310,6 +343,7 @@ export default function BillingPage() {
 
                 </div>
 
+                {/* ✅ BUTTON FIX */}
                 <button
                   onClick={() => handleUpgrade(plan.id)}
                   disabled={loading === plan.id || isCurrent}
@@ -324,7 +358,9 @@ export default function BillingPage() {
                     : loading === plan.id
                     ? "Processing..."
                     : planKey === "FREE_LOCKED"
-                    ? "Start Free Trial"
+                    ? hasUsedTrial
+                      ? "Buy Now"
+                      : "Start Free Trial"
                     : "Upgrade Plan"}
                 </button>
 

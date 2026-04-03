@@ -61,6 +61,8 @@ import "./workers/bookingReminder.worker";
 /* ========= ERRORS ========= */
 import { isAppError } from "./utils/AppError";
 
+import conversationRoutes from "./routes/conversation.routes";
+
 const app = express();
 
 /* ======================================
@@ -224,6 +226,8 @@ app.use("/api/ai", protect, attachBillingContext, aiLimiter, aiRoutes);
 app.use("/api/automation", protect, attachBillingContext, automationRoutes);
 
 app.use("/api/messages", protect, attachBillingContext, messageRoutes);
+
+app.use("/api/conversations", protect, conversationRoutes);
 
 app.use("/api/comment-triggers", protect, attachBillingContext, commentTriggerRoutes);
 

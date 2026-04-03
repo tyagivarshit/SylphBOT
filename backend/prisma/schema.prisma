@@ -166,16 +166,17 @@ model Plan {
   name         String   @unique
   priceIdINR String?
   priceIdUSD String?
-  type         String
+  type String @unique
 
   maxAiCalls   Int
   maxMessages  Int
   maxFollowups Int
 
+  earlyUsed    Int      @default(0)
+  earlyLimit   Int      @default(20)
 
   subscriptions Subscription[]
 
-  @@index([type])
 }
 
 /* =====================================================

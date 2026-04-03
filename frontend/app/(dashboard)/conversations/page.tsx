@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
-import ChatSidebar from "@/components/conversations/ChatSidebar"; 
+import ChatSidebar from "@/components/conversations/ChatSidebar";
 import ChatWindow from "@/components/conversations/ChatWindow";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "";
@@ -10,6 +10,9 @@ const API = process.env.NEXT_PUBLIC_API_URL || "";
 export interface Lead {
   id: string;
   name?: string;
+  lastMessage?: string;
+  lastMessageTime?: string;
+  unreadCount?: number;
 }
 
 export interface Message {
@@ -37,14 +40,21 @@ export default function ConversationsPage() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  /* ================= FETCH LEADS ================= */
+  /* ================= FETCH CONVERSATIONS ================= */
   useEffect(() => {
     const fetchLeads = async () => {
       try {
-        const res = await fetch(`${API}/api/leads`);
+        const res = await fetch(`${API}/api/conversations`, {
+          credentials: "include", // 🔥 MOST IMPORTANT FIX
+        });
+
         const data = await res.json();
-        setLeads(data.leads || []);
-      } catch {
+
+        console.log("🔥 conversations API:", data);
+
+        setLeads(data.conversations || []);
+      } catch (err) {
+        console.error(err);
         setLeads([]);
       }
     };
@@ -59,11 +69,19 @@ export default function ConversationsPage() {
     const fetchMessages = async () => {
       try {
         const res = await fetch(
-          `${API}/api/messages/${selectedLead.id}`
+          `${API}/api/conversations/${selectedLead.id}/messages`,
+          {
+            credentials: "include", // 🔥 IMPORTANT
+          }
         );
+
         const data = await res.json();
+
+        console.log("🔥 messages API:", data);
+
         setMessages(data.messages || []);
-      } catch {
+      } catch (err) {
+        console.error(err);
         setMessages([]);
       }
     };
@@ -77,12 +95,26 @@ export default function ConversationsPage() {
 
     const socket = io(API, {
       transports: ["websocket"],
+      withCredentials: true, // 🔥 IMPORTANT FOR COOKIE AUTH
     });
 
-    socket.emit("join", selectedLead.id);
+    socket.emit("join", `lead_${selectedLead.id}`);
 
     socket.on("new_message", (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
+
+      setLeads((prev) =>
+        prev.map((lead) =>
+          lead.id === selectedLead.id
+            ? {
+                ...lead,
+                lastMessage: msg.content,
+                lastMessageTime: msg.createdAt,
+                unreadCount: 0,
+              }
+            : lead
+        )
+      );
     });
 
     return () => {
@@ -97,15 +129,12 @@ export default function ConversationsPage() {
 
   return (
     <div className="h-[calc(100vh-64px)] flex bg-[#f9fcff]">
-
-      {/* 🔥 SIDEBAR */}
       <ChatSidebar
         leads={leads}
         selectedLead={selectedLead}
         setSelectedLead={setSelectedLead}
       />
 
-      {/* 🔥 CHAT WINDOW */}
       <ChatWindow
         selectedLead={selectedLead}
         messages={messages}

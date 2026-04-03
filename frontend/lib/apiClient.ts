@@ -36,7 +36,7 @@ async function coreFetch<T>(
   const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
-    /* 🔥 TOKEN */
+    /* 🔥 TOKEN (OPTIONAL - FUTURE SAFE) */
     const token =
       typeof window !== "undefined"
         ? localStorage.getItem("accessToken")
@@ -44,12 +44,11 @@ async function coreFetch<T>(
 
     const res = await fetch(url, {
       ...options,
-      credentials: "include",
+      credentials: "include", // ✅ COOKIE AUTH
       mode: "cors",
       headers: {
         "Content-Type": "application/json",
 
-        /* 🔥 MAIN FIX */
         ...(token && {
           Authorization: `Bearer ${token}`,
         }),
@@ -84,7 +83,7 @@ async function coreFetch<T>(
       };
     }
 
-    /* 🔒 403 (LIMIT / ACCESS CONTROL) */
+    /* 🔒 403 (PLAN LIMIT / ACCESS CONTROL) */
     if (res.status === 403) {
       return {
         success: true,
@@ -148,7 +147,7 @@ async function coreFetch<T>(
 }
 
 /* ======================================
-🔥 PUBLIC API
+🔥 PUBLIC API (🔥 FIXED)
 ====================================== */
 
 export async function apiFetch<T = any>(
@@ -156,7 +155,12 @@ export async function apiFetch<T = any>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
 
-  const url = `${API}${path}`;
+  /* 🔥 MAIN FIX: REMOVE DOUBLE /api */
+  const cleanPath = path.startsWith("/api")
+    ? path.replace(/^\/api/, "")
+    : path;
+
+  const url = `${API}${cleanPath}`;
 
   return coreFetch<T>(url, options);
 }

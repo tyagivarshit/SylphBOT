@@ -32,68 +32,67 @@ export default function ChatWindow({
   onBack,
 }: Props) {
   const [input, setInput] = useState("");
-  const [typing, setTyping] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
   /* ================= AUTO SCROLL ================= */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typing]);
+  }, [messages]);
 
   /* ================= SEND MESSAGE ================= */
   const sendMessage = async () => {
-    if (!input.trim() || !selectedLead) return;
+    if (!input.trim() || !selectedLead || sending) return;
 
-    const msg = input;
+    const msg = input.trim();
+    setInput("");
 
     const tempMessage: Message = {
-      id: Date.now().toString(),
+      id: "temp-" + Date.now(),
       content: msg,
       sender: "USER",
       createdAt: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, tempMessage]);
-    setInput("");
-    setTyping(true);
+    setSending(true);
 
     try {
-      await fetch(`${API}/api/messages/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          leadId: selectedLead.id,
-          message: msg,
-        }),
-      });
+      await fetch(
+        `${API}/api/conversations/${selectedLead.id}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            content: msg, // ✅ FIX
+            sender: "USER",
+          }),
+        }
+      );
     } catch (err) {
       console.error(err);
     } finally {
-      setTyping(false);
+      setSending(false);
     }
   };
 
-  /* ================= CTA HANDLERS ================= */
+  /* ================= CTA ================= */
 
   const handleBooking = async () => {
     if (!selectedLead) return;
 
-    try {
-      await fetch(`${API}/api/booking/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          leadId: selectedLead.id,
-        }),
-      });
-    } catch (err) {
-      console.error("Booking error:", err);
-    }
+    await fetch(`${API}/api/booking/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        leadId: selectedLead.id,
+      }),
+    });
   };
 
   const handleOptions = async () => {
@@ -104,16 +103,13 @@ export default function ChatWindow({
       const msg: Message = {
         id: Date.now().toString(),
         content:
-          data?.message ||
-          "Here are some options I can suggest for you 👍",
+          data?.message || "Here are some options I can suggest 👍",
         sender: "AI",
         createdAt: new Date().toISOString(),
       };
 
       setMessages((prev) => [...prev, msg]);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch {}
   };
 
   /* ================= EMPTY ================= */
@@ -127,7 +123,6 @@ export default function ChatWindow({
 
   return (
     <div className="flex-1 flex flex-col bg-[#f9fcff] h-full">
-      
       {/* HEADER */}
       <div className="h-[60px] border-b border-gray-200 flex items-center px-4 bg-white gap-3">
         <button onClick={onBack} className="md:hidden text-gray-700">
@@ -144,7 +139,7 @@ export default function ChatWindow({
 
       {/* MESSAGES */}
       <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 space-y-3">
-        {messages.map((msg) => {
+        {(messages || []).map((msg) => {
           const isUser = msg.sender === "USER";
 
           return (
@@ -162,7 +157,7 @@ export default function ChatWindow({
               >
                 <p>{msg.content}</p>
 
-                {/* 🔥 CTA BUTTONS */}
+                {/* CTA */}
                 {msg.sender === "AI" && msg.cta && msg.cta !== "NONE" && (
                   <div className="mt-2 flex gap-2 flex-wrap">
                     {msg.cta === "BOOK_NOW" && (
@@ -197,15 +192,6 @@ export default function ChatWindow({
           );
         })}
 
-        {/* TYPING */}
-        {typing && (
-          <div className="flex justify-start">
-            <div className="bg-white border border-gray-200 px-4 py-2 rounded-xl text-sm text-gray-500 animate-pulse">
-              typing...
-            </div>
-          </div>
-        )}
-
         <div ref={bottomRef} />
       </div>
 
@@ -214,7 +200,7 @@ export default function ChatWindow({
         <div className="flex items-center gap-2">
           <input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => setInput(e.target.value || "")}
             placeholder="Message..."
             className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-[#14E1C1]"
             onKeyDown={(e) => {
@@ -224,7 +210,8 @@ export default function ChatWindow({
 
           <button
             onClick={sendMessage}
-            className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white p-2 rounded-full"
+            disabled={sending}
+            className="bg-gradient-to-r from-[#14E1C1] to-[#3b82f6] text-white p-2 rounded-full disabled:opacity-50"
           >
             <Send size={16} />
           </button>

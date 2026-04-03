@@ -126,10 +126,49 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
-  /* PRICE */
+  /* 🔥 EARLY PRICING LOGIC */
   /* ============================= */
 
-  const priceId = await getPriceId(plan, billing, finalCurrency);
+  const planData = await prisma.plan.findUnique({
+    where: { type: plan },
+  });
+
+  if (!planData) {
+    throw new Error("Plan not found");
+  }
+
+  const allPlans = await prisma.plan.findMany({
+    select: { earlyUsed: true },
+  });
+
+  const totalEarlyUsed = allPlans.reduce(
+    (acc, p) => acc + (p.earlyUsed || 0),
+    0
+  );
+
+  const earlyLimit = 20;
+
+  const hasPaidBefore = !!existingSub?.stripeSubscriptionId;
+
+  const allowEarly = totalEarlyUsed < earlyLimit && !hasPaidBefore;
+
+  let priceKey: string;
+
+  if (billing === "monthly") {
+    priceKey = allowEarly
+      ? `STRIPE_${plan}_${finalCurrency}_MONTHLY_EARLY`
+      : `STRIPE_${plan}_${finalCurrency}_MONTHLY`;
+  } else {
+    priceKey = allowEarly
+      ? `STRIPE_${plan}_${finalCurrency}_YEARLY_EARLY`
+      : `STRIPE_${plan}_${finalCurrency}_YEARLY`;
+  }
+
+  const priceId = process.env[priceKey];
+
+  if (!priceId) {
+    throw new Error(`Missing Stripe price for ${priceKey}`);
+  }
 
   /* ============================= */
   /* 🔥 UPGRADE FIX (REAL SAAS) */
@@ -175,16 +214,11 @@ export const createCheckoutSession = async (
   }
 
   /* ============================= */
-  /* 🔥 TRIAL PROTECTION (IMPORTANT) */
+  /* 🔥 TRIAL LOGIC */
   /* ============================= */
 
-  let isTrialEligible = false;
-
-  if (!existingSub) {
-    isTrialEligible = true;
-  } else if (!existingSub.trialUsed) {
-    isTrialEligible = true;
-  }
+  const isTrialEligible =
+    !existingSub || !existingSub.trialUsed;
 
   /* ============================= */
   /* CREATE CHECKOUT */
@@ -217,6 +251,10 @@ export const createCheckoutSession = async (
         plan,
         billing,
         currency: finalCurrency,
+
+        // 🔥 SECURITY FLAGS
+        usedEarly: allowEarly ? "true" : "false",
+        usedTrial: isTrialEligible ? "true" : "false",
       },
 
       success_url: `${env.FRONTEND_URL}/billing/success`,

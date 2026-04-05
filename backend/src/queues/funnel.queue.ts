@@ -1,7 +1,15 @@
 import { Queue } from "bullmq";
-import { redisConnection } from "../config/redis";
+const url = new URL(process.env.REDIS_URL!);
+
+const connection = {
+  host: url.hostname,
+  port: Number(url.port),
+  username: "default",
+  password: url.password,
+  tls: {},
+};
 
 export const funnelQueue = new Queue("funnelQueue", {
-  connection: redisConnection,
+  connection: connection,
   prefix: "sylph",
 });

@@ -1,11 +1,12 @@
-import { redisConnection } from "../config/redis";
+import redis from "../config/redis";
 
 interface RateLimitResult {
   blocked: boolean;
   remaining: number;
 }
 
-const WINDOW_SECONDS = 60; // 1 min window
+const WINDOW_SECONDS = 60;
+
 const LIMITS = {
   WHATSAPP: 20,
   INSTAGRAM: 15,
@@ -25,13 +26,13 @@ export const checkPlatformRateLimit = async ({
 
     const key = `rate:${platform}:${businessId}:${leadId}`;
 
-    const current = await (redisConnection as any).incr(key);
+    const current = await redis?.incr(key);
 
     if (current === 1) {
-      await (redisConnection as any).expire(key, WINDOW_SECONDS);
+      await redis?.expire(key, WINDOW_SECONDS);
     }
 
-    if (current > limit) {
+    if (current && current > limit) {
       return {
         blocked: true,
         remaining: 0,
@@ -40,8 +41,9 @@ export const checkPlatformRateLimit = async ({
 
     return {
       blocked: false,
-      remaining: limit - current,
+      remaining: limit - (current || 0),
     };
+
   } catch (error) {
     console.error("RATE LIMIT ERROR:", error);
 

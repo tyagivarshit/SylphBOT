@@ -1,8 +1,16 @@
 import { Queue } from "bullmq";
-import { redisConnection } from "../config/redis";
 
+const url = new URL(process.env.REDIS_URL!);
+
+const connection = {
+  host: url.hostname,
+  port: Number(url.port),
+  username: "default",
+  password: url.password,
+  tls: {},
+};
 const aiQueue = new Queue("aiQueue", {
-  connection: redisConnection,
+  connection: connection,
 });
 
 export const getQueueHealth = async () => {

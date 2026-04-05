@@ -1,9 +1,17 @@
 import { Worker } from "bullmq";
 import axios from "axios";
 import prisma from "../config/prisma";
-import { redisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
 import { getIO } from "../sockets/socket.server";
+const url = new URL(process.env.REDIS_URL!);
+
+const connection = {
+  host: url.hostname,
+  port: Number(url.port),
+  username: "default",
+  password: url.password,
+  tls: {},
+};
 
 /* 🔥 SMART FOLLOWUP GENERATOR (UPGRADED 🔥) */
 const generateSmartFollowup = (
@@ -245,7 +253,7 @@ new Worker(
 
   },
   {
-    connection: redisConnection,
+    connection: connection,
     concurrency: 5,
   }
 );

@@ -19,9 +19,6 @@ const worker = new Worker(
     const { businessId, leadId, message, plan } = job.data;
 
     try {
-      /* =================================================
-      🤖 AI
-      ================================================= */
       const aiResponse = await routeAIMessage({
         businessId,
         leadId,
@@ -36,9 +33,6 @@ const worker = new Worker(
 
       if (!aiReply) return;
 
-      /* =================================================
-      💬 SAVE + REALTIME (USING YOUR SERVICE 🔥)
-      ================================================= */
       await handleIncomingMessage({
         leadId,
         content: aiReply,

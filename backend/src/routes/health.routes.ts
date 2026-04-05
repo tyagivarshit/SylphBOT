@@ -1,29 +1,40 @@
 import { Router } from "express";
 import os from "os";
 import { Queue } from "bullmq";
-import { redis } from "../redis/rateLimiter.redis";
-import { redisConnection } from "../config/redis";
+import redis from "../config/redis";
 
 const router = Router();
 
-/* =============================
-QUEUE INSTANCES
-============================= */
+/* ================================
+   CONNECTION (FIXED)
+================================ */
 
-const aiQueue = new Queue("aiQueue", {
-  connection: redisConnection,
-});
+const url = new URL(process.env.REDIS_URL!);
+
+const connection = {
+  host: url.hostname,
+  port: Number(url.port),
+  username: "default",
+  password: url.password,
+  tls: {},
+};
+
+/* ================================
+   QUEUE INSTANCES (FIXED)
+================================ */
+
+const aiQueue = new Queue("aiQueue", { connection });
 
 const funnelQueue = new Queue("funnelQueue", {
-  connection: redisConnection,
+  connection,
+  prefix: "sylph",
 });
 
-/* =============================
-SYSTEM STATS
-============================= */
+/* ================================
+   SYSTEM STATS
+================================ */
 
 const getSystemStats = () => {
-
   const memory = process.memoryUsage();
 
   return {
@@ -37,47 +48,36 @@ const getSystemStats = () => {
       external: memory.external,
     },
   };
-
 };
 
-/* =============================
-REDIS HEALTH
-============================= */
+/* ================================
+   REDIS HEALTH
+================================ */
 
 const checkRedis = async () => {
-
   try {
-
     const start = Date.now();
-
-    const pong = await redis.ping();
-
+    const pong = await redis?.ping();
     const latency = Date.now() - start;
 
     return {
       status: pong === "PONG" ? "ok" : "error",
       latency,
     };
-
   } catch (error) {
-
     return {
       status: "error",
       error: String(error),
     };
-
   }
-
 };
 
-/* =============================
-QUEUE HEALTH
-============================= */
+/* ================================
+   QUEUE HEALTH
+================================ */
 
 const checkQueues = async () => {
-
   try {
-
     const [
       aiWaiting,
       aiActive,
@@ -109,26 +109,20 @@ const checkQueues = async () => {
         failed: funnelFailed,
       },
     };
-
   } catch (error) {
-
     return {
       status: "error",
       error: String(error),
     };
-
   }
-
 };
 
-/* =============================
-GLOBAL HEALTH
-============================= */
+/* ================================
+   ROUTES
+================================ */
 
 router.get("/", async (req, res) => {
-
   try {
-
     const [redisHealth, queueHealth] = await Promise.all([
       checkRedis(),
       checkQueues(),
@@ -147,50 +141,12 @@ router.get("/", async (req, res) => {
       redis: redisHealth,
       queues: queueHealth,
     });
-
   } catch (error) {
-
     res.status(500).send({
       status: "error",
       error: String(error),
     });
-
   }
-
-});
-
-/* =============================
-REDIS ONLY CHECK
-============================= */
-
-router.get("/redis", async (req, res) => {
-
-  const redisHealth = await checkRedis();
-
-  res.send(redisHealth);
-
-});
-
-/* =============================
-QUEUE ONLY CHECK
-============================= */
-
-router.get("/queues", async (req, res) => {
-
-  const queues = await checkQueues();
-
-  res.send(queues);
-
-});
-
-/* =============================
-SYSTEM STATS ONLY
-============================= */
-
-router.get("/system", (req, res) => {
-
-  res.send(getSystemStats());
-
 });
 
 export default router;

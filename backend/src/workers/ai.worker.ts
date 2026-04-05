@@ -1,7 +1,6 @@
 import { Worker } from "bullmq";
 import prisma from "../config/prisma";
 import axios from "axios";
-import { redisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
 import { retryAsync } from "../utils/retry.utils";
 
@@ -15,6 +14,15 @@ import { bookingPriorityRouter } from "../services/bookingPriorityRouter.service
 import { getIO } from "../sockets/socket.server";
 import logger from "../utils/logger";
 import * as Sentry from "@sentry/node";
+const url = new URL(process.env.REDIS_URL!);
+
+const connection = {
+  host: url.hostname,
+  port: Number(url.port),
+  username: "default",
+  password: url.password,
+  tls: {},
+};
 
 /* ---------------- DELAY ---------------- */
 const delay = (ms: number) =>
@@ -61,7 +69,7 @@ const worker = new Worker(
     });
   },
   {
-    connection: redisConnection,
+    connection: connection,
     concurrency: 10,
   }
 );
@@ -190,7 +198,9 @@ const processAndSendReply = async (data: any, aiReply: any) => {
     });
 
   } catch (error: any) {
-    logger.error("❌ Send reply failed", error);
+    if (error instanceof Error) {
+      logger.error("❌ Legacy flow failed: " + error.message);
+    }
     Sentry.captureException(error);
     throw error;
   }
@@ -282,7 +292,9 @@ aiReply =
     return await processAndSendReply(data, aiReply);
 
   } catch (error: any) {
-    logger.error("❌ Legacy flow failed", error);
+    if (error instanceof Error) {
+      logger.error("❌ Legacy flow failed: " + error.message);
+    }
     Sentry.captureException(error);
     throw error;
   }

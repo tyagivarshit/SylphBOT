@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+console.log("REDIS_URL FROM ENV:", process.env.REDIS_URL);
 
 let redis: Redis | null = null;
 

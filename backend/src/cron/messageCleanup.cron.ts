@@ -1,8 +1,7 @@
 import prisma from "../config/prisma";
 import { generateConversationSummary } from "../services/conversationSummary.service";
-import Redis from "ioredis";
+import redis from "../config/redis";
 
-const redis = new Redis(process.env.REDIS_URL as string);
 
 /*
 ---------------------------------------------------

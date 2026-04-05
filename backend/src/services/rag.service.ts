@@ -1,9 +1,7 @@
 import prisma from "../config/prisma";
 import { searchKnowledge } from "./knowledgeSearch.service";
 import OpenAI from "openai";
-import Redis from "ioredis";
-
-const redis = new Redis(process.env.REDIS_URL as string);
+import redis from "../config/redis";
 
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,

@@ -1,6 +1,4 @@
-import Redis from "ioredis";
-
-const redis = new Redis(process.env.REDIS_URL as string);
+import redis from "../config/redis";
 
 const PREFIX = "webhook_errors";
 const TTL = 60 * 60 * 24; // 24 hours

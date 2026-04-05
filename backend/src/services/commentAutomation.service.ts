@@ -5,8 +5,7 @@ import { generateAIReply } from "./ai.service";
 import { hasFeature } from "../config/plan.config";
 import { incrementRate } from "../redis/rateLimiter.redis";
 
-import Redis from "ioredis";
-const redis = new Redis(process.env.REDIS_URL as string);
+import redis from "../config/redis";
 
 interface CommentInput {
   businessId: string;

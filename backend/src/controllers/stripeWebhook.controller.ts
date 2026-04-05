@@ -3,7 +3,6 @@ import Stripe from "stripe";
 import { stripe } from "../services/stripe.service";
 import prisma from "../config/prisma";
 import { env } from "../config/env";
-import Redis from "ioredis";
 
 /* 🔥 EMAIL */
 import {
@@ -16,8 +15,8 @@ import { getStripeTaxDetails } from "../services/tax.service";
 
 /* 🔥 INVOICE NUMBER */
 import { generateInvoiceNumber } from "../services/invoice.service";
+import redis from "../config/redis";
 
-const redis = new Redis(process.env.REDIS_URL!);
 
 /* ====================================== */
 /* UTILS */

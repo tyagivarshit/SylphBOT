@@ -1,8 +1,7 @@
 import { Worker } from "bullmq";
-import Redis from "ioredis";
+import redis from "../config/redis";
 import { handleCommentAutomation } from "../services/commentAutomation.service";
 
-const redis = new Redis(process.env.REDIS_URL as string);
 
 new Worker(
   "automation",

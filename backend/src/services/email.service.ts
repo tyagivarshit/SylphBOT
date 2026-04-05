@@ -205,7 +205,12 @@ const generateInvoicePDF = async ({ amount, currency, email }: any) => {
 export const sendInvoiceEmail = async (
   to: string,
   amount: number,
-  currency: string
+  currency: string,
+  hostedUrl?: string | null,
+  pdfUrl?: string | null,
+  subtotal?: number,
+  taxAmount?: number,
+  taxType?: string
 ) => {
   const pdfBuffer = await generateInvoicePDF({
     amount,
@@ -214,18 +219,75 @@ export const sendInvoiceEmail = async (
   });
 
   const html = baseTemplate(`
-    <h2 style="font-size:18px;font-weight:600;color:#111;margin-bottom:10px;">
-      Payment Successful 💳
-    </h2>
+  <h2 style="font-size:18px;font-weight:600;color:#111;margin-bottom:10px;">
+    Payment Successful 💳
+  </h2>
 
-    <p style="color:#4b5563;font-size:14px;">
-      Total Paid: <strong>${currency.toUpperCase()} ${(amount / 100).toFixed(2)}</strong>
-    </p>
+  <p style="color:#4b5563;font-size:14px;">
+    Total Paid: 
+    <strong>${currency.toUpperCase()} ${(amount / 100).toFixed(2)}</strong>
+  </p>
 
-    <p style="font-size:12px;color:#6b7280;">
-      Your invoice is attached below 📎
-    </p>
-  `);
+  ${
+    subtotal !== undefined
+      ? `<p style="font-size:13px;color:#6b7280;">
+          Subtotal: ${currency.toUpperCase()} ${(subtotal / 100).toFixed(2)}
+        </p>`
+      : ""
+  }
+
+  ${
+    taxAmount !== undefined
+      ? `<p style="font-size:13px;color:#6b7280;">
+          Tax (${taxType || "GST"}): ${currency.toUpperCase()} ${(taxAmount / 100).toFixed(2)}
+        </p>`
+      : ""
+  }
+
+  ${
+    hostedUrl
+      ? `
+        <div style="text-align:center;margin:20px 0;">
+          <a href="${hostedUrl}" style="
+            display:inline-block;
+            padding:10px 16px;
+            background:#635bff;
+            color:#fff;
+            border-radius:6px;
+            text-decoration:none;
+            font-size:13px;
+          ">
+            View Invoice
+          </a>
+        </div>
+      `
+      : ""
+  }
+
+  ${
+    pdfUrl
+      ? `
+        <div style="text-align:center;margin:10px 0;">
+          <a href="${pdfUrl}" style="
+            display:inline-block;
+            padding:10px 16px;
+            background:#111827;
+            color:#fff;
+            border-radius:6px;
+            text-decoration:none;
+            font-size:13px;
+          ">
+            Download PDF
+          </a>
+        </div>
+      `
+      : ""
+  }
+
+  <p style="font-size:12px;color:#6b7280;margin-top:20px;">
+    Thank you for choosing Automexia AI 🚀
+  </p>
+`);
 
   await transporter.sendMail({
     from: `"Automexia AI Support" <${process.env.EMAIL_USER}>`,

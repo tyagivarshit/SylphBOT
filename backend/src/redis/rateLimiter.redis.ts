@@ -1,9 +1,5 @@
-import Redis from "ioredis";
+import redis from "../config/redis";
 
-export const redis = new Redis(process.env.REDIS_URL as string, {
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-});
 
 /* ======================================
 CONFIG

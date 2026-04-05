@@ -1,9 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma";
-import Redis from "ioredis";
+import redis from "../config/redis";
 import { getPlanKey } from "../config/plan.config";
 
-const redis = new Redis(process.env.REDIS_URL as string);
 
 const CACHE_TTL = 60 * 3;
 

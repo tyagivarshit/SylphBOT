@@ -1,6 +1,5 @@
-import Redis from "ioredis";
+import redis from "../config/redis";
 
-const redis = new Redis(process.env.REDIS_URL as string);
 
 const PREFIX = "queue_dedup";
 

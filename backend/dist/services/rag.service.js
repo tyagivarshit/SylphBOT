@@ -1,0 +1,226 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.generateRAGReply = void 0;
+const prisma_1 = __importDefault(require("../config/prisma"));
+const knowledgeSearch_service_1 = require("./knowledgeSearch.service");
+const openai_1 = __importDefault(require("openai"));
+const ioredis_1 = __importDefault(require("ioredis"));
+const redis = new ioredis_1.default(process.env.REDIS_URL);
+const groq = new openai_1.default({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: "https://api.groq.com/openai/v1",
+});
+/* ---------------- INTENT ---------------- */
+const detectIntent = (message) => {
+    const msg = message.toLowerCase();
+    if (/price|cost|pricing/.test(msg))
+        return "PRICE";
+    if (/expensive|costly|high price/.test(msg))
+        return "OBJECTION_PRICE";
+    if (/not sure|thinking|later/.test(msg))
+        return "HESITATION";
+    if (/buy|purchase|order|start/.test(msg))
+        return "READY";
+    return "GENERAL";
+};
+/* ---------------- MULTI QUERY ---------------- */
+const generateQueries = (message) => {
+    const base = message.toLowerCase();
+    return [
+        base,
+        base + " details",
+        base + " information",
+    ];
+};
+/* ---------------- CACHE ---------------- */
+const getCache = async (key) => {
+    try {
+        const data = await redis.get(key);
+        return data ? JSON.parse(data) : null;
+    }
+    catch {
+        return null;
+    }
+};
+const setCache = async (key, value, ttl = 120) => {
+    try {
+        await redis.set(key, JSON.stringify(value), "EX", ttl);
+    }
+    catch { }
+};
+/* ---------------- SYSTEM PROMPT ---------------- */
+const SYSTEM_PROMPT = `
+You are an elite AI sales assistant.
+
+STRICT RULES:
+- Answer ONLY from the Knowledge section
+- If answer not found → reply EXACTLY: "No information available"
+- Do NOT guess
+
+STYLE:
+- Short replies
+- Human-like tone
+- Conversion focused
+`;
+/* =================================================
+🔥 NEW: STAGE BASED TONE ENGINE
+================================================= */
+const applyStageTone = (reply, stage, intent) => {
+    if (!reply)
+        return reply;
+    /* ❄️ COLD */
+    if (stage === "COLD" || stage === "NEW") {
+        return reply;
+    }
+    /* 🌤 WARM */
+    if (stage === "WARM" || stage === "INTERESTED") {
+        return reply + "\n\nWant me to guide you step by step?";
+    }
+    /* 🔥 HOT */
+    if (stage === "HOT" || stage === "READY_TO_BUY") {
+        if (intent === "PRICE") {
+            return reply + "\n\nI can suggest the best plan and book it for you 👍";
+        }
+        return reply + "\n\nI can book this for you right now 👍";
+    }
+    return reply;
+};
+/* =================================================
+🔥 GET LEAD STAGE
+================================================= */
+const getLeadStage = async (leadId) => {
+    if (!leadId)
+        return "NEW";
+    const lead = await prisma_1.default.lead.findUnique({
+        where: { id: leadId },
+        select: {
+            stage: true,
+            aiStage: true,
+        },
+    });
+    return lead?.aiStage || lead?.stage || "NEW";
+};
+/* ---------------- MAIN ---------------- */
+const generateRAGReply = async (businessId, message, leadId) => {
+    try {
+        const intent = detectIntent(message);
+        const businessKey = `biz:${businessId}`;
+        /* ================= SEARCH ================= */
+        const queries = generateQueries(message);
+        let allResults = [];
+        for (const q of queries) {
+            const res = await (0, knowledgeSearch_service_1.searchKnowledge)(businessId, q);
+            allResults.push(...res);
+        }
+        const uniqueMap = new Map();
+        for (const item of allResults) {
+            if (!uniqueMap.has(item.content)) {
+                uniqueMap.set(item.content, item);
+            }
+        }
+        const finalResults = Array.from(uniqueMap.values())
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5);
+        const knowledgeContext = finalResults
+            .map((r) => `• ${r.content}`)
+            .join("\n");
+        /* ---------------- BUSINESS QUERY FIX ---------------- */
+        const lowerMsg = message.toLowerCase();
+        const isBusinessQuery = lowerMsg.includes("business") ||
+            lowerMsg.includes("service") ||
+            lowerMsg.includes("kya karte") ||
+            lowerMsg.includes("what do you do");
+        if (!knowledgeContext.trim() && !isBusinessQuery) {
+            return {
+                found: false,
+                reply: null,
+                context: "",
+            };
+        }
+        let finalContext = knowledgeContext;
+        if (!finalContext.trim()) {
+            const top = finalResults[0];
+            if (top) {
+                finalContext = `• ${top.content}`;
+            }
+        }
+        /* ================= BUSINESS CACHE ================= */
+        let businessData = await getCache(businessKey);
+        if (!businessData) {
+            const client = await prisma_1.default.client.findFirst({
+                where: { businessId, isActive: true },
+                select: {
+                    businessInfo: true,
+                    pricingInfo: true,
+                    aiTone: true,
+                    salesInstructions: true,
+                },
+            });
+            businessData = client || {};
+            await setCache(businessKey, businessData, 300);
+        }
+        /* ================= PROMPT ================= */
+        const intentMap = {
+            PRICE: "Explain pricing clearly and guide user.",
+            OBJECTION_PRICE: "Handle objection and justify value.",
+            HESITATION: "Build trust and remove hesitation.",
+            READY: "Push toward conversion.",
+            GENERAL: "Be helpful and guide user.",
+        };
+        const prompt = `
+Business:
+${businessData.businessInfo || ""}
+
+Pricing:
+${businessData.pricingInfo || ""}
+
+Tone:
+${businessData.aiTone || "Friendly"}
+
+Instructions:
+${businessData.salesInstructions || ""}
+
+Knowledge:
+${finalContext}
+
+User:
+${message}
+
+Intent:
+${intentMap[intent]}
+`;
+        /* ================= AI CALL ================= */
+        const response = await groq.chat.completions.create({
+            model: "llama-3.1-8b-instant",
+            temperature: 0.2,
+            max_tokens: 200,
+            messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                { role: "user", content: prompt },
+            ],
+        });
+        let reply = response?.choices?.[0]?.message?.content?.trim();
+        /* =================================================
+        🔥 APPLY SALES BRAIN (NEW)
+        ================================================= */
+        const stage = await getLeadStage(leadId);
+        reply = applyStageTone(reply, stage, intent);
+        return {
+            found: true,
+            reply: reply || null,
+            context: finalContext,
+        };
+    }
+    catch (error) {
+        console.error("RAG ERROR:", error);
+        return {
+            found: false,
+            reply: null,
+            context: "",
+        };
+    }
+};
+exports.generateRAGReply = generateRAGReply;

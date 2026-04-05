@@ -1,0 +1,170 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getFlows = exports.createAutomationFlow = void 0;
+const prisma_1 = __importDefault(require("../config/prisma"));
+/* ---------------- CREATE FLOW ---------------- */
+const createAutomationFlow = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({
+                message: "Unauthorized",
+            });
+        }
+        /* 🔥 GET BUSINESS + PLAN (OPTIMIZED SELECT) */
+        const business = await prisma_1.default.business.findFirst({
+            where: { ownerId: userId },
+            select: {
+                id: true,
+                subscription: {
+                    select: {
+                        plan: {
+                            select: {
+                                type: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        if (!business) {
+            return res.status(404).json({
+                message: "Business not found",
+            });
+        }
+        const planType = business.subscription?.plan?.type || "FREE";
+        const { name, triggerValue, triggerType = "KEYWORD", channel = "INSTAGRAM", steps = [], } = req.body;
+        /* ---------------- VALIDATION ---------------- */
+        const cleanName = name?.trim();
+        const cleanTrigger = triggerValue?.toLowerCase().trim();
+        if (!cleanName || !cleanTrigger) {
+            return res.status(400).json({
+                message: "Name and triggerValue are required",
+            });
+        }
+        if (!Array.isArray(steps) || steps.length === 0) {
+            return res.status(400).json({
+                message: "At least 1 step is required",
+            });
+        }
+        /* 🔥 STEP SANITIZATION (IMPORTANT) */
+        const sanitizedSteps = steps.map((step, index) => ({
+            stepKey: `STEP_${index + 1}`,
+            stepType: step.type,
+            message: step.config?.message || null,
+            condition: step.config?.condition || null,
+            nextStep: index < steps.length - 1
+                ? `STEP_${index + 2}`
+                : null,
+            metadata: step.config || {},
+        }));
+        /* ---------------- PLAN RESTRICTIONS ---------------- */
+        const restrictedTypesBasic = ["DELAY", "CONDITION", "BOOKING"];
+        if (planType === "BASIC") {
+            const invalidStep = sanitizedSteps.find((s) => restrictedTypesBasic.includes(s.stepType));
+            if (invalidStep) {
+                return res.status(403).json({
+                    message: `Step '${invalidStep.stepType}' not allowed in BASIC plan`,
+                });
+            }
+        }
+        /* ---------------- CREATE FLOW + STEPS ---------------- */
+        const flow = await prisma_1.default.$transaction(async (tx) => {
+            const createdFlow = await tx.automationFlow.create({
+                data: {
+                    businessId: business.id,
+                    name: cleanName,
+                    channel,
+                    triggerType,
+                    triggerValue: cleanTrigger,
+                    status: "ACTIVE",
+                },
+                select: { id: true },
+            });
+            await tx.automationStep.createMany({
+                data: sanitizedSteps.map((step) => ({
+                    ...step,
+                    flowId: createdFlow.id,
+                })),
+            });
+            return tx.automationFlow.findUnique({
+                where: { id: createdFlow.id },
+                include: {
+                    steps: {
+                        orderBy: { createdAt: "asc" },
+                    },
+                },
+            });
+        });
+        return res.status(201).json({
+            success: true,
+            flow,
+        });
+    }
+    catch (error) {
+        console.error("Create flow error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to create flow",
+        });
+    }
+};
+exports.createAutomationFlow = createAutomationFlow;
+/* ---------------- GET FLOWS ---------------- */
+const getFlows = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({
+                message: "Unauthorized",
+            });
+        }
+        const business = await prisma_1.default.business.findFirst({
+            where: { ownerId: userId },
+            select: { id: true },
+        });
+        if (!business) {
+            return res.status(404).json({
+                message: "Business not found",
+            });
+        }
+        const flows = await prisma_1.default.automationFlow.findMany({
+            where: {
+                businessId: business.id,
+            },
+            select: {
+                id: true,
+                name: true,
+                channel: true,
+                triggerType: true,
+                triggerValue: true,
+                status: true,
+                createdAt: true,
+                steps: {
+                    select: {
+                        stepKey: true,
+                        stepType: true,
+                        message: true,
+                        condition: true,
+                        nextStep: true,
+                    },
+                    orderBy: { createdAt: "asc" },
+                },
+            },
+            orderBy: {
+                createdAt: "desc",
+            },
+        });
+        return res.json(flows);
+    }
+    catch (error) {
+        console.error("Fetch flows error:", error);
+        return res.status(500).json({
+            message: "Failed to fetch flows",
+        });
+    }
+};
+exports.getFlows = getFlows;

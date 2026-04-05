@@ -9,6 +9,9 @@ export type PlanLimits = {
   messagesLimit: number;
   followupsLimit: number;
   maxTriggers: number;
+  aiCallsUsed?: number;      // 👈 add this
+  messagesUsed?: number;     // (safe add)
+  followupsUsed?: number; 
 };
 
 export type PlanFeatures = {

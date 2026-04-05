@@ -1,18 +1,6 @@
 import prisma from "../config/prisma";
-import Redis from "ioredis";
+import redis from "../config/redis";
 
-/*
-====================================================
-REDIS CONNECTION
-====================================================
-*/
-
-const redis = new Redis(process.env.REDIS_URL as string, {
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: false,
-  lazyConnect: true,
-  reconnectOnError: () => true,
-});
 
 /*
 ====================================================

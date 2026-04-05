@@ -1,10 +1,4 @@
-import Redis from "ioredis";
-
-const redis = new Redis(process.env.REDIS_URL as string, {
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  lazyConnect: true,
-});
+import redis from "../config/redis";
 
 const CACHE_TTL = 60 * 60; // 1 hour
 

@@ -10,6 +10,7 @@ export const env = {
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET as string,
 
   FRONTEND_URL: process.env.FRONTEND_URL as string,
+  REDIS_URL: process.env.REDIS_URL!, // ✅ ADD THIS
 
   /* =========================
      BASIC - INR

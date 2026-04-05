@@ -3,6 +3,8 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import cookieParser from "cookie-parser";
+import { env } from "./config/env";
+
 
 /* ========= CONFIG ========= */
 import prisma from "./config/prisma";
@@ -64,6 +66,7 @@ import { isAppError } from "./utils/AppError";
 import conversationRoutes from "./routes/conversation.routes";
 
 const app = express();
+console.log("🔥 REDIS FROM ENV:", env.REDIS_URL);
 
 /* ======================================
 🔥 TRUST PROXY

@@ -1,19 +1,22 @@
-import { Redis } from "ioredis";
-import { RedisOptions } from "bullmq";
+import Redis from "ioredis";
 
-/* BullMQ connection */
+let redis: Redis | undefined;
 
-export const redisConnection: RedisOptions | undefined = process.env.REDIS_URL
-  ? {
-      host: new URL(process.env.REDIS_URL).hostname,
-      port: Number(new URL(process.env.REDIS_URL).port),
-    }
-  : undefined;
+if (!process.env.REDIS_URL) {
+  console.log("❌ REDIS_URL not found");
+} else {
+  redis = new Redis(process.env.REDIS_URL, {
+    tls: {},
+    maxRetriesPerRequest: null,
+  });
 
-/* Redis client */
+  redis.on("connect", () => {
+    console.log("✅ Redis connected");
+  });
 
-export let redis: Redis | undefined;
-
-if (process.env.REDIS_URL) {
-  redis = new Redis(process.env.REDIS_URL);
+  redis.on("error", (err) => {
+    console.error("❌ Redis error:", err.message);
+  });
 }
+
+export default redis;

@@ -1,13 +1,10 @@
 import Redis from "ioredis";
 
-if (!process.env.REDIS_URL) {
-  throw new Error("❌ REDIS_URL missing");
-}
-
-const redis = new Redis(process.env.REDIS_URL, {
+const redis = new Redis(process.env.REDIS_URL!, {
   tls: {},
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
+  retryStrategy: () => null, // 🔥 VERY IMPORTANT
 });
 
 redis.on("connect", () => {

@@ -58,16 +58,20 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-white via-blue-50 to-cyan-50">
 
       {/* ===== TOPBAR ===== */}
-      <Topbar setOpen={setOpen} />
+      <div className="shrink-0">
+        <Topbar setOpen={setOpen} />
+      </div>
 
       {/* ===== BODY ===== */}
       <div className="flex flex-1 overflow-hidden">
 
         {/* ===== SIDEBAR ===== */}
-        <Sidebar open={open} setOpen={setOpen} />
+        <div className="shrink-0">
+          <Sidebar open={open} setOpen={setOpen} />
+        </div>
 
         {/* ===== OVERLAY (MOBILE) ===== */}
         {open && (

@@ -74,7 +74,6 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // 🔥 restore scroll
   useEffect(() => {
     const saved = sessionStorage.getItem("sidebar_scroll");
     if (saved && scrollRef.current) {
@@ -112,14 +111,13 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
           h-screen lg:h-full
           w-64 max-w-[85%]
 
-          bg-white/70 backdrop-blur-xl
-          border border-blue-100
+          bg-white/80 backdrop-blur-xl
+          border-r border-blue-100
 
           flex flex-col
           z-50
 
           transform transition-transform duration-300 ease-out
-          will-change-transform
 
           ${open ? "translate-x-0" : "-translate-x-full"}
           lg:translate-x-0
@@ -141,12 +139,10 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
         >
           {menu.map((group) => (
             <div key={group.section}>
-              {/* SECTION TITLE */}
               <p className="px-3 mb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
                 {group.section}
               </p>
 
-              {/* ITEMS */}
               <div className="space-y-1">
                 {group.items.map((item) => {
                   const Icon = item.icon;

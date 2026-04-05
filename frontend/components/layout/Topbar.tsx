@@ -29,7 +29,6 @@ function TopbarComponent({ setOpen }: TopbarProps) {
 
   const debounced = useDebounce(search, 300);
 
-  /* ================= USER ================= */
   const { data: userData } = useQuery({
     queryKey: ["me"],
     queryFn: async () => {
@@ -41,7 +40,6 @@ function TopbarComponent({ setOpen }: TopbarProps) {
     },
   });
 
-  /* ================= NOTIFICATIONS ================= */
   const { data } = useQuery({
     queryKey: ["notifications"],
     queryFn: async () => {
@@ -57,7 +55,6 @@ function TopbarComponent({ setOpen }: TopbarProps) {
 
   const unreadCount = data?.unreadCount ?? 0;
 
-  /* ================= SEARCH ================= */
   const { data: searchData, isLoading } = useQuery({
     queryKey: ["search", debounced],
     queryFn: async () => {
@@ -83,31 +80,29 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   return (
     <div
       className="
-        sticky top-0 z-30
-        h-16
-
-        bg-white/70 backdrop-blur-xl
+        h-16 shrink-0
+        bg-white/80 backdrop-blur-xl
         border-b border-blue-100
-
         flex items-center justify-between
-        px-4 sm:px-6
+        px-3 sm:px-6
+        relative z-50
       "
     >
-      {/* 🔥 LEFT (BRANDING FIXED) */}
+      {/* LEFT */}
       <h1
-        className="text-2xl sm:text-3xl font-extrabold tracking-wide bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent whitespace-nowrap"
+        className="text-xl sm:text-3xl font-extrabold tracking-wide bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent whitespace-nowrap"
         style={{ fontFamily: "Orbitron" }}
       >
         Automexa
       </h1>
 
-      {/* 🔥 RIGHT */}
+      {/* RIGHT */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-        
-        {/* 🔍 SEARCH */}
+
+        {/* SEARCH */}
         <div
           ref={containerRef}
-          className="relative hidden md:block w-48 lg:w-64 xl:w-72 max-w-full"
+          className="relative hidden md:block w-48 lg:w-64 xl:w-72"
         >
           <Search
             size={16}
@@ -121,25 +116,22 @@ function TopbarComponent({ setOpen }: TopbarProps) {
               setOpenSearch(true);
             }}
             placeholder="Search..."
-            className="w-full border border-blue-100 rounded-xl pl-9 pr-3 py-2 text-sm text-gray-900 bg-white/80 backdrop-blur-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="w-full px-4 py-2.5 pl-10 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
           />
 
           {openSearch && (
-            <div className="absolute mt-2 w-full bg-white border border-blue-100 rounded-xl shadow-lg z-50 max-h-72 overflow-y-auto">
-              
+            <div className="absolute mt-2 w-full bg-white border border-blue-100 rounded-2xl shadow-lg z-[9999] max-h-72 overflow-y-auto">
               {isLoading && (
                 <div className="p-3 text-sm text-gray-500">Searching...</div>
               )}
-
               {!isLoading && results.length === 0 && (
                 <div className="p-3 text-sm text-gray-500">No results</div>
               )}
-
               {results.map((item: any, index: number) => (
                 <div
                   key={item.id}
                   onClick={() => router.push(item.url)}
-                  className={`p-3 text-sm cursor-pointer ${
+                  className={`px-4 py-3 text-sm cursor-pointer transition ${
                     index === activeIndex
                       ? "bg-blue-50"
                       : "hover:bg-blue-50"
@@ -152,23 +144,23 @@ function TopbarComponent({ setOpen }: TopbarProps) {
           )}
         </div>
 
-        {/* 🔔 NOTIFICATIONS */}
-        <div className="relative flex-shrink-0">
+        {/* NOTIFICATIONS */}
+        <div className="relative flex-shrink-0 z-[100]">
           <NotificationsDropdown userId={userData?.id} />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
           )}
         </div>
 
-        {/* 👤 PROFILE */}
-        <div className="flex-shrink-0">
+        {/* PROFILE */}
+        <div className="relative flex-shrink-0 z-[1000]">
           <ProfileDropdown />
         </div>
 
-        {/* 🍔 MENU BUTTON */}
+        {/* MENU BUTTON */}
         <button
           onClick={() => setOpen((prev) => !prev)}
-          className="lg:hidden p-2 rounded-xl hover:bg-blue-50 active:scale-95 transition duration-200"
+          className="lg:hidden p-2 rounded-xl hover:bg-blue-50 active:scale-95 transition"
         >
           <Menu size={20} className="text-gray-800" />
         </button>

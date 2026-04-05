@@ -16,9 +16,6 @@ export default function ProfileDropdown() {
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  /* =========================
-     🔥 REAL USER DATA
-  ========================= */
   const { data: user } = useQuery({
     queryKey: ["me"],
     queryFn: async () => {
@@ -30,9 +27,6 @@ export default function ProfileDropdown() {
     },
   });
 
-  /* =========================
-     🔥 OUTSIDE CLICK
-  ========================= */
   useEffect(() => {
     function handleClick(e: any) {
       if (ref.current && !ref.current.contains(e.target)) {
@@ -42,10 +36,6 @@ export default function ProfileDropdown() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
-
-  /* =========================
-     🔥 ACTIONS
-  ========================= */
 
   const goToProfile = () => {
     router.push("/settings/profile");
@@ -85,9 +75,8 @@ export default function ProfileDropdown() {
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative z-[999]"> {/* 🔥 FIX */}
 
-      {/* PROFILE BUTTON */}
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-blue-50 transition"
@@ -107,11 +96,9 @@ export default function ProfileDropdown() {
         </span>
       </button>
 
-      {/* DROPDOWN */}
       {open && (
-        <div className="absolute right-0 mt-3 w-[90vw] sm:w-72 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-lg z-50 overflow-hidden">
+        <div className="absolute right-0 mt-3 w-[90vw] sm:w-72 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-xl z-[1000] overflow-hidden">
 
-          {/* USER INFO */}
           <div className="px-4 py-3 border-b border-blue-100">
             <p className="text-sm font-semibold text-gray-900">
               {user?.name || "User"}
@@ -121,7 +108,6 @@ export default function ProfileDropdown() {
             </p>
           </div>
 
-          {/* MENU */}
           <div className="p-2 space-y-1">
 
             <button
@@ -154,7 +140,6 @@ export default function ProfileDropdown() {
 
           </div>
 
-          {/* LOGOUT */}
           <div className="p-2 border-t border-blue-100">
             <button
               onClick={handleLogout}

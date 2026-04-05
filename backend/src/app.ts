@@ -90,23 +90,12 @@ app.use(cookieParser());
 /* ======================================
 🔥 CORS
 ====================================== */
-const allowedOrigins = [
-  "http://localhost:3000",
-  process.env.FRONTEND_URL,
-];
-
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      console.warn("❌ Blocked by CORS:", origin);
-      return callback(new Error("Not allowed by CORS"));
-    },
+    origin: [
+      "https://automexiaai.in",
+      "https://www.automexiaai.in"
+    ],
     credentials: true,
   })
 );

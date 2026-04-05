@@ -59,7 +59,7 @@ const getPriceId = async (
   currency: Currency
 ): Promise<string> => {
   const key = `STRIPE_${plan}_${currency}_${billing.toUpperCase()}`;
-  const price = process.env[key];
+  const price = (env as any)[key];
 
   if (!price) {
     throw new Error(`Missing Stripe price for ${key}`);
@@ -164,7 +164,7 @@ export const createCheckoutSession = async (
       : `STRIPE_${plan}_${finalCurrency}_YEARLY`;
   }
 
-  const priceId = process.env[priceKey];
+  const priceId = (env as any)[priceKey];
 
   if (!priceId) {
     throw new Error(`Missing Stripe price for ${priceKey}`);

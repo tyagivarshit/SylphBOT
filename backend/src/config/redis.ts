@@ -1,13 +1,17 @@
 import Redis from "ioredis";
-console.log("REDIS_URL FROM ENV:", process.env.REDIS_URL);
+
+console.log("REDIS_URL:", process.env.REDIS_URL);
 
 let redis: Redis | null = null;
 
-if (process.env.REDIS_URL) {
+if (!process.env.REDIS_URL) {
+  console.log("❌ REDIS_URL missing");
+} else {
   redis = new Redis(process.env.REDIS_URL, {
     tls: {},
     maxRetriesPerRequest: null,
-    retryStrategy: () => null, // stop infinite retry
+    enableReadyCheck: false,
+    connectTimeout: 10000,
   });
 
   redis.on("connect", () => {
@@ -17,8 +21,6 @@ if (process.env.REDIS_URL) {
   redis.on("error", (err) => {
     console.error("❌ Redis error:", err.message);
   });
-} else {
-  console.log("❌ REDIS_URL missing");
 }
 
 export default redis;

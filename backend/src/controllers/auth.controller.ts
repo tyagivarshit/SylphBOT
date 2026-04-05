@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import prisma from "../config/prisma";
-import { redis } from "../config/redis";
+import  redis  from "../config/redis";
 import {
   generateAccessToken,
   generateRefreshToken,

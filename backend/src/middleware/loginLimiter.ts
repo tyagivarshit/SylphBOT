@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { redis } from "../config/redis";
+import  redis  from "../config/redis";
 
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;

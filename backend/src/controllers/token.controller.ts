@@ -94,13 +94,17 @@ export const refreshAccessToken = async (
     });
 
     // 🔄 Generate new tokens
-    const newRefreshToken = generateRefreshToken(user.id);
+    const newRefreshToken = generateRefreshToken(
+  user.id,
+  user.tokenVersion
+);
 
-    const newAccessToken = generateAccessToken(
-      user.id,
-      user.role,
-      business.id
-    );
+const newAccessToken = generateAccessToken(
+  user.id,
+  user.role,
+  business.id,
+  user.tokenVersion
+);
 
     const newHashedToken = hashToken(newRefreshToken);
 

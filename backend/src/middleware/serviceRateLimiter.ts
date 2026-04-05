@@ -1,4 +1,4 @@
-import { redis } from "../config/redis";
+import  redis  from "../config/redis";
 
 export const incrementRate = async (
   key: string,

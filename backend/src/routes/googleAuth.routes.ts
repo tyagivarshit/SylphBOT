@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import passport from "passport";
-import { redis } from "../config/redis";
+import  redis  from "../config/redis";
 import {
   googleAuth,
   googleCallback,

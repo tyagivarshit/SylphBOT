@@ -6,7 +6,8 @@
     "outDir": "./dist",
     "strict": false,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmitOnError": false   // 👈 YE ADD KAR
   },
   "include": ["src"],
   "exclude": ["node_modules"]

@@ -31,7 +31,7 @@ export function proxy(request: NextRequest) {
   /* 🔐 NOT LOGGED IN */
   if (!accessToken && !isPublic) {
     return NextResponse.redirect(
-      new URL("/auth/login", request.url)
+      new URL("/auth/login", request.url) 
     )
   }
 

@@ -4,17 +4,12 @@ import { Queue } from "bullmq";
 
 const router = Router();
 import redis from "../config/redis";
+import { aiQueue } from "../queues/ai.queue";
+import { funnelQueue } from "../queues/funnel.queue";
 
 /* ================================
    QUEUE INSTANCES (FIXED)
 ================================ */
-
-const aiQueue = new Queue("aiQueue", { connection :redis});
-
-const funnelQueue = new Queue("funnelQueue", {
-  connection:redis,
-  prefix: "sylph",
-});
 
 /* ================================
    SYSTEM STATS

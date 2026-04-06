@@ -1,10 +1,7 @@
 import { Queue } from "bullmq";
 
 import redis from "../config/redis";
-const aiQueue = new Queue("aiQueue", {
-  connection: redis,
-});
-
+import { aiQueue } from "../queues/ai.queue";
 export const getQueueHealth = async () => {
 
   const waiting = await aiQueue.getWaitingCount();

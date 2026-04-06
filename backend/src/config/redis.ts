@@ -16,6 +16,7 @@ if (!env.REDIS_URL) {
 ====================================== */
 
 const redis = new Redis(env.REDIS_URL, {
+  tls: {},
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
 });

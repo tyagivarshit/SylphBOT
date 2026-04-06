@@ -3,7 +3,7 @@ import prisma from "../config/prisma";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
 import { sendAIFollowup } from "../services/aiFollowup.service";
 
-import redis from "../config/redis";
+import {env} from "../config/env";
 /*
 =========================================================
 MISSED BOOKING MONITOR (PRODUCTION SAFE)
@@ -127,7 +127,7 @@ Reply YES and we’ll set it up again 👍`,
     }
   },
   {
-    connection: redis,
+    connection: { url: env.REDIS_URL } ,
     concurrency: 1, // 🔥 IMPORTANT (avoid race condition)
   }
 );

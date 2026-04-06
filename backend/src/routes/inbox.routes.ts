@@ -2,7 +2,7 @@ import { Worker } from "bullmq";
 import { routeAIMessage } from "../services/aiRouter.service";
 import { handleIncomingMessage } from "../services/message.service";
 import * as Sentry from "@sentry/node";
-import redis from "../config/redis";
+import { env } from "../config/env"; 
 
 
 const worker = new Worker(
@@ -47,7 +47,9 @@ const worker = new Worker(
       throw error;
     }
   },
-  { connection: redis}
+  {
+    connection: { url: env.REDIS_URL } 
+  }
 );
 
 export default worker;

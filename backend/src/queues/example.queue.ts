@@ -1,18 +1,16 @@
 import { Queue, Worker } from "bullmq";
-import redis from "../config/redis";
+import { env } from "../config/env"; // ✅
 
-// 🔥 reuse same connection
 export const exampleQueue = new Queue("example-queue", {
-  connection: redis,
+  connection: { url: env.REDIS_URL }, // ✅
 });
 
-// 🔥 worker
 export const exampleWorker = new Worker(
   "example-queue",
   async (job) => {
     console.log("Processing job:", job.data);
   },
   {
-    connection: redis,
+    connection: { url: env.REDIS_URL }, // ✅
   }
 );

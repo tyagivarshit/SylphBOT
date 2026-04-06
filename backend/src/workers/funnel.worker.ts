@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import prisma from "../config/prisma";
-import redis from "../config/redis";
+import {env} from "../config/env";
 
 /* SENTRY MONITORING */
 import * as Sentry from "@sentry/node";
@@ -32,7 +32,7 @@ const worker = new Worker(
 
   },
   {
-    connection: redis,
+    connection: { url: env.REDIS_URL } ,
     concurrency: 3,
   }
 );

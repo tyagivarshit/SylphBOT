@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import redis from "../config/redis";
+import { env } from "../config/env"; // ✅ add only
 import { handleCommentAutomation } from "../services/commentAutomation.service";
 
 
@@ -11,7 +11,7 @@ new Worker(
     }
   },
   {
-    connection: redis,
+    connection: { url: env.REDIS_URL } ,
     concurrency: 20,
   }
 );

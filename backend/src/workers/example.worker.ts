@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import redis from "../config/redis";
+import {env} from "../config/env";
 
 const worker = new Worker(
   "example-queue",
@@ -7,7 +7,7 @@ const worker = new Worker(
     console.log("Processing job:", job.data);
   },
   {
-    connection: redis,
+    connection: { url: env.REDIS_URL } ,
   }
 );
 

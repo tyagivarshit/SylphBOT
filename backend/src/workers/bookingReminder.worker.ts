@@ -2,7 +2,7 @@ import { Worker } from "bullmq";
 import prisma from "../config/prisma";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
 import { BOOKING_REMINDER_QUEUE_NAME } from "../queues/bookingReminder.queue";
-import redis from "../config/redis";
+import {env} from "../config/env";
 
 /*
 =========================================================
@@ -159,7 +159,7 @@ Please be ready 🚀`;
     }
   },
   {
-    connection: redis,
+    connection: { url: env.REDIS_URL } ,
     concurrency: 5,
   }
 );

@@ -1,7 +1,9 @@
 import { Queue } from "bullmq";
-import redis from "../config/redis";
+import { env } from "../config/env";
 
 
 export const automationQueue = new Queue("automation", {
-  connection: redis,
+  connection: {
+    url: env.REDIS_URL,
+  },
 });

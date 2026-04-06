@@ -3,7 +3,7 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { getIO } from "../sockets/socket.server";
-import redis from "../config/redis";
+import {env} from "../config/env";
 
 /* 🔥 SMART FOLLOWUP GENERATOR (UPGRADED 🔥) */
 const generateSmartFollowup = (
@@ -245,7 +245,7 @@ new Worker(
 
   },
   {
-    connection: redis,
+    connection: { url: env.REDIS_URL } ,
     concurrency: 5,
   }
 );

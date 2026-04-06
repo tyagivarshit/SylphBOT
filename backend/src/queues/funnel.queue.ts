@@ -1,6 +1,6 @@
 import { Queue } from "bullmq";
-import redis from "../config/redis";
+import { env } from "../config/env"; 
 export const funnelQueue = new Queue("funnelQueue", {
-  connection: redis,
+  connection: { url: env.REDIS_URL } ,
   prefix: "sylph",
 });

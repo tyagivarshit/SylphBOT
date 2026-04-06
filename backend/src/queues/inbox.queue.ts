@@ -2,16 +2,7 @@ import { Worker } from "bullmq";
 import { routeAIMessage } from "../services/aiRouter.service";
 import { handleIncomingMessage } from "../services/message.service";
 import * as Sentry from "@sentry/node";
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
-
+import redis from "../config/redis";
 
 const worker = new Worker(
   "inboxQueue",
@@ -49,7 +40,7 @@ const worker = new Worker(
       throw error;
     }
   },
-  { connection: connection }
+  { connection: redis }
 );
 
 export default worker;

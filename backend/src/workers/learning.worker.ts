@@ -2,16 +2,7 @@ import { Worker } from "bullmq";
 
 import { env } from "../config/env";
 
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
-
+import redis from "../config/redis";
 
 export const startLearningWorker = () => {
   const worker = new Worker(
@@ -21,7 +12,7 @@ export const startLearningWorker = () => {
 
       // 🔥 Yaha tera AI / automation logic aayega
     },
-    { connection }
+    { connection :redis}
   );
 
   worker.on("completed", (job) => {

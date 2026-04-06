@@ -1,14 +1,17 @@
 import Redis from "ioredis";
+import { env } from "./env";
 
-const redis = new Redis(process.env.REDIS_URL!, {
-  tls: {},
+const redis = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
-  retryStrategy: () => null, // 🔥 VERY IMPORTANT
 });
 
 redis.on("connect", () => {
   console.log("✅ Redis connected");
+});
+
+redis.on("ready", () => {
+  console.log("🚀 Redis ready");
 });
 
 redis.on("error", (err) => {

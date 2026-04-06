@@ -14,16 +14,7 @@ import { bookingPriorityRouter } from "../services/bookingPriorityRouter.service
 import { getIO } from "../sockets/socket.server";
 import logger from "../utils/logger";
 import * as Sentry from "@sentry/node";
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
-
+import redis from "../config/redis";
 /* ---------------- DELAY ---------------- */
 const delay = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,7 +60,7 @@ const worker = new Worker(
     });
   },
   {
-    connection: connection,
+    connection: redis,
     concurrency: 10,
   }
 );

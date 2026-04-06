@@ -1,32 +1,18 @@
 import { Router } from "express";
 import os from "os";
 import { Queue } from "bullmq";
-import redis from "../config/redis";
 
 const router = Router();
-
-/* ================================
-   CONNECTION (FIXED)
-================================ */
-
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
+import redis from "../config/redis";
 
 /* ================================
    QUEUE INSTANCES (FIXED)
 ================================ */
 
-const aiQueue = new Queue("aiQueue", { connection });
+const aiQueue = new Queue("aiQueue", { connection :redis});
 
 const funnelQueue = new Queue("funnelQueue", {
-  connection,
+  connection:redis,
   prefix: "sylph",
 });
 

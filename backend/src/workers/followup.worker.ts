@@ -3,15 +3,7 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { getIO } from "../sockets/socket.server";
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
+import redis from "../config/redis";
 
 /* 🔥 SMART FOLLOWUP GENERATOR (UPGRADED 🔥) */
 const generateSmartFollowup = (
@@ -253,7 +245,7 @@ new Worker(
 
   },
   {
-    connection: connection,
+    connection: redis,
     concurrency: 5,
   }
 );

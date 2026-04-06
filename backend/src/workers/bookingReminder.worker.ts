@@ -2,15 +2,7 @@ import { Worker } from "bullmq";
 import prisma from "../config/prisma";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
 import { BOOKING_REMINDER_QUEUE_NAME } from "../queues/bookingReminder.queue";
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
+import redis from "../config/redis";
 
 /*
 =========================================================
@@ -167,7 +159,7 @@ Please be ready 🚀`;
     }
   },
   {
-    connection: connection,
+    connection: redis,
     concurrency: 5,
   }
 );

@@ -1,17 +1,9 @@
 import { Queue } from "bullmq";
 import prisma from "../config/prisma";
 
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
+import redis from "../config/redis";
 export const followupQueue = new Queue("followupQueue", {
-  connection: connection,
+  connection: redis,
   prefix: "sylph",
 
   defaultJobOptions: {

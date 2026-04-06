@@ -6,21 +6,13 @@ import prisma from "../config/prisma";
 BOOKING REMINDER QUEUE (SAAS LEVEL)
 =========================================================
 */
-const url = new URL(process.env.REDIS_URL!);
-
-const connection = {
-  host: url.hostname,
-  port: Number(url.port),
-  username: "default",
-  password: url.password,
-  tls: {},
-};
+import redis from "../config/redis";
 export const BOOKING_REMINDER_QUEUE_NAME = "booking-reminder-queue";
 
 export const bookingReminderQueue = new Queue(
   BOOKING_REMINDER_QUEUE_NAME,
   {
-    connection: connection,
+    connection: redis,
     defaultJobOptions: {
       attempts: 3,
       backoff: {

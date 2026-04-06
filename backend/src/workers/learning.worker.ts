@@ -2,7 +2,6 @@ import { Worker } from "bullmq";
 
 import { env } from "../config/env";
 
-import redis from "../config/redis";
 
 export const startLearningWorker = () => {
   const worker = new Worker(
@@ -11,8 +10,8 @@ export const startLearningWorker = () => {
       console.log("📚 Processing Learning Job:", job.data);
 
       // 🔥 Yaha tera AI / automation logic aayega
-    },
-    { connection :redis}
+    },{
+    connection: { url: env.REDIS_URL } }
   );
 
   worker.on("completed", (job) => {

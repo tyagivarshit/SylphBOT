@@ -1,13 +1,12 @@
 import Redis from "ioredis";
-import { env } from "./env";
 
 /* ======================================
 🔥 DEBUG: ENV CHECK
 ====================================== */
 
-console.log("🔍 [REDIS DEBUG] ENV REDIS_URL:", env.REDIS_URL);
+console.log("🔍 [REDIS DEBUG] ENV REDIS_URL:", process.env.REDIS_URL);
 
-if (!env.REDIS_URL) {
+if (!process.env.REDIS_URL) {
   console.error("❌ [REDIS ERROR] REDIS_URL is missing!");
 }
 
@@ -15,7 +14,7 @@ if (!env.REDIS_URL) {
 🔥 REDIS INIT
 ====================================== */
 
-const redis = new Redis(env.REDIS_URL, {
+const redis = new Redis(process.env.REDIS_URL, {
   tls: {},
   maxRetriesPerRequest: null,
   enableReadyCheck: false,

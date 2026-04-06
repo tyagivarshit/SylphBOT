@@ -18,7 +18,7 @@ import clientRoutes from "./routes/client.routes";
 import aiRoutes from "./routes/ai.routes";
 import whatsappWebhook from "./routes/whatsapp.webhook";
 import instagramWebhook from "./routes/instagram.webhook";
-import billingRoutes from "./routes/billing.routes";
+import billingRoutes from "./routes/billing.routes";// 🔥 HEALTH CHECK ROUTE (IMPORTANT FOR RENDER)
 import stripeWebhookRoutes from "./routes/stripeWebhook.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 
@@ -180,10 +180,12 @@ app.use(express.json({ limit: "1mb" }));
 ====================================== */
 app.use((req, res, next) => {
   const publicRoutes = [
-    "/api/auth",
-    "/api/webhooks",
-    "/api/webhook",
-  ];
+  "/",
+  "/health",
+  "/api/auth",
+  "/api/webhooks",
+  "/api/webhook",
+];
 
   const isPublic = publicRoutes.some((route) =>
     req.originalUrl.startsWith(route)

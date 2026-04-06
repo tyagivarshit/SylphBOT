@@ -127,7 +127,7 @@ Reply YES and we’ll set it up again 👍`,
     }
   },
   {
-    connection: { url: env.REDIS_URL } ,
+    connection: { url: process.env.REDIS_URL } ,
     concurrency: 1, // 🔥 IMPORTANT (avoid race condition)
   }
 );

@@ -1,9 +1,8 @@
 import { Queue } from "bullmq";
 import prisma from "../config/prisma";
 
-import { env } from "../config/env"; 
 export const followupQueue = new Queue("followupQueue", {
-  connection: { url: env.REDIS_URL } ,
+  connection: { url: process.env.REDIS_URL } ,
   prefix: "sylph",
 
   defaultJobOptions: {

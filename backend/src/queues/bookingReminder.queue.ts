@@ -1,6 +1,5 @@
 import { Queue } from "bullmq";
 import prisma from "../config/prisma";
-import { env } from "../config/env"; 
 
 /*
 =========================================================
@@ -13,7 +12,7 @@ export const BOOKING_REMINDER_QUEUE_NAME = "booking-reminder-queue";
 export const bookingReminderQueue = new Queue(
   BOOKING_REMINDER_QUEUE_NAME,
   {
-    connection: { url: env.REDIS_URL }, // ✅ FIX
+    connection: { url: process.env.REDIS_URL }, // ✅ FIX
     defaultJobOptions: {
       attempts: 3,
       backoff: {

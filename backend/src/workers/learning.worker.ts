@@ -11,7 +11,7 @@ export const startLearningWorker = () => {
 
       // 🔥 Yaha tera AI / automation logic aayega
     },{
-    connection: { url: env.REDIS_URL } }
+    connection: { url: process.env.REDIS_URL } }
   );
 
   worker.on("completed", (job) => {

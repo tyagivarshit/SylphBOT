@@ -7,7 +7,7 @@ const worker = new Worker(
     console.log("Processing job:", job.data);
   },
   {
-    connection: { url: env.REDIS_URL } ,
+    connection: { url: process.env.REDIS_URL },
   }
 );
 

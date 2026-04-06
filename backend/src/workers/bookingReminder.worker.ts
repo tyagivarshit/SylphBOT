@@ -159,7 +159,7 @@ Please be ready 🚀`;
     }
   },
   {
-    connection: { url: env.REDIS_URL } ,
+    connection: { url: process.env.REDIS_URL } ,
     concurrency: 5,
   }
 );

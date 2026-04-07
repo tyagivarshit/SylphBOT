@@ -105,7 +105,7 @@ export default function LoginPage() {
           className="text-3xl sm:text-4xl font-bold tracking-wider bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent"
           style={{ fontFamily: "Orbitron" }}
         >
-          Automexa
+          Automexia AI
         </h1>
       </div>
 

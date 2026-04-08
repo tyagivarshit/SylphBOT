@@ -48,7 +48,7 @@ export default function ProfileDropdown() {
   };
 
   const goToSupport = () => {
-    router.push("/support");
+    window.location.assign("/support");
     setOpen(false);
   };
 

@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { memo } from "react";
@@ -10,9 +11,17 @@ import {
   Instagram,
   MessageCircle,
   Calendar,
+  type LucideIcon,
 } from "lucide-react";
 
-const actions = [
+type QuickAction = {
+  title: string;
+  desc: string;
+  href: Route;
+  icon: LucideIcon;
+};
+
+const actions: QuickAction[] = [
   {
     title: "Create Automation",
     desc: "Build a new AI automation flow",
@@ -28,13 +37,13 @@ const actions = [
   {
     title: "Connect Instagram",
     desc: "Start capturing Instagram leads",
-    href: "/integrations/instagram",
+    href: "/settings",
     icon: Instagram,
   },
   {
     title: "Connect WhatsApp",
     desc: "Enable WhatsApp automation",
-    href: "/integrations/whatsapp",
+    href: "/settings",
     icon: MessageCircle,
   },
   {

@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { memo, useEffect, useRef } from "react";
@@ -17,6 +18,7 @@ import {
   Settings,
   MessageCircle,
   X,
+  type LucideIcon,
 } from "lucide-react";
 
 type SidebarProps = {
@@ -24,7 +26,18 @@ type SidebarProps = {
   setOpen: (val: boolean) => void;
 };
 
-const menu = [
+type MenuItem = {
+  name: string;
+  href: Route;
+  icon: LucideIcon;
+};
+
+type MenuSection = {
+  section: string;
+  items: MenuItem[];
+};
+
+const menu: MenuSection[] = [
   {
     section: "Overview",
     items: [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard }],

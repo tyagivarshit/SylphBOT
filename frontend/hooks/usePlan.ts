@@ -1,12 +1,14 @@
 "use client"
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { buildApiUrl } from "@/lib/userApi"
 
 /* ================= FETCH ================= */
 
 const fetchBilling = async () => {
-  const res = await fetch("/api/billing", {
+  const res = await fetch(buildApiUrl("/api/billing"), {
     credentials: "include",
+    cache: "no-store",
   })
 
   if (!res.ok) {
@@ -37,8 +39,14 @@ export function usePlan() {
   })
 
   /* 🔥 SAFE FALLBACK */
-  const plan = data?.subscription?.plan?.type || "FREE"
-  const status = data?.subscription?.status || "INACTIVE"
+  const plan =
+    data?.billing?.planKey ||
+    data?.subscription?.plan?.type ||
+    "FREE_LOCKED"
+  const status =
+    data?.billing?.status ||
+    data?.subscription?.status ||
+    "INACTIVE"
 
   /* 🔥 FORCE REFRESH (AFTER CHECKOUT) */
   const refreshPlan = async () => {

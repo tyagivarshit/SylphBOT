@@ -10,8 +10,9 @@ export default function BillingSettings() {
   const { data, isLoading } = useQuery({
     queryKey: ["billing"],
     queryFn: async () => {
-      const res = await fetch(buildApiUrl("/api/billing/current"), {
+      const res = await fetch(buildApiUrl("/api/billing"), {
         credentials: "include",
+        cache: "no-store",
       });
 
       if (!res.ok) throw new Error("Failed");

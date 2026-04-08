@@ -141,3 +141,33 @@ export const upgradePlan = async (
 
   }
 }
+
+/* ======================================
+CONFIRM CHECKOUT
+====================================== */
+
+export const confirmCheckout = async (sessionId: string) => {
+
+  try {
+
+    return await fetchWithTimeout(
+      `${API}/api/billing/checkout/confirm?session_id=${encodeURIComponent(
+        sessionId
+      )}`,
+      {
+        method: "GET",
+      },
+      15000
+    )
+
+  } catch (error: any) {
+
+    console.error("Checkout confirmation error:", error)
+
+    return {
+      success: false,
+      message: error.message || "Checkout confirmation failed",
+    }
+
+  }
+}

@@ -1,9 +1,12 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
-import { stripe, createCheckoutSession } from "../services/stripe.service";
+import { stripe } from "../services/stripe.service";
+import { createCheckoutSession } from "../services/checkout.service";
 import { env } from "../config/env";
-import geoip from "geoip-lite";
 import { getInvoices } from "../services/invoice.service";
+import { resolveBillingCurrency } from "../services/billingGeo.service";
+import { loadBillingContext } from "../middleware/subscription.middleware";
+import { confirmCheckoutSession } from "../services/billingSync.service";
 
 /* ====================================== */
 /* USER CONTEXT */
@@ -32,26 +35,91 @@ async function getUserContext(req: Request) {
 }
 
 /* ====================================== */
-/* GEO */
-/* ====================================== */
-
-function getCurrency(req: Request) {
-  const ip =
-    (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-    req.socket.remoteAddress ||
-    "";
-
-  const geo = geoip.lookup(ip);
-  const country = geo?.country || "IN";
-
-  return country === "IN" ? "INR" : "USD";
-}
-
-/* ====================================== */
 /* CONTROLLER */
 /* ====================================== */
 
 export class BillingController {
+  private static async buildBillingResponse(
+    businessId: string,
+    req: Request
+  ) {
+    const { subscription, context } = await loadBillingContext(
+      businessId
+    );
+
+    let invoices: any[] = [];
+
+    if (subscription?.stripeCustomerId) {
+      invoices = await getInvoices(subscription.stripeCustomerId);
+    }
+
+    return {
+      success: true,
+      subscription,
+      billing: context,
+      currency:
+        subscription?.currency || resolveBillingCurrency(req),
+      invoices,
+    };
+  }
+
+  private static async handleCheckout(
+    req: Request,
+    res: Response
+  ) {
+    try {
+      const { plan, billing, coupon } = req.body;
+
+      if (!plan || !billing) {
+        return res.status(400).json({
+          success: false,
+          message: "Plan & billing required",
+        });
+      }
+
+      const { businessId, email } = await getUserContext(req);
+
+      const session = await createCheckoutSession(
+        email,
+        businessId,
+        plan,
+        billing,
+        req,
+        resolveBillingCurrency(req),
+        coupon
+      );
+
+      return res.json({
+        success: true,
+        url: session.url,
+      });
+    } catch (error: any) {
+      if (error.message === "Unauthorized") {
+        return res.status(401).json({
+          success: false,
+          message: "Unauthorized",
+        });
+      }
+
+      if (
+        error.message?.includes("Currency cannot be changed") ||
+        error.message?.includes("Invalid plan") ||
+        error.message?.includes("Invalid billing")
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      console.error("Billing checkout error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || "Checkout failed",
+      });
+    }
+  }
 
   static async getPlans(req: Request, res: Response) {
     try {
@@ -88,26 +156,14 @@ export class BillingController {
   static async getBilling(req: Request, res: Response) {
     try {
       const { businessId } = await getUserContext(req);
+      res.setHeader("Cache-Control", "no-store");
 
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
-        include: { plan: true },
-      });
-
-      const currency = getCurrency(req);
-
-      let invoices: any[] = [];
-
-      if (subscription?.stripeCustomerId) {
-        invoices = await getInvoices(subscription.stripeCustomerId);
-      }
-
-      return res.json({
-        success: true,
-        subscription,
-        currency,
-        invoices,
-      });
+      return res.json(
+        await BillingController.buildBillingResponse(
+          businessId,
+          req
+        )
+      );
 
     } catch (error) {
 
@@ -122,59 +178,50 @@ export class BillingController {
   }
 
   static async checkout(req: Request, res: Response) {
+    return BillingController.handleCheckout(req, res);
+  }
+
+  static async confirmCheckout(req: Request, res: Response) {
     try {
+      const sessionId =
+        String(req.query.session_id || req.body?.session_id || "");
 
-      const { plan, billing, coupon } = req.body;
-
-      if (!plan || !billing) {
+      if (!sessionId) {
         return res.status(400).json({
           success: false,
-          message: "Plan & billing required",
+          message: "session_id is required",
         });
       }
 
-      const { businessId, email } = await getUserContext(req);
+      const { businessId } = await getUserContext(req);
 
-      const currency = getCurrency(req);
+      await confirmCheckoutSession(sessionId, businessId);
 
-      const session = await createCheckoutSession(
-        email,
-        businessId,
-        plan,
-        billing,
-        req,
-        currency,
-        coupon
+      res.setHeader("Cache-Control", "no-store");
+
+      return res.json(
+        await BillingController.buildBillingResponse(
+          businessId,
+          req
+        )
       );
-
-      return res.json({
-        success: true,
-        url: session.url,
-      });
-
     } catch (error: any) {
-
-      if (error.message === "Unauthorized") {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if (error.message?.includes("Currency cannot be changed")) {
-        return res.status(400).json({
+      if (
+        error.message?.includes("does not belong") ||
+        error.message?.includes("missing billing metadata")
+      ) {
+        return res.status(403).json({
           success: false,
           message: error.message,
         });
       }
 
-      console.error("Checkout error:", error);
+      console.error("Confirm checkout error:", error);
 
       return res.status(500).json({
         success: false,
-        message: error.message || "Checkout failed",
+        message: error.message || "Checkout confirmation failed",
       });
-
     }
   }
 
@@ -259,60 +306,7 @@ export class BillingController {
   }
 
   static async upgradePlan(req: Request, res: Response) {
-    try {
-
-      const { plan, billing, coupon } = req.body;
-
-      if (!plan || !billing) {
-        return res.status(400).json({
-          success: false,
-          message: "Plan & billing required",
-        });
-      }
-
-      const { businessId, email } = await getUserContext(req);
-
-      const currency = getCurrency(req);
-
-      const session = await createCheckoutSession(
-        email,
-        businessId,
-        plan,
-        billing,
-        req,
-        currency,
-        coupon
-      );
-
-      return res.json({
-        success: true,
-        url: session.url,
-      });
-
-    } catch (error: any) {
-
-      if (error.message === "Unauthorized") {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
-      }
-
-      if (error.message?.includes("Currency cannot be changed")) {
-        return res.status(400).json({
-          success: false,
-          message: error.message,
-        });
-      }
-
-      console.error("Upgrade error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Upgrade failed",
-      });
-
-    }
+    return BillingController.handleCheckout(req, res);
   }
 
 }

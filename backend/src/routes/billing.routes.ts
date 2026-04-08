@@ -17,6 +17,12 @@ GET CURRENT BILLING
 ====================================== */
 
 router.get("/", protect, attachBillingContext, BillingController.getBilling);
+router.get(
+  "/current",
+  protect,
+  attachBillingContext,
+  BillingController.getBilling
+);
 
 /* ======================================
 CHECKOUT
@@ -27,6 +33,11 @@ router.post(
   protect,
   authLimiter,
   BillingController.checkout
+);
+router.get(
+  "/checkout/confirm",
+  protect,
+  BillingController.confirmCheckout
 );
 
 /* ======================================

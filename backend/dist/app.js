@@ -73,8 +73,7 @@ app.use((0, cookie_parser_1.default)());
 ====================================== */
 app.use((0, cors_1.default)({
     origin: [
-        "https://automexiaai.in",
-        "https://www.automexiaai.in"
+        "https://app.automexiaai.in"
     ],
     credentials: true,
 }));

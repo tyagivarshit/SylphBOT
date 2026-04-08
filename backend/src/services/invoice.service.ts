@@ -7,10 +7,12 @@ export const generateInvoiceNumber = () => {
 
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
+  const suffix = Math.random()
+    .toString(36)
+    .slice(2, 8)
+    .toUpperCase();
 
-  const random = Math.floor(1000 + Math.random() * 9000);
-
-  return `INV-${year}${month}-${random}`;
+  return `INV-${year}${month}-${suffix}`;
 };
 
 /* ================= 🔥 GET INVOICES ================= */
@@ -36,11 +38,11 @@ export const getInvoices = async (customerId: string) => {
     return {
       id: inv.id,
 
-      amount: inv.amount_paid ? inv.amount_paid / 100 : 0,
+      amount: inv.amount_paid || 0,
 
-      subtotal: inv.subtotal ? inv.subtotal / 100 : 0,
+      subtotal: inv.subtotal || 0,
 
-      tax: taxAmount / 100,
+      taxAmount,
 
       currency: inv.currency?.toUpperCase() || "USD",
 

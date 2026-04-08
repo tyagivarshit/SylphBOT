@@ -3,12 +3,115 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.attachBillingContext = void 0;
+exports.attachBillingContext = exports.loadBillingContext = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const plan_config_1 = require("../config/plan.config");
+const env_1 = require("../config/env");
 const CACHE_TTL = 60 * 3;
+const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
 const getKey = (businessId) => `sub:${businessId}`;
+const getBaseContext = () => ({
+    subscription: null,
+    plan: null,
+    planKey: "FREE_LOCKED",
+    status: "INACTIVE",
+    isLimited: true,
+    upgradeRequired: true,
+    allowEarly: false,
+    remainingEarly: 0,
+});
+const lockContext = (context, status = "INACTIVE") => ({
+    ...context,
+    planKey: "FREE_LOCKED",
+    status,
+    isLimited: true,
+    upgradeRequired: true,
+});
+const getCachedSubscription = async (businessId) => {
+    const cacheKey = getKey(businessId);
+    const cached = await redis_1.default.get(cacheKey);
+    if (cached) {
+        return JSON.parse(cached);
+    }
+    const subscription = await prisma_1.default.subscription.findUnique({
+        where: { businessId },
+        include: { plan: true },
+    });
+    if (subscription) {
+        await redis_1.default.set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL);
+    }
+    return subscription;
+};
+const getEarlyAccessSnapshot = async (subscription) => {
+    const plans = await prisma_1.default.plan.findMany({
+        where: {
+            type: {
+                in: ["BASIC", "PRO", "ELITE"],
+            },
+        },
+        select: {
+            earlyUsed: true,
+        },
+    });
+    const totalEarlyUsed = plans.reduce((acc, plan) => acc + (plan.earlyUsed || 0), 0);
+    return {
+        allowEarly: totalEarlyUsed < EARLY_ACCESS_LIMIT &&
+            !subscription?.stripeSubscriptionId,
+        remainingEarly: Math.max(EARLY_ACCESS_LIMIT - totalEarlyUsed, 0),
+    };
+};
+const loadBillingContext = async (businessId) => {
+    const subscription = await getCachedSubscription(businessId);
+    const now = new Date();
+    let context = getBaseContext();
+    if (subscription?.plan) {
+        context = {
+            subscription,
+            plan: subscription.plan,
+            planKey: (0, plan_config_1.getPlanKey)(subscription.plan),
+            status: "ACTIVE",
+            isLimited: false,
+            upgradeRequired: false,
+            allowEarly: false,
+            remainingEarly: 0,
+        };
+        if (subscription.status === "INACTIVE") {
+            context = lockContext(context);
+        }
+        if (subscription.status === "CANCELLED") {
+            context = lockContext(context);
+        }
+        if (subscription.status === "PAST_DUE") {
+            context =
+                subscription.graceUntil &&
+                    now <= new Date(subscription.graceUntil)
+                    ? {
+                        ...context,
+                        status: "ACTIVE",
+                    }
+                    : lockContext(context);
+        }
+        if (subscription.isTrial) {
+            context =
+                subscription.currentPeriodEnd &&
+                    now <= new Date(subscription.currentPeriodEnd)
+                    ? {
+                        ...context,
+                        status: "TRIAL",
+                    }
+                    : lockContext(context);
+        }
+    }
+    const earlyAccess = await getEarlyAccessSnapshot(subscription);
+    context.allowEarly = earlyAccess.allowEarly;
+    context.remainingEarly = earlyAccess.remainingEarly;
+    return {
+        subscription,
+        context,
+    };
+};
+exports.loadBillingContext = loadBillingContext;
 const attachBillingContext = async (req, res, next) => {
     try {
         const businessId = req.user?.businessId;
@@ -18,111 +121,13 @@ const attachBillingContext = async (req, res, next) => {
                 message: "Unauthorized",
             });
         }
-        let subscription = null;
-        const cacheKey = getKey(businessId);
-        const cached = await redis_1.default.get(cacheKey);
-        if (cached) {
-            subscription = JSON.parse(cached);
-        }
-        else {
-            subscription = await prisma_1.default.subscription.findUnique({
-                where: { businessId },
-                include: { plan: true },
-            });
-            if (subscription) {
-                await redis_1.default.set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL);
-            }
-        }
-        const now = new Date();
-        let context = {
-            subscription: null,
-            plan: null,
-            planKey: "FREE_LOCKED",
-            status: "INACTIVE",
-            isLimited: true,
-            upgradeRequired: true,
-            allowEarly: false,
-            remainingEarly: 0,
-        };
-        if (subscription && subscription.plan) {
-            const planKey = (0, plan_config_1.getPlanKey)(subscription.plan);
-            context = {
-                subscription,
-                plan: subscription.plan,
-                planKey,
-                status: "ACTIVE",
-                isLimited: false,
-                upgradeRequired: false,
-                allowEarly: false,
-                remainingEarly: 0,
-            };
-            /* ============================= */
-            /* TRIAL */
-            /* ============================= */
-            if (subscription.isTrial) {
-                if (subscription.currentPeriodEnd &&
-                    now <= new Date(subscription.currentPeriodEnd)) {
-                    context.status = "TRIAL";
-                }
-                else {
-                    context.status = "INACTIVE";
-                    context.planKey = "FREE_LOCKED";
-                    context.isLimited = true;
-                    context.upgradeRequired = true;
-                }
-            }
-            /* ============================= */
-            /* GRACE PERIOD */
-            /* ============================= */
-            if (subscription.status === "PAST_DUE") {
-                if (subscription.graceUntil &&
-                    now <= new Date(subscription.graceUntil)) {
-                    context.status = "ACTIVE";
-                }
-                else {
-                    context.status = "INACTIVE";
-                    context.planKey = "FREE_LOCKED";
-                    context.isLimited = true;
-                    context.upgradeRequired = true;
-                }
-            }
-            /* ============================= */
-            /* CANCELLED */
-            /* ============================= */
-            if (subscription.status === "CANCELLED") {
-                context.status = "INACTIVE";
-                context.planKey = "FREE_LOCKED";
-                context.isLimited = true;
-                context.upgradeRequired = true;
-            }
-        }
-        /* ============================= */
-        /* 🔥 EARLY PRICING LOGIC */
-        /* ============================= */
-        const planData = await prisma_1.default.plan.findMany({
-            where: {
-                type: { in: ["BASIC", "PRO", "ELITE"] },
-            },
-            select: {
-                type: true,
-                earlyUsed: true,
-                earlyLimit: true,
-            },
-        });
-        const totalEarlyUsed = planData.reduce((acc, p) => acc + (p.earlyUsed || 0), 0);
-        const earlyLimit = 20;
-        const hasPaidBefore = !!subscription?.stripeSubscriptionId;
-        const allowEarly = totalEarlyUsed < earlyLimit && !hasPaidBefore;
-        const remainingEarly = Math.max(earlyLimit - totalEarlyUsed, 0);
-        context.allowEarly = allowEarly;
-        context.remainingEarly = remainingEarly;
-        /* ============================= */
+        const { subscription, context } = await (0, exports.loadBillingContext)(businessId);
         req.subscription = subscription;
         req.billing = context;
         next();
     }
     catch (error) {
-        console.error("❌ Subscription Middleware Error:", error);
+        console.error("Subscription middleware error:", error);
         return res.status(500).json({
             message: "Server error",
         });

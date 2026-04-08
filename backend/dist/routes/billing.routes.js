@@ -14,10 +14,12 @@ router.get("/plans", billing_controller_1.BillingController.getPlans);
 GET CURRENT BILLING
 ====================================== */
 router.get("/", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, billing_controller_1.BillingController.getBilling);
+router.get("/current", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, billing_controller_1.BillingController.getBilling);
 /* ======================================
 CHECKOUT
 ====================================== */
 router.post("/checkout", auth_middleware_1.protect, rateLimit_middleware_1.authLimiter, billing_controller_1.BillingController.checkout);
+router.get("/checkout/confirm", auth_middleware_1.protect, billing_controller_1.BillingController.confirmCheckout);
 /* ======================================
 UPGRADE PLAN
 ====================================== */

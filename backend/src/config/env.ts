@@ -40,6 +40,7 @@ export const env = {
   ========================= */
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+  EARLY_ACCESS_LIMIT: process.env.EARLY_ACCESS_LIMIT,
 
   /* =========================
      BASIC - INR

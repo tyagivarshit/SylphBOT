@@ -34,7 +34,8 @@ export default function LeadsPage(){
   const [totalPages,setTotalPages] = useState(1)
   const initialSelectedLeadId = searchParams.get("leadId")
 
-  const isAllowed = plan !== "BASIC"
+  const isAllowed =
+    plan !== "FREE_LOCKED" && plan !== "BASIC"
 
   useEffect(()=>{
 

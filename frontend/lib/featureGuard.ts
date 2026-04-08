@@ -2,7 +2,7 @@
 PLAN TYPES
 ========================================= */
 
-export type PlanType = "BASIC" | "PRO" | "ELITE"
+export type PlanType = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE"
 
 /* =========================================
 FEATURE TYPES (SYNCED WITH BACKEND)
@@ -24,6 +24,8 @@ PLAN → FEATURES MAP
 ========================================= */
 
 export const PLAN_FEATURES: Record<PlanType, Feature[]> = {
+
+  FREE_LOCKED: [],
 
   BASIC: [
     "INSTAGRAM_DM",
@@ -105,7 +107,7 @@ export function getMissingFeatures(
 PLAN ORDER (UPGRADE LOGIC)
 ========================================= */
 
-const PLAN_ORDER: PlanType[] = ["BASIC", "PRO", "ELITE"]
+const PLAN_ORDER: PlanType[] = ["FREE_LOCKED", "BASIC", "PRO", "ELITE"]
 
 export function isHigherPlan(
   current?: PlanType,
@@ -162,6 +164,7 @@ PLAN LABELS (UI)
 ========================================= */
 
 export const PLAN_LABELS: Record<PlanType, string> = {
+  FREE_LOCKED: "Starter",
   BASIC: "Basic",
   PRO: "Pro",
   ELITE: "Elite"

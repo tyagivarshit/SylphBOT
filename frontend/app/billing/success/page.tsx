@@ -1,109 +1,157 @@
-"use client"
+"use client";
 
-import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { buildApiUrl } from "@/lib/userApi"
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { confirmCheckout } from "@/lib/billing";
+import { buildApiUrl } from "@/lib/userApi";
 
-export default function SuccessPage(){
+type BillingPayload = {
+  success?: boolean;
+  billing?: {
+    status?: "INACTIVE" | "ACTIVE" | "TRIAL";
+  };
+  subscription?: {
+    status?: string;
+  };
+};
 
-const router = useRouter()
+const sleep = (ms: number) =>
+  new Promise((resolve) => window.setTimeout(resolve, ms));
 
-const [show,setShow] = useState(false)
-const [loading,setLoading] = useState(true)
+const isActivated = (payload: BillingPayload | null) => {
+  const billingStatus = payload?.billing?.status;
+  const subscriptionStatus = payload?.subscription?.status;
 
-/* ================= POLLING ================= */
+  return (
+    billingStatus === "ACTIVE" ||
+    billingStatus === "TRIAL" ||
+    subscriptionStatus === "ACTIVE"
+  );
+};
 
-const checkSubscription = async () => {
-try{
-const res = await fetch(buildApiUrl("/api/billing"),{
-credentials:"include"
-})
-const data = await res.json()
+const getSuccessMessage = (
+  payload: BillingPayload | null,
+  upgraded: boolean
+) => {
+  if (upgraded) {
+    return "Your plan change is now live.";
+  }
 
-if(data?.subscription?.status === "ACTIVE"){
-return true
-}
+  if (payload?.billing?.status === "TRIAL") {
+    return "Your 7-day free trial is now active.";
+  }
 
-return false
-}catch{
-return false
-}
-}
+  return "Your subscription is now active.";
+};
 
-/* ================= EFFECT ================= */
+const fetchBilling = async (): Promise<BillingPayload | null> => {
+  try {
+    const res = await fetch(buildApiUrl("/api/billing"), {
+      credentials: "include",
+      cache: "no-store",
+    });
 
-useEffect(()=>{
+    if (!res.ok) {
+      return null;
+    }
 
-setTimeout(()=>setShow(true),300)
+    return res.json();
+  } catch {
+    return null;
+  }
+};
 
-let attempts = 0
-const maxAttempts = 10
+export default function SuccessPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get("session_id");
+  const upgraded = searchParams.get("upgraded") === "1";
+  const [show, setShow] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("Verifying your payment...");
+  const [failed, setFailed] = useState(false);
 
-const interval = setInterval(async () => {
+  useEffect(() => {
+    let cancelled = false;
 
-const active = await checkSubscription()
+    const activate = async () => {
+      window.setTimeout(() => {
+        if (!cancelled) {
+          setShow(true);
+        }
+      }, 250);
 
-if(active){
-clearInterval(interval)
-setLoading(false)
-return
-}
+      if (sessionId) {
+        const confirmed = await confirmCheckout(sessionId);
 
-attempts++
+        if (!cancelled && confirmed?.success && isActivated(confirmed)) {
+          setMessage(getSuccessMessage(confirmed, upgraded));
+          setLoading(false);
+          return;
+        }
+      }
 
-if(attempts >= maxAttempts){
-clearInterval(interval)
-setLoading(false) // fallback
-}
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const billing = await fetchBilling();
 
-},1500) // poll every 1.5s
+        if (!cancelled && isActivated(billing)) {
+          setMessage(getSuccessMessage(billing, upgraded));
+          setLoading(false);
+          return;
+        }
 
-return ()=>clearInterval(interval)
+        await sleep(1500);
+      }
 
-},[])
+      if (!cancelled) {
+        setLoading(false);
+        setFailed(true);
+        setMessage(
+          "Payment completed, but activation is still syncing. Please reopen billing once."
+        );
+      }
+    };
 
-/* ================= UI ================= */
+    activate();
 
-return(
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, upgraded]);
 
-<div className="min-h-screen flex items-center justify-center bg-gray-50">
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
+        <div className="mb-6 flex justify-center">
+          <div
+            className={`flex h-20 w-20 items-center justify-center rounded-full border-4 transition-all duration-500 ${
+              failed
+                ? "border-amber-400 text-amber-600"
+                : "border-green-500 text-green-600"
+            } ${show ? "scale-100" : "scale-0"}`}
+          >
+            <span className="text-3xl">{failed ? "!" : "OK"}</span>
+          </div>
+        </div>
 
-<div className="bg-white p-8 rounded-xl shadow text-center w-[350px]">
+        <h1 className="text-xl font-semibold text-gray-900">
+          {failed ? "Activation Pending" : "Payment Successful"}
+        </h1>
 
-{/* ANIMATION */}
+        <p className="mt-2 text-sm text-gray-500">{message}</p>
 
-<div className="flex justify-center mb-6">
-
-<div className={`w-20 h-20 rounded-full border-4 border-green-500 flex items-center justify-center
-transition-all duration-500 ${show?"scale-100":"scale-0"}`}>
-
-<span className="text-3xl text-green-600">✓</span>
-
-</div>
-
-</div>
-
-<h1 className="text-xl font-semibold">Payment Successful</h1>
-
-<p className="text-sm text-gray-500 mt-2">
-{loading
-? "Activating your subscription..."
-: "Your subscription is now active"}
-</p>
-
-<button
-onClick={()=>router.push("/dashboard")}
-disabled={loading}
-className="mt-6 w-full bg-blue-600 text-white py-2 rounded disabled:opacity-50"
->
-
-{loading ? "Please wait..." : "Go to Dashboard"}
-
-</button>
-
-</div>
-
-</div>
-
-)
+        <button
+          onClick={() => router.push(failed ? "/billing" : "/dashboard")}
+          disabled={loading}
+          className="mt-6 w-full rounded-xl bg-blue-600 py-2.5 text-white disabled:opacity-50"
+        >
+          {loading
+            ? "Please wait..."
+            : failed
+            ? "Back to Billing"
+            : "Go to Dashboard"}
+        </button>
+      </div>
+    </div>
+  );
 }

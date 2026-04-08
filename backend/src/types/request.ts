@@ -1,10 +1,11 @@
 import { Request } from "express";
 
-export interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    role: string;
-    email: string;
-    businessId: string;
-  };
-}
+type DefaultBody = Record<string, unknown>;
+type DefaultParams = Record<string, string>;
+type DefaultQuery = Record<string, string | string[] | undefined>;
+
+export type AuthenticatedRequest<
+  TBody = DefaultBody,
+  TParams = DefaultParams,
+  TQuery = DefaultQuery,
+> = Request<TParams, unknown, TBody, TQuery>;

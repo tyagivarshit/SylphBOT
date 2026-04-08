@@ -7,7 +7,7 @@
     "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "noEmitOnError": false   // 👈 YE ADD KAR
+    "noEmitOnError": true
   },
   "include": ["src"],
   "exclude": ["node_modules"]

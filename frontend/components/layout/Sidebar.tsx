@@ -179,7 +179,7 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
         {/* 🔥 FOOTER */}
         <div className="h-[60px] flex items-center justify-center border-t border-blue-100">
           <p className="text-[12px] text-gray-500 font-medium">
-            Automexa v1.0
+            Automexia AI
           </p>
         </div>
       </aside>

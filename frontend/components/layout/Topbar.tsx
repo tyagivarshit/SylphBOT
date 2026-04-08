@@ -79,10 +79,10 @@ function TopbarComponent({ setOpen }: TopbarProps) {
     >
       {/* LEFT */}
       <h1
-        className="text-xl sm:text-3xl font-extrabold tracking-wide bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent whitespace-nowrap"
+        className="shrink-0 pr-2 text-lg sm:text-2xl xl:text-3xl font-extrabold tracking-[0.08em] bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent whitespace-nowrap"
         style={{ fontFamily: "Orbitron" }}
       >
-        Automexa
+        Automexia AI
       </h1>
 
       {/* RIGHT */}

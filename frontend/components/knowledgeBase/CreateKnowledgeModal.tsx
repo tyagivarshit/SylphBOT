@@ -78,7 +78,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected }: any){
 
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
 
-      <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl w-full max-w-md p-6 shadow-xl space-y-5">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 sm:p-6 shadow-xl space-y-5">
 
         <h2 className="text-base font-semibold text-gray-900">
           {selected ? "Edit Knowledge" : "Add Knowledge"}
@@ -121,12 +121,12 @@ export default function CreateKnowledgeModal({ open, onClose, selected }: any){
 
         </div>
 
-        <div className="flex justify-end gap-3 pt-2">
+        <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
 
           <button
             onClick={onClose}
             disabled={loading}
-            className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-50 text-gray-700 hover:bg-blue-100 transition"
+            className="w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-semibold bg-blue-50 text-gray-700 hover:bg-blue-100 transition"
           >
             Cancel
           </button>
@@ -134,7 +134,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected }: any){
           <button
             onClick={handleSubmit}
             disabled={loading}
-            className="px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md disabled:opacity-60 transition"
+            className="w-full sm:w-auto px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md disabled:opacity-60 transition"
           >
             {loading ? "Saving..." : selected ? "Update" : "Save"}
           </button>

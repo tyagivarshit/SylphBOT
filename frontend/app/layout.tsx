@@ -11,8 +11,8 @@ const roboto = Roboto({
 });
 
 export const metadata = {
-  title: "Sylph",
-  description: "AI Automation Platform",
+  title: "Automexia AI",
+  description: "Automexia AI automation platform",
 };
 
 export default function RootLayout({

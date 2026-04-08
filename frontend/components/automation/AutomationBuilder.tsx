@@ -1,19 +1,24 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AutomationStep from "./AutomationStep";
 
 type StepType = "MESSAGE" | "DELAY" | "CONDITION" | "BOOKING";
+type StepConfig = {
+  message?: string;
+  condition?: string;
+  delay?: number;
+};
+type AutomationPayloadStep = {
+  type: StepType;
+  config: StepConfig;
+};
 
 interface Step {
   id: number;
   type: StepType;
   label: string;
-  config: {
-    message?: string;
-    condition?: string;
-    delay?: number;
-  };
+  config: StepConfig;
 }
 
 export default function AutomationBuilder({
@@ -21,7 +26,7 @@ export default function AutomationBuilder({
   onChange,
 }: {
   plan?: "BASIC" | "PRO" | "ELITE";
-  onChange?: (steps: any[]) => void;
+  onChange?: (steps: AutomationPayloadStep[]) => void;
 }) {
   const [steps, setSteps] = useState<Step[]>([
     {
@@ -38,25 +43,30 @@ export default function AutomationBuilder({
     return ["MESSAGE", "DELAY", "CONDITION", "BOOKING"];
   }, [plan]);
 
-  /* ---------------- UPDATE ---------------- */
+  const formatSteps = (source: Step[]) =>
+    source.map((step) => {
+      const cleanConfig: StepConfig = {};
 
-  const updateSteps = (newSteps: Step[]) => {
-    setSteps(newSteps);
-
-    const formatted = newSteps.map((s) => {
-      const cleanConfig: any = {};
-
-      if (s.config.message) cleanConfig.message = s.config.message;
-      if (s.config.condition) cleanConfig.condition = s.config.condition;
-      if (s.config.delay) cleanConfig.delay = s.config.delay;
+      if (step.config.message) {
+        cleanConfig.message = step.config.message.replace("ðŸ‘‹", "").trim();
+      }
+      if (step.config.condition) cleanConfig.condition = step.config.condition;
+      if (step.config.delay) cleanConfig.delay = step.config.delay;
 
       return {
-        type: s.type,
+        type: step.type,
         config: cleanConfig,
       };
     });
 
-    onChange?.(formatted);
+  useEffect(() => {
+    onChange?.(formatSteps(steps));
+  }, [onChange, steps]);
+
+  /* ---------------- UPDATE ---------------- */
+
+  const updateSteps = (newSteps: Step[]) => {
+    setSteps(newSteps);
   };
 
   /* ---------------- ADD STEP ---------------- */
@@ -112,7 +122,7 @@ export default function AutomationBuilder({
   const updateConfig = (
     id: number,
     key: string,
-    value: any
+    value: string | number
   ) => {
     const newSteps = steps.map((s) =>
       s.id === id
@@ -129,31 +139,37 @@ export default function AutomationBuilder({
     updateSteps(newSteps);
   };
 
+  const getStepButtonClass = (enabled: boolean) =>
+    [
+      "flex items-center justify-center rounded-2xl border px-3 py-3 text-sm font-semibold transition",
+      enabled
+        ? "border-blue-200 bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-700 hover:border-blue-300 hover:shadow-sm"
+        : "border-slate-200 bg-slate-100 text-slate-400",
+    ].join(" ");
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
 
       {/* 🔥 STEPS CONTAINER */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         {steps.map((step, i) => (
           <div key={step.id} className="relative">
             
             {/* STEP CARD WRAPPER */}
-            <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition">
-              <AutomationStep
-                step={step}
-                onDelete={() => removeStep(step.id)}
-                onMoveUp={() => moveStep(i, "up")}
-                onMoveDown={() => moveStep(i, "down")}
-                onConfigChange={(key: string, value: any) =>
-                  updateConfig(step.id, key, value)
-                }
-              />
-            </div>
+            <AutomationStep
+              step={step}
+              onDelete={() => removeStep(step.id)}
+              onMoveUp={() => moveStep(i, "up")}
+              onMoveDown={() => moveStep(i, "down")}
+              onConfigChange={(key: string, value: string | number) =>
+                updateConfig(step.id, key, value)
+              }
+            />
 
             {/* 🔥 CONNECTOR LINE */}
             {i !== steps.length - 1 && (
-              <div className="flex justify-center my-2">
-                <div className="w-px h-6 bg-blue-100" />
+              <div className="flex justify-center py-3">
+                <div className="h-8 w-px rounded-full bg-gradient-to-b from-blue-200 to-cyan-200" />
               </div>
             )}
 
@@ -162,36 +178,49 @@ export default function AutomationBuilder({
       </div>
 
       {/* 🔥 ADD STEP BUTTONS */}
-      <div className="flex flex-wrap gap-2 pt-2">
+      <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 p-4 sm:p-5">
+        <p className="text-sm font-semibold text-slate-800">
+          Add Another Step
+        </p>
+        <p className="mt-1 text-sm text-slate-500">
+          Expand the flow while keeping the experience simple and clear.
+        </p>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
 
         <button
+          type="button"
           onClick={() => addStep("MESSAGE")}
-          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
+          className={getStepButtonClass(allowedSteps.includes("MESSAGE"))}
         >
-          + Message
+          Message
         </button>
 
         <button
+          type="button"
           onClick={() => addStep("DELAY")}
-          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
+          className={getStepButtonClass(allowedSteps.includes("DELAY"))}
         >
-          + Delay
+          Delay
         </button>
 
         <button
+          type="button"
           onClick={() => addStep("CONDITION")}
-          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
+          className={getStepButtonClass(allowedSteps.includes("CONDITION"))}
         >
-          + Condition
+          Condition
         </button>
 
         <button
+          type="button"
           onClick={() => addStep("BOOKING")}
-          className="text-xs font-semibold bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 px-3 py-1.5 rounded-xl hover:shadow-sm transition"
+          className={getStepButtonClass(allowedSteps.includes("BOOKING"))}
         >
-          + Booking
+          Booking
         </button>
 
+        </div>
       </div>
     </div>
   );

@@ -43,13 +43,13 @@ export default function AutomationStep({
   };
 
   return (
-    <div className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm transition-all hover:shadow-md sm:p-5">
+    <div className="relative overflow-hidden rounded-[22px] border border-slate-200 bg-white p-3 shadow-sm transition-all hover:shadow-md sm:p-4">
 
       {/* 🔥 TOP GRADIENT STRIP */}
       <div className={`absolute left-0 top-0 h-1.5 w-full bg-gradient-to-r ${getColor()}`} />
 
       {/* 🔥 HEADER */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
             {step.type}
@@ -64,7 +64,7 @@ export default function AutomationStep({
           <button
             type="button"
             onClick={onMoveUp}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[0px] text-slate-600 transition before:text-xs before:font-semibold before:content-['Up'] hover:bg-slate-100"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-[0px] text-slate-600 transition before:text-xs before:font-semibold before:content-['Up'] hover:bg-slate-100"
           >
             ↑
           </button>
@@ -72,7 +72,7 @@ export default function AutomationStep({
           <button
             type="button"
             onClick={onMoveDown}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[0px] text-slate-600 transition before:text-xs before:font-semibold before:content-['Down'] hover:bg-slate-100"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-[0px] text-slate-600 transition before:text-xs before:font-semibold before:content-['Down'] hover:bg-slate-100"
           >
             ↓
           </button>
@@ -80,7 +80,7 @@ export default function AutomationStep({
           <button
             type="button"
             onClick={onDelete}
-            className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+            className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100"
           >
             Delete
           </button>
@@ -89,18 +89,18 @@ export default function AutomationStep({
       </div>
 
       {/* 🔥 CONTENT */}
-      <div className="mt-4 space-y-2">
+      <div className="mt-3 space-y-2">
 
         {/* MESSAGE */}
         {step.type === "MESSAGE" && (
           <textarea
-            rows={4}
+            rows={3}
             value={(step.config?.message || "").replace("ðŸ‘‹", "").trim()}
             onChange={(e) =>
               onConfigChange("message", e.target.value || "")
             }
             placeholder="Enter message to send..."
-            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
           />
         )}
 
@@ -112,7 +112,7 @@ export default function AutomationStep({
               onConfigChange("condition", e.target.value)
             }
             placeholder="Enter keyword (e.g. price)"
-            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100"
+            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100"
           />
         )}
 
@@ -125,7 +125,7 @@ export default function AutomationStep({
               onConfigChange("delay", Number(e.target.value) || 0)
             }
             placeholder="Delay in seconds"
-            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-yellow-400 focus:outline-none focus:ring-4 focus:ring-yellow-100"
+            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-yellow-400 focus:outline-none focus:ring-4 focus:ring-yellow-100"
           />
         )}
 

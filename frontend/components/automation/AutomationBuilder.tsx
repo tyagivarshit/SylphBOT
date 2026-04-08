@@ -141,17 +141,17 @@ export default function AutomationBuilder({
 
   const getStepButtonClass = (enabled: boolean) =>
     [
-      "flex items-center justify-center rounded-2xl border px-3 py-3 text-sm font-semibold transition",
+      "flex items-center justify-center rounded-2xl border px-3 py-2.5 text-sm font-semibold transition",
       enabled
         ? "border-blue-200 bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-700 hover:border-blue-300 hover:shadow-sm"
         : "border-slate-200 bg-slate-100 text-slate-400",
     ].join(" ");
 
   return (
-    <div className="space-y-5">
+    <div className="flex h-full min-h-0 flex-col gap-3">
 
       {/* 🔥 STEPS CONTAINER */}
-      <div className="space-y-3 sm:space-y-4">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 sm:space-y-4">
         {steps.map((step, i) => (
           <div key={step.id} className="relative">
             
@@ -168,8 +168,8 @@ export default function AutomationBuilder({
 
             {/* 🔥 CONNECTOR LINE */}
             {i !== steps.length - 1 && (
-              <div className="flex justify-center py-3">
-                <div className="h-8 w-px rounded-full bg-gradient-to-b from-blue-200 to-cyan-200" />
+              <div className="flex justify-center py-2">
+                <div className="h-6 w-px rounded-full bg-gradient-to-b from-blue-200 to-cyan-200" />
               </div>
             )}
 
@@ -178,15 +178,15 @@ export default function AutomationBuilder({
       </div>
 
       {/* 🔥 ADD STEP BUTTONS */}
-      <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 p-4 sm:p-5">
+      <div className="shrink-0 rounded-[22px] border border-dashed border-slate-300 bg-slate-50 p-3 sm:p-4">
         <p className="text-sm font-semibold text-slate-800">
           Add Another Step
         </p>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-xs leading-5 text-slate-500">
           Expand the flow while keeping the experience simple and clear.
         </p>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
 
         <button
           type="button"

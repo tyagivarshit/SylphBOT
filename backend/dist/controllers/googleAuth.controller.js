@@ -8,7 +8,8 @@ const passport_1 = __importDefault(require("passport"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const crypto_1 = __importDefault(require("crypto"));
 const generateToken_1 = require("../utils/generateToken");
-const isProd = process.env.NODE_ENV === "production";
+const authCookies_1 = require("../utils/authCookies");
+const googleOAuthState_1 = require("../utils/googleOAuthState");
 /* ======================================
 UTILS
 ====================================== */
@@ -17,26 +18,14 @@ const getIP = (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
     "unknown";
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
 /* ======================================
-COOKIE OPTIONS
-====================================== */
-const getCookieOptions = () => ({
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? "none" : "lax",
-    ...(isProd ? { domain: ".automexiaai.in" } : {}),
-    path: "/",
-});
-/* ======================================
 GOOGLE INIT
 ====================================== */
 const googleAuth = (req, res, next) => {
     try {
-        const state = crypto_1.default.randomBytes(32).toString("hex");
-        const cookieOptions = getCookieOptions();
-        res.cookie("oauth_state", state, {
-            ...cookieOptions,
-            maxAge: 10 * 60 * 1000,
-        });
+        const redirectOrigin = String(req.headers.referer ||
+            req.headers.origin ||
+            (0, googleOAuthState_1.getDefaultFrontendOrigin)());
+        const state = (0, googleOAuthState_1.createGoogleOAuthState)(redirectOrigin);
         passport_1.default.authenticate("google", {
             scope: ["profile", "email"],
             state,
@@ -44,7 +33,7 @@ const googleAuth = (req, res, next) => {
         })(req, res, next);
     }
     catch {
-        return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+        return res.redirect(`${(0, googleOAuthState_1.getDefaultFrontendOrigin)()}/auth/login`);
     }
 };
 exports.googleAuth = googleAuth;
@@ -54,19 +43,17 @@ GOOGLE CALLBACK
 const googleCallback = async (req, res) => {
     try {
         const user = req.user;
-        const stateFromGoogle = req.query.state;
-        const stateFromCookie = req.cookies?.oauth_state;
-        const cookieOptions = getCookieOptions();
+        const state = (0, googleOAuthState_1.verifyGoogleOAuthState)(req.query.state);
+        const redirectOrigin = state?.redirectOrigin || (0, googleOAuthState_1.getDefaultFrontendOrigin)();
         /* ======================================
         STATE VALIDATION
         ====================================== */
-        if (!stateFromGoogle || stateFromGoogle !== stateFromCookie) {
+        if (!state) {
             console.warn("OAuth state mismatch");
-            return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+            return res.redirect(`${(0, googleOAuthState_1.getDefaultFrontendOrigin)()}/auth/login`);
         }
-        res.clearCookie("oauth_state", cookieOptions);
         if (!user || !user.id || !user.isActive) {
-            return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+            return res.redirect(`${redirectOrigin}/auth/login`);
         }
         const result = await prisma_1.default.$transaction(async (tx) => {
             let business = await tx.business.findFirst({
@@ -118,23 +105,16 @@ const googleCallback = async (req, res) => {
                 businessId: business.id,
             };
         });
-        res.cookie("accessToken", result.accessToken, {
-            ...cookieOptions,
-            maxAge: 15 * 60 * 1000,
-        });
-        res.cookie("refreshToken", result.refreshRaw, {
-            ...cookieOptions,
-            maxAge: 7 * 24 * 60 * 60 * 1000,
-        });
+        (0, authCookies_1.setAuthCookies)(res, req, result.accessToken, result.refreshRaw);
         console.log("GOOGLE LOGIN SUCCESS", {
             userId: user.id,
             businessId: result.businessId,
         });
-        return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+        return res.redirect(`${redirectOrigin}/dashboard`);
     }
     catch (err) {
         console.error("GOOGLE CALLBACK ERROR", err);
-        return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+        return res.redirect(`${(0, googleOAuthState_1.getDefaultFrontendOrigin)()}/auth/login`);
     }
 };
 exports.googleCallback = googleCallback;

@@ -6,8 +6,12 @@ import {
   generateAccessToken,
   generateRefreshToken,
 } from "../utils/generateToken";
-
-const isProd = process.env.NODE_ENV === "production";
+import { setAuthCookies } from "../utils/authCookies";
+import {
+  createGoogleOAuthState,
+  getDefaultFrontendOrigin,
+  verifyGoogleOAuthState,
+} from "../utils/googleOAuthState";
 
 /* ======================================
 UTILS
@@ -22,18 +26,6 @@ const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
 /* ======================================
-COOKIE OPTIONS
-====================================== */
-
-const getCookieOptions = () => ({
-  httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? ("none" as const) : ("lax" as const),
-  ...(isProd ? { domain: ".automexiaai.in" } : {}),
-  path: "/",
-});
-
-/* ======================================
 GOOGLE INIT
 ====================================== */
 
@@ -43,13 +35,12 @@ export const googleAuth = (
   next: NextFunction
 ) => {
   try {
-    const state = crypto.randomBytes(32).toString("hex");
-    const cookieOptions = getCookieOptions();
-
-    res.cookie("oauth_state", state, {
-      ...cookieOptions,
-      maxAge: 10 * 60 * 1000,
-    });
+    const redirectOrigin = String(
+      req.headers.referer ||
+        req.headers.origin ||
+        getDefaultFrontendOrigin()
+    );
+    const state = createGoogleOAuthState(redirectOrigin);
 
     passport.authenticate("google", {
       scope: ["profile", "email"],
@@ -57,7 +48,7 @@ export const googleAuth = (
       session: false,
     })(req, res, next);
   } catch {
-    return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+    return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
   }
 };
 
@@ -68,23 +59,20 @@ GOOGLE CALLBACK
 export const googleCallback = async (req: Request, res: Response) => {
   try {
     const user = req.user as any;
-    const stateFromGoogle = req.query.state;
-    const stateFromCookie = req.cookies?.oauth_state;
-    const cookieOptions = getCookieOptions();
+    const state = verifyGoogleOAuthState(req.query.state);
+    const redirectOrigin = state?.redirectOrigin || getDefaultFrontendOrigin();
 
     /* ======================================
     STATE VALIDATION
     ====================================== */
 
-    if (!stateFromGoogle || stateFromGoogle !== stateFromCookie) {
+    if (!state) {
       console.warn("OAuth state mismatch");
-      return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+      return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
     }
 
-    res.clearCookie("oauth_state", cookieOptions);
-
     if (!user || !user.id || !user.isActive) {
-      return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+      return res.redirect(`${redirectOrigin}/auth/login`);
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -157,24 +145,16 @@ export const googleCallback = async (req: Request, res: Response) => {
       };
     });
 
-    res.cookie("accessToken", result.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000,
-    });
-
-    res.cookie("refreshToken", result.refreshRaw, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    setAuthCookies(res, req, result.accessToken, result.refreshRaw);
 
     console.log("GOOGLE LOGIN SUCCESS", {
       userId: user.id,
       businessId: result.businessId,
     });
 
-    return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+    return res.redirect(`${redirectOrigin}/dashboard`);
   } catch (err) {
     console.error("GOOGLE CALLBACK ERROR", err);
-    return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+    return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
   }
 };

@@ -5,6 +5,12 @@ import {
   googleAuth,
   googleCallback,
 } from "../controllers/googleAuth.controller";
+import {
+  getDefaultFrontendOrigin,
+  getGoogleOAuthStateKey,
+  GOOGLE_OAUTH_STATE_TTL_SECONDS,
+  verifyGoogleOAuthState,
+} from "../utils/googleOAuthState";
 
 const router = Router();
 
@@ -64,52 +70,113 @@ SAFE WRAPPER
 const safeHandler =
   (fn: any) => (req: Request, res: Response, next: NextFunction) =>
     Promise.resolve(fn(req, res, next)).catch(() => {
-      return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+      return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
     });
 
 const hasAuthCookies = (req: Request) =>
   Boolean(req.cookies?.accessToken || req.cookies?.refreshToken);
 
-const handleGoogleCallback = (
+const claimGoogleOAuthState = async (nonce: string) => {
+  try {
+    const result = await redis.set(
+      getGoogleOAuthStateKey(nonce),
+      "processing",
+      "EX",
+      GOOGLE_OAUTH_STATE_TTL_SECONDS,
+      "NX"
+    );
+
+    return result === "OK";
+  } catch (error) {
+    console.error("GOOGLE OAUTH STATE CLAIM ERROR", error);
+    return null;
+  }
+};
+
+const releaseGoogleOAuthState = async (nonce: string) => {
+  try {
+    await redis.del(getGoogleOAuthStateKey(nonce));
+  } catch (error) {
+    console.error("GOOGLE OAUTH STATE RELEASE ERROR", error);
+  }
+};
+
+const authenticateGoogleUser = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  // Some browsers/providers can replay the callback URL once cookies are already set.
-  // In that case, avoid reusing the same auth code and just continue to the dashboard.
-  if (hasAuthCookies(req) && req.query.code) {
-    return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
-  }
-
-  return passport.authenticate(
-    "google",
-    {
-      session: false,
-      failureRedirect: `${process.env.FRONTEND_URL}/auth/login`,
-    },
-    (err: any, user: any) => {
-      if (err) {
-        if (hasAuthCookies(req) && req.query.code) {
-          return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+  return new Promise<any>((resolve, reject) => {
+    passport.authenticate(
+      "google",
+      {
+        session: false,
+      },
+      (err: any, user: any) => {
+        if (err) {
+          return reject(err);
         }
 
-        console.error("GOOGLE PASSPORT ERROR", {
-          message: err?.message,
-          code: err?.code,
-          status: err?.status,
-        });
-
-        return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+        return resolve(user);
       }
+    )(req, res, next);
+  });
+};
 
-      if (!user) {
-        return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
-      }
+const handleGoogleCallback = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const state = verifyGoogleOAuthState(req.query.state);
+  const loginUrl = `${getDefaultFrontendOrigin()}/auth/login`;
 
-      (req as any).user = user;
-      return safeHandler(googleCallback)(req, res, next);
-    }
-  )(req, res, next);
+  if (!state) {
+    return res.redirect(loginUrl);
+  }
+
+  const claimed = await claimGoogleOAuthState(state.nonce);
+
+  // Browsers can replay the callback URL once cookies are already set.
+  // Reuse the established session instead of re-spending the same auth code.
+  if (claimed === false) {
+    return hasAuthCookies(req)
+      ? res.redirect(`${state.redirectOrigin}/dashboard`)
+      : res.redirect(loginUrl);
+  }
+
+  let user: any;
+
+  try {
+    user = await authenticateGoogleUser(req, res, next);
+  } catch (err: any) {
+    await releaseGoogleOAuthState(state.nonce);
+
+    console.error("GOOGLE PASSPORT ERROR", {
+      message: err?.message,
+      code: err?.code,
+      status: err?.status,
+    });
+
+    return hasAuthCookies(req) && req.query.code
+      ? res.redirect(`${state.redirectOrigin}/dashboard`)
+      : res.redirect(loginUrl);
+  }
+
+  if (!user) {
+    await releaseGoogleOAuthState(state.nonce);
+    return res.redirect(loginUrl);
+  }
+
+  (req as any).user = user;
+
+  try {
+    await googleCallback(req, res);
+  } catch (error) {
+    await releaseGoogleOAuthState(state.nonce);
+    console.error("GOOGLE CALLBACK ROUTE ERROR", error);
+    return res.redirect(loginUrl);
+  }
 };
 
 /* ======================================

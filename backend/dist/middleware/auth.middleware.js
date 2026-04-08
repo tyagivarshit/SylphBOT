@@ -3,36 +3,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.protect = exports.clearAuthCookies = void 0;
+exports.protect = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const env_1 = require("../config/env");
 const AppError_1 = require("../utils/AppError");
 const crypto_1 = __importDefault(require("crypto"));
 const generateToken_1 = require("../utils/generateToken");
-const isProd = process.env.NODE_ENV === "production";
+const authCookies_1 = require("../utils/authCookies");
 /* ======================================
 UTILS
 ====================================== */
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
-/* ======================================
-COOKIE CONFIG
-====================================== */
-const cookieOptions = {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? "none" : "lax",
-    domain: ".automexiaai.in",
-    path: "/",
-};
-/* ======================================
-CLEAR COOKIES
-====================================== */
-const clearAuthCookies = (res) => {
-    res.clearCookie("accessToken", cookieOptions);
-    res.clearCookie("refreshToken", cookieOptions);
-};
-exports.clearAuthCookies = clearAuthCookies;
 /* ======================================
 GET USER
 ====================================== */
@@ -103,7 +85,7 @@ const protect = async (req, res, next) => {
             }
         }
         catch {
-            (0, exports.clearAuthCookies)(res);
+            (0, authCookies_1.clearAuthCookies)(res, req);
             throw (0, AppError_1.unauthorized)("Invalid refresh token");
         }
         const hashed = hashToken(refreshToken);
@@ -115,14 +97,14 @@ const protect = async (req, res, next) => {
             },
         });
         if (!dbToken) {
-            (0, exports.clearAuthCookies)(res);
+            (0, authCookies_1.clearAuthCookies)(res, req);
             throw (0, AppError_1.unauthorized)("Session expired");
         }
         const user = await getUserWithBusiness(decoded.id);
         if (!user ||
             !user.isActive ||
             user.tokenVersion !== decoded.tokenVersion) {
-            (0, exports.clearAuthCookies)(res);
+            (0, authCookies_1.clearAuthCookies)(res, req);
             throw (0, AppError_1.unauthorized)("Invalid session");
         }
         /* =============================
@@ -130,7 +112,7 @@ const protect = async (req, res, next) => {
         ============================= */
         const newAccessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, user.businessId || null, user.tokenVersion);
         res.cookie("accessToken", newAccessToken, {
-            ...cookieOptions,
+            ...(0, authCookies_1.getAuthCookieOptions)(req),
             maxAge: 15 * 60 * 1000,
         });
         req.user = {

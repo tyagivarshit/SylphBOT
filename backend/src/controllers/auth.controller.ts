@@ -14,6 +14,10 @@ import {
   conflict,
   tooManyRequests,
 } from "../utils/AppError";
+import {
+  clearAuthCookies,
+  setAuthCookies,
+} from "../utils/authCookies";
 
 /* ======================================
 UTILS
@@ -44,36 +48,22 @@ const checkGlobalLimit = async (ip: string) => {
 COOKIE CONFIG (PRODUCTION GRADE)
 ====================================== */
 
-const isProd = process.env.NODE_ENV === "production";
-
-const getCookieOptions = () => ({
-  httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? ("none" as const) : ("lax" as const),
-  ...(isProd ? { domain: ".automexiaai.in" } : {}),
-  path: "/",
-});
 
 /* ======================================
 SET COOKIES
 ====================================== */
 
-const setCookies = (res: Response, access: string, refresh: string) => {
-  const options = getCookieOptions();
+const setCookies = (
+  req: Request,
+  res: Response,
+  access: string,
+  refresh: string
+) => {
+  setAuthCookies(res, req, access, refresh);
 
-  res.cookie("accessToken", access, {
-    ...options,
-    maxAge: 15 * 60 * 1000,
-  });
 
-  res.cookie("refreshToken", refresh, {
-    ...options,
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
 
-  if (!isProd) {
     console.log("🍪 Cookies set");
-  }
 };
 
 /* ======================================
@@ -196,7 +186,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       },
     });
 
-    setCookies(res, accessToken, refreshRaw);
+    setAuthCookies(res, req, accessToken, refreshRaw);
 
     res.json({
       success: true,
@@ -431,10 +421,7 @@ export const logout = async (req: any, res: Response, next: NextFunction) => {
       where: { userId: req.user.id },
     });
 
-    const options = getCookieOptions();
-
-    res.clearCookie("accessToken", options);
-    res.clearCookie("refreshToken", options);
+    clearAuthCookies(res, req);
 
     res.json({ success: true });
 

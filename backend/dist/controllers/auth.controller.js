@@ -11,6 +11,7 @@ const redis_1 = __importDefault(require("../config/redis"));
 const generateToken_1 = require("../utils/generateToken");
 const email_service_1 = require("../services/email.service");
 const AppError_1 = require("../utils/AppError");
+const authCookies_1 = require("../utils/authCookies");
 /* ======================================
 UTILS
 ====================================== */
@@ -33,30 +34,12 @@ const checkGlobalLimit = async (ip) => {
 /* ======================================
 COOKIE CONFIG (PRODUCTION GRADE)
 ====================================== */
-const isProd = process.env.NODE_ENV === "production";
-const getCookieOptions = () => ({
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? "none" : "lax",
-    domain: ".automexiaai.in",
-    path: "/",
-});
 /* ======================================
 SET COOKIES
 ====================================== */
-const setCookies = (res, access, refresh) => {
-    const options = getCookieOptions();
-    res.cookie("accessToken", access, {
-        ...options,
-        maxAge: 15 * 60 * 1000,
-    });
-    res.cookie("refreshToken", refresh, {
-        ...options,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-    if (!isProd) {
-        console.log("🍪 Cookies set");
-    }
+const setCookies = (req, res, access, refresh) => {
+    (0, authCookies_1.setAuthCookies)(res, req, access, refresh);
+    console.log("🍪 Cookies set");
 };
 /* ======================================
 REGISTER
@@ -146,7 +129,7 @@ const login = async (req, res, next) => {
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
         });
-        setCookies(res, accessToken, refreshRaw);
+        (0, authCookies_1.setAuthCookies)(res, req, accessToken, refreshRaw);
         res.json({
             success: true,
             user: {
@@ -340,9 +323,7 @@ const logout = async (req, res, next) => {
         await prisma_1.default.refreshToken.deleteMany({
             where: { userId: req.user.id },
         });
-        const options = getCookieOptions();
-        res.clearCookie("accessToken", options);
-        res.clearCookie("refreshToken", options);
+        (0, authCookies_1.clearAuthCookies)(res, req);
         res.json({ success: true });
     }
     catch (err) {

@@ -5,8 +5,10 @@ import { env } from "../config/env";
 import { unauthorized } from "../utils/AppError";
 import crypto from "crypto";
 import { generateAccessToken } from "../utils/generateToken";
-
-const isProd = process.env.NODE_ENV === "production";
+import {
+  clearAuthCookies,
+  getAuthCookieOptions,
+} from "../utils/authCookies";
 
 /* ======================================
 UTILS
@@ -14,27 +16,6 @@ UTILS
 
 const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
-
-/* ======================================
-COOKIE CONFIG
-====================================== */
-
-const cookieOptions = {
-  httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? ("none" as const) : ("lax" as const),
-  ...(isProd ? { domain: ".automexiaai.in" } : {}),
-  path: "/",
-};
-
-/* ======================================
-CLEAR COOKIES
-====================================== */
-
-export const clearAuthCookies = (res: Response) => {
-  res.clearCookie("accessToken", cookieOptions);
-  res.clearCookie("refreshToken", cookieOptions);
-};
 
 /* ======================================
 GET USER
@@ -135,7 +116,7 @@ export const protect = async (
       }
 
     } catch {
-      clearAuthCookies(res);
+      clearAuthCookies(res, req);
       throw unauthorized("Invalid refresh token");
     }
 
@@ -150,7 +131,7 @@ export const protect = async (
     });
 
     if (!dbToken) {
-      clearAuthCookies(res);
+      clearAuthCookies(res, req);
       throw unauthorized("Session expired");
     }
 
@@ -161,7 +142,7 @@ export const protect = async (
       !user.isActive ||
       user.tokenVersion !== decoded.tokenVersion
     ) {
-      clearAuthCookies(res);
+      clearAuthCookies(res, req);
       throw unauthorized("Invalid session");
     }
 
@@ -177,7 +158,7 @@ export const protect = async (
     );
 
     res.cookie("accessToken", newAccessToken, {
-      ...cookieOptions,
+      ...getAuthCookieOptions(req),
       maxAge: 15 * 60 * 1000,
     });
 

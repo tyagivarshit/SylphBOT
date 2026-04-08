@@ -5,6 +5,14 @@ import { X } from "lucide-react"
 import { getLeadDetail } from "@/lib/dashboard.api"
 import { apiFetch } from "@/lib/apiClient"
 import { socket } from "@/lib/socket"
+import StageSelect from "./StageSelect"
+
+const stageOptions = [
+  { value: "NEW", label: "NEW" },
+  { value: "QUALIFIED", label: "QUALIFIED" },
+  { value: "WON", label: "WON" },
+  { value: "LOST", label: "LOST" },
+]
 
 export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
 
@@ -213,18 +221,14 @@ export default function LeadDrawer({ lead, onClose, onStageUpdate }: any) {
             Lead Stage
           </label>
 
-          <select
+          <StageSelect
             value={stage}
-            onChange={(e)=>updateStage(e.target.value)}
-            className="mt-2 w-full border border-blue-100 rounded-xl px-4 py-2.5 text-sm bg-white/70 focus:outline-none focus:ring-2 focus:ring-blue-400"
-          >
-
-            <option value="NEW">NEW</option>
-            <option value="QUALIFIED">QUALIFIED</option>
-            <option value="WON">WON</option>
-            <option value="LOST">LOST</option>
-
-          </select>
+            options={stageOptions}
+            direction="up"
+            ariaLabel="Update lead stage"
+            className="mt-2"
+            onChange={updateStage}
+          />
 
         </div>
 

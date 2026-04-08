@@ -6,12 +6,21 @@ import axios from "axios"
 import { useSearchParams } from "next/navigation"
 
 import LeadsTable from "@/components/leads/LeadsTable"
+import StageSelect from "@/components/leads/StageSelect"
 import FeatureGate from "@/components/FeatureGate"
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000",
   withCredentials: true,
 })
+
+const stageOptions = [
+  { value: "", label: "All Stages" },
+  { value: "NEW", label: "New" },
+  { value: "QUALIFIED", label: "Qualified" },
+  { value: "WON", label: "Won" },
+  { value: "LOST", label: "Lost" },
+]
 
 export default function LeadsPage(){
   const searchParams = useSearchParams()
@@ -63,7 +72,7 @@ export default function LeadsPage(){
 
   return(
 
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
 
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -72,20 +81,16 @@ export default function LeadsPage(){
           Leads CRM
         </h1>
 
-        <select
+        <StageSelect
           value={stage}
-          onChange={(e)=>{
-            setStage(e.target.value)
+          options={stageOptions}
+          ariaLabel="Filter leads by stage"
+          className="w-full sm:w-[180px]"
+          onChange={(value)=>{
+            setStage(value)
             setPage(1)
           }}
-          className="px-4 py-2.5 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
-        >
-          <option value="">All Stages</option>
-          <option value="NEW">New</option>
-          <option value="QUALIFIED">Qualified</option>
-          <option value="WON">Won</option>
-          <option value="LOST">Lost</option>
-        </select>
+        />
 
       </div>
 

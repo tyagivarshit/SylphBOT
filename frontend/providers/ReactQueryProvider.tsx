@@ -12,7 +12,6 @@ export default function ReactQueryProvider({
 }: {
   children: React.ReactNode;
 }) {
-
   const [queryClient] = useState(() =>
     new QueryClient({
       defaultOptions: {
@@ -25,12 +24,14 @@ export default function ReactQueryProvider({
     })
   );
 
-  console.log("🧠 QueryClient ACTIVE");
+  const showDevtools = process.env.NODE_ENV !== "production";
 
   return (
     <QueryClientProvider client={queryClient}>
       {children}
-      <ReactQueryDevtools initialIsOpen />
+      {showDevtools ? (
+        <ReactQueryDevtools initialIsOpen={false} />
+      ) : null}
     </QueryClientProvider>
   );
 }

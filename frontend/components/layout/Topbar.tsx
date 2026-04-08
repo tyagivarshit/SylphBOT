@@ -14,6 +14,11 @@ import { useQuery } from "@tanstack/react-query";
 import NotificationsDropdown from "../topbar/NotificationsDropdown";
 import ProfileDropdown from "../topbar/ProfileDropdown";
 import { useRouter } from "next/navigation";
+import {
+  fetchCurrentUser,
+  fetchNotifications,
+  searchApp,
+} from "@/lib/userApi";
 
 interface TopbarProps {
   setOpen: Dispatch<SetStateAction<boolean>>;
@@ -28,41 +33,25 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   const router = useRouter();
 
   const debounced = useDebounce(search, 300);
+  const normalizedQuery = debounced.trim();
+  const shouldSearch = openSearch && normalizedQuery.length > 0;
 
   const { data: userData } = useQuery({
     queryKey: ["me"],
-    queryFn: async () => {
-      const res = await fetch("http://localhost:5000/api/user/me", {
-        credentials: "include",
-      });
-      if (!res.ok) return null;
-      return res.json();
-    },
+    queryFn: fetchCurrentUser,
   });
 
   const { data } = useQuery({
     queryKey: ["notifications"],
-    queryFn: async () => {
-      const res = await fetch("http://localhost:5000/api/notifications", {
-        credentials: "include",
-      });
-      if (!res.ok) {
-        return { notifications: [], unreadCount: 0 };
-      }
-      return res.json();
-    },
+    queryFn: fetchNotifications,
   });
 
   const unreadCount = data?.unreadCount ?? 0;
 
   const { data: searchData, isLoading } = useQuery({
-    queryKey: ["search", debounced],
-    queryFn: async () => {
-      if (!debounced) return [];
-      const res = await fetch(`/api/search?q=${debounced}`);
-      return res.json();
-    },
-    enabled: !!debounced,
+    queryKey: ["search", normalizedQuery],
+    queryFn: () => searchApp(normalizedQuery),
+    enabled: shouldSearch,
   });
 
   const results = Array.isArray(searchData) ? searchData : [];
@@ -113,31 +102,55 @@ function TopbarComponent({ setOpen }: TopbarProps) {
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
-              setOpenSearch(true);
+              setOpenSearch(Boolean(e.target.value.trim()));
+            }}
+            onFocus={() => {
+              if (search.trim()) setOpenSearch(true);
             }}
             placeholder="Search..."
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            name="global-search"
             className="w-full px-4 py-2.5 pl-10 border border-blue-100 rounded-xl text-sm text-gray-900 bg-white/70 backdrop-blur-xl focus:ring-2 focus:ring-blue-400 outline-none"
           />
 
-          {openSearch && (
+          {openSearch && search.trim().length > 0 && (
             <div className="absolute mt-2 w-full bg-white border border-blue-100 rounded-2xl shadow-lg z-[9999] max-h-72 overflow-y-auto">
-              {isLoading && (
+              {search.trim().length < 2 && (
+                <div className="p-3 text-sm text-gray-500">
+                  Type at least 2 characters
+                </div>
+              )}
+              {search.trim().length >= 2 && isLoading && (
                 <div className="p-3 text-sm text-gray-500">Searching...</div>
               )}
-              {!isLoading && results.length === 0 && (
+              {search.trim().length >= 2 && !isLoading && results.length === 0 && (
                 <div className="p-3 text-sm text-gray-500">No results</div>
               )}
-              {results.map((item: any, index: number) => (
+              {search.trim().length >= 2 && results.map((item: any, index: number) => (
                 <div
                   key={item.id}
-                  onClick={() => router.push(item.url)}
+                  onClick={() => {
+                    router.push(item.searchUrl || item.url);
+                    setOpenSearch(false);
+                    setSearch("");
+                  }}
                   className={`px-4 py-3 text-sm cursor-pointer transition ${
                     index === activeIndex
                       ? "bg-blue-50"
                       : "hover:bg-blue-50"
                   }`}
                 >
-                  {item.title}
+                  <div className="font-medium text-gray-900">
+                    {item.title}
+                  </div>
+                  {item.subtitle && (
+                    <div className="mt-1 text-xs text-gray-500 truncate">
+                      {item.subtitle}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

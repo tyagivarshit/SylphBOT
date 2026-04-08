@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { fetchCurrentUser } from "@/lib/userApi";
 
 export default function ProfileDropdown() {
   const [open, setOpen] = useState(false);
@@ -18,13 +19,7 @@ export default function ProfileDropdown() {
 
   const { data: user } = useQuery({
     queryKey: ["me"],
-    queryFn: async () => {
-      const res = await fetch("http://localhost:5000/api/user/me", {
-        credentials: "include",
-      });
-      if (!res.ok) return null;
-      return res.json();
-    },
+    queryFn: fetchCurrentUser,
   });
 
   useEffect(() => {
@@ -67,10 +62,10 @@ export default function ProfileDropdown() {
       localStorage.clear();
       sessionStorage.clear();
 
-      window.location.href = "/login";
+      window.location.href = "/auth/login";
     } catch (err) {
       console.error("Logout error:", err);
-      window.location.href = "/login";
+      window.location.href = "/auth/login";
     }
   };
 

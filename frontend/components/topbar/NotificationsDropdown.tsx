@@ -3,11 +3,15 @@
 import { Bell } from "lucide-react";
 import { useEffect, useState } from "react";
 import { socket } from "@/lib/socket";
+import {
+  fetchNotifications,
+  markAllNotificationsRead,
+} from "@/lib/userApi";
 
 export default function NotificationsDropdown({
   userId,
 }: {
-  userId: string;
+  userId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -17,13 +21,9 @@ export default function NotificationsDropdown({
   useEffect(() => {
     if (!userId) return;
 
-    const fetchNotifications = async () => {
+    const loadNotifications = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/notifications", {
-          credentials: "include",
-        });
-
-        const data = await res.json();
+        const data = await fetchNotifications();
 
         console.log("NOTIFICATIONS API:", data);
 
@@ -37,7 +37,7 @@ export default function NotificationsDropdown({
       }
     };
 
-    fetchNotifications();
+    loadNotifications();
   }, [userId]);
 
   /* ---------------- SOCKET ---------------- */
@@ -59,10 +59,7 @@ export default function NotificationsDropdown({
   /* ---------------- MARK READ ---------------- */
   const markAllRead = async () => {
     try {
-      await fetch("http://localhost:5000/api/notifications/read-all", {
-        method: "PATCH",
-        credentials: "include",
-      });
+      await markAllNotificationsRead();
 
       setUnread(0);
       setNotifications((prev) =>

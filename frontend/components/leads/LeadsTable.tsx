@@ -5,7 +5,13 @@ import StageBadge from "./StageBadge"
 import LeadDrawer from "./LeadDrawer"
 import { socket } from "@/lib/socket"
 
-export default function LeadsTable({ leads }: any) {
+export default function LeadsTable({
+  leads,
+  initialSelectedLeadId,
+}: {
+  leads: any[];
+  initialSelectedLeadId?: string | null;
+}) {
 
   const [selectedLead,setSelectedLead] = useState<any>(null)
   const [tableLeads,setTableLeads] = useState<any[]>([])
@@ -16,6 +22,18 @@ export default function LeadsTable({ leads }: any) {
       setTableLeads(leads)
     }
   },[leads])
+
+  useEffect(() => {
+    if (!initialSelectedLeadId || !Array.isArray(tableLeads)) return
+
+    const matchedLead = tableLeads.find(
+      (lead: any) => lead.id === initialSelectedLeadId
+    )
+
+    if (matchedLead) {
+      setSelectedLead(matchedLead)
+    }
+  }, [initialSelectedLeadId, tableLeads])
 
   /* REALTIME MESSAGE */
   useEffect(()=>{

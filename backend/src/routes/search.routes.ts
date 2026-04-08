@@ -3,11 +3,12 @@ import prisma from "../config/prisma";
 
 const router = express.Router();
 
-router.get("/", async (req, res) => {
+router.get("/", async (req: any, res) => {
   try {
     const q = (req.query.q as string)?.toLowerCase()?.trim();
+    const businessId = req.user?.businessId;
 
-    if (!q) return res.json([]);
+    if (!q || !businessId) return res.json([]);
 
     /* =========================
     🔥 NAVIGATION (MATCHES YOUR APP)
@@ -21,7 +22,6 @@ router.get("/", async (req, res) => {
       { id: "nav-analytics", title: "Analytics", url: "/analytics", type: "page" },
       { id: "nav-settings", title: "Settings", url: "/settings", type: "page" },
       { id: "nav-ai-training", title: "AI Training", url: "/ai-training", type: "page" },
-      { id: "nav-ai-settings", title: "AI Settings", url: "/ai-settings", type: "page" },
       { id: "nav-billing", title: "Billing", url: "/billing", type: "page" },
       { id: "nav-booking", title: "Booking", url: "/booking", type: "page" },
       { id: "nav-calendar", title: "Booking Calendar", url: "/booking-calendar", type: "page" },
@@ -38,9 +38,10 @@ router.get("/", async (req, res) => {
 
     const leads = await prisma.lead.findMany({
       where: {
+        businessId,
         OR: [
-          { name: { contains: q } },
-          { email: { contains: q } },
+          { name: { contains: q, mode: "insensitive" } },
+          { email: { contains: q, mode: "insensitive" } },
           { phone: { contains: q } },
         ],
       },
@@ -50,9 +51,11 @@ router.get("/", async (req, res) => {
 
     const leadResults = leads.map((l) => ({
       id: `lead-${l.id}`,
-      title: l.name || l.email || l.phone || "Lead",
-      subtitle: "Lead",
+      title: l.name || l.phone || "Lead",
+      subtitle: l.email || l.phone || "Lead",
+      searchUrl: `/leads?leadId=${l.id}`,
       url: `/leads/${l.id}`, // ✅ FIXED
+      preferredUrl: `/leads?leadId=${l.id}`,
       type: "lead",
     }));
 
@@ -62,17 +65,30 @@ router.get("/", async (req, res) => {
 
     const messages = await prisma.message.findMany({
       where: {
-        content: { contains: q },
+        content: { contains: q, mode: "insensitive" },
+        lead: { businessId },
       },
       take: 5,
       orderBy: { createdAt: "desc" },
+      include: {
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+          },
+        },
+      },
     });
 
     const messageResults = messages.map((m) => ({
       id: `msg-${m.id}`,
-      title: m.content.slice(0, 50),
-      subtitle: "Message",
+      title: m.lead?.name || m.lead?.phone || m.lead?.email || "Conversation",
+      subtitle: m.content.slice(0, 70),
+      searchUrl: `/conversations?leadId=${m.leadId}`,
       url: `/conversations/${m.leadId}`, // ✅ FIXED
+      preferredUrl: `/conversations?leadId=${m.leadId}`,
       type: "message",
     }));
 
@@ -86,7 +102,7 @@ router.get("/", async (req, res) => {
       ...messageResults,
     ];
 
-    res.json(results);
+    res.json(results.slice(0, 12));
   } catch (err) {
     console.error("SEARCH ERROR:", err);
     res.status(500).json([]);

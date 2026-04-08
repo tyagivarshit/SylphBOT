@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { usePlan } from "@/hooks/usePlan"
 import axios from "axios"
+import { useSearchParams } from "next/navigation"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import FeatureGate from "@/components/FeatureGate"
@@ -13,6 +14,7 @@ const api = axios.create({
 })
 
 export default function LeadsPage(){
+  const searchParams = useSearchParams()
 
   const { plan } = usePlan()
 
@@ -21,6 +23,7 @@ export default function LeadsPage(){
   const [stage,setStage] = useState("")
   const [page,setPage] = useState(1)
   const [totalPages,setTotalPages] = useState(1)
+  const initialSelectedLeadId = searchParams.get("leadId")
 
   const isAllowed = plan !== "BASIC"
 
@@ -107,7 +110,10 @@ export default function LeadsPage(){
               </p>
             ) : (
               <>
-                <LeadsTable leads={leads} />
+                <LeadsTable
+                  leads={leads}
+                  initialSelectedLeadId={initialSelectedLeadId}
+                />
 
                 {/* PAGINATION */}
                 <div className="flex justify-between items-center mt-5">

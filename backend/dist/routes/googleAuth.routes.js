@@ -50,12 +50,38 @@ SAFE WRAPPER
 const safeHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(() => {
     return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
 });
+const hasAuthCookies = (req) => Boolean(req.cookies?.accessToken || req.cookies?.refreshToken);
+const handleGoogleCallback = (req, res, next) => {
+    // Some browsers/providers can replay the callback URL once cookies are already set.
+    // In that case, avoid reusing the same auth code and just continue to the dashboard.
+    if (hasAuthCookies(req) && req.query.code) {
+        return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+    }
+    return passport_1.default.authenticate("google", {
+        session: false,
+        failureRedirect: `${process.env.FRONTEND_URL}/auth/login`,
+    }, (err, user) => {
+        if (err) {
+            if (hasAuthCookies(req) && req.query.code) {
+                return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+            }
+            console.error("GOOGLE PASSPORT ERROR", {
+                message: err?.message,
+                code: err?.code,
+                status: err?.status,
+            });
+            return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+        }
+        if (!user) {
+            return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
+        }
+        req.user = user;
+        return safeHandler(googleAuth_controller_1.googleCallback)(req, res, next);
+    })(req, res, next);
+};
 /* ======================================
 ROUTES
 ====================================== */
 router.get("/google", oauthLimiter, safeHandler(googleAuth_controller_1.googleAuth));
-router.get("/google/callback", oauthLimiter, passport_1.default.authenticate("google", {
-    session: false,
-    failureRedirect: `${process.env.FRONTEND_URL}/auth/login`,
-}), safeHandler(googleAuth_controller_1.googleCallback));
+router.get("/google/callback", oauthLimiter, handleGoogleCallback);
 exports.default = router;

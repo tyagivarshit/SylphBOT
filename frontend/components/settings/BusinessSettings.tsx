@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-
-const API_URL = "http://localhost:5000";
+import { fetchCurrentUser, updateCurrentUser } from "@/lib/userApi";
 
 export default function BusinessSettings() {
   const queryClient = useQueryClient();
@@ -22,15 +21,7 @@ export default function BusinessSettings() {
   ========================= */
   const { data, isLoading } = useQuery({
     queryKey: ["me"],
-    queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/user/me`, {
-        credentials: "include",
-      });
-
-      if (!res.ok) throw new Error("Failed");
-
-      return res.json();
-    },
+    queryFn: fetchCurrentUser,
   });
 
   /* =========================
@@ -53,19 +44,9 @@ export default function BusinessSettings() {
      🔥 UPDATE
   ========================= */
   const mutation = useMutation({
-    mutationFn: async (body: any) => {
-      const res = await fetch(`${API_URL}/api/user/update`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) throw new Error("Update failed");
-
-      return res.json();
-    },
-    onSuccess: async () => {
+    mutationFn: updateCurrentUser,
+    onSuccess: async (updatedUser) => {
+      queryClient.setQueryData(["me"], updatedUser);
       await queryClient.invalidateQueries({ queryKey: ["me"] });
     },
   });

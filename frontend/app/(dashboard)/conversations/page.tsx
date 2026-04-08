@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
+import { useSearchParams } from "next/navigation";
 import ChatSidebar from "@/components/conversations/ChatSidebar";
 import ChatWindow from "@/components/conversations/ChatWindow";
 
@@ -23,10 +24,12 @@ export interface Message {
 }
 
 export default function ConversationsPage() {
+  const searchParams = useSearchParams();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isMobileView, setIsMobileView] = useState(false);
+  const leadIdFromQuery = searchParams.get("leadId");
 
   /* ================= MOBILE DETECT ================= */
   useEffect(() => {
@@ -88,6 +91,16 @@ export default function ConversationsPage() {
 
     fetchMessages();
   }, [selectedLead]);
+
+  useEffect(() => {
+    if (!leadIdFromQuery || leads.length === 0) return;
+
+    const matchedLead = leads.find((lead) => lead.id === leadIdFromQuery);
+
+    if (matchedLead) {
+      setSelectedLead(matchedLead);
+    }
+  }, [leadIdFromQuery, leads]);
 
   /* ================= SOCKET ================= */
   useEffect(() => {

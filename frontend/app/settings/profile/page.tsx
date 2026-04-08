@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-
-const API_URL = "http://localhost:5000";
+import {
+  fetchCurrentUser,
+  updateCurrentUser,
+  uploadUserAvatar,
+} from "@/lib/userApi";
 
 export default function ProfilePage() {
   const queryClient = useQueryClient();
@@ -28,15 +31,7 @@ export default function ProfilePage() {
   ========================= */
   const { data: user, isLoading } = useQuery({
     queryKey: ["me"],
-    queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/user/me`, {
-        credentials: "include",
-      });
-
-      if (!res.ok) throw new Error("Failed to fetch user");
-
-      return res.json();
-    },
+    queryFn: fetchCurrentUser,
     staleTime: 1000 * 60 * 5,
   });
 
@@ -72,19 +67,9 @@ export default function ProfilePage() {
      🔥 UPDATE USER
   ========================= */
   const mutation = useMutation({
-    mutationFn: async (data: any) => {
-      const res = await fetch(`${API_URL}/api/user/update`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(data),
-      });
-
-      if (!res.ok) throw new Error("Update failed");
-
-      return res.json();
-    },
-    onSuccess: async () => {
+    mutationFn: updateCurrentUser,
+    onSuccess: async (updatedUser) => {
+      queryClient.setQueryData(["me"], updatedUser);
       await queryClient.invalidateQueries({ queryKey: ["me"] });
       setEditing(false);
     },
@@ -114,18 +99,22 @@ export default function ProfilePage() {
     const file = e.target.files[0];
     if (!file) return;
 
-    setImage(URL.createObjectURL(file));
+    const previousImage = image;
+    const previewUrl = URL.createObjectURL(file);
+    setImage(previewUrl);
 
-    const formData = new FormData();
-    formData.append("file", file);
-
-    await fetch(`${API_URL}/api/user/upload-avatar`, {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    });
-
-    queryClient.invalidateQueries({ queryKey: ["me"] });
+    try {
+      const updatedUser = await uploadUserAvatar(file);
+      setImage(updatedUser.avatar || null);
+      queryClient.setQueryData(["me"], updatedUser);
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
+    } catch (error) {
+      console.error("Avatar upload error:", error);
+      setImage(previousImage);
+    } finally {
+      URL.revokeObjectURL(previewUrl);
+      e.target.value = "";
+    }
   };
 
   if (isLoading) {

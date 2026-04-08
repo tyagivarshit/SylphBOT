@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.logout = exports.getMe = exports.resetPassword = exports.forgotPassword = exports.resendVerificationEmail = exports.verifyEmail = exports.login = exports.register = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
+const env_1 = require("../config/env");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const generateToken_1 = require("../utils/generateToken");
@@ -20,6 +21,16 @@ const getIP = (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
     "unknown";
 const getUA = (req) => req.headers["user-agent"] || "unknown";
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
+const normalizeEmail = (email) => email.trim().toLowerCase();
+const verifyPassword = async (plainTextPassword, storedHash) => {
+    try {
+        return await bcryptjs_1.default.compare(plainTextPassword, storedHash);
+    }
+    catch {
+        return false;
+    }
+};
+const isStrongPassword = (password) => /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
 /* ======================================
 RATE LIMIT
 ====================================== */
@@ -47,9 +58,11 @@ REGISTER
 const register = async (req, res, next) => {
     try {
         await checkGlobalLimit(getIP(req));
-        const { name, email, password } = req.body;
-        if (!name || !email || !password || password.length < 6) {
-            throw (0, AppError_1.badRequest)("Invalid input");
+        const name = String(req.body.name || "").trim();
+        const email = normalizeEmail(String(req.body.email || ""));
+        const password = String(req.body.password || "");
+        if (!name || !email || !password || !isStrongPassword(password)) {
+            throw (0, AppError_1.badRequest)("Password must be at least 8 characters and include uppercase, lowercase, and a number");
         }
         const exists = await prisma_1.default.user.findUnique({ where: { email } });
         if (exists)
@@ -65,7 +78,7 @@ const register = async (req, res, next) => {
                 verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
         });
-        await (0, email_service_1.sendVerificationEmail)(email, `${process.env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`);
+        await (0, email_service_1.sendVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`);
         res.status(201).json({ success: true });
     }
     catch (err) {
@@ -79,11 +92,12 @@ LOGIN
 const login = async (req, res, next) => {
     try {
         await checkGlobalLimit(getIP(req));
-        const { email, password } = req.body;
+        const email = normalizeEmail(String(req.body.email || ""));
+        const password = String(req.body.password || "");
         const user = await prisma_1.default.user.findUnique({ where: { email } });
         if (!user ||
             !user.isVerified ||
-            !(await bcryptjs_1.default.compare(password, user.password))) {
+            !(await verifyPassword(password, user.password))) {
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
         let business = await prisma_1.default.business.findFirst({
@@ -129,7 +143,7 @@ const login = async (req, res, next) => {
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
         });
-        (0, authCookies_1.setAuthCookies)(res, req, accessToken, refreshRaw);
+        setCookies(req, res, accessToken, refreshRaw);
         res.json({
             success: true,
             user: {
@@ -206,9 +220,9 @@ RESEND VERIFICATION
 ====================================== */
 const resendVerificationEmail = async (req, res, next) => {
     try {
-        const email = req.body.email;
+        const email = normalizeEmail(String(req.body.email || ""));
         const user = await prisma_1.default.user.findUnique({ where: { email } });
-        if (!user)
+        if (!user || user.isVerified)
             return res.json({ success: true });
         const raw = crypto_1.default.randomBytes(32).toString("hex");
         await prisma_1.default.user.update({
@@ -218,7 +232,7 @@ const resendVerificationEmail = async (req, res, next) => {
                 verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
         });
-        await (0, email_service_1.sendVerificationEmail)(email, `${process.env.FRONTEND_URL}/auth/verify-email?token=${raw}`);
+        await (0, email_service_1.sendVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${raw}`);
         res.json({ success: true });
     }
     catch (err) {
@@ -231,7 +245,7 @@ FORGOT PASSWORD
 ====================================== */
 const forgotPassword = async (req, res, next) => {
     try {
-        const email = req.body.email;
+        const email = normalizeEmail(String(req.body.email || ""));
         const user = await prisma_1.default.user.findUnique({ where: { email } });
         if (!user)
             return res.json({ success: true });
@@ -243,7 +257,7 @@ const forgotPassword = async (req, res, next) => {
                 resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
             },
         });
-        await (0, email_service_1.sendVerificationEmail)(email, `${process.env.FRONTEND_URL}/auth/reset-password?token=${raw}`);
+        await (0, email_service_1.sendVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/reset-password?token=${raw}`);
         res.json({ success: true });
     }
     catch (err) {
@@ -257,8 +271,8 @@ RESET PASSWORD
 const resetPassword = async (req, res, next) => {
     try {
         const { token, password } = req.body;
-        if (!token || !password || password.length < 6) {
-            throw (0, AppError_1.badRequest)("Invalid input");
+        if (!token || !password || !isStrongPassword(password)) {
+            throw (0, AppError_1.badRequest)("Password must be at least 8 characters and include uppercase, lowercase, and a number");
         }
         const user = await prisma_1.default.user.findFirst({
             where: {

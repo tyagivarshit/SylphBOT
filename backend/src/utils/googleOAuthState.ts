@@ -12,27 +12,36 @@ export type GoogleOAuthStatePayload = {
 };
 
 const defaultFrontendOrigin = new URL(env.FRONTEND_URL).origin;
+const TRUSTED_SITE_SUFFIX = "automexiaai.in";
 
-const buildAlternateFrontendOrigin = (origin: string) => {
+const buildTrustedFrontendOrigins = (origin: string) => {
   try {
     const url = new URL(origin);
+    const hostname = url.hostname.toLowerCase();
 
-    if (url.hostname === "app.automexiaai.in") {
-      return url.origin;
+    if (
+      hostname !== TRUSTED_SITE_SUFFIX &&
+      !hostname.endsWith(`.${TRUSTED_SITE_SUFFIX}`)
+    ) {
+      return [url.origin];
     }
 
-    return null;
+    return [
+      `${url.protocol}//${TRUSTED_SITE_SUFFIX}`,
+      `${url.protocol}//www.${TRUSTED_SITE_SUFFIX}`,
+      `${url.protocol}//app.${TRUSTED_SITE_SUFFIX}`,
+    ];
   } catch {
-    return null;
+    return [defaultFrontendOrigin];
   }
 };
 
 const allowedFrontendOrigins = Array.from(
   new Set(
     [
-      defaultFrontendOrigin,
-      buildAlternateFrontendOrigin(defaultFrontendOrigin),
-    ].filter((value): value is string => Boolean(value))
+      ...buildTrustedFrontendOrigins(defaultFrontendOrigin),
+      ...env.ALLOWED_FRONTEND_ORIGINS,
+    ]
   )
 );
 

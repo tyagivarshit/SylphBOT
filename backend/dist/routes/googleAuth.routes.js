@@ -49,7 +49,9 @@ const oauthLimiter = async (req, res, next) => {
 SAFE WRAPPER
 ====================================== */
 const safeHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(() => {
-    return res.redirect(`${(0, googleOAuthState_1.getDefaultFrontendOrigin)()}/auth/login`);
+    const loginUrl = new URL("/auth/login", (0, googleOAuthState_1.getDefaultFrontendOrigin)());
+    loginUrl.searchParams.set("authError", "oauth_failed");
+    return res.redirect(loginUrl.toString());
 });
 const hasAuthCookies = (req) => Boolean(req.cookies?.accessToken || req.cookies?.refreshToken);
 const claimGoogleOAuthState = async (nonce) => {
@@ -82,11 +84,19 @@ const authenticateGoogleUser = (req, res, next) => {
         })(req, res, next);
     });
 };
+const buildAuthErrorUrl = (redirectOrigin, authError) => {
+    const loginUrl = new URL("/auth/login", redirectOrigin);
+    loginUrl.searchParams.set("authError", authError);
+    return loginUrl.toString();
+};
 const handleGoogleCallback = async (req, res, next) => {
     const state = (0, googleOAuthState_1.verifyGoogleOAuthState)(req.query.state);
-    const loginUrl = `${(0, googleOAuthState_1.getDefaultFrontendOrigin)()}/auth/login`;
+    const redirectOrigin = (0, googleOAuthState_1.resolveGoogleOAuthRedirectOrigin)(state?.redirectOrigin || (0, googleOAuthState_1.getDefaultFrontendOrigin)());
+    const loginUrl = buildAuthErrorUrl(redirectOrigin, req.query.error === "access_denied"
+        ? "oauth_cancelled"
+        : "oauth_failed");
     if (!state) {
-        return res.redirect(loginUrl);
+        return res.redirect(buildAuthErrorUrl((0, googleOAuthState_1.getDefaultFrontendOrigin)(), "oauth_state_invalid"));
     }
     const claimed = await claimGoogleOAuthState(state.nonce);
     // Browsers can replay the callback URL once cookies are already set.

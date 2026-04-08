@@ -43,29 +43,15 @@ export const AuthProvider = ({
 
   const fetchUser = useCallback(async () => {
     try {
-      console.log("🔥 CALLING /api/auth/me");
-
       const res = await getCurrentUser();
 
-      console.log("✅ /me RESPONSE:", res);
-
-      if (res?.unauthorized) {
+      if (res?.unauthorized || !res?.success) {
         setUser(null);
         return;
       }
 
-      if (!res?.success) {
-        setUser(null);
-        return;
-      }
-
-      const userData = res?.data?.user ?? null;
-
-      console.log("👤 USER SET:", userData);
-
-      setUser(userData);
-    } catch (err) {
-      console.error("❌ AUTH ERROR:", err);
+      setUser(res?.data?.user ?? null);
+    } catch {
       setUser(null);
     } finally {
       setLoading(false);
@@ -76,14 +62,11 @@ export const AuthProvider = ({
     if (hasFetched.current) return;
     hasFetched.current = true;
 
-    fetchUser();
+    void fetchUser();
   }, [fetchUser]);
 
   useEffect(() => {
-    const handler = () => {
-      console.log("🔄 AUTH REFRESH TRIGGERED");
-      fetchUser();
-    };
+    const handler = () => void fetchUser();
 
     window.addEventListener("auth:refresh", handler);
     return () =>

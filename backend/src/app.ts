@@ -54,6 +54,49 @@ app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
 const allowedOrigins = new Set(env.ALLOWED_FRONTEND_ORIGINS);
+const TRUSTED_SITE_SUFFIX = "automexiaai.in";
+const sameSiteOrigins = new Set<string>();
+
+const addSameSiteOrigins = (origin?: string) => {
+  if (!origin) {
+    return;
+  }
+
+  try {
+    const url = new URL(origin);
+    const hostname = url.hostname.toLowerCase();
+
+    if (
+      hostname !== TRUSTED_SITE_SUFFIX &&
+      !hostname.endsWith(`.${TRUSTED_SITE_SUFFIX}`)
+    ) {
+      return;
+    }
+
+    for (const candidate of [
+      TRUSTED_SITE_SUFFIX,
+      `www.${TRUSTED_SITE_SUFFIX}`,
+      `app.${TRUSTED_SITE_SUFFIX}`,
+    ]) {
+      sameSiteOrigins.add(`${url.protocol}//${candidate}`);
+    }
+  } catch {
+    // Ignore invalid origins here because env validation already handles them.
+  }
+};
+
+const isAllowedOrigin = (origin: string) => {
+  const normalizedOrigin = new URL(origin).origin;
+
+  if (allowedOrigins.has(normalizedOrigin)) {
+    return true;
+  }
+
+  return sameSiteOrigins.has(normalizedOrigin);
+};
+
+addSameSiteOrigins(env.FRONTEND_ORIGIN);
+addSameSiteOrigins(env.BACKEND_ORIGIN);
 
 const corsOptions: CorsOptions = {
   origin(origin, callback) {
@@ -64,13 +107,14 @@ const corsOptions: CorsOptions = {
     try {
       const normalizedOrigin = new URL(origin).origin;
 
-      if (allowedOrigins.has(normalizedOrigin)) {
+      if (isAllowedOrigin(normalizedOrigin)) {
         return callback(null, true);
       }
     } catch {
       return callback(new Error("Invalid CORS origin"));
     }
 
+    console.warn("Blocked CORS origin", { origin });
     return callback(new Error("Origin not allowed by CORS"));
   },
   credentials: true,

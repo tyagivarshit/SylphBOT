@@ -10,6 +10,7 @@ import { setAuthCookies } from "../utils/authCookies";
 import {
   createGoogleOAuthState,
   getDefaultFrontendOrigin,
+  resolveGoogleOAuthRedirectOrigin,
   verifyGoogleOAuthState,
 } from "../utils/googleOAuthState";
 
@@ -25,6 +26,15 @@ const getIP = (req: Request) =>
 const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
+const buildAuthErrorUrl = (
+  redirectOrigin: string,
+  authError: string
+) => {
+  const url = new URL("/auth/login", redirectOrigin);
+  url.searchParams.set("authError", authError);
+  return url.toString();
+};
+
 /* ======================================
 GOOGLE INIT
 ====================================== */
@@ -35,10 +45,14 @@ export const googleAuth = (
   next: NextFunction
 ) => {
   try {
-    const redirectOrigin = String(
-      req.headers.referer ||
-        req.headers.origin ||
-        getDefaultFrontendOrigin()
+    const redirectOrigin = resolveGoogleOAuthRedirectOrigin(
+      typeof req.query.redirectTo === "string"
+        ? req.query.redirectTo
+        : String(
+            req.headers.referer ||
+              req.headers.origin ||
+              getDefaultFrontendOrigin()
+          )
     );
     const state = createGoogleOAuthState(redirectOrigin);
 
@@ -48,7 +62,9 @@ export const googleAuth = (
       session: false,
     })(req, res, next);
   } catch {
-    return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
+    return res.redirect(
+      buildAuthErrorUrl(getDefaultFrontendOrigin(), "oauth_failed")
+    );
   }
 };
 
@@ -68,11 +84,21 @@ export const googleCallback = async (req: Request, res: Response) => {
 
     if (!state) {
       console.warn("OAuth state mismatch");
-      return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
+      return res.redirect(
+        buildAuthErrorUrl(
+          getDefaultFrontendOrigin(),
+          "oauth_state_invalid"
+        )
+      );
     }
 
     if (!user || !user.id || !user.isActive) {
-      return res.redirect(`${redirectOrigin}/auth/login`);
+      return res.redirect(
+        buildAuthErrorUrl(
+          redirectOrigin,
+          user?.id ? "account_inactive" : "oauth_failed"
+        )
+      );
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -155,6 +181,8 @@ export const googleCallback = async (req: Request, res: Response) => {
     return res.redirect(`${redirectOrigin}/dashboard`);
   } catch (err) {
     console.error("GOOGLE CALLBACK ERROR", err);
-    return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
+    return res.redirect(
+      buildAuthErrorUrl(getDefaultFrontendOrigin(), "oauth_failed")
+    );
   }
 };

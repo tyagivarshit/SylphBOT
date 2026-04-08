@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { env } from "../config/env";
 import prisma from "../config/prisma";
 import  redis  from "../config/redis";
 import {
@@ -32,6 +33,22 @@ const getUA = (req: Request) => req.headers["user-agent"] || "unknown";
 
 const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+const verifyPassword = async (
+  plainTextPassword: string,
+  storedHash: string
+) => {
+  try {
+    return await bcrypt.compare(plainTextPassword, storedHash);
+  } catch {
+    return false;
+  }
+};
+
+const isStrongPassword = (password: string) =>
+  /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
 
 /* ======================================
 RATE LIMIT
@@ -74,10 +91,14 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   try {
     await checkGlobalLimit(getIP(req));
 
-    const { name, email, password } = req.body;
+    const name = String(req.body.name || "").trim();
+    const email = normalizeEmail(String(req.body.email || ""));
+    const password = String(req.body.password || "");
 
-    if (!name || !email || !password || password.length < 6) {
-      throw badRequest("Invalid input");
+    if (!name || !email || !password || !isStrongPassword(password)) {
+      throw badRequest(
+        "Password must be at least 8 characters and include uppercase, lowercase, and a number"
+      );
     }
 
     const exists = await prisma.user.findUnique({ where: { email } });
@@ -98,7 +119,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
     await sendVerificationEmail(
       email,
-      `${process.env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`
+      `${env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`
     );
 
     res.status(201).json({ success: true });
@@ -116,14 +137,15 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   try {
     await checkGlobalLimit(getIP(req));
 
-    const { email, password } = req.body;
+    const email = normalizeEmail(String(req.body.email || ""));
+    const password = String(req.body.password || "");
 
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (
       !user ||
       !user.isVerified ||
-      !(await bcrypt.compare(password, user.password))
+      !(await verifyPassword(password, user.password))
     ) {
       throw unauthorized("Invalid credentials");
     }
@@ -186,7 +208,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       },
     });
 
-    setAuthCookies(res, req, accessToken, refreshRaw);
+    setCookies(req, res, accessToken, refreshRaw);
 
     res.json({
       success: true,
@@ -276,11 +298,11 @@ RESEND VERIFICATION
 
 export const resendVerificationEmail = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const email = req.body.email;
+    const email = normalizeEmail(String(req.body.email || ""));
 
     const user = await prisma.user.findUnique({ where: { email } });
 
-    if (!user) return res.json({ success: true });
+    if (!user || user.isVerified) return res.json({ success: true });
 
     const raw = crypto.randomBytes(32).toString("hex");
 
@@ -294,7 +316,7 @@ export const resendVerificationEmail = async (req: Request, res: Response, next:
 
     await sendVerificationEmail(
       email,
-      `${process.env.FRONTEND_URL}/auth/verify-email?token=${raw}`
+      `${env.FRONTEND_URL}/auth/verify-email?token=${raw}`
     );
 
     res.json({ success: true });
@@ -310,7 +332,7 @@ FORGOT PASSWORD
 
 export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const email = req.body.email;
+    const email = normalizeEmail(String(req.body.email || ""));
 
     const user = await prisma.user.findUnique({ where: { email } });
 
@@ -328,7 +350,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
     await sendVerificationEmail(
       email,
-      `${process.env.FRONTEND_URL}/auth/reset-password?token=${raw}`
+      `${env.FRONTEND_URL}/auth/reset-password?token=${raw}`
     );
 
     res.json({ success: true });
@@ -346,8 +368,10 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
   try {
     const { token, password } = req.body;
 
-    if (!token || !password || password.length < 6) {
-      throw badRequest("Invalid input");
+    if (!token || !password || !isStrongPassword(password)) {
+      throw badRequest(
+        "Password must be at least 8 characters and include uppercase, lowercase, and a number"
+      );
     }
 
     const user = await prisma.user.findFirst({

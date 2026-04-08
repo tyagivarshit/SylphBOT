@@ -31,7 +31,7 @@ export default function ResetPasswordPage() {
   }, [])
 
   const isStrongPassword = (pass: string) => {
-    return /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{6,}$/.test(pass)
+    return /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(pass)
   }
 
   const handleReset = async (e?: React.FormEvent) => {
@@ -45,7 +45,7 @@ export default function ResetPasswordPage() {
     }
 
     if (!isStrongPassword(password)) {
-      toast.error("Use uppercase, lowercase & number")
+      toast.error("Use 8+ chars with uppercase, lowercase & number")
       return
     }
 
@@ -63,9 +63,9 @@ export default function ResetPasswordPage() {
 
       toast.success("Password reset successful")
 
-    } catch (err: any) {
+    } catch (err: unknown) {
 
-      const msg = err?.message?.toLowerCase() || ""
+      const msg = err instanceof Error ? err.message.toLowerCase() : ""
 
       if (msg.includes("expired")) {
         toast.error("Reset link expired")

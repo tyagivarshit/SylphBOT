@@ -7,8 +7,7 @@ import toast from "react-hot-toast";
 import { FcGoogle } from "react-icons/fc";
 import { Eye, EyeOff } from "lucide-react";
 
-import { registerUser, resendVerification } from "@/lib/auth";
-import { buildApiUrl } from "@/lib/url";
+import { buildGoogleAuthUrl, registerUser } from "@/lib/auth";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -20,35 +19,19 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const [emailSent, setEmailSent] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
     return () => {
       mounted.current = false;
-      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
 
-  useEffect(() => {
-    if (cooldown <= 0) return;
-
-    timerRef.current = setInterval(() => {
-      setCooldown((prev) => prev - 1);
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [cooldown]);
-
-  const startCooldown = () => setCooldown(30);
-
   const validateEmail = (value: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+  const isStrongPassword = (value: string) =>
+    /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(value);
 
   const handleRegister = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -67,8 +50,10 @@ export default function RegisterPage() {
       return;
     }
 
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters");
+    if (!isStrongPassword(password)) {
+      toast.error(
+        "Use 8+ chars with uppercase, lowercase, and a number"
+      );
       return;
     }
 
@@ -81,29 +66,25 @@ export default function RegisterPage() {
         throw new Error(res?.message || "Registration failed");
       }
 
-      if (res?.data?.user) {
-        localStorage.setItem("user", JSON.stringify(res.data.user));
-      }
-
-      toast.success("Account created 🎉 Check your email");
+      toast.success("Account created. Check your email");
 
       if (mounted.current) {
-        setEmailSent(true);
-
         setTimeout(() => {
           router.push(`/auth/login?email=${encodeURIComponent(cleanEmail)}`);
         }, 1500);
       }
 
-    } catch (err: any) {
-      toast.error(err?.message || "Registration failed");
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error ? err.message : "Registration failed"
+      );
     } finally {
       if (mounted.current) setLoading(false);
     }
   };
 
   const handleGoogleRegister = () => {
-    window.location.assign(buildApiUrl("/auth/google"));
+    window.location.assign(buildGoogleAuthUrl(window.location.origin));
   };
 
   return (

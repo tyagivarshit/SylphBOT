@@ -10,9 +10,14 @@ import { verifyEmail, resendVerification } from "@/lib/auth"
 export default function VerifyEmailPage() {
 
   const params = useSearchParams()
+  const token = params.get("token")
 
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
-  const [message, setMessage] = useState("")
+  const [status, setStatus] = useState<"loading" | "success" | "error">(
+    token ? "loading" : "error"
+  )
+  const [message, setMessage] = useState(
+    token ? "" : "Invalid verification link"
+  )
   const [email, setEmail] = useState("")
   const [cooldown, setCooldown] = useState(0)
 
@@ -41,12 +46,7 @@ export default function VerifyEmailPage() {
   const startCooldown = () => setCooldown(30)
 
   useEffect(() => {
-
-    const token = params.get("token")
-
     if (!token) {
-      setStatus("error")
-      setMessage("Invalid verification link")
       return
     }
 
@@ -59,9 +59,9 @@ export default function VerifyEmailPage() {
           setMessage("Your email has been successfully verified.")
         }
 
-      } catch (err: any) {
+      } catch (err: unknown) {
 
-        const msg = err?.message?.toLowerCase() || ""
+        const msg = err instanceof Error ? err.message.toLowerCase() : ""
 
         let finalMsg = "Verification failed"
 
@@ -80,7 +80,7 @@ export default function VerifyEmailPage() {
 
     runVerification()
 
-  }, [params])
+  }, [token])
 
   const handleResend = async () => {
 

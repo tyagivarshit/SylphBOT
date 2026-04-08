@@ -9,6 +9,7 @@ import {
   getDefaultFrontendOrigin,
   getGoogleOAuthStateKey,
   GOOGLE_OAUTH_STATE_TTL_SECONDS,
+  resolveGoogleOAuthRedirectOrigin,
   verifyGoogleOAuthState,
 } from "../utils/googleOAuthState";
 
@@ -70,7 +71,9 @@ SAFE WRAPPER
 const safeHandler =
   (fn: any) => (req: Request, res: Response, next: NextFunction) =>
     Promise.resolve(fn(req, res, next)).catch(() => {
-      return res.redirect(`${getDefaultFrontendOrigin()}/auth/login`);
+      const loginUrl = new URL("/auth/login", getDefaultFrontendOrigin());
+      loginUrl.searchParams.set("authError", "oauth_failed");
+      return res.redirect(loginUrl.toString());
     });
 
 const hasAuthCookies = (req: Request) =>
@@ -123,16 +126,38 @@ const authenticateGoogleUser = (
   });
 };
 
+const buildAuthErrorUrl = (
+  redirectOrigin: string,
+  authError: string
+) => {
+  const loginUrl = new URL("/auth/login", redirectOrigin);
+  loginUrl.searchParams.set("authError", authError);
+  return loginUrl.toString();
+};
+
 const handleGoogleCallback = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   const state = verifyGoogleOAuthState(req.query.state);
-  const loginUrl = `${getDefaultFrontendOrigin()}/auth/login`;
+  const redirectOrigin = resolveGoogleOAuthRedirectOrigin(
+    state?.redirectOrigin || getDefaultFrontendOrigin()
+  );
+  const loginUrl = buildAuthErrorUrl(
+    redirectOrigin,
+    req.query.error === "access_denied"
+      ? "oauth_cancelled"
+      : "oauth_failed"
+  );
 
   if (!state) {
-    return res.redirect(loginUrl);
+    return res.redirect(
+      buildAuthErrorUrl(
+        getDefaultFrontendOrigin(),
+        "oauth_state_invalid"
+      )
+    );
   }
 
   const claimed = await claimGoogleOAuthState(state.nonce);

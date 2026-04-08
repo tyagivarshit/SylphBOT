@@ -1,18 +1,18 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { FcGoogle } from "react-icons/fc";
 import { Eye, EyeOff } from "lucide-react";
 
-import { loginUser } from "@/lib/auth";
-import { buildApiUrl } from "@/lib/url";
+import { buildGoogleAuthUrl, loginUser } from "@/lib/auth";
 import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
   const [email, setEmail] = useState("");
@@ -21,6 +21,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const mounted = useRef(true);
+  const handledMessageRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -33,6 +34,33 @@ export default function LoginPage() {
       router.replace("/dashboard");
     }
   }, [user, authLoading, router]);
+
+  useEffect(() => {
+    const prefilledEmail = searchParams.get("email");
+
+    if (prefilledEmail) {
+      setEmail(prefilledEmail.trim().toLowerCase());
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const authError = searchParams.get("authError");
+
+    if (!authError || handledMessageRef.current === authError) {
+      return;
+    }
+
+    handledMessageRef.current = authError;
+
+    const messageMap: Record<string, string> = {
+      oauth_cancelled: "Google sign-in was cancelled. Please try again.",
+      oauth_failed: "Google sign-in failed. Please try again.",
+      oauth_state_invalid: "Your Google sign-in session expired. Please retry.",
+      account_inactive: "This account is inactive. Contact support.",
+    };
+
+    toast.error(messageMap[authError] || "Sign-in failed. Please try again.");
+  }, [searchParams]);
 
   if (authLoading) {
     return (
@@ -70,24 +98,18 @@ export default function LoginPage() {
         throw new Error(res.message || "Login failed");
       }
 
-      if (res?.data?.user) {
-        localStorage.setItem("user", JSON.stringify(res.data.user));
-      }
-
-      window.dispatchEvent(new Event("auth:refresh"));
-
-      toast.success("Login successful 🚀");
+      toast.success("Login successful");
       router.replace("/dashboard");
 
-    } catch (err: any) {
-      toast.error(err?.message || "Login failed");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {
       if (mounted.current) setLoading(false);
     }
   };
 
   const handleGoogleLogin = () => {
-    window.location.assign(buildApiUrl("/auth/google"));
+    window.location.assign(buildGoogleAuthUrl(window.location.origin));
   };
 
   return (
@@ -193,7 +215,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-xs text-gray-600 mt-6 text-center">
-            Don’t have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Link
               href="/auth/register"
               className="text-blue-600 font-medium hover:underline"

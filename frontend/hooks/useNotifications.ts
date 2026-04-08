@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { buildApiUrl } from "@/lib/userApi";
 
 export function useNotifications() {
   const qc = useQueryClient();
@@ -6,7 +7,9 @@ export function useNotifications() {
   const query = useQuery({
     queryKey: ["notifications"],
     queryFn: async () => {
-      const res = await fetch("/api/notifications");
+      const res = await fetch(buildApiUrl("/api/notifications"), {
+        credentials: "include",
+      });
       return res.json();
     },
     refetchInterval: 5000, // 🔥 real-time feel
@@ -14,13 +17,19 @@ export function useNotifications() {
 
   const markRead = useMutation({
     mutationFn: (id: string) =>
-      fetch(`/api/notifications/${id}/read`, { method: "PATCH" }),
+      fetch(buildApiUrl(`/api/notifications/${id}/read`), {
+        method: "PATCH",
+        credentials: "include",
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
   const clearAll = useMutation({
     mutationFn: () =>
-      fetch(`/api/notifications/read-all`, { method: "PATCH" }),
+      fetch(buildApiUrl("/api/notifications/read-all"), {
+        method: "PATCH",
+        credentials: "include",
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 

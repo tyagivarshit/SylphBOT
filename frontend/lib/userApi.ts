@@ -2,7 +2,7 @@ const API_BASE = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 ).replace(/\/$/, "");
 
-const buildApiUrl = (path: string) =>
+export const buildApiUrl = (path: string) =>
   `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 
 export type CurrentUser = {

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { buildApiUrl } from "@/lib/userApi";
 
 export default function DeleteAccount() {
   const router = useRouter();
@@ -19,20 +20,17 @@ export default function DeleteAccount() {
     try {
       setLoading(true);
 
-      const res = await fetch(
-        "http://localhost:5000/api/user/delete-account",
-        {
-          method: "DELETE",
-          credentials: "include",
-        }
-      );
+      const res = await fetch(buildApiUrl("/api/user/delete-account"), {
+        method: "DELETE",
+        credentials: "include",
+      });
 
       if (!res.ok) {
         throw new Error("Delete failed");
       }
 
       // 🔥 redirect after delete
-      router.push("/login");
+      router.push("/auth/login");
 
     } catch (err) {
       console.error("❌ Delete failed:", err);

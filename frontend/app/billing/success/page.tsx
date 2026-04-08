@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
+import { buildApiUrl } from "@/lib/userApi"
 
 export default function SuccessPage(){
 
@@ -14,7 +15,7 @@ const [loading,setLoading] = useState(true)
 
 const checkSubscription = async () => {
 try{
-const res = await fetch(`/api/billing`,{
+const res = await fetch(buildApiUrl("/api/billing"),{
 credentials:"include"
 })
 const data = await res.json()

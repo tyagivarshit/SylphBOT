@@ -50,7 +50,7 @@ const getCookieOptions = () => ({
   httpOnly: true,
   secure: isProd,
   sameSite: isProd ? ("none" as const) : ("lax" as const),
-  domain: ".automexiaai.in", 
+  ...(isProd ? { domain: ".automexiaai.in" } : {}),
   path: "/",
 });
 

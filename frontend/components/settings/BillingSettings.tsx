@@ -1,8 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-
-const API_URL = "http://localhost:5000";
+import { buildApiUrl } from "@/lib/userApi";
 
 export default function BillingSettings() {
   /* =========================
@@ -11,7 +10,7 @@ export default function BillingSettings() {
   const { data, isLoading } = useQuery({
     queryKey: ["billing"],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/billing/current`, {
+      const res = await fetch(buildApiUrl("/api/billing/current"), {
         credentials: "include",
       });
 

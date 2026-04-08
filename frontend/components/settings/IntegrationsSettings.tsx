@@ -4,8 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-
-const API_URL = "http://localhost:5000";
+import { buildApiUrl } from "@/lib/userApi";
 
 export default function IntegrationsSettings() {
   const queryClient = useQueryClient();
@@ -20,7 +19,7 @@ export default function IntegrationsSettings() {
   const { data, isLoading } = useQuery({
     queryKey: ["integrations"],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/clients`, {
+      const res = await fetch(buildApiUrl("/api/clients"), {
         credentials: "include",
       });
 
@@ -58,7 +57,7 @@ export default function IntegrationsSettings() {
   ========================= */
   const disconnect = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`${API_URL}/api/clients/${id}`, {
+      const res = await fetch(buildApiUrl(`/api/clients/${id}`), {
         method: "DELETE",
         credentials: "include",
       });
@@ -80,7 +79,7 @@ export default function IntegrationsSettings() {
     try {
       setConnecting("meta");
 
-      const res = await fetch(`${API_URL}/api/clients/oauth/meta`, {
+      const res = await fetch(buildApiUrl("/api/clients/oauth/meta"), {
         credentials: "include",
       });
 

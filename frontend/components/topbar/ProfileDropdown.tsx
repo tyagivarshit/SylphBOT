@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { fetchCurrentUser } from "@/lib/userApi";
+import { buildApiUrl, fetchCurrentUser } from "@/lib/userApi";
 
 export default function ProfileDropdown() {
   const [open, setOpen] = useState(false);
@@ -54,7 +54,7 @@ export default function ProfileDropdown() {
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/auth/logout", {
+      await fetch(buildApiUrl("/api/auth/logout"), {
         method: "POST",
         credentials: "include",
       });

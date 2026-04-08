@@ -1,28 +1,52 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 const LEGACY_HOSTS = new Set([
   "automexiaai.in",
   "www.automexiaai.in",
 ]);
 
+const PUBLIC_ROUTES = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/forgot",
+  "/auth/reset-password",
+  "/auth/verify-email",
+];
+
 export function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").split(":")[0];
+  const { pathname } = request.nextUrl;
 
-  if (!LEGACY_HOSTS.has(host)) {
+  if (LEGACY_HOSTS.has(host)) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.hostname = "app.automexiaai.in";
+    redirectUrl.protocol = "https:";
+    return NextResponse.redirect(redirectUrl, 308);
+  }
+
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon.ico") ||
+    pathname.startsWith("/images")
+  ) {
     return NextResponse.next();
   }
 
-  const redirectUrl = request.nextUrl.clone();
-  redirectUrl.hostname = "app.automexiaai.in";
+  const accessToken = request.cookies.get("accessToken")?.value;
+  const isPublic = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
 
-  if (redirectUrl.protocol !== "https:") {
-    redirectUrl.protocol = "https:";
+  if (!accessToken && !isPublic) {
+    return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
-  return NextResponse.redirect(redirectUrl, 308);
+  if (accessToken && isPublic) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };
-

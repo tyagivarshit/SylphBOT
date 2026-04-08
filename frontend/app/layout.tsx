@@ -1,14 +1,7 @@
 import "./globals.css";
-import { Toaster } from "react-hot-toast";
-import { Roboto } from "next/font/google";
 import Script from "next/script";
+import { Toaster } from "react-hot-toast";
 import Providers from "@/providers";
-
-const roboto = Roboto({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  display: "swap",
-});
 
 export const metadata = {
   title: "Automexia AI",
@@ -20,23 +13,16 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  console.log("🌍 ROOT LAYOUT RENDER");
-
   return (
     <html lang="en">
-      <body
-        className={`${roboto.className} bg-slate-100 text-gray-900 min-h-screen`}
-      >
+      <body className="bg-slate-100 text-gray-900 min-h-screen font-sans antialiased">
         <Providers>
-
-          {/* 🔥 FACEBOOK SDK */}
           <Script
             id="facebook-sdk"
             src="https://connect.facebook.net/en_US/sdk.js"
             strategy="afterInteractive"
           />
 
-          {/* 🔥 PREMIUM TOASTER */}
           <Toaster
             position="top-right"
             toastOptions={{
@@ -64,7 +50,6 @@ export default function RootLayout({
           />
 
           {children}
-
         </Providers>
       </body>
     </html>

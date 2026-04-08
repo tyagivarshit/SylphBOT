@@ -1,10 +1,60 @@
 import express from "express";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import prisma from "../config/prisma";
 import upload from "../middleware/upload";
 import cloudinary from "../config/cloudinary";
 import { protect } from "../middleware/auth.middleware";
+import { clearAuthCookies } from "../utils/authCookies";
+import { stripe } from "../services/stripe.service";
+import { env } from "../config/env";
 
 const router = express.Router();
+
+const safeUserSelect = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  avatar: true,
+  businessId: true,
+  business: {
+    select: {
+      id: true,
+      name: true,
+      website: true,
+      industry: true,
+      teamSize: true,
+      type: true,
+      timezone: true,
+    },
+  },
+} as const;
+
+const getCurrentUser = async (userId: string) =>
+  prisma.user.findUnique({
+    where: { id: userId },
+    select: safeUserSelect,
+  });
+
+const buildApiKey = (
+  userId: string,
+  businessId: string | null | undefined,
+  tokenVersion: number
+) => {
+  const fingerprint = crypto
+    .createHmac("sha256", env.JWT_SECRET)
+    .update(`${userId}:${businessId || "workspace"}:${tokenVersion}`)
+    .digest("base64url")
+    .slice(0, 32);
+
+  return `sylph_${fingerprint}`;
+};
+
+const buildDeletedEmail = (email: string) => {
+  const [local, domain = "deleted.local"] = email.split("@");
+  return `${local}+deleted_${Date.now()}@${domain}`;
+};
 
 /* =========================
    🔥 GET CURRENT USER (PROTECTED)
@@ -17,12 +67,7 @@ router.get("/me", protect, async (req: any, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        business: true,
-      },
-    });
+    const user = await getCurrentUser(userId);
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
@@ -90,12 +135,7 @@ router.patch("/update", protect, async (req: any, res) => {
     }
 
     /* 🔥 RETURN UPDATED USER */
-    const updatedUser = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        business: true,
-      },
-    });
+    const updatedUser = await getCurrentUser(userId);
 
     return res.json(updatedUser);
 
@@ -160,12 +200,7 @@ router.post(
       });
 
       /* 🔥 RETURN UPDATED USER */
-      const updatedUser = await prisma.user.findUnique({
-        where: { id: userId },
-        include: {
-          business: true,
-        },
-      });
+      const updatedUser = await getCurrentUser(userId);
 
       return res.json(updatedUser);
 
@@ -175,5 +210,254 @@ router.post(
     }
   }
 );
+
+router.post("/change-password", protect, async (req: any, res) => {
+  try {
+    const userId = req.user?.id;
+    const {
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    } = req.body || {};
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (
+      !currentPassword ||
+      !newPassword ||
+      newPassword.length < 8 ||
+      newPassword !== confirmPassword
+    ) {
+      return res.status(400).json({
+        error: "Invalid password payload",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        password: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const matches = await bcrypt.compare(
+      currentPassword,
+      user.password
+    );
+
+    if (!matches) {
+      return res.status(400).json({
+        error: "Current password is incorrect",
+      });
+    }
+
+    const nextPassword = await bcrypt.hash(newPassword, 12);
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: {
+          password: nextPassword,
+          resetToken: null,
+          resetTokenExpiry: null,
+          tokenVersion: { increment: 1 },
+        },
+      }),
+      prisma.refreshToken.deleteMany({
+        where: { userId },
+      }),
+    ]);
+
+    clearAuthCookies(res, req);
+
+    return res.json({
+      success: true,
+      message: "Password updated. Please log in again.",
+    });
+  } catch (err) {
+    console.error("CHANGE PASSWORD ERROR:", err);
+    return res
+      .status(500)
+      .json({ error: "Failed to update password" });
+  }
+});
+
+router.get("/api-key", protect, async (req: any, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        businessId: true,
+        tokenVersion: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.json({
+      apiKey: buildApiKey(
+        user.id,
+        user.businessId,
+        user.tokenVersion
+      ),
+    });
+  } catch (err) {
+    console.error("API KEY FETCH ERROR:", err);
+    return res.status(500).json({ error: "Failed to load API key" });
+  }
+});
+
+router.delete("/delete-account", protect, async (req: any, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        businessId: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const now = new Date();
+
+    if (user.businessId) {
+      const subscription = await prisma.subscription.findUnique({
+        where: { businessId: user.businessId },
+        select: {
+          stripeSubscriptionId: true,
+        },
+      });
+
+      if (subscription?.stripeSubscriptionId) {
+        try {
+          await stripe.subscriptions.cancel(
+            subscription.stripeSubscriptionId
+          );
+        } catch (stripeError) {
+          console.error(
+            "DELETE ACCOUNT STRIPE CANCEL ERROR:",
+            stripeError
+          );
+        }
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (user.businessId) {
+        await tx.business.update({
+          where: { id: user.businessId },
+          data: {
+            deletedAt: now,
+          },
+        });
+
+        await Promise.all([
+          tx.client.updateMany({
+            where: { businessId: user.businessId },
+            data: {
+              isActive: false,
+              deletedAt: now,
+            },
+          }),
+          tx.lead.updateMany({
+            where: { businessId: user.businessId },
+            data: {
+              deletedAt: now,
+            },
+          }),
+          tx.commentTrigger.updateMany({
+            where: { businessId: user.businessId },
+            data: {
+              isActive: false,
+            },
+          }),
+          tx.automationFlow.updateMany({
+            where: { businessId: user.businessId },
+            data: {
+              status: "INACTIVE",
+            },
+          }),
+          tx.knowledgeBase.updateMany({
+            where: { businessId: user.businessId },
+            data: {
+              isActive: false,
+            },
+          }),
+          tx.bookingSlot.updateMany({
+            where: { businessId: user.businessId },
+            data: {
+              isActive: false,
+            },
+          }),
+          tx.subscription.updateMany({
+            where: { businessId: user.businessId },
+            data: {
+              status: "CANCELLED",
+              graceUntil: null,
+              isTrial: false,
+            },
+          }),
+        ]);
+      }
+
+      await tx.refreshToken.deleteMany({
+        where: { userId },
+      });
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          email: buildDeletedEmail(user.email),
+          isActive: false,
+          deletedAt: now,
+          businessId: null,
+          tokenVersion: { increment: 1 },
+          avatar: null,
+          phone: null,
+          resetToken: null,
+          resetTokenExpiry: null,
+          verifyToken: null,
+          verifyTokenExpiry: null,
+        },
+      });
+    });
+
+    clearAuthCookies(res, req);
+
+    return res.json({
+      success: true,
+      message: "Account deleted successfully",
+    });
+  } catch (err) {
+    console.error("DELETE ACCOUNT ERROR:", err);
+    return res.status(500).json({ error: "Delete failed" });
+  }
+});
 
 export default router;

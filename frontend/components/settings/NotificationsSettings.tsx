@@ -1,72 +1,63 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
-  useQuery,
   useMutation,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+import { buildApiUrl } from "@/lib/userApi";
 
 export default function NotificationSettings() {
   const queryClient = useQueryClient();
-
   const [settings, setSettings] = useState({
     email: true,
     whatsapp: false,
     leads: true,
   });
 
-  /* =========================
-     🔥 FETCH SETTINGS
-  ========================= */
   const { data, isLoading, isError } = useQuery({
     queryKey: ["notification-settings"],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/notifications/settings`, {
+      const res = await fetch(buildApiUrl("/api/notifications/settings"), {
         credentials: "include",
       });
 
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed to load notification settings");
+      }
 
       return res.json();
     },
   });
 
-  /* =========================
-     🔥 AUTO FILL
-  ========================= */
   useEffect(() => {
     if (data) {
       setSettings({
-        email: data.email,
-        whatsapp: data.whatsapp,
-        leads: data.leads,
+        email: Boolean(data.email),
+        whatsapp: Boolean(data.whatsapp),
+        leads: Boolean(data.leads),
       });
     }
   }, [data]);
 
-  /* =========================
-     🔥 UPDATE SETTINGS
-  ========================= */
   const mutation = useMutation({
-    mutationFn: async (body: any) => {
-      const res = await fetch(`${API_URL}/api/notifications/settings`, {
+    mutationFn: async (body: typeof settings) => {
+      const res = await fetch(buildApiUrl("/api/notifications/settings"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed to update notification settings");
+      }
 
       return res.json();
     },
-
-    onSuccess: () => {
-      queryClient.invalidateQueries({
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
         queryKey: ["notification-settings"],
       });
     },
@@ -74,29 +65,24 @@ export default function NotificationSettings() {
 
   const toggle = (key: keyof typeof settings) => {
     const updated = { ...settings, [key]: !settings[key] };
-
     setSettings(updated);
     mutation.mutate(updated);
   };
 
-  if (isLoading)
-    return (
-      <div className="text-sm text-gray-500 animate-pulse">
-        Loading...
-      </div>
-    );
+  if (isLoading) {
+    return <div className="text-sm text-gray-500 animate-pulse">Loading...</div>;
+  }
 
-  if (isError)
+  if (isError) {
     return (
       <div className="text-sm bg-red-100 text-red-600 px-3 py-2 rounded-md inline-block">
         Failed to load settings
       </div>
     );
+  }
 
   return (
     <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm space-y-6">
-
-      {/* HEADER */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900">
           Notification Preferences
@@ -106,9 +92,7 @@ export default function NotificationSettings() {
         </p>
       </div>
 
-      {/* TOGGLES */}
       <div className="space-y-4">
-
         <Toggle
           label="Email Notifications"
           desc="Receive important updates via email"
@@ -129,15 +113,10 @@ export default function NotificationSettings() {
           value={settings.leads}
           onChange={() => toggle("leads")}
         />
-
       </div>
     </div>
   );
 }
-
-/* =========================
-   🔥 TOGGLE COMPONENT (PREMIUM)
-========================= */
 
 function Toggle({
   label,
@@ -152,18 +131,11 @@ function Toggle({
 }) {
   return (
     <div className="flex items-center justify-between p-4 border border-blue-100 rounded-2xl bg-white/70 backdrop-blur-xl hover:shadow-md transition">
-
-      {/* TEXT */}
       <div>
-        <p className="text-sm font-semibold text-gray-900">
-          {label}
-        </p>
-        <p className="text-xs text-gray-500 mt-1">
-          {desc}
-        </p>
+        <p className="text-sm font-semibold text-gray-900">{label}</p>
+        <p className="text-xs text-gray-500 mt-1">{desc}</p>
       </div>
 
-      {/* SWITCH */}
       <button
         onClick={onChange}
         className={`relative w-11 h-6 rounded-full transition-all duration-300 ${

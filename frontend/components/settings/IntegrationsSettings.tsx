@@ -1,21 +1,25 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { buildApiUrl } from "@/lib/userApi";
+import {
+  buildApiUrl,
+  buildAppUrl,
+  fetchWorkspaceApiKey,
+} from "@/lib/userApi";
+
+type ClientConnection = {
+  id: string;
+  platform: string;
+};
 
 export default function IntegrationsSettings() {
   const queryClient = useQueryClient();
   const params = useSearchParams();
-  const router = useRouter();
-
   const [connecting, setConnecting] = useState<string | null>(null);
 
-  /* =========================
-     🔥 FETCH CONNECTIONS
-  ========================= */
   const { data, isLoading } = useQuery({
     queryKey: ["integrations"],
     queryFn: async () => {
@@ -23,38 +27,33 @@ export default function IntegrationsSettings() {
         credentials: "include",
       });
 
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed to load integrations");
+      }
 
-      return res.json();
+      return (await res.json()) as ClientConnection[];
     },
   });
 
   const clients = data || [];
+  const whatsapp = clients.find((client) => client.platform === "WHATSAPP");
+  const instagram = clients.find((client) => client.platform === "INSTAGRAM");
 
-  const whatsapp = clients.find((c: any) => c.platform === "WHATSAPP");
-  const instagram = clients.find((c: any) => c.platform === "INSTAGRAM");
-
-  /* =========================
-     🔥 TOAST + AUTO REFRESH
-  ========================= */
   useEffect(() => {
     const status = params.get("integration");
 
     if (status === "success") {
-      toast.success("Integration connected successfully 🚀");
+      toast.success("Integration connected successfully");
       queryClient.invalidateQueries({ queryKey: ["integrations"] });
-      router.replace("/settings");
+      window.history.replaceState({}, "", buildAppUrl("/settings"));
     }
 
     if (status === "error") {
-      toast.error("Integration failed ❌");
-      router.replace("/settings");
+      toast.error("Integration failed");
+      window.history.replaceState({}, "", buildAppUrl("/settings"));
     }
-  }, [params]);
+  }, [params, queryClient]);
 
-  /* =========================
-     🔥 DISCONNECT
-  ========================= */
   const disconnect = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(buildApiUrl(`/api/clients/${id}`), {
@@ -62,7 +61,9 @@ export default function IntegrationsSettings() {
         credentials: "include",
       });
 
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Disconnect failed");
+      }
 
       return res.json();
     },
@@ -70,11 +71,11 @@ export default function IntegrationsSettings() {
       toast.success("Disconnected successfully");
       await queryClient.invalidateQueries({ queryKey: ["integrations"] });
     },
+    onError: () => {
+      toast.error("Unable to disconnect right now");
+    },
   });
 
-  /* =========================
-     🔥 CONNECT (FIXED FLOW)
-  ========================= */
   const connectMeta = async () => {
     try {
       setConnecting("meta");
@@ -83,72 +84,56 @@ export default function IntegrationsSettings() {
         credentials: "include",
       });
 
-      const data = await res.json();
+      const payload = await res.json().catch(() => null);
 
-      if (data?.url) {
-        window.location.href = data.url;
-      } else {
-        toast.error("Failed to start connection");
-        setConnecting(null);
+      if (!res.ok || !payload?.url) {
+        throw new Error(payload?.message || "Failed to start connection");
       }
+
+      window.location.assign(payload.url);
     } catch (err) {
       console.error(err);
-      toast.error("Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
       setConnecting(null);
     }
   };
 
   if (isLoading) {
-    return (
-      <div className="text-sm text-gray-500 animate-pulse">
-        Loading...
-      </div>
-    );
+    return <div className="text-sm text-gray-500 animate-pulse">Loading...</div>;
   }
 
   return (
     <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 space-y-6 shadow-sm">
-
-      {/* HEADER */}
       <div>
-        <h3 className="text-base font-semibold text-gray-900">
-          Integrations
-        </h3>
+        <h3 className="text-base font-semibold text-gray-900">Integrations</h3>
         <p className="text-sm text-gray-500 mt-1">
           Connect your external platforms
         </p>
       </div>
 
-      {/* WHATSAPP */}
       <IntegrationCard
         title="WhatsApp"
         desc="Connect WhatsApp Business API"
-        connected={!!whatsapp}
+        connected={Boolean(whatsapp)}
         loading={connecting === "meta"}
         onConnect={connectMeta}
-        onDisconnect={() => disconnect.mutate(whatsapp.id)}
+        onDisconnect={() => whatsapp && disconnect.mutate(whatsapp.id)}
       />
 
-      {/* INSTAGRAM */}
       <IntegrationCard
         title="Instagram"
-        desc="Connect Instagram messaging & comments"
-        connected={!!instagram}
+        desc="Connect Instagram messaging and comments"
+        connected={Boolean(instagram)}
         loading={connecting === "meta"}
         onConnect={connectMeta}
-        onDisconnect={() => disconnect.mutate(instagram.id)}
+        onDisconnect={() => instagram && disconnect.mutate(instagram.id)}
       />
 
-      {/* API KEY */}
       <ApiKeySection />
-
     </div>
   );
 }
 
-/* =========================
-   🔥 CARD
-========================= */
 function IntegrationCard({
   title,
   desc,
@@ -156,14 +141,18 @@ function IntegrationCard({
   loading,
   onConnect,
   onDisconnect,
-}: any) {
+}: {
+  title: string;
+  desc: string;
+  connected: boolean;
+  loading: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+}) {
   return (
     <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 flex items-center justify-between hover:shadow-md transition">
-
       <div>
-        <p className="text-sm font-semibold text-gray-900">
-          {title}
-        </p>
+        <p className="text-sm font-semibold text-gray-900">{title}</p>
         <p className="text-xs text-gray-500">{desc}</p>
       </div>
 
@@ -182,44 +171,50 @@ function IntegrationCard({
           {loading ? "Connecting..." : "Connect"}
         </button>
       )}
-
     </div>
   );
 }
 
-/* =========================
-   🔥 API KEY SECTION
-========================= */
 function ApiKeySection() {
-  const apiKey = "sk_live_xxxxxxxxxxxxxx";
+  const { data: apiKey, isLoading, isError } = useQuery({
+    queryKey: ["workspace-api-key"],
+    queryFn: fetchWorkspaceApiKey,
+  });
+
+  const maskedKey = apiKey
+    ? `${apiKey.slice(0, 12)}${"*".repeat(10)}${apiKey.slice(-6)}`
+    : "Loading workspace key...";
+
+  const handleCopy = async () => {
+    if (!apiKey) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(apiKey);
+    toast.success("API key copied");
+  };
 
   return (
     <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 space-y-4">
-
       <div>
-        <p className="text-sm font-semibold text-gray-900">
-          API Key
-        </p>
-        <p className="text-xs text-gray-500">
-          Use this key to access API
-        </p>
+        <p className="text-sm font-semibold text-gray-900">API Key</p>
+        <p className="text-xs text-gray-500">Use this key to access API</p>
       </div>
 
-      <div className="flex items-center justify-between bg-white border border-blue-100 rounded-xl px-4 py-2.5">
-
+      <div className="flex items-center justify-between bg-white border border-blue-100 rounded-xl px-4 py-2.5 gap-3">
         <span className="text-sm text-gray-700 truncate">
-          {apiKey}
+          {isError ? "Unable to load workspace API key" : maskedKey}
         </span>
 
         <button
-          onClick={() => navigator.clipboard.writeText(apiKey)}
-          className="text-xs font-semibold bg-blue-50 text-gray-700 px-3 py-1.5 rounded-lg hover:shadow-sm transition"
+          onClick={handleCopy}
+          disabled={!apiKey || isLoading}
+          className="text-xs font-semibold bg-blue-50 text-gray-700 px-3 py-1.5 rounded-lg hover:shadow-sm transition disabled:opacity-60"
         >
-          Copy
+          {isLoading ? "Loading..." : "Copy"}
         </button>
-
       </div>
-
     </div>
   );
 }
+

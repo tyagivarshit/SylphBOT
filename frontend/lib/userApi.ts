@@ -2,8 +2,28 @@ const API_BASE = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 ).replace(/\/$/, "");
 
+const normalizePath = (path: string) =>
+  path.startsWith("/") ? path : `/${path}`;
+
+const getAppBase = () => {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+
+  if (configured) {
+    return configured;
+  }
+
+  if (typeof window !== "undefined") {
+    return window.location.origin.replace(/\/$/, "");
+  }
+
+  return "https://app.automexiaai.in";
+};
+
 export const buildApiUrl = (path: string) =>
-  `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  `${API_BASE}${normalizePath(path)}`;
+
+export const buildAppUrl = (path: string) =>
+  `${getAppBase()}${normalizePath(path)}`;
 
 export type CurrentUser = {
   id: string;
@@ -98,6 +118,44 @@ export async function uploadUserAvatar(file: File) {
   }
 
   return data;
+}
+
+export async function changeUserPassword(body: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}) {
+  const res = await fetch(buildApiUrl("/api/user/change-password"), {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await readJson<{ success?: boolean; message?: string; error?: string }>(res);
+
+  if (!res.ok) {
+    throw new Error(data?.error || "Password update failed");
+  }
+
+  return data;
+}
+
+export async function fetchWorkspaceApiKey() {
+  const res = await fetch(buildApiUrl("/api/user/api-key"), {
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  const data = await readJson<{ apiKey?: string; error?: string }>(res);
+
+  if (!res.ok || !data?.apiKey) {
+    throw new Error(data?.error || "Failed to load API key");
+  }
+
+  return data.apiKey;
 }
 
 export async function fetchNotifications() {

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import ChangePassword from "@/components/settings/ChangePassword";
 import DeleteAccount from "@/components/settings/DeleteAccount";
 
@@ -26,7 +27,15 @@ export default function SettingsPage() {
           Integrations
         </h2>
         <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
-          <IntegrationsSettings />
+          <Suspense
+            fallback={
+              <div className="text-sm text-gray-500 animate-pulse">
+                Loading integrations...
+              </div>
+            }
+          >
+            <IntegrationsSettings />
+          </Suspense>
         </div>
       </div>
 

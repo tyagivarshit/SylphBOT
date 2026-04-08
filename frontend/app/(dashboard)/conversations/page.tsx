@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { useSearchParams } from "next/navigation";
 import ChatSidebar from "@/components/conversations/ChatSidebar";
@@ -23,7 +23,7 @@ export interface Message {
   createdAt: string;
 }
 
-export default function ConversationsPage() {
+function ConversationsPageContent() {
   const searchParams = useSearchParams();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -162,5 +162,21 @@ export default function ConversationsPage() {
       </div>
 
     </div>
+  );
+}
+
+function ConversationsPageFallback() {
+  return (
+    <div className="h-[calc(100vh-64px)] flex items-center justify-center bg-gradient-to-br from-white via-blue-50 to-cyan-50">
+      <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
+}
+
+export default function ConversationsPage() {
+  return (
+    <Suspense fallback={<ConversationsPageFallback />}>
+      <ConversationsPageContent />
+    </Suspense>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { confirmCheckout } from "@/lib/billing";
 import { buildApiUrl } from "@/lib/userApi";
@@ -61,7 +61,7 @@ const fetchBilling = async (): Promise<BillingPayload | null> => {
   }
 };
 
-export default function SuccessPage() {
+function SuccessPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session_id");
@@ -153,5 +153,28 @@ export default function SuccessPage() {
         </button>
       </div>
     </div>
+  );
+}
+
+function SuccessPageFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
+        <h1 className="text-xl font-semibold text-gray-900">
+          Verifying payment
+        </h1>
+        <p className="mt-2 text-sm text-gray-500">
+          Preparing your billing confirmation...
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function SuccessPage() {
+  return (
+    <Suspense fallback={<SuccessPageFallback />}>
+      <SuccessPageContent />
+    </Suspense>
   );
 }

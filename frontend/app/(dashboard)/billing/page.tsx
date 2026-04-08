@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createCheckout, upgradePlan } from "@/lib/billing";
 import PaymentHistory from "@/components/billing/PaymentHistory";
@@ -139,7 +139,7 @@ const isCurrentPlan = (
   return currentType === planId || currentName === planId;
 };
 
-export default function BillingPage() {
+function BillingPageContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState<PlanId | null>(null);
   const [billing, setBilling] = useState<BillingCycle>("monthly");
@@ -420,5 +420,21 @@ export default function BillingPage() {
         <PaymentHistory invoices={invoices} />
       </div>
     </div>
+  );
+}
+
+function BillingPageFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={<BillingPageFallback />}>
+      <BillingPageContent />
+    </Suspense>
   );
 }

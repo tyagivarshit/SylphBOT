@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { usePlan } from "@/hooks/usePlan"
 import axios from "axios"
 import { useSearchParams } from "next/navigation"
@@ -22,7 +22,7 @@ const stageOptions = [
   { value: "LOST", label: "Lost" },
 ]
 
-export default function LeadsPage(){
+function LeadsPageContent(){
   const searchParams = useSearchParams()
 
   const { plan } = usePlan()
@@ -158,4 +158,22 @@ export default function LeadsPage(){
 
   )
 
+}
+
+function LeadsPageFallback() {
+  return (
+    <div className="min-w-0 space-y-6">
+      <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 text-gray-500 shadow-sm">
+        Loading leads...
+      </div>
+    </div>
+  )
+}
+
+export default function LeadsPage() {
+  return (
+    <Suspense fallback={<LeadsPageFallback />}>
+      <LeadsPageContent />
+    </Suspense>
+  )
 }

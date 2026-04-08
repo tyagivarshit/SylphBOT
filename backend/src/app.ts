@@ -1,116 +1,131 @@
 import express from "express";
-import cors from "cors";
+import { randomUUID } from "crypto";
+import cors, { type CorsOptions } from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import { env } from "./config/env";
-
-
-/* ========= CONFIG ========= */
-import prisma from "./config/prisma";
 import { protect } from "./middleware/auth.middleware";
 import { attachBillingContext } from "./middleware/subscription.middleware";
 
-/* ========= ROUTES ========= */
 import authRoutes from "./routes/auth.routes";
 import googleAuthRoutes from "./routes/googleAuth.routes";
 import clientRoutes from "./routes/client.routes";
 import aiRoutes from "./routes/ai.routes";
 import whatsappWebhook from "./routes/whatsapp.webhook";
 import instagramWebhook from "./routes/instagram.webhook";
-import billingRoutes from "./routes/billing.routes";// 🔥 HEALTH CHECK ROUTE (IMPORTANT FOR RENDER)
+import billingRoutes from "./routes/billing.routes";
 import stripeWebhookRoutes from "./routes/stripeWebhook.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
-
 import commentTriggerRoutes from "./routes/commentTrigger.routes";
 import messageRoutes from "./routes/message.routes";
-
 import automationRoutes from "./routes/automation.routes";
 import instagramRoutes from "./routes/instagram.routes";
-
 import knowledgeRoutes from "./routes/knowledge.routes";
 import trainingRoutes from "./routes/training.routes";
-
 import leadRoutes from "./routes/lead.routes";
 import analyticsRoutes from "./routes/analytics.routes";
-
-/* ========= NEW ROUTES ========= */
 import searchRoutes from "./routes/search.routes";
 import notificationRoutes from "./routes/notification";
 import userRoutes from "./routes/user.routes";
 import securityRoutes from "./routes/security.routes";
 import integrationRoutes from "./routes/integration.routes";
 import oauthRoutes from "./routes/oauth.routes";
-
-/* ✅ ADDED ROUTES */
 import bookingRoutes from "./routes/booking.routes";
 import availabilityRoutes from "./routes/availability.routes";
+import conversationRoutes from "./routes/conversation.routes";
 
-/* ========= MIDDLEWARE ========= */
 import {
   aiLimiter,
   globalLimiter,
 } from "./middleware/rateLimit.middleware";
-
 import { monitoringMiddleware } from "./middleware/monitoring.middleware";
 
-/* ========= CRONS ========= */
 import { startTrialExpiryCron } from "./cron/trial.cron";
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "./cron/resetUsage.cron";
 import "./workers/bookingReminder.worker";
 
-/* ========= ERRORS ========= */
 import { isAppError } from "./utils/AppError";
 
-import conversationRoutes from "./routes/conversation.routes";
-
 const app = express();
-console.log("🔥 REDIS FROM ENV:", env.REDIS_URL);
 
-/* ======================================
-🔥 TRUST PROXY
-====================================== */
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
-/* ======================================
-🔥 SECURITY + PERFORMANCE
-====================================== */
+const allowedOrigins = new Set(env.ALLOWED_FRONTEND_ORIGINS);
+
+const corsOptions: CorsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    try {
+      const normalizedOrigin = new URL(origin).origin;
+
+      if (allowedOrigins.has(normalizedOrigin)) {
+        return callback(null, true);
+      }
+    } catch {
+      return callback(new Error("Invalid CORS origin"));
+    }
+
+    return callback(new Error("Origin not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Stripe-Signature",
+    "X-Requested-With",
+    "X-Request-Id",
+  ],
+  exposedHeaders: ["X-Request-Id"],
+  maxAge: 86400,
+};
+
 app.use(
   helmet({
-    crossOriginResourcePolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    referrerPolicy: {
+      policy: "strict-origin-when-cross-origin",
+    },
+    hsts: env.IS_PROD
+      ? {
+          maxAge: 31536000,
+          includeSubDomains: true,
+          preload: true,
+        }
+      : false,
   })
 );
 
 app.use(compression());
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(globalLimiter);
-
-/* ======================================
-🔥 COOKIE PARSER
-====================================== */
 app.use(cookieParser());
 
-/* ======================================
-🔥 CORS
-====================================== */
-app.use(
-  cors({
-    origin: [
-      "https://app.automexiaai.in"
-    ],
-    credentials: true,
-  })
-);
+app.use((req: any, res, next) => {
+  const headerValue = req.headers["x-request-id"];
+  const requestId =
+    (Array.isArray(headerValue) ? headerValue[0] : headerValue) ||
+    randomUUID();
 
-/* ======================================
-🔥 REQUEST LOGGER
-====================================== */
-app.use((req, res, next) => {
+  req.requestId = requestId;
+  res.setHeader("X-Request-Id", requestId);
+  next();
+});
+
+app.use((req: any, res, next) => {
   const start = Date.now();
 
   res.on("finish", () => {
     console.info(
       JSON.stringify({
+        requestId: req.requestId,
         type: "request",
         method: req.method,
         url: req.originalUrl,
@@ -124,27 +139,21 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ======================================
-🔥 MONITORING
-====================================== */
 app.use(monitoringMiddleware);
 
-/* ======================================
-🔥 REQUEST TIMEOUT
-====================================== */
 app.use((req, res, next) => {
   res.setTimeout(15000, () => {
-    console.error("⏱️ Request timeout:", req.originalUrl);
+    console.error("Request timeout:", req.originalUrl);
     if (!res.headersSent) {
-      res.status(408).send("Request Timeout");
+      res.status(408).json({
+        success: false,
+        message: "Request Timeout",
+        requestId: (req as any).requestId,
+      });
     }
   });
   next();
 });
-
-/* ======================================
-🔥 WEBHOOKS (ORDER IMPORTANT)
-====================================== */
 
 app.use(
   "/api/webhooks/stripe",
@@ -169,62 +178,35 @@ app.use(
   instagramWebhook
 );
 
-/* ======================================
-🔥 JSON PARSER
-====================================== */
 app.use(express.json({ limit: "1mb" }));
 
-/* ======================================
-🔥 GLOBAL AUTH ONLY (FIXED)
-====================================== */
-app.use((req, res, next) => {
-  const publicRoutes = [
-  "/",
-  "/health",
-  "/api/auth",
-  "/api/webhooks",
-  "/api/webhook",
-];
-
-  const isPublic = publicRoutes.some((route) =>
-    req.originalUrl.startsWith(route)
-  );
-
-  if (isPublic) return next();
-
-  protect(req, res, next);
-});
-
-/* ======================================
-🔥 ROUTES
-====================================== */
-
 app.get("/", (_req, res) => {
-  res.send("API Running 🚀");
+  res.json({
+    success: true,
+    message: "API Running",
+    environment: env.NODE_ENV,
+  });
 });
 
-/* AUTH */
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
 
-/* FREE (AUTH ONLY) */
 app.use("/api/dashboard", protect, dashboardRoutes);
 app.use("/api/billing", protect, billingRoutes);
 app.use("/api/user", protect, userRoutes);
 app.use("/api/notifications", protect, notificationRoutes);
 
-/* PREMIUM */
 app.use("/api/ai", protect, attachBillingContext, aiLimiter, aiRoutes);
-
 app.use("/api/automation", protect, attachBillingContext, automationRoutes);
-
 app.use("/api/messages", protect, attachBillingContext, messageRoutes);
-
 app.use("/api/conversations", protect, conversationRoutes);
+app.use(
+  "/api/comment-triggers",
+  protect,
+  attachBillingContext,
+  commentTriggerRoutes
+);
 
-app.use("/api/comment-triggers", protect, attachBillingContext, commentTriggerRoutes);
-
-/* OTHER (AUTH ONLY) */
 app.use("/api/clients", protect, clientRoutes);
 app.use("/api/instagram", protect, instagramRoutes);
 app.use("/api/knowledge", protect, knowledgeRoutes);
@@ -235,33 +217,34 @@ app.use("/api/search", protect, searchRoutes);
 app.use("/api/security", protect, securityRoutes);
 app.use("/api/integrations", protect, integrationRoutes);
 app.use("/api/oauth", protect, oauthRoutes);
-
-/* ✅ ADDED BOOKING + AVAILABILITY */
 app.use("/api/booking", protect, attachBillingContext, bookingRoutes);
-app.use("/api/availability", protect, attachBillingContext, availabilityRoutes);
+app.use(
+  "/api/availability",
+  protect,
+  attachBillingContext,
+  availabilityRoutes
+);
 
-/* ======================================
-🔥 HEALTH
-====================================== */
-app.get("/health", (_req, res) => {
-  res.status(200).json({ success: true });
-});
-
-/* ======================================
-🔥 404
-====================================== */
-app.use((_req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "Route not found",
+app.get("/health", (req: any, res) => {
+  res.status(200).json({
+    success: true,
+    status: "ok",
+    requestId: req.requestId,
+    timestamp: new Date().toISOString(),
   });
 });
 
-/* ======================================
-🔥 ERROR HANDLER
-====================================== */
+app.use((req: any, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+    requestId: req.requestId,
+  });
+});
+
 app.use((err: any, req: any, res: any, _next: any) => {
   console.error("ERROR:", {
+    requestId: req.requestId,
     message: err.message,
     path: req.originalUrl,
     method: req.method,
@@ -273,36 +256,29 @@ app.use((err: any, req: any, res: any, _next: any) => {
       message: err.message,
       code: err.code,
       details: err.details || null,
+      requestId: req.requestId,
     });
   }
 
   return res.status(500).json({
     success: false,
-    message:
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message,
+    message: env.IS_PROD ? "Internal server error" : err.message,
+    requestId: req.requestId,
   });
 });
 
-/* ======================================
-🔥 CRONS
-====================================== */
 if (process.env.ENABLE_CRON === "true") {
   startTrialExpiryCron();
   startMetaTokenRefreshCron();
   startUsageResetCron();
 }
 
-/* ======================================
-🔥 CRASH SAFETY
-====================================== */
 process.on("uncaughtException", (err) => {
-  console.error("🔥 UNCAUGHT EXCEPTION:", err);
+  console.error("UNCAUGHT EXCEPTION:", err);
 });
 
 process.on("unhandledRejection", (err) => {
-  console.error("🔥 UNHANDLED REJECTION:", err);
+  console.error("UNHANDLED REJECTION:", err);
 });
 
 export default app;

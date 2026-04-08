@@ -14,7 +14,7 @@ const PUBLIC_ROUTES = [
   "/auth/verify-email",
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const host = (request.headers.get("host") || "").split(":")[0];
   const { pathname } = request.nextUrl;
 

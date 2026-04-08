@@ -17,13 +17,7 @@ const buildAlternateFrontendOrigin = (origin: string) => {
   try {
     const url = new URL(origin);
 
-    if (url.hostname === "automexiaai.in") {
-      url.hostname = "www.automexiaai.in";
-      return url.origin;
-    }
-
-    if (url.hostname === "www.automexiaai.in") {
-      url.hostname = "automexiaai.in";
+    if (url.hostname === "app.automexiaai.in") {
       return url.origin;
     }
 

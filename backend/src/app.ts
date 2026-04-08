@@ -96,8 +96,7 @@ app.use(cookieParser());
 app.use(
   cors({
     origin: [
-      "https://automexiaai.in",
-      "https://www.automexiaai.in"
+      "https://app.automexiaai.in"
     ],
     credentials: true,
   })

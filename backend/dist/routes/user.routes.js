@@ -4,11 +4,51 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = __importDefault(require("crypto"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const upload_1 = __importDefault(require("../middleware/upload"));
 const cloudinary_1 = __importDefault(require("../config/cloudinary"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const authCookies_1 = require("../utils/authCookies");
+const stripe_service_1 = require("../services/stripe.service");
+const env_1 = require("../config/env");
 const router = express_1.default.Router();
+const safeUserSelect = {
+    id: true,
+    name: true,
+    email: true,
+    phone: true,
+    avatar: true,
+    businessId: true,
+    business: {
+        select: {
+            id: true,
+            name: true,
+            website: true,
+            industry: true,
+            teamSize: true,
+            type: true,
+            timezone: true,
+        },
+    },
+};
+const getCurrentUser = async (userId) => prisma_1.default.user.findUnique({
+    where: { id: userId },
+    select: safeUserSelect,
+});
+const buildApiKey = (userId, businessId, tokenVersion) => {
+    const fingerprint = crypto_1.default
+        .createHmac("sha256", env_1.env.JWT_SECRET)
+        .update(`${userId}:${businessId || "workspace"}:${tokenVersion}`)
+        .digest("base64url")
+        .slice(0, 32);
+    return `sylph_${fingerprint}`;
+};
+const buildDeletedEmail = (email) => {
+    const [local, domain = "deleted.local"] = email.split("@");
+    return `${local}+deleted_${Date.now()}@${domain}`;
+};
 /* =========================
    🔥 GET CURRENT USER (PROTECTED)
 ========================= */
@@ -18,12 +58,7 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized" });
         }
-        const user = await prisma_1.default.user.findUnique({
-            where: { id: userId },
-            include: {
-                business: true,
-            },
-        });
+        const user = await getCurrentUser(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -73,12 +108,7 @@ router.patch("/update", auth_middleware_1.protect, async (req, res) => {
             });
         }
         /* 🔥 RETURN UPDATED USER */
-        const updatedUser = await prisma_1.default.user.findUnique({
-            where: { id: userId },
-            include: {
-                business: true,
-            },
-        });
+        const updatedUser = await getCurrentUser(userId);
         return res.json(updatedUser);
     }
     catch (err) {
@@ -128,17 +158,218 @@ router.post("/upload-avatar", auth_middleware_1.protect, upload_1.default.single
             },
         });
         /* 🔥 RETURN UPDATED USER */
-        const updatedUser = await prisma_1.default.user.findUnique({
-            where: { id: userId },
-            include: {
-                business: true,
-            },
-        });
+        const updatedUser = await getCurrentUser(userId);
         return res.json(updatedUser);
     }
     catch (err) {
         console.error("UPLOAD AVATAR ERROR:", err);
         res.status(500).json({ error: "Upload failed" });
+    }
+});
+router.post("/change-password", auth_middleware_1.protect, async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const { currentPassword, newPassword, confirmPassword, } = req.body || {};
+        if (!userId) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        if (!currentPassword ||
+            !newPassword ||
+            newPassword.length < 8 ||
+            newPassword !== confirmPassword) {
+            return res.status(400).json({
+                error: "Invalid password payload",
+            });
+        }
+        const user = await prisma_1.default.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                password: true,
+            },
+        });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        const matches = await bcryptjs_1.default.compare(currentPassword, user.password);
+        if (!matches) {
+            return res.status(400).json({
+                error: "Current password is incorrect",
+            });
+        }
+        const nextPassword = await bcryptjs_1.default.hash(newPassword, 12);
+        await prisma_1.default.$transaction([
+            prisma_1.default.user.update({
+                where: { id: userId },
+                data: {
+                    password: nextPassword,
+                    resetToken: null,
+                    resetTokenExpiry: null,
+                    tokenVersion: { increment: 1 },
+                },
+            }),
+            prisma_1.default.refreshToken.deleteMany({
+                where: { userId },
+            }),
+        ]);
+        (0, authCookies_1.clearAuthCookies)(res, req);
+        return res.json({
+            success: true,
+            message: "Password updated. Please log in again.",
+        });
+    }
+    catch (err) {
+        console.error("CHANGE PASSWORD ERROR:", err);
+        return res
+            .status(500)
+            .json({ error: "Failed to update password" });
+    }
+});
+router.get("/api-key", auth_middleware_1.protect, async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        const user = await prisma_1.default.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                businessId: true,
+                tokenVersion: true,
+            },
+        });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        return res.json({
+            apiKey: buildApiKey(user.id, user.businessId, user.tokenVersion),
+        });
+    }
+    catch (err) {
+        console.error("API KEY FETCH ERROR:", err);
+        return res.status(500).json({ error: "Failed to load API key" });
+    }
+});
+router.delete("/delete-account", auth_middleware_1.protect, async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        const user = await prisma_1.default.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                businessId: true,
+            },
+        });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        const now = new Date();
+        if (user.businessId) {
+            const subscription = await prisma_1.default.subscription.findUnique({
+                where: { businessId: user.businessId },
+                select: {
+                    stripeSubscriptionId: true,
+                },
+            });
+            if (subscription?.stripeSubscriptionId) {
+                try {
+                    await stripe_service_1.stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
+                }
+                catch (stripeError) {
+                    console.error("DELETE ACCOUNT STRIPE CANCEL ERROR:", stripeError);
+                }
+            }
+        }
+        await prisma_1.default.$transaction(async (tx) => {
+            if (user.businessId) {
+                await tx.business.update({
+                    where: { id: user.businessId },
+                    data: {
+                        deletedAt: now,
+                    },
+                });
+                await Promise.all([
+                    tx.client.updateMany({
+                        where: { businessId: user.businessId },
+                        data: {
+                            isActive: false,
+                            deletedAt: now,
+                        },
+                    }),
+                    tx.lead.updateMany({
+                        where: { businessId: user.businessId },
+                        data: {
+                            deletedAt: now,
+                        },
+                    }),
+                    tx.commentTrigger.updateMany({
+                        where: { businessId: user.businessId },
+                        data: {
+                            isActive: false,
+                        },
+                    }),
+                    tx.automationFlow.updateMany({
+                        where: { businessId: user.businessId },
+                        data: {
+                            status: "INACTIVE",
+                        },
+                    }),
+                    tx.knowledgeBase.updateMany({
+                        where: { businessId: user.businessId },
+                        data: {
+                            isActive: false,
+                        },
+                    }),
+                    tx.bookingSlot.updateMany({
+                        where: { businessId: user.businessId },
+                        data: {
+                            isActive: false,
+                        },
+                    }),
+                    tx.subscription.updateMany({
+                        where: { businessId: user.businessId },
+                        data: {
+                            status: "CANCELLED",
+                            graceUntil: null,
+                            isTrial: false,
+                        },
+                    }),
+                ]);
+            }
+            await tx.refreshToken.deleteMany({
+                where: { userId },
+            });
+            await tx.user.update({
+                where: { id: userId },
+                data: {
+                    email: buildDeletedEmail(user.email),
+                    isActive: false,
+                    deletedAt: now,
+                    businessId: null,
+                    tokenVersion: { increment: 1 },
+                    avatar: null,
+                    phone: null,
+                    resetToken: null,
+                    resetTokenExpiry: null,
+                    verifyToken: null,
+                    verifyTokenExpiry: null,
+                },
+            });
+        });
+        (0, authCookies_1.clearAuthCookies)(res, req);
+        return res.json({
+            success: true,
+            message: "Account deleted successfully",
+        });
+    }
+    catch (err) {
+        console.error("DELETE ACCOUNT ERROR:", err);
+        return res.status(500).json({ error: "Delete failed" });
     }
 });
 exports.default = router;

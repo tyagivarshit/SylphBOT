@@ -1,42 +1,25 @@
-/* ======================================
-🔥 BASE URL FIX (FINAL)
-====================================== */
-
-const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-const API = `${BASE.replace(/\/$/, "")}/api`;
-
-/* ======================================
-🔥 TYPES
-====================================== */
+import { buildApiUrl } from "@/lib/url";
 
 export type ApiResponse<T = any> = {
   success: boolean;
   data: T | null;
-
   limited: boolean;
   upgradeRequired: boolean;
   unauthorized: boolean;
-
   message?: string;
   code?: string;
   networkError?: boolean;
 };
-
-/* ======================================
-🔥 CORE FETCH (PRODUCTION SAFE)
-====================================== */
 
 async function coreFetch<T>(
   url: string,
   options: RequestInit,
   retry = false
 ): Promise<ApiResponse<T>> {
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
-    /* 🔥 TOKEN (OPTIONAL - FUTURE SAFE) */
     const token =
       typeof window !== "undefined"
         ? localStorage.getItem("accessToken")
@@ -44,15 +27,15 @@ async function coreFetch<T>(
 
     const res = await fetch(url, {
       ...options,
-      credentials: "include", // ✅ COOKIE AUTH
+      credentials: "include",
       mode: "cors",
       headers: {
         "Content-Type": "application/json",
-
-        ...(token && {
-          Authorization: `Bearer ${token}`,
-        }),
-
+        ...(token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : {}),
         ...(options.headers || {}),
       },
       signal: controller.signal,
@@ -67,7 +50,6 @@ async function coreFetch<T>(
       data = null;
     }
 
-    /* 🔐 UNAUTHORIZED */
     if (res.status === 401) {
       if (!retry) {
         return coreFetch<T>(url, options, true);
@@ -83,7 +65,6 @@ async function coreFetch<T>(
       };
     }
 
-    /* 🔒 403 (PLAN LIMIT / ACCESS CONTROL) */
     if (res.status === 403) {
       return {
         success: true,
@@ -96,9 +77,8 @@ async function coreFetch<T>(
       };
     }
 
-    /* ❌ OTHER ERRORS */
     if (!res.ok) {
-      console.error("❌ API ERROR:", {
+      console.error("API ERROR:", {
         url,
         status: res.status,
         data,
@@ -115,7 +95,6 @@ async function coreFetch<T>(
       };
     }
 
-    /* ✅ SUCCESS */
     return {
       success: true,
       data: data?.data ?? data,
@@ -123,14 +102,12 @@ async function coreFetch<T>(
       upgradeRequired: data?.upgradeRequired ?? false,
       unauthorized: false,
     };
-
   } catch (error: any) {
-
     clearTimeout(timeout);
 
     const isAbort = error?.name === "AbortError";
 
-    console.error("❌ FETCH FAILED:", error);
+    console.error("FETCH FAILED:", error);
 
     return {
       success: false,
@@ -146,21 +123,15 @@ async function coreFetch<T>(
   }
 }
 
-/* ======================================
-🔥 PUBLIC API (🔥 FIXED)
-====================================== */
-
 export async function apiFetch<T = any>(
   path: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
-
-  /* 🔥 MAIN FIX: REMOVE DOUBLE /api */
   const cleanPath = path.startsWith("/api")
     ? path.replace(/^\/api/, "")
     : path;
 
-  const url = `${API}${cleanPath}`;
+  const url = buildApiUrl(cleanPath);
 
   return coreFetch<T>(url, options);
 }

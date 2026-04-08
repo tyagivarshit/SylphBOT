@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.aiQueue = void 0;
+exports.addRouterJob = exports.addAIJob = exports.aiQueue = void 0;
 const bullmq_1 = require("bullmq");
 const env_1 = require("../config/env");
 exports.aiQueue = new bullmq_1.Queue("aiQueue", {
@@ -22,3 +22,7 @@ exports.aiQueue = new bullmq_1.Queue("aiQueue", {
         },
     },
 });
+const addAIJob = async (data) => exports.aiQueue.add("message", data);
+exports.addAIJob = addAIJob;
+const addRouterJob = async (data) => exports.aiQueue.add("router", data);
+exports.addRouterJob = addRouterJob;

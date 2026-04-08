@@ -21,3 +21,11 @@ export const aiQueue = new Queue("aiQueue", {
     },
   },
 });
+
+type AIJobPayload = Record<string, unknown>;
+
+export const addAIJob = async (data: AIJobPayload) =>
+  aiQueue.add("message", data);
+
+export const addRouterJob = async (data: AIJobPayload) =>
+  aiQueue.add("router", data);

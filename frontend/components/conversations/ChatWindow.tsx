@@ -1,9 +1,8 @@
 "use client";
 
+import { buildApiUrl } from "@/lib/url";
 import { useEffect, useRef, useState } from "react";
 import { Send, ArrowLeft } from "lucide-react";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface Message {
   id: string;
@@ -60,9 +59,10 @@ export default function ChatWindow({
 
     try {
       await fetch(
-        `${API}/api/conversations/${selectedLead.id}/messages`,
+        buildApiUrl(`/conversations/${selectedLead.id}/messages`),
         {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },
@@ -84,8 +84,9 @@ export default function ChatWindow({
   const handleBooking = async () => {
     if (!selectedLead) return;
 
-    await fetch(`${API}/api/booking/start`, {
+    await fetch(buildApiUrl("/booking/start"), {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
@@ -97,7 +98,9 @@ export default function ChatWindow({
 
   const handleOptions = async () => {
     try {
-      const res = await fetch(`${API}/api/services/options`);
+      const res = await fetch(buildApiUrl("/services/options"), {
+        credentials: "include",
+      });
       const data = await res.json();
 
       const msg: Message = {

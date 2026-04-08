@@ -1,4 +1,4 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL;
+import { buildApiUrl } from "@/lib/url";
 
 export const apiFetch = async (
   endpoint: string,
@@ -6,8 +6,9 @@ export const apiFetch = async (
 ) => {
   const token = localStorage.getItem("token");
 
-  const res = await fetch(`${API_URL}${endpoint}`, {
+  const res = await fetch(buildApiUrl(endpoint), {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(token && { Authorization: `Bearer ${token}` }),

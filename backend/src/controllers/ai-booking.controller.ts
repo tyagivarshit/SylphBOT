@@ -41,7 +41,7 @@ export const handleAIBooking = async (
       success: true,
       handled: result.handled,
       message: result.message,
-      slots: result.slots || [],
+      slots: (result as any).slots || [],
     });
   } catch (error: any) {
     console.error("AI BOOKING INTENT ERROR:", error);

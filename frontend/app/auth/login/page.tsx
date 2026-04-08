@@ -8,6 +8,7 @@ import { FcGoogle } from "react-icons/fc";
 import { Eye, EyeOff } from "lucide-react";
 
 import { loginUser } from "@/lib/auth";
+import { buildApiUrl } from "@/lib/url";
 import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
@@ -86,14 +87,7 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = () => {
-    const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
-
-    if (!API) {
-      toast.error("API URL not configured");
-      return;
-    }
-
-    window.location.href = `${API}/api/auth/google`;
+    window.location.assign(buildApiUrl("/auth/google"));
   };
 
   return (

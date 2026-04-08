@@ -1,29 +1,11 @@
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
-).replace(/\/$/, "");
+export {
+  buildAbsoluteApiUrl,
+  buildApiUrl,
+  buildAppUrl,
+  getApiBaseUrl,
+} from "@/lib/url";
 
-const normalizePath = (path: string) =>
-  path.startsWith("/") ? path : `/${path}`;
-
-const getAppBase = () => {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-
-  if (configured) {
-    return configured;
-  }
-
-  if (typeof window !== "undefined") {
-    return window.location.origin.replace(/\/$/, "");
-  }
-
-  return "https://app.automexiaai.in";
-};
-
-export const buildApiUrl = (path: string) =>
-  `${API_BASE}${normalizePath(path)}`;
-
-export const buildAppUrl = (path: string) =>
-  `${getAppBase()}${normalizePath(path)}`;
+import { buildApiUrl } from "@/lib/url";
 
 export type CurrentUser = {
   id: string;

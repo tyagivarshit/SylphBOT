@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.autoCompleteAppointments = exports.rescheduleByLead = exports.cancelAppointmentByLead = exports.getUpcomingAppointment = exports.createNewAppointment = exports.fetchAvailableSlots = void 0;
+exports.rescheduleAppointment = exports.cancelExistingAppointment = exports.autoCompleteAppointments = exports.rescheduleByLead = exports.cancelAppointmentByLead = exports.getUpcomingAppointment = exports.createNewAppointment = exports.fetchAvailableSlots = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const bookingReminder_queue_1 = require("../queues/bookingReminder.queue");
 const ownerNotification_service_1 = require("./ownerNotification.service");
@@ -222,3 +222,51 @@ const autoCompleteAppointments = async () => {
     });
 };
 exports.autoCompleteAppointments = autoCompleteAppointments;
+const getAppointmentById = async (appointmentId) => {
+    const appointment = await prisma_1.default.appointment.findUnique({
+        where: { id: appointmentId },
+    });
+    if (!appointment) {
+        throw new Error("Appointment not found");
+    }
+    return appointment;
+};
+const cancelExistingAppointment = async (appointmentId) => {
+    const appointment = await getAppointmentById(appointmentId);
+    if (appointment.status === "CANCELLED") {
+        return appointment;
+    }
+    return prisma_1.default.appointment.update({
+        where: { id: appointmentId },
+        data: { status: "CANCELLED" },
+    });
+};
+exports.cancelExistingAppointment = cancelExistingAppointment;
+const rescheduleAppointment = async (appointmentId, newStart, newEnd) => {
+    const appointment = await getAppointmentById(appointmentId);
+    const conflict = await prisma_1.default.appointment.findFirst({
+        where: {
+            businessId: appointment.businessId,
+            status: "CONFIRMED",
+            id: { not: appointment.id },
+            AND: [
+                { startTime: { lt: newEnd } },
+                { endTime: { gt: newStart } },
+            ],
+        },
+    });
+    if (conflict) {
+        throw new Error("New slot not available");
+    }
+    return prisma_1.default.appointment.update({
+        where: { id: appointmentId },
+        data: {
+            startTime: newStart,
+            endTime: newEnd,
+            status: appointment.status === "CANCELLED"
+                ? "CONFIRMED"
+                : appointment.status,
+        },
+    });
+};
+exports.rescheduleAppointment = rescheduleAppointment;

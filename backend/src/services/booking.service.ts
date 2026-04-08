@@ -294,3 +294,66 @@ export const autoCompleteAppointments = async () => {
     },
   });
 };
+
+const getAppointmentById = async (appointmentId: string) => {
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+  });
+
+  if (!appointment) {
+    throw new Error("Appointment not found");
+  }
+
+  return appointment;
+};
+
+export const cancelExistingAppointment = async (
+  appointmentId: string
+) => {
+  const appointment = await getAppointmentById(appointmentId);
+
+  if (appointment.status === "CANCELLED") {
+    return appointment;
+  }
+
+  return prisma.appointment.update({
+    where: { id: appointmentId },
+    data: { status: "CANCELLED" },
+  });
+};
+
+export const rescheduleAppointment = async (
+  appointmentId: string,
+  newStart: Date,
+  newEnd: Date
+) => {
+  const appointment = await getAppointmentById(appointmentId);
+
+  const conflict = await prisma.appointment.findFirst({
+    where: {
+      businessId: appointment.businessId,
+      status: "CONFIRMED",
+      id: { not: appointment.id },
+      AND: [
+        { startTime: { lt: newEnd } },
+        { endTime: { gt: newStart } },
+      ],
+    },
+  });
+
+  if (conflict) {
+    throw new Error("New slot not available");
+  }
+
+  return prisma.appointment.update({
+    where: { id: appointmentId },
+    data: {
+      startTime: newStart,
+      endTime: newEnd,
+      status:
+        appointment.status === "CANCELLED"
+          ? "CONFIRMED"
+          : appointment.status,
+    },
+  });
+};

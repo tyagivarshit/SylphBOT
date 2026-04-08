@@ -4,15 +4,11 @@ import { Suspense, useEffect, useState } from "react"
 import { usePlan } from "@/hooks/usePlan"
 import axios from "axios"
 import { useSearchParams } from "next/navigation"
+import { buildApiUrl } from "@/lib/url"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
 import FeatureGate from "@/components/FeatureGate"
-
-const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000",
-  withCredentials: true,
-})
 
 const stageOptions = [
   { value: "", label: "All Stages" },
@@ -48,7 +44,8 @@ function LeadsPageContent(){
           return
         }
 
-        const res = await api.get("/api/dashboard/leads",{
+        const res = await axios.get(buildApiUrl("/dashboard/leads"), {
+          withCredentials: true,
           params:{
             page,
             limit:10,
@@ -177,3 +174,4 @@ export default function LeadsPage() {
     </Suspense>
   )
 }
+

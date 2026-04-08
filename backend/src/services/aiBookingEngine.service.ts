@@ -29,6 +29,7 @@ import { scheduleReminderJobs } from "../queues/bookingReminder.queue";
 interface BookingResult {
   handled: boolean;
   message: string;
+  slots?: Date[];
 }
 
 /* ================================================= */
@@ -311,5 +312,60 @@ export const handleAIBookingIntent = async (
   } catch (error) {
     console.error("BOOKING ENGINE ERROR:", error);
     return { handled: false, message: "" };
+  }
+};
+
+export const confirmAIBooking = async (
+  businessId: string,
+  leadId: string,
+  slot: Date
+) => {
+  try {
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+    });
+
+    if (!lead) {
+      return {
+        success: false,
+        message: "Lead not found.",
+        appointment: null,
+      };
+    }
+
+    const appointment = await createNewAppointment({
+      businessId,
+      leadId,
+      name: lead.name || "Customer",
+      email: lead.email || null,
+      phone: lead.phone || null,
+      startTime: slot,
+      endTime: new Date(slot.getTime() + 30 * 60000),
+    });
+
+    scheduleReminderJobs(appointment.id).catch(() => {});
+    await releaseSlotLock(slot.toISOString()).catch(() => {});
+    await clearConversationState(leadId);
+
+    await sendOwnerWhatsAppNotification({
+      businessId,
+      leadId,
+      slot,
+      type: "BOOKED",
+    }).catch(() => {});
+
+    return {
+      success: true,
+      message: `Booked for ${slot.toLocaleString()}`,
+      appointment,
+    };
+  } catch (error: any) {
+    console.error("AI BOOKING CONFIRM ERROR:", error);
+
+    return {
+      success: false,
+      message: error?.message || "Failed to confirm booking",
+      appointment: null,
+    };
   }
 };

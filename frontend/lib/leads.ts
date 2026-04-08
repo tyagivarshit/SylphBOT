@@ -1,6 +1,5 @@
+import { buildApiUrl } from "@/lib/url"
 import { getToken } from "./token"
-
-const API = process.env.NEXT_PUBLIC_API_URL
 
 export async function getLeads(){
 
@@ -10,8 +9,9 @@ export async function getLeads(){
     throw new Error("No token found")
   }
 
-  const res = await fetch(`${API}/api/dashboard/leads`,{
+  const res = await fetch(buildApiUrl("/dashboard/leads"),{
     method:"GET",
+    credentials: "include",
     headers:{
       "Content-Type":"application/json",
       Authorization:`Bearer ${token}`

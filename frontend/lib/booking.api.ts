@@ -1,15 +1,11 @@
 import axios from "axios";
+import { getApiBaseUrl } from "@/lib/url";
 
 const API = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: getApiBaseUrl(),
   withCredentials: true,
 });
 
-/*
-=====================================================
-GET AVAILABLE SLOTS
-=====================================================
-*/
 export const getAvailableSlots = async (
   businessId: string,
   date: string
@@ -20,11 +16,6 @@ export const getAvailableSlots = async (
   return res.data;
 };
 
-/*
-=====================================================
-CREATE APPOINTMENT
-=====================================================
-*/
 export const createAppointment = async (data: {
   businessId: string;
   leadId?: string;
@@ -38,11 +29,6 @@ export const createAppointment = async (data: {
   return res.data;
 };
 
-/*
-=====================================================
-RESCHEDULE APPOINTMENT
-=====================================================
-*/
 export const rescheduleAppointment = async (
   appointmentId: string,
   data: {
@@ -57,11 +43,6 @@ export const rescheduleAppointment = async (
   return res.data;
 };
 
-/*
-=====================================================
-CANCEL APPOINTMENT
-=====================================================
-*/
 export const cancelAppointment = async (appointmentId: string) => {
   const res = await API.delete(
     `/booking/appointment/${appointmentId}`

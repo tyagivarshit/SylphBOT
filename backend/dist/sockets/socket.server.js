@@ -2,13 +2,14 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getIO = exports.initSocket = void 0;
 const socket_io_1 = require("socket.io");
+const env_1 = require("../config/env");
 let io;
 const initSocket = (server) => {
     io = new socket_io_1.Server(server, {
         cors: {
-            origin: process.env.FRONTEND_URL,
-            credentials: true
-        }
+            origin: env_1.env.ALLOWED_FRONTEND_ORIGINS,
+            credentials: true,
+        },
     });
     io.on("connection", (socket) => {
         console.log("Socket connected:", socket.id);

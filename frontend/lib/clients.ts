@@ -1,8 +1,8 @@
-const API = process.env.NEXT_PUBLIC_API_URL
+import { buildApiUrl } from "@/lib/url"
 
 export async function getClients() {
-  const res = await fetch(`${API}/api/clients`, {
-    credentials: "include", // 🔥 MUST
+  const res = await fetch(buildApiUrl("/clients"), {
+    credentials: "include",
   })
 
   if (!res.ok) {
@@ -18,9 +18,9 @@ export async function getClients() {
 }
 
 export async function createClient(data: any) {
-  const res = await fetch(`${API}/api/clients`, {
+  const res = await fetch(buildApiUrl("/clients"), {
     method: "POST",
-    credentials: "include", // 🔥 MUST
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },

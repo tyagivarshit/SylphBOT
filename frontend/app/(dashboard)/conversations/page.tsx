@@ -5,8 +5,7 @@ import { io } from "socket.io-client";
 import { useSearchParams } from "next/navigation";
 import ChatSidebar from "@/components/conversations/ChatSidebar";
 import ChatWindow from "@/components/conversations/ChatWindow";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "";
+import { buildApiUrl, getAbsoluteApiOrigin } from "@/lib/url";
 
 export interface Lead {
   id: string;
@@ -47,7 +46,7 @@ function ConversationsPageContent() {
   useEffect(() => {
     const fetchLeads = async () => {
       try {
-        const res = await fetch(`${API}/api/conversations`, {
+        const res = await fetch(buildApiUrl("/conversations"), {
           credentials: "include",
         });
 
@@ -72,7 +71,7 @@ function ConversationsPageContent() {
     const fetchMessages = async () => {
       try {
         const res = await fetch(
-          `${API}/api/conversations/${selectedLead.id}/messages`,
+          buildApiUrl(`/conversations/${selectedLead.id}/messages`),
           {
             credentials: "include",
           }
@@ -106,12 +105,12 @@ function ConversationsPageContent() {
   useEffect(() => {
     if (!selectedLead) return;
 
-    const socket = io(API, {
+    const socket = io(getAbsoluteApiOrigin(), {
       transports: ["websocket"],
       withCredentials: true,
     });
 
-    socket.emit("join", `lead_${selectedLead.id}`);
+    socket.emit("join_conversation", selectedLead.id);
 
     socket.on("new_message", (msg: Message) => {
       setMessages((prev) => [...prev, msg]);

@@ -5,11 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import LeadsChart from "@/components/charts/LeadsCharts";
 import axios from "axios";
-
-const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000",
-  withCredentials: true,
-});
+import { buildApiUrl } from "@/lib/url";
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
@@ -29,8 +25,12 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         const [statsRes, convoRes] = await Promise.all([
-          api.get("/api/dashboard/stats"),
-          api.get("/api/dashboard/active-conversations"),
+          axios.get(buildApiUrl("/dashboard/stats"), {
+            withCredentials: true,
+          }),
+          axios.get(buildApiUrl("/dashboard/active-conversations"), {
+            withCredentials: true,
+          }),
         ]);
 
         setStats(statsRes.data.data);

@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const crypto_1 = require("crypto");
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const compression_1 = __importDefault(require("compression"));
@@ -11,14 +12,13 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const env_1 = require("./config/env");
 const auth_middleware_1 = require("./middleware/auth.middleware");
 const subscription_middleware_1 = require("./middleware/subscription.middleware");
-/* ========= ROUTES ========= */
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const googleAuth_routes_1 = __importDefault(require("./routes/googleAuth.routes"));
 const client_routes_1 = __importDefault(require("./routes/client.routes"));
 const ai_routes_1 = __importDefault(require("./routes/ai.routes"));
 const whatsapp_webhook_1 = __importDefault(require("./routes/whatsapp.webhook"));
 const instagram_webhook_1 = __importDefault(require("./routes/instagram.webhook"));
-const billing_routes_1 = __importDefault(require("./routes/billing.routes")); // 🔥 HEALTH CHECK ROUTE (IMPORTANT FOR RENDER)
+const billing_routes_1 = __importDefault(require("./routes/billing.routes"));
 const stripeWebhook_routes_1 = __importDefault(require("./routes/stripeWebhook.routes"));
 const dashboard_routes_1 = __importDefault(require("./routes/dashboard.routes"));
 const commentTrigger_routes_1 = __importDefault(require("./routes/commentTrigger.routes"));
@@ -29,61 +29,85 @@ const knowledge_routes_1 = __importDefault(require("./routes/knowledge.routes"))
 const training_routes_1 = __importDefault(require("./routes/training.routes"));
 const lead_routes_1 = __importDefault(require("./routes/lead.routes"));
 const analytics_routes_1 = __importDefault(require("./routes/analytics.routes"));
-/* ========= NEW ROUTES ========= */
 const search_routes_1 = __importDefault(require("./routes/search.routes"));
 const notification_1 = __importDefault(require("./routes/notification"));
 const user_routes_1 = __importDefault(require("./routes/user.routes"));
 const security_routes_1 = __importDefault(require("./routes/security.routes"));
 const integration_routes_1 = __importDefault(require("./routes/integration.routes"));
 const oauth_routes_1 = __importDefault(require("./routes/oauth.routes"));
-/* ✅ ADDED ROUTES */
 const booking_routes_1 = __importDefault(require("./routes/booking.routes"));
 const availability_routes_1 = __importDefault(require("./routes/availability.routes"));
-/* ========= MIDDLEWARE ========= */
+const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
-/* ========= CRONS ========= */
 const trial_cron_1 = require("./cron/trial.cron");
 const metaTokenRefresh_cron_1 = require("./cron/metaTokenRefresh.cron");
 const resetUsage_cron_1 = require("./cron/resetUsage.cron");
 require("./workers/bookingReminder.worker");
-/* ========= ERRORS ========= */
 const AppError_1 = require("./utils/AppError");
-const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
 const app = (0, express_1.default)();
-console.log("🔥 REDIS FROM ENV:", env_1.env.REDIS_URL);
-/* ======================================
-🔥 TRUST PROXY
-====================================== */
 app.set("trust proxy", 1);
-/* ======================================
-🔥 SECURITY + PERFORMANCE
-====================================== */
+app.disable("x-powered-by");
+const allowedOrigins = new Set(env_1.env.ALLOWED_FRONTEND_ORIGINS);
+const corsOptions = {
+    origin(origin, callback) {
+        if (!origin) {
+            return callback(null, true);
+        }
+        try {
+            const normalizedOrigin = new URL(origin).origin;
+            if (allowedOrigins.has(normalizedOrigin)) {
+                return callback(null, true);
+            }
+        }
+        catch {
+            return callback(new Error("Invalid CORS origin"));
+        }
+        return callback(new Error("Origin not allowed by CORS"));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Stripe-Signature",
+        "X-Requested-With",
+        "X-Request-Id",
+    ],
+    exposedHeaders: ["X-Request-Id"],
+    maxAge: 86400,
+};
 app.use((0, helmet_1.default)({
-    crossOriginResourcePolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    referrerPolicy: {
+        policy: "strict-origin-when-cross-origin",
+    },
+    hsts: env_1.env.IS_PROD
+        ? {
+            maxAge: 31536000,
+            includeSubDomains: true,
+            preload: true,
+        }
+        : false,
 }));
 app.use((0, compression_1.default)());
+app.use((0, cors_1.default)(corsOptions));
+app.options(/.*/, (0, cors_1.default)(corsOptions));
 app.use(rateLimit_middleware_1.globalLimiter);
-/* ======================================
-🔥 COOKIE PARSER
-====================================== */
 app.use((0, cookie_parser_1.default)());
-/* ======================================
-🔥 CORS
-====================================== */
-app.use((0, cors_1.default)({
-    origin: [
-        "https://app.automexiaai.in"
-    ],
-    credentials: true,
-}));
-/* ======================================
-🔥 REQUEST LOGGER
-====================================== */
+app.use((req, res, next) => {
+    const headerValue = req.headers["x-request-id"];
+    const requestId = (Array.isArray(headerValue) ? headerValue[0] : headerValue) ||
+        (0, crypto_1.randomUUID)();
+    req.requestId = requestId;
+    res.setHeader("X-Request-Id", requestId);
+    next();
+});
 app.use((req, res, next) => {
     const start = Date.now();
     res.on("finish", () => {
         console.info(JSON.stringify({
+            requestId: req.requestId,
             type: "request",
             method: req.method,
             url: req.originalUrl,
@@ -94,25 +118,20 @@ app.use((req, res, next) => {
     });
     next();
 });
-/* ======================================
-🔥 MONITORING
-====================================== */
 app.use(monitoring_middleware_1.monitoringMiddleware);
-/* ======================================
-🔥 REQUEST TIMEOUT
-====================================== */
 app.use((req, res, next) => {
     res.setTimeout(15000, () => {
-        console.error("⏱️ Request timeout:", req.originalUrl);
+        console.error("Request timeout:", req.originalUrl);
         if (!res.headersSent) {
-            res.status(408).send("Request Timeout");
+            res.status(408).json({
+                success: false,
+                message: "Request Timeout",
+                requestId: req.requestId,
+            });
         }
     });
     next();
 });
-/* ======================================
-🔥 WEBHOOKS (ORDER IMPORTANT)
-====================================== */
 app.use("/api/webhooks/stripe", express_1.default.raw({ type: "application/json" }), stripeWebhook_routes_1.default);
 app.use("/api/webhook/whatsapp", express_1.default.raw({ type: "application/json" }), whatsapp_webhook_1.default);
 app.use("/api/webhook/instagram", express_1.default.raw({
@@ -121,47 +140,25 @@ app.use("/api/webhook/instagram", express_1.default.raw({
         req.rawBody = buf;
     },
 }), instagram_webhook_1.default);
-/* ======================================
-🔥 JSON PARSER
-====================================== */
 app.use(express_1.default.json({ limit: "1mb" }));
-/* ======================================
-🔥 GLOBAL AUTH ONLY (FIXED)
-====================================== */
-app.use((req, res, next) => {
-    const publicRoutes = [
-        "/",
-        "/health",
-        "/api/auth",
-        "/api/webhooks",
-        "/api/webhook",
-    ];
-    const isPublic = publicRoutes.some((route) => req.originalUrl.startsWith(route));
-    if (isPublic)
-        return next();
-    (0, auth_middleware_1.protect)(req, res, next);
-});
-/* ======================================
-🔥 ROUTES
-====================================== */
 app.get("/", (_req, res) => {
-    res.send("API Running 🚀");
+    res.json({
+        success: true,
+        message: "API Running",
+        environment: env_1.env.NODE_ENV,
+    });
 });
-/* AUTH */
 app.use("/api/auth", auth_routes_1.default);
 app.use("/api/auth", googleAuth_routes_1.default);
-/* FREE (AUTH ONLY) */
 app.use("/api/dashboard", auth_middleware_1.protect, dashboard_routes_1.default);
 app.use("/api/billing", auth_middleware_1.protect, billing_routes_1.default);
 app.use("/api/user", auth_middleware_1.protect, user_routes_1.default);
 app.use("/api/notifications", auth_middleware_1.protect, notification_1.default);
-/* PREMIUM */
 app.use("/api/ai", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, rateLimit_middleware_1.aiLimiter, ai_routes_1.default);
 app.use("/api/automation", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, automation_routes_1.default);
 app.use("/api/messages", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, message_routes_1.default);
 app.use("/api/conversations", auth_middleware_1.protect, conversation_routes_1.default);
 app.use("/api/comment-triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
-/* OTHER (AUTH ONLY) */
 app.use("/api/clients", auth_middleware_1.protect, client_routes_1.default);
 app.use("/api/instagram", auth_middleware_1.protect, instagram_routes_1.default);
 app.use("/api/knowledge", auth_middleware_1.protect, knowledge_routes_1.default);
@@ -172,29 +169,26 @@ app.use("/api/search", auth_middleware_1.protect, search_routes_1.default);
 app.use("/api/security", auth_middleware_1.protect, security_routes_1.default);
 app.use("/api/integrations", auth_middleware_1.protect, integration_routes_1.default);
 app.use("/api/oauth", auth_middleware_1.protect, oauth_routes_1.default);
-/* ✅ ADDED BOOKING + AVAILABILITY */
 app.use("/api/booking", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, booking_routes_1.default);
 app.use("/api/availability", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, availability_routes_1.default);
-/* ======================================
-🔥 HEALTH
-====================================== */
-app.get("/health", (_req, res) => {
-    res.status(200).json({ success: true });
+app.get("/health", (req, res) => {
+    res.status(200).json({
+        success: true,
+        status: "ok",
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+    });
 });
-/* ======================================
-🔥 404
-====================================== */
-app.use((_req, res) => {
+app.use((req, res) => {
     res.status(404).json({
         success: false,
         message: "Route not found",
+        requestId: req.requestId,
     });
 });
-/* ======================================
-🔥 ERROR HANDLER
-====================================== */
 app.use((err, req, res, _next) => {
     console.error("ERROR:", {
+        requestId: req.requestId,
         message: err.message,
         path: req.originalUrl,
         method: req.method,
@@ -205,30 +199,24 @@ app.use((err, req, res, _next) => {
             message: err.message,
             code: err.code,
             details: err.details || null,
+            requestId: req.requestId,
         });
     }
     return res.status(500).json({
         success: false,
-        message: process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : err.message,
+        message: env_1.env.IS_PROD ? "Internal server error" : err.message,
+        requestId: req.requestId,
     });
 });
-/* ======================================
-🔥 CRONS
-====================================== */
 if (process.env.ENABLE_CRON === "true") {
     (0, trial_cron_1.startTrialExpiryCron)();
     (0, metaTokenRefresh_cron_1.startMetaTokenRefreshCron)();
     (0, resetUsage_cron_1.startUsageResetCron)();
 }
-/* ======================================
-🔥 CRASH SAFETY
-====================================== */
 process.on("uncaughtException", (err) => {
-    console.error("🔥 UNCAUGHT EXCEPTION:", err);
+    console.error("UNCAUGHT EXCEPTION:", err);
 });
 process.on("unhandledRejection", (err) => {
-    console.error("🔥 UNHANDLED REJECTION:", err);
+    console.error("UNHANDLED REJECTION:", err);
 });
 exports.default = app;

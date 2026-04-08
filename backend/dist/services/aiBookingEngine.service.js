@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleAIBookingIntent = void 0;
+exports.confirmAIBooking = exports.handleAIBookingIntent = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const booking_service_1 = require("./booking.service");
 const conversationState_service_1 = require("./conversationState.service");
@@ -224,3 +224,49 @@ const handleAIBookingIntent = async (businessId, leadId, message) => {
     }
 };
 exports.handleAIBookingIntent = handleAIBookingIntent;
+const confirmAIBooking = async (businessId, leadId, slot) => {
+    try {
+        const lead = await prisma_1.default.lead.findUnique({
+            where: { id: leadId },
+        });
+        if (!lead) {
+            return {
+                success: false,
+                message: "Lead not found.",
+                appointment: null,
+            };
+        }
+        const appointment = await (0, booking_service_1.createNewAppointment)({
+            businessId,
+            leadId,
+            name: lead.name || "Customer",
+            email: lead.email || null,
+            phone: lead.phone || null,
+            startTime: slot,
+            endTime: new Date(slot.getTime() + 30 * 60000),
+        });
+        (0, bookingReminder_queue_1.scheduleReminderJobs)(appointment.id).catch(() => { });
+        await (0, slotLock_service_1.releaseSlotLock)(slot.toISOString()).catch(() => { });
+        await (0, conversationState_service_1.clearConversationState)(leadId);
+        await (0, ownerNotification_service_1.sendOwnerWhatsAppNotification)({
+            businessId,
+            leadId,
+            slot,
+            type: "BOOKED",
+        }).catch(() => { });
+        return {
+            success: true,
+            message: `Booked for ${slot.toLocaleString()}`,
+            appointment,
+        };
+    }
+    catch (error) {
+        console.error("AI BOOKING CONFIRM ERROR:", error);
+        return {
+            success: false,
+            message: error?.message || "Failed to confirm booking",
+            appointment: null,
+        };
+    }
+};
+exports.confirmAIBooking = confirmAIBooking;

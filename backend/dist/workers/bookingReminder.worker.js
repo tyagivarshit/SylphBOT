@@ -7,7 +7,6 @@ exports.bookingReminderWorker = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const whatsapp_service_1 = require("../services/whatsapp.service");
-const redis_1 = require("../config/redis");
 const bookingReminder_queue_1 = require("../queues/bookingReminder.queue");
 exports.bookingReminderWorker = new bullmq_1.Worker(bookingReminder_queue_1.BOOKING_REMINDER_QUEUE_NAME, async (job) => {
     const { type, appointmentId } = job.data;
@@ -118,6 +117,6 @@ Please be ready 🚀`;
         throw error; // retry
     }
 }, {
-    connection: redis_1.redisConnection,
+    connection: { url: process.env.REDIS_URL },
     concurrency: 5,
 });

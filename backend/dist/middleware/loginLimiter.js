@@ -1,7 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loginLimiter = void 0;
-const redis_1 = require("../config/redis");
+const redis_1 = __importDefault(require("../config/redis"));
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;
 const MAX_IP_ATTEMPTS = 20;
@@ -18,7 +21,7 @@ CORE LIMITER LOGIC
 ====================================== */
 const checkLimit = async (key, limit) => {
     const now = Date.now();
-    const multi = redis_1.redis.multi();
+    const multi = redis_1.default.multi();
     multi.zremrangebyscore(key, 0, now - WINDOW * 1000);
     multi.zadd(key, now, `${now}-${Math.random()}`);
     multi.zcard(key);
@@ -44,7 +47,7 @@ const loginLimiter = async (req, res, next) => {
             checkLimit(ipKey, MAX_IP_ATTEMPTS),
         ]);
         if (isEmailBlocked || isIPBlocked) {
-            const ttl = await redis_1.redis.ttl(emailIPKey);
+            const ttl = await redis_1.default.ttl(emailIPKey);
             console.warn("🚨 LOGIN RATE LIMITED", {
                 email,
                 ip,

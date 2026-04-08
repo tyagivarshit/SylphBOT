@@ -5,18 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processWebhookEvent = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const ioredis_1 = __importDefault(require("ioredis"));
-/*
-====================================================
-REDIS CONNECTION
-====================================================
-*/
-const redis = new ioredis_1.default(process.env.REDIS_URL, {
-    maxRetriesPerRequest: 3,
-    enableReadyCheck: false,
-    lazyConnect: true,
-    reconnectOnError: () => true,
-});
+const redis_1 = __importDefault(require("../config/redis"));
 /*
 ====================================================
 CONFIG
@@ -40,7 +29,7 @@ REDIS LOCK
 const acquireRedisLock = async (eventId, platform) => {
     const key = buildKey(eventId, platform);
     try {
-        const result = await redis.set(key, "1", "EX", REDIS_TTL, "NX");
+        const result = await redis_1.default.set(key, "1", "EX", REDIS_TTL, "NX");
         return result === "OK";
     }
     catch (error) {

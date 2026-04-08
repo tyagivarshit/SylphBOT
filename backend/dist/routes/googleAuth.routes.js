@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const passport_1 = __importDefault(require("passport"));
-const redis_1 = require("../config/redis");
+const redis_1 = __importDefault(require("../config/redis"));
 const googleAuth_controller_1 = require("../controllers/googleAuth.controller");
 const router = (0, express_1.Router)();
 /* ======================================
@@ -22,12 +22,12 @@ const oauthLimiter = async (req, res, next) => {
     try {
         const ip = getIP(req);
         const key = `oauth:${ip}`;
-        const multi = redis_1.redis.multi();
+        const multi = redis_1.default.multi();
         multi.incr(key);
         multi.ttl(key);
         const [[, count], [, ttl]] = (await multi.exec());
         if (ttl === -1) {
-            await redis_1.redis.expire(key, 60);
+            await redis_1.default.expire(key, 60);
         }
         if (count > 20) {
             return res.status(429).json({

@@ -5,22 +5,16 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const os_1 = __importDefault(require("os"));
-const bullmq_1 = require("bullmq");
-const rateLimiter_redis_1 = require("../redis/rateLimiter.redis");
-const redis_1 = require("../config/redis");
 const router = (0, express_1.Router)();
-/* =============================
-QUEUE INSTANCES
-============================= */
-const aiQueue = new bullmq_1.Queue("aiQueue", {
-    connection: redis_1.redisConnection,
-});
-const funnelQueue = new bullmq_1.Queue("funnelQueue", {
-    connection: redis_1.redisConnection,
-});
-/* =============================
-SYSTEM STATS
-============================= */
+const redis_1 = __importDefault(require("../config/redis"));
+const ai_queue_1 = require("../queues/ai.queue");
+const funnel_queue_1 = require("../queues/funnel.queue");
+/* ================================
+   QUEUE INSTANCES (FIXED)
+================================ */
+/* ================================
+   SYSTEM STATS
+================================ */
 const getSystemStats = () => {
     const memory = process.memoryUsage();
     return {
@@ -35,13 +29,13 @@ const getSystemStats = () => {
         },
     };
 };
-/* =============================
-REDIS HEALTH
-============================= */
+/* ================================
+   REDIS HEALTH
+================================ */
 const checkRedis = async () => {
     try {
         const start = Date.now();
-        const pong = await rateLimiter_redis_1.redis.ping();
+        const pong = await redis_1.default?.ping();
         const latency = Date.now() - start;
         return {
             status: pong === "PONG" ? "ok" : "error",
@@ -55,19 +49,19 @@ const checkRedis = async () => {
         };
     }
 };
-/* =============================
-QUEUE HEALTH
-============================= */
+/* ================================
+   QUEUE HEALTH
+================================ */
 const checkQueues = async () => {
     try {
         const [aiWaiting, aiActive, aiFailed, aiDelayed, funnelWaiting, funnelActive, funnelFailed,] = await Promise.all([
-            aiQueue.getWaitingCount(),
-            aiQueue.getActiveCount(),
-            aiQueue.getFailedCount(),
-            aiQueue.getDelayedCount(),
-            funnelQueue.getWaitingCount(),
-            funnelQueue.getActiveCount(),
-            funnelQueue.getFailedCount(),
+            ai_queue_1.aiQueue.getWaitingCount(),
+            ai_queue_1.aiQueue.getActiveCount(),
+            ai_queue_1.aiQueue.getFailedCount(),
+            ai_queue_1.aiQueue.getDelayedCount(),
+            funnel_queue_1.funnelQueue.getWaitingCount(),
+            funnel_queue_1.funnelQueue.getActiveCount(),
+            funnel_queue_1.funnelQueue.getFailedCount(),
         ]);
         return {
             aiQueue: {
@@ -90,9 +84,9 @@ const checkQueues = async () => {
         };
     }
 };
-/* =============================
-GLOBAL HEALTH
-============================= */
+/* ================================
+   ROUTES
+================================ */
 router.get("/", async (req, res) => {
     try {
         const [redisHealth, queueHealth] = await Promise.all([
@@ -116,25 +110,5 @@ router.get("/", async (req, res) => {
             error: String(error),
         });
     }
-});
-/* =============================
-REDIS ONLY CHECK
-============================= */
-router.get("/redis", async (req, res) => {
-    const redisHealth = await checkRedis();
-    res.send(redisHealth);
-});
-/* =============================
-QUEUE ONLY CHECK
-============================= */
-router.get("/queues", async (req, res) => {
-    const queues = await checkQueues();
-    res.send(queues);
-});
-/* =============================
-SYSTEM STATS ONLY
-============================= */
-router.get("/system", (req, res) => {
-    res.send(getSystemStats());
 });
 exports.default = router;

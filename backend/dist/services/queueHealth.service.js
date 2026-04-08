@@ -1,16 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getQueueHealth = void 0;
-const bullmq_1 = require("bullmq");
-const redis_1 = require("../config/redis");
-const aiQueue = new bullmq_1.Queue("aiQueue", {
-    connection: redis_1.redisConnection,
-});
+const ai_queue_1 = require("../queues/ai.queue");
 const getQueueHealth = async () => {
-    const waiting = await aiQueue.getWaitingCount();
-    const active = await aiQueue.getActiveCount();
-    const delayed = await aiQueue.getDelayedCount();
-    const failed = await aiQueue.getFailedCount();
+    const waiting = await ai_queue_1.aiQueue.getWaitingCount();
+    const active = await ai_queue_1.aiQueue.getActiveCount();
+    const delayed = await ai_queue_1.aiQueue.getDelayedCount();
+    const failed = await ai_queue_1.aiQueue.getFailedCount();
     return {
         waiting,
         active,

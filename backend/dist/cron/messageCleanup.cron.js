@@ -6,8 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runMessageCleanup = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const conversationSummary_service_1 = require("../services/conversationSummary.service");
-const ioredis_1 = __importDefault(require("ioredis"));
-const redis = new ioredis_1.default(process.env.REDIS_URL);
+const redis_1 = __importDefault(require("../config/redis"));
 /*
 ---------------------------------------------------
 CONFIG
@@ -68,10 +67,10 @@ CLEAR REDIS CONVERSATION CACHE
 */
 const clearRedisCache = async () => {
     console.log("⚡ Clearing conversation cache");
-    const keys = await redis.keys("conversation:*");
+    const keys = await redis_1.default.keys("conversation:*");
     if (!keys.length)
         return;
-    await redis.del(keys);
+    await redis_1.default.del(keys);
     console.log(`⚡ Cleared ${keys.length} cache keys`);
 };
 /*

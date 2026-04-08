@@ -6,7 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const bullmq_1 = require("bullmq");
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
-const redis_1 = require("../config/redis");
 const encrypt_1 = require("../utils/encrypt");
 const socket_server_1 = require("../sockets/socket.server");
 /* 🔥 SMART FOLLOWUP GENERATOR (UPGRADED 🔥) */
@@ -182,7 +181,7 @@ new bullmq_1.Worker("followupQueue", async (job) => {
         throw err;
     }
 }, {
-    connection: redis_1.redisConnection,
+    connection: { url: process.env.REDIS_URL },
     concurrency: 5,
 });
 console.log("🚀 Followup Worker Started");

@@ -3,12 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearAllRates = exports.resetRate = exports.getRate = exports.incrementRate = exports.getRateKey = exports.redis = void 0;
-const ioredis_1 = __importDefault(require("ioredis"));
-exports.redis = new ioredis_1.default(process.env.REDIS_URL, {
-    maxRetriesPerRequest: 3,
-    enableReadyCheck: true,
-});
+exports.clearAllRates = exports.resetRate = exports.getRate = exports.incrementRate = exports.getRateKey = void 0;
+const redis_1 = __importDefault(require("../config/redis"));
 /* ======================================
 CONFIG
 ====================================== */
@@ -28,12 +24,12 @@ INCREMENT (ATOMIC + SAFE)
 const incrementRate = async (businessId, leadId, platform, windowSeconds = 60) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
     try {
-        const multi = exports.redis.multi();
+        const multi = redis_1.default.multi();
         multi.incr(key);
         multi.ttl(key);
         const [[, count], [, ttl]] = (await multi.exec());
         if (ttl === -1) {
-            await exports.redis.expire(key, windowSeconds);
+            await redis_1.default.expire(key, windowSeconds);
         }
         return count;
     }
@@ -48,7 +44,7 @@ GET RATE
 const getRate = async (businessId, leadId, platform) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
     try {
-        const value = await exports.redis.get(key);
+        const value = await redis_1.default.get(key);
         return Number(value || 0);
     }
     catch {
@@ -62,7 +58,7 @@ RESET RATE
 const resetRate = async (businessId, leadId, platform) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
     try {
-        await exports.redis.del(key);
+        await redis_1.default.del(key);
     }
     catch { }
 };
@@ -72,11 +68,11 @@ CLEAR ALL (SAFE SCAN)
 ====================================== */
 const clearAllRates = async () => {
     try {
-        const stream = exports.redis.scanStream({
+        const stream = redis_1.default.scanStream({
             match: `${PREFIX}:*`,
             count: 100,
         });
-        const pipeline = exports.redis.pipeline();
+        const pipeline = redis_1.default.pipeline();
         stream.on("data", (keys) => {
             if (keys.length) {
                 keys.forEach((key) => pipeline.del(key));

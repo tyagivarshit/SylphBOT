@@ -22,6 +22,7 @@ const cookieOptions = {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? "none" : "lax",
+    domain: ".automexiaai.in",
     path: "/",
 };
 /* ======================================

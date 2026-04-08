@@ -7,14 +7,13 @@ exports.stripeWebhook = void 0;
 const stripe_service_1 = require("../services/stripe.service");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const env_1 = require("../config/env");
-const ioredis_1 = __importDefault(require("ioredis"));
 /* 🔥 EMAIL */
 const email_service_1 = require("../services/email.service");
 /* 🔥 TAX */
 const tax_service_1 = require("../services/tax.service");
 /* 🔥 INVOICE NUMBER */
 const invoice_service_1 = require("../services/invoice.service");
-const redis = new ioredis_1.default(process.env.REDIS_URL);
+const redis_1 = __importDefault(require("../config/redis"));
 /* ====================================== */
 /* UTILS */
 /* ====================================== */
@@ -31,7 +30,7 @@ const getPeriodEnd = (sub) => {
 };
 const safeRedisDel = async (key) => {
     try {
-        await redis.del(key);
+        await redis_1.default.del(key);
     }
     catch {
         console.warn("⚠️ Redis failed:", key);

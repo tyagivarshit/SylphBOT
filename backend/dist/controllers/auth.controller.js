@@ -7,7 +7,7 @@ exports.logout = exports.getMe = exports.resetPassword = exports.forgotPassword 
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const prisma_1 = __importDefault(require("../config/prisma"));
-const redis_1 = require("../config/redis");
+const redis_1 = __importDefault(require("../config/redis"));
 const generateToken_1 = require("../utils/generateToken");
 const email_service_1 = require("../services/email.service");
 const AppError_1 = require("../utils/AppError");
@@ -24,9 +24,9 @@ RATE LIMIT
 ====================================== */
 const checkGlobalLimit = async (ip) => {
     const key = `global:${ip}`;
-    const count = await redis_1.redis.incr(key);
+    const count = await redis_1.default.incr(key);
     if (count === 1)
-        await redis_1.redis.expire(key, 60);
+        await redis_1.default.expire(key, 60);
     if (count > 60)
         throw (0, AppError_1.tooManyRequests)("Too many requests");
 };
@@ -38,6 +38,7 @@ const getCookieOptions = () => ({
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? "none" : "lax",
+    domain: ".automexiaai.in",
     path: "/",
 });
 /* ======================================

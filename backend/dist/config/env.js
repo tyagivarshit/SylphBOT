@@ -6,12 +6,37 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.env = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
+/* ======================================
+🔥 VALIDATION (CRITICAL)
+====================================== */
+if (!process.env.REDIS_URL) {
+    throw new Error("❌ REDIS_URL is not defined");
+}
+if (!process.env.JWT_SECRET) {
+    throw new Error("❌ JWT_SECRET is not defined");
+}
+if (!process.env.JWT_REFRESH_SECRET) {
+    throw new Error("❌ JWT_REFRESH_SECRET is not defined");
+}
+if (!process.env.FRONTEND_URL) {
+    throw new Error("❌ FRONTEND_URL is not defined");
+}
+/* ======================================
+🌍 ENV EXPORT (SINGLE SOURCE OF TRUTH)
+====================================== */
 exports.env = {
+    /* =========================
+       CORE
+    ========================= */
+    REDIS_URL: process.env.REDIS_URL,
     JWT_SECRET: process.env.JWT_SECRET,
     JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
+    FRONTEND_URL: process.env.FRONTEND_URL,
+    /* =========================
+       STRIPE
+    ========================= */
     STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
-    FRONTEND_URL: process.env.FRONTEND_URL,
     /* =========================
        BASIC - INR
     ========================= */

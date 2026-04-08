@@ -39,7 +39,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const axios_1 = __importDefault(require("axios"));
-const redis_1 = require("../config/redis");
 const encrypt_1 = require("../utils/encrypt");
 const retry_utils_1 = require("../utils/retry.utils");
 const executionRouter_servce_1 = require("../services/executionRouter.servce"); // 🔥 FINAL ROUTER
@@ -83,7 +82,7 @@ const worker = new bullmq_1.Worker("aiQueue", async (job) => {
         plan: job.data.plan || null, // 🔥 ALSO FIX HERE
     });
 }, {
-    connection: redis_1.redisConnection,
+    connection: { url: process.env.REDIS_URL },
     concurrency: 10,
 });
 /* =====================================================
@@ -174,7 +173,9 @@ const processAndSendReply = async (data, aiReply) => {
         });
     }
     catch (error) {
-        logger_1.default.error("❌ Send reply failed", error);
+        if (error instanceof Error) {
+            logger_1.default.error("❌ Legacy flow failed: " + error.message);
+        }
         Sentry.captureException(error);
         throw error;
     }
@@ -246,7 +247,9 @@ const legacyExecution = async (data) => {
         return await processAndSendReply(data, aiReply);
     }
     catch (error) {
-        logger_1.default.error("❌ Legacy flow failed", error);
+        if (error instanceof Error) {
+            logger_1.default.error("❌ Legacy flow failed: " + error.message);
+        }
         Sentry.captureException(error);
         throw error;
     }

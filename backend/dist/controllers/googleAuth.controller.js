@@ -16,11 +16,14 @@ const getIP = (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
     req.socket.remoteAddress ||
     "unknown";
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
-/* 🔥 COOKIE OPTIONS */
+/* ======================================
+COOKIE OPTIONS
+====================================== */
 const getCookieOptions = () => ({
     httpOnly: true,
-    secure: false, // localhost fix
-    sameSite: "lax",
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    ...(isProd ? { domain: ".automexiaai.in" } : {}),
     path: "/",
 });
 /* ======================================
@@ -29,10 +32,9 @@ GOOGLE INIT
 const googleAuth = (req, res, next) => {
     try {
         const state = crypto_1.default.randomBytes(32).toString("hex");
+        const cookieOptions = getCookieOptions();
         res.cookie("oauth_state", state, {
-            httpOnly: true,
-            secure: false,
-            sameSite: "lax",
+            ...cookieOptions,
             maxAge: 10 * 60 * 1000,
         });
         passport_1.default.authenticate("google", {
@@ -54,21 +56,19 @@ const googleCallback = async (req, res) => {
         const user = req.user;
         const stateFromGoogle = req.query.state;
         const stateFromCookie = req.cookies?.oauth_state;
+        const cookieOptions = getCookieOptions();
         /* ======================================
         STATE VALIDATION
         ====================================== */
         if (!stateFromGoogle || stateFromGoogle !== stateFromCookie) {
-            console.warn("⚠️ OAuth state mismatch");
+            console.warn("OAuth state mismatch");
             return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
         }
-        res.clearCookie("oauth_state");
+        res.clearCookie("oauth_state", cookieOptions);
         if (!user || !user.id || !user.isActive) {
             return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
         }
         const result = await prisma_1.default.$transaction(async (tx) => {
-            /* ======================================
-            🔥 BUSINESS CHECK / CREATE (FIXED)
-            ====================================== */
             let business = await tx.business.findFirst({
                 where: { ownerId: user.id },
                 select: { id: true },
@@ -86,13 +86,9 @@ const googleCallback = async (req, res) => {
                 });
                 business = { id: newBusiness.id };
             }
-            /* ======================================
-            🔥 TOKENS
-            ====================================== */
             const accessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business.id, user.tokenVersion);
             const refreshRaw = (0, generateToken_1.generateRefreshToken)(user.id, user.tokenVersion);
             const refreshToken = hashToken(refreshRaw);
-            /* SESSION LIMIT */
             const count = await tx.refreshToken.count({
                 where: { userId: user.id },
             });
@@ -122,10 +118,6 @@ const googleCallback = async (req, res) => {
                 businessId: business.id,
             };
         });
-        /* ======================================
-        SET COOKIES
-        ====================================== */
-        const cookieOptions = getCookieOptions();
         res.cookie("accessToken", result.accessToken, {
             ...cookieOptions,
             maxAge: 15 * 60 * 1000,
@@ -134,17 +126,14 @@ const googleCallback = async (req, res) => {
             ...cookieOptions,
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
-        console.log("✅ GOOGLE LOGIN SUCCESS", {
+        console.log("GOOGLE LOGIN SUCCESS", {
             userId: user.id,
             businessId: result.businessId,
         });
-        /* ======================================
-        🔥 FINAL REDIRECT (FIXED)
-        ====================================== */
         return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
     }
     catch (err) {
-        console.error("❌ GOOGLE CALLBACK ERROR", err);
+        console.error("GOOGLE CALLBACK ERROR", err);
         return res.redirect(`${process.env.FRONTEND_URL}/auth/login`);
     }
 };

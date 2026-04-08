@@ -10,8 +10,7 @@ const encrypt_1 = require("../utils/encrypt");
 const ai_service_1 = require("./ai.service");
 const plan_config_1 = require("../config/plan.config");
 const rateLimiter_redis_1 = require("../redis/rateLimiter.redis");
-const ioredis_1 = __importDefault(require("ioredis"));
-const redis = new ioredis_1.default(process.env.REDIS_URL);
+const redis_1 = __importDefault(require("../config/redis"));
 const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, reelId, commentText, }) => {
     try {
         const text = commentText?.toLowerCase()?.trim();
@@ -34,7 +33,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             return;
         /* FETCH TRIGGERS */
         const cacheKey = `triggers:${businessId}:${clientId}:${reelId}`;
-        let triggers = await redis.get(cacheKey);
+        let triggers = await redis_1.default.get(cacheKey);
         if (triggers) {
             triggers = JSON.parse(triggers);
         }
@@ -48,7 +47,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
                 },
                 orderBy: { createdAt: "asc" },
             });
-            await redis.set(cacheKey, JSON.stringify(triggers), "EX", 300);
+            await redis_1.default.set(cacheKey, JSON.stringify(triggers), "EX", 300);
         }
         if (!triggers.length)
             return;

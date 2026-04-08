@@ -39,7 +39,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.bookingMonitorWorker = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
-const redis_1 = require("../config/redis");
 const whatsapp_service_1 = require("../services/whatsapp.service");
 const aiFollowup_service_1 = require("../services/aiFollowup.service");
 /*
@@ -148,6 +147,6 @@ Reply YES and we’ll set it up again 👍`,
         console.error("❌ BOOKING MONITOR ERROR:", error);
     }
 }, {
-    connection: redis_1.redisConnection,
+    connection: { url: process.env.REDIS_URL },
     concurrency: 1, // 🔥 IMPORTANT (avoid race condition)
 });

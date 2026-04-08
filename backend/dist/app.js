@@ -8,6 +8,7 @@ const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const compression_1 = __importDefault(require("compression"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
+const env_1 = require("./config/env");
 const auth_middleware_1 = require("./middleware/auth.middleware");
 const subscription_middleware_1 = require("./middleware/subscription.middleware");
 /* ========= ROUTES ========= */
@@ -17,7 +18,7 @@ const client_routes_1 = __importDefault(require("./routes/client.routes"));
 const ai_routes_1 = __importDefault(require("./routes/ai.routes"));
 const whatsapp_webhook_1 = __importDefault(require("./routes/whatsapp.webhook"));
 const instagram_webhook_1 = __importDefault(require("./routes/instagram.webhook"));
-const billing_routes_1 = __importDefault(require("./routes/billing.routes"));
+const billing_routes_1 = __importDefault(require("./routes/billing.routes")); // 🔥 HEALTH CHECK ROUTE (IMPORTANT FOR RENDER)
 const stripeWebhook_routes_1 = __importDefault(require("./routes/stripeWebhook.routes"));
 const dashboard_routes_1 = __importDefault(require("./routes/dashboard.routes"));
 const commentTrigger_routes_1 = __importDefault(require("./routes/commentTrigger.routes"));
@@ -50,6 +51,7 @@ require("./workers/bookingReminder.worker");
 const AppError_1 = require("./utils/AppError");
 const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
 const app = (0, express_1.default)();
+console.log("🔥 REDIS FROM ENV:", env_1.env.REDIS_URL);
 /* ======================================
 🔥 TRUST PROXY
 ====================================== */
@@ -69,20 +71,11 @@ app.use((0, cookie_parser_1.default)());
 /* ======================================
 🔥 CORS
 ====================================== */
-const allowedOrigins = [
-    "http://localhost:3000",
-    process.env.FRONTEND_URL,
-];
 app.use((0, cors_1.default)({
-    origin: (origin, callback) => {
-        if (!origin)
-            return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-            return callback(null, true);
-        }
-        console.warn("❌ Blocked by CORS:", origin);
-        return callback(new Error("Not allowed by CORS"));
-    },
+    origin: [
+        "https://automexiaai.in",
+        "https://www.automexiaai.in"
+    ],
     credentials: true,
 }));
 /* ======================================
@@ -138,6 +131,8 @@ app.use(express_1.default.json({ limit: "1mb" }));
 ====================================== */
 app.use((req, res, next) => {
     const publicRoutes = [
+        "/",
+        "/health",
         "/api/auth",
         "/api/webhooks",
         "/api/webhook",

@@ -38,7 +38,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
-const redis_1 = require("../config/redis");
 /* SENTRY MONITORING */
 const Sentry = __importStar(require("@sentry/node"));
 const worker = new bullmq_1.Worker("funnelQueue", async (job) => {
@@ -57,7 +56,7 @@ const worker = new bullmq_1.Worker("funnelQueue", async (job) => {
         throw error;
     }
 }, {
-    connection: redis_1.redisConnection,
+    connection: { url: process.env.REDIS_URL },
     concurrency: 3,
 });
 /* WORKER FAILURE MONITORING */

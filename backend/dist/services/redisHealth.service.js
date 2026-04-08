@@ -4,11 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkRedisHealth = void 0;
-const ioredis_1 = __importDefault(require("ioredis"));
-const redis = new ioredis_1.default(process.env.REDIS_URL);
+const redis_1 = __importDefault(require("../config/redis"));
 const checkRedisHealth = async () => {
     try {
-        await redis.ping();
+        await redis_1.default.ping();
         return {
             status: "healthy",
         };

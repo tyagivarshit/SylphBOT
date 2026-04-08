@@ -5,9 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.attachBillingContext = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const ioredis_1 = __importDefault(require("ioredis"));
+const redis_1 = __importDefault(require("../config/redis"));
 const plan_config_1 = require("../config/plan.config");
-const redis = new ioredis_1.default(process.env.REDIS_URL);
 const CACHE_TTL = 60 * 3;
 const getKey = (businessId) => `sub:${businessId}`;
 const attachBillingContext = async (req, res, next) => {
@@ -21,7 +20,7 @@ const attachBillingContext = async (req, res, next) => {
         }
         let subscription = null;
         const cacheKey = getKey(businessId);
-        const cached = await redis.get(cacheKey);
+        const cached = await redis_1.default.get(cacheKey);
         if (cached) {
             subscription = JSON.parse(cached);
         }
@@ -31,7 +30,7 @@ const attachBillingContext = async (req, res, next) => {
                 include: { plan: true },
             });
             if (subscription) {
-                await redis.set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL);
+                await redis_1.default.set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL);
             }
         }
         const now = new Date();

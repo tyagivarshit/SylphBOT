@@ -4,12 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteConversationCache = exports.setConversationCache = exports.getConversationCache = void 0;
-const ioredis_1 = __importDefault(require("ioredis"));
-const redis = new ioredis_1.default(process.env.REDIS_URL, {
-    maxRetriesPerRequest: 3,
-    enableReadyCheck: true,
-    lazyConnect: true,
-});
+const redis_1 = __importDefault(require("../config/redis"));
 const CACHE_TTL = 60 * 60; // 1 hour
 /* ----------------------------------
 GET CACHE
@@ -17,7 +12,7 @@ GET CACHE
 const getConversationCache = async (leadId) => {
     try {
         const key = `sylph:conversation:${leadId}`;
-        const data = await redis.get(key);
+        const data = await redis_1.default.get(key);
         if (!data)
             return null;
         return JSON.parse(data);
@@ -34,7 +29,7 @@ SET CACHE
 const setConversationCache = async (leadId, payload) => {
     try {
         const key = `sylph:conversation:${leadId}`;
-        await redis.set(key, JSON.stringify(payload), "EX", CACHE_TTL);
+        await redis_1.default.set(key, JSON.stringify(payload), "EX", CACHE_TTL);
     }
     catch (error) {
         console.error("Redis set cache error:", error);
@@ -47,7 +42,7 @@ DELETE CACHE
 const deleteConversationCache = async (leadId) => {
     try {
         const key = `sylph:conversation:${leadId}`;
-        await redis.del(key);
+        await redis_1.default.del(key);
     }
     catch (error) {
         console.error("Redis delete cache error:", error);

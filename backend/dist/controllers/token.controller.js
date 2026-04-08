@@ -73,8 +73,8 @@ const refreshAccessToken = async (req, res) => {
             where: { token: hashedToken },
         });
         // 🔄 Generate new tokens
-        const newRefreshToken = (0, generateToken_1.generateRefreshToken)(user.id);
-        const newAccessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business.id);
+        const newRefreshToken = (0, generateToken_1.generateRefreshToken)(user.id, user.tokenVersion);
+        const newAccessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business.id, user.tokenVersion);
         const newHashedToken = hashToken(newRefreshToken);
         const expiry = new Date();
         expiry.setDate(expiry.getDate() + 7);

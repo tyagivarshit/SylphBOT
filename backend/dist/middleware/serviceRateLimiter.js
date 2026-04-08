@@ -1,12 +1,15 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.incrementRate = void 0;
-const redis_1 = require("../config/redis");
+const redis_1 = __importDefault(require("../config/redis"));
 const incrementRate = async (key, limit, windowSec = 60) => {
     const redisKey = `rate:${key}`;
-    const current = await redis_1.redis.incr(redisKey);
+    const current = await redis_1.default.incr(redisKey);
     if (current === 1) {
-        await redis_1.redis.expire(redisKey, windowSec);
+        await redis_1.default.expire(redisKey, windowSec);
     }
     if (current > limit) {
         throw new Error("RATE_LIMIT_EXCEEDED");

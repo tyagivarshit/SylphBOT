@@ -5,10 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.cancelFollowups = exports.scheduleFollowups = exports.followupQueue = void 0;
 const bullmq_1 = require("bullmq");
-const redis_1 = require("../config/redis");
 const prisma_1 = __importDefault(require("../config/prisma"));
 exports.followupQueue = new bullmq_1.Queue("followupQueue", {
-    connection: redis_1.redisConnection,
+    connection: { url: process.env.REDIS_URL },
     prefix: "sylph",
     defaultJobOptions: {
         attempts: 3,

@@ -7,8 +7,7 @@ exports.generateRAGReply = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const knowledgeSearch_service_1 = require("./knowledgeSearch.service");
 const openai_1 = __importDefault(require("openai"));
-const ioredis_1 = __importDefault(require("ioredis"));
-const redis = new ioredis_1.default(process.env.REDIS_URL);
+const redis_1 = __importDefault(require("../config/redis"));
 const groq = new openai_1.default({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: "https://api.groq.com/openai/v1",
@@ -38,7 +37,7 @@ const generateQueries = (message) => {
 /* ---------------- CACHE ---------------- */
 const getCache = async (key) => {
     try {
-        const data = await redis.get(key);
+        const data = await redis_1.default.get(key);
         return data ? JSON.parse(data) : null;
     }
     catch {
@@ -47,7 +46,7 @@ const getCache = async (key) => {
 };
 const setCache = async (key, value, ttl = 120) => {
     try {
-        await redis.set(key, JSON.stringify(value), "EX", ttl);
+        await redis_1.default.set(key, JSON.stringify(value), "EX", ttl);
     }
     catch { }
 };

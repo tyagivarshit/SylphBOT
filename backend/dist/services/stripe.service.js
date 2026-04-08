@@ -40,7 +40,7 @@ const validatePlan = (plan) => {
 /* ============================= */
 const getPriceId = async (plan, billing, currency) => {
     const key = `STRIPE_${plan}_${currency}_${billing.toUpperCase()}`;
-    const price = process.env[key];
+    const price = env_1.env[key];
     if (!price) {
         throw new Error(`Missing Stripe price for ${key}`);
     }
@@ -107,7 +107,7 @@ const createCheckoutSession = async (email, businessId, planInput, billing, req,
             ? `STRIPE_${plan}_${finalCurrency}_YEARLY_EARLY`
             : `STRIPE_${plan}_${finalCurrency}_YEARLY`;
     }
-    const priceId = process.env[priceKey];
+    const priceId = env_1.env[priceKey];
     if (!priceId) {
         throw new Error(`Missing Stripe price for ${priceKey}`);
     }

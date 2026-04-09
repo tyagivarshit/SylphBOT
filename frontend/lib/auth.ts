@@ -166,11 +166,7 @@ export async function getCurrentUser(): Promise<
 
   fetchingPromise = (async () => {
     try {
-      const res = await authFetch<CurrentUserResponse>("auth/me", {
-        headers: {
-          "Cache-Control": "no-cache",
-        },
-      });
+      const res = await authFetch<CurrentUserResponse>("auth/me");
 
       if (res.unauthorized || !res.success) {
         currentUserCache = null;

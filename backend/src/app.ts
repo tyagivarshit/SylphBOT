@@ -122,9 +122,12 @@ const corsOptions: CorsOptions = {
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "Cache-Control",
     "Stripe-Signature",
     "X-Requested-With",
     "X-Request-Id",
+    "Sentry-Trace",
+    "Baggage",
   ],
   exposedHeaders: ["X-Request-Id"],
   maxAge: 86400,

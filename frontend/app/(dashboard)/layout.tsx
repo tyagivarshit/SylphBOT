@@ -2,7 +2,14 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, createContext, useContext, useMemo } from "react";
+import {
+  useEffect,
+  useState,
+  createContext,
+  useContext,
+  useMemo,
+  type ReactNode,
+} from "react";
 
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
@@ -10,13 +17,28 @@ import Topbar from "@/components/layout/Topbar";
 /* =========================
    🔥 UPGRADE CONTEXT (STABLE)
 ========================= */
-const UpgradeContext = createContext<any>(null);
+type UpgradeContextValue = {
+  openUpgrade: () => void;
+  closeUpgrade: () => void;
+};
+
+const UpgradeContext = createContext<UpgradeContextValue | null>(null);
 
 export function useUpgrade() {
-  return useContext(UpgradeContext);
+  const context = useContext(UpgradeContext);
+
+  if (!context) {
+    throw new Error("useUpgrade must be used within DashboardLayout");
+  }
+
+  return context;
 }
 
-export default function DashboardLayout({ children }: any) {
+export default function DashboardLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const { user, loading } = useAuth();
   const router = useRouter();
 
@@ -28,7 +50,7 @@ export default function DashboardLayout({ children }: any) {
     if (!loading && !user) {
       router.replace("/auth/login");
     }
-  }, [loading, user]);
+  }, [loading, router, user]);
 
   /* 🔥 STABLE CONTEXT */
   const upgradeValue = useMemo(
@@ -47,7 +69,13 @@ export default function DashboardLayout({ children }: any) {
     );
   }
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f9fcff]">
+        <div className="w-10 h-10 border-4 border-gray-200 border-t-[#14E1C1] rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <UpgradeContext.Provider value={upgradeValue}>

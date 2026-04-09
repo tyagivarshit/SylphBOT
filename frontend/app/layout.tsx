@@ -15,7 +15,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-slate-100 text-gray-900 min-h-screen font-sans antialiased">
+      <body className="brand-body bg-background text-foreground min-h-screen font-sans antialiased">
         <Providers>
           <Script
             id="facebook-sdk"
@@ -28,15 +28,18 @@ export default function RootLayout({
             toastOptions={{
               duration: 3000,
               style: {
-                background: "#111827",
-                color: "#fff",
-                borderRadius: "10px",
+                background: "rgba(255,255,255,0.94)",
+                color: "#0f1d34",
+                borderRadius: "18px",
                 fontSize: "14px",
-                padding: "10px 14px",
+                padding: "12px 16px",
+                border: "1px solid rgba(217,225,236,0.92)",
+                boxShadow: "0 18px 40px rgba(15,23,42,0.12)",
+                backdropFilter: "blur(16px)",
               },
               success: {
                 iconTheme: {
-                  primary: "#14E1C1",
+                  primary: "#1E5EFF",
                   secondary: "#fff",
                 },
               },

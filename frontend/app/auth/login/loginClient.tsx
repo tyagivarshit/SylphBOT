@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { FcGoogle } from "react-icons/fc";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 
+import AuthShell from "@/components/brand/AuthShell";
 import { buildGoogleAuthUrl, loginUser } from "@/lib/auth";
 import { useAuth } from "@/context/AuthContext";
 
@@ -119,115 +120,116 @@ export default function LoginClient({
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f4f8ff]">
-        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+      <div className="brand-app brand-auth-shell">
+        <div className="brand-auth-grid">
+          <div className="flex items-center justify-center lg:col-start-2">
+            <div className="brand-auth-card w-full max-w-xl rounded-[32px] p-8 text-center">
+              <div className="mx-auto h-10 w-10 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" />
+              <p className="mt-4 text-sm text-slate-500">
+                Preparing your Automexia workspace...
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#f5f9ff] via-white to-[#eef4ff]">
-      <div className="fixed top-6 left-6 sm:left-10 z-20">
-        <h1
-          className="text-3xl sm:text-4xl font-bold tracking-wider bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent"
-          style={{ fontFamily: "Orbitron" }}
-        >
-          Automexia AI
-        </h1>
-      </div>
-
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="w-full max-w-md bg-white/70 backdrop-blur-xl border border-blue-100 rounded-3xl p-8 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
-              Welcome back
-            </h2>
-          </div>
-
-          <button
-            onClick={handleGoogleLogin}
-            className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-xl py-2.5 bg-white hover:shadow-md transition"
-          >
-            <FcGoogle size={18} />
-            <span className="text-sm font-medium text-gray-800">
-              Continue with Google
-            </span>
-          </button>
-
-          <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-xs text-gray-400">OR</span>
-            <div className="flex-1 h-px bg-gray-200" />
-          </div>
-
-          <form className="space-y-5" onSubmit={handleLogin}>
-            <div>
-              <label className="text-xs font-medium text-gray-700">
-                Email
-              </label>
-
-              <input
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full mt-1 bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between mb-1">
-                <label className="text-xs font-medium text-gray-700">
-                  Password
-                </label>
-
-                <Link
-                  href="/auth/forgot"
-                  className="text-xs text-blue-500 hover:underline"
-                >
-                  Forgot?
-                </Link>
-              </div>
-
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 pr-10 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((value) => !value)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition active:scale-[0.98] disabled:opacity-70"
-            >
-              {loading ? "Signing in..." : "Sign in"}
-            </button>
-          </form>
-
-          <p className="text-xs text-gray-600 mt-6 text-center">
-            Don&apos;t have an account?{" "}
-            <Link
-              href="/auth/register"
-              className="text-blue-600 font-medium hover:underline"
-            >
-              Sign up
-            </Link>
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to your Automexia Lead OS workspace and continue handling conversations, CRM, and automation with the same premium brand experience."
+      footer={
+        <p className="text-center">
+          Don&apos;t have an account?{" "}
+          <Link href="/auth/register" className="brand-text-link">
+            Create one
+          </Link>
+        </p>
+      }
+    >
+      <div className="brand-note-card flex items-start gap-3">
+        <span className="mt-0.5 rounded-2xl bg-blue-100 p-2 text-blue-700">
+          <ShieldCheck size={16} />
+        </span>
+        <div>
+          <p className="text-sm font-semibold text-slate-900">
+            Trusted access for your revenue workspace
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-500">
+            Your CRM activity, automations, and AI desk settings stay protected
+            behind authenticated workspace access.
           </p>
         </div>
       </div>
-    </div>
+
+      <button onClick={handleGoogleLogin} className="brand-social-button">
+        <FcGoogle size={18} />
+        Continue with Google
+      </button>
+
+      <div className="brand-divider-label">or sign in with email</div>
+
+      <form className="space-y-5" onSubmit={handleLogin}>
+        <div className="space-y-2">
+          <label htmlFor="login-email" className="brand-field-label">
+            Email
+          </label>
+
+          <div className="brand-input-shell">
+            <Mail size={17} className="brand-input-icon" />
+            <input
+              id="login-email"
+              type="email"
+              placeholder="you@example.com"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="login-password" className="brand-field-label">
+              Password
+            </label>
+
+            <Link href="/auth/forgot" className="brand-text-link text-xs">
+              Forgot password?
+            </Link>
+          </div>
+
+          <div className="brand-input-shell">
+            <LockKeyhole size={17} className="brand-input-icon" />
+            <input
+              id="login-password"
+              type={showPassword ? "text" : "password"}
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              className="pr-4 text-slate-400 transition hover:text-slate-700"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="brand-button-primary w-full"
+        >
+          {loading ? "Signing in..." : "Sign in to workspace"}
+        </button>
+      </form>
+    </AuthShell>
   );
 }

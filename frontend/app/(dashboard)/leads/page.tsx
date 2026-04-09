@@ -9,6 +9,7 @@ import { buildApiUrl } from "@/lib/url"
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
 import FeatureGate from "@/components/FeatureGate"
+import PageHeader from "@/components/brand/PageHeader"
 
 const stageOptions = [
   { value: "", label: "All Stages" },
@@ -18,12 +19,21 @@ const stageOptions = [
   { value: "LOST", label: "Lost" },
 ]
 
+type LeadItem = {
+  id: string
+  name?: string | null
+  platform?: string | null
+  stage: string
+  lastMessage?: string | null
+  unreadCount?: number
+}
+
 function LeadsPageContent(){
   const searchParams = useSearchParams()
 
   const { plan } = usePlan()
 
-  const [leads,setLeads] = useState<any[]>([])
+  const [leads,setLeads] = useState<LeadItem[]>([])
   const [loading,setLoading] = useState(true)
   const [stage,setStage] = useState("")
   const [page,setPage] = useState(1)
@@ -72,43 +82,42 @@ function LeadsPageContent(){
 
     <div className="min-w-0 space-y-6">
 
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-
-        <h1 className="text-xl font-semibold text-gray-900">
-          Leads CRM
-        </h1>
-
-        <StageSelect
-          value={stage}
-          options={stageOptions}
-          ariaLabel="Filter leads by stage"
-          className="w-full sm:w-[180px]"
-          onChange={(value)=>{
-            setStage(value)
-            setPage(1)
-          }}
-        />
-
-      </div>
+      <PageHeader
+        eyebrow="CRM"
+        title="Leads CRM"
+        description="Track captured conversations, monitor stages, and open full lead context inside the same premium Automexia product experience."
+        chip={<span className="brand-chip">Pipeline visibility</span>}
+        action={
+          <StageSelect
+            value={stage}
+            options={stageOptions}
+            ariaLabel="Filter leads by stage"
+            className="w-full sm:w-[220px]"
+            onChange={(value)=>{
+              setStage(value)
+              setPage(1)
+            }}
+          />
+        }
+      />
 
       {/* CONTENT */}
       {loading ? (
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 text-gray-500 shadow-sm">
+        <div className="brand-panel rounded-[26px] p-6 text-slate-500">
           Loading leads...
         </div>
       ) : (
 
         <FeatureGate feature="CRM">
 
-          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 md:p-6 shadow-sm">
+          <div className="brand-panel rounded-[28px] p-5 md:p-6">
 
             {!isAllowed ? (
-              <p className="text-sm text-gray-500 text-center py-10">
+              <p className="brand-empty-state rounded-[24px] py-10 text-center text-sm">
                 Preview of your leads will appear here 🚀
               </p>
             ) : leads.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-10">
+              <p className="brand-empty-state rounded-[24px] py-10 text-center text-sm">
                 No leads yet. Start automations to capture leads 🚀
               </p>
             ) : (
@@ -119,24 +128,24 @@ function LeadsPageContent(){
                 />
 
                 {/* PAGINATION */}
-                <div className="flex justify-between items-center mt-5">
+                <div className="mt-5 flex items-center justify-between gap-3">
 
                   <button
                     disabled={page === 1}
                     onClick={()=>setPage((p)=>p-1)}
-                    className="px-4 py-2 text-sm font-medium bg-blue-50 text-gray-700 rounded-xl hover:shadow-sm transition disabled:opacity-50"
+                    className="brand-button-secondary px-4 py-2 text-sm disabled:opacity-50"
                   >
                     Prev
                   </button>
 
-                  <span className="text-sm text-gray-500">
+                  <span className="text-sm text-slate-500">
                     Page {page} of {totalPages}
                   </span>
 
                   <button
                     disabled={page === totalPages}
                     onClick={()=>setPage((p)=>p+1)}
-                    className="px-4 py-2 text-sm font-medium bg-blue-50 text-gray-700 rounded-xl hover:shadow-sm transition disabled:opacity-50"
+                    className="brand-button-secondary px-4 py-2 text-sm disabled:opacity-50"
                   >
                     Next
                   </button>
@@ -160,7 +169,7 @@ function LeadsPageContent(){
 function LeadsPageFallback() {
   return (
     <div className="min-w-0 space-y-6">
-      <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 text-gray-500 shadow-sm">
+      <div className="brand-panel rounded-[26px] p-6 text-slate-500">
         Loading leads...
       </div>
     </div>

@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { FcGoogle } from "react-icons/fc";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, LockKeyhole, Mail, Sparkles, User2 } from "lucide-react";
 
+import AuthShell from "@/components/brand/AuthShell";
 import { buildGoogleAuthUrl, registerUser } from "@/lib/auth";
 
 export default function RegisterPage() {
@@ -88,100 +89,117 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="h-screen sm:h-screen overflow-hidden bg-gradient-to-br from-[#f5f9ff] via-white to-[#eef4ff]">
-
-      {/* BRANDING */}
-      <div className="fixed top-6 left-6 sm:left-10 z-20">
-        <h1
-          className="text-3xl sm:text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent"
-          style={{ fontFamily: "Orbitron" }}
-        >
-          Automexia AI
-        </h1>
-      </div>
-
-      <div className="h-full flex items-center justify-center px-4">
-
-        <div className="w-full max-w-sm sm:max-w-sm bg-white/70 backdrop-blur-xl border border-blue-100 rounded-3xl p-6 sm:p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
-
-          {/* HEADING */}
-          <div className="text-center mb-6">
-            <h2 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
-              Create account
-            </h2>
-          </div>
-
-          {/* GOOGLE */}
-          <button
-            onClick={handleGoogleRegister}
-            className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-xl py-2.5 bg-white hover:shadow-md transition"
-          >
-            <FcGoogle size={18} />
-            <span className="text-sm font-medium text-gray-800">
-              Continue with Google
-            </span>
-          </button>
-
-          <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-xs text-gray-400">OR</span>
-            <div className="flex-1 h-px bg-gray-200" />
-          </div>
-
-          <form className="space-y-4" onSubmit={handleRegister}>
-
-            <input
-              type="text"
-              placeholder="Your name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
-            />
-
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
-            />
-
-            <div className="relative">
-              <input
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 pr-10 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
-              />
-
-              <button
-                type="button"
-                onClick={() => setShowPassword((p) => !p)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition"
-            >
-              {loading ? "Creating..." : "Create account"}
-            </button>
-          </form>
-
-          <p className="text-xs text-gray-600 mt-5 text-center">
-            Already have an account?{" "}
-            <Link href="/auth/login" className="text-blue-600 font-medium hover:underline">
-              Sign in
-            </Link>
+    <AuthShell
+      title="Create your workspace"
+      subtitle="Set up your Automexia account and launch a polished lead-to-revenue operating system that feels consistent with the main brand from day one."
+      footer={
+        <p className="text-center">
+          Already have an account?{" "}
+          <Link href="/auth/login" className="brand-text-link">
+            Sign in
+          </Link>
+        </p>
+      }
+    >
+      <div className="brand-note-card flex items-start gap-3">
+        <span className="mt-0.5 rounded-2xl bg-blue-100 p-2 text-blue-700">
+          <Sparkles size={16} />
+        </span>
+        <div>
+          <p className="text-sm font-semibold text-slate-900">
+            Built for premium client-facing automation
           </p>
-
+          <p className="mt-1 text-sm leading-6 text-slate-500">
+            Your account unlocks the same brand language across CRM, inbox,
+            automations, and AI-assisted sales workflows.
+          </p>
         </div>
       </div>
-    </div>
+
+      <button onClick={handleGoogleRegister} className="brand-social-button">
+        <FcGoogle size={18} />
+        Continue with Google
+      </button>
+
+      <div className="brand-divider-label">or create with email</div>
+
+      <form className="space-y-5" onSubmit={handleRegister}>
+        <div className="space-y-2">
+          <label htmlFor="register-name" className="brand-field-label">
+            Full name
+          </label>
+
+          <div className="brand-input-shell">
+            <User2 size={17} className="brand-input-icon" />
+            <input
+              id="register-name"
+              type="text"
+              placeholder="Your name"
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="register-email" className="brand-field-label">
+            Work email
+          </label>
+
+          <div className="brand-input-shell">
+            <Mail size={17} className="brand-input-icon" />
+            <input
+              id="register-email"
+              type="email"
+              placeholder="you@example.com"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="register-password" className="brand-field-label">
+              Password
+            </label>
+            <span className="text-xs text-slate-400">
+              8+ chars, mixed case, number
+            </span>
+          </div>
+
+          <div className="brand-input-shell">
+            <LockKeyhole size={17} className="brand-input-icon" />
+            <input
+              id="register-password"
+              type={showPassword ? "text" : "password"}
+              placeholder="Create a strong password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            <button
+              type="button"
+              onClick={() => setShowPassword((p) => !p)}
+              className="pr-4 text-slate-400 transition hover:text-slate-700"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="brand-button-primary w-full"
+        >
+          {loading ? "Creating account..." : "Create account"}
+        </button>
+      </form>
+    </AuthShell>
   );
 }

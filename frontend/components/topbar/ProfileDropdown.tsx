@@ -74,31 +74,31 @@ export default function ProfileDropdown() {
 
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-blue-50 transition"
+        className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/72 px-2.5 py-2 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:px-3"
       >
-        <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-r from-blue-600 to-cyan-500 flex items-center justify-center text-xs font-semibold text-white shadow-sm">
+        <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#0b2a5b_0%,#1e5eff_55%,#7dd3fc_100%)] text-xs font-semibold text-white shadow-[0_14px_30px_rgba(30,94,255,0.22)]">
           
           {user?.avatar ? (
-            <img src={user.avatar} className="w-full h-full object-cover" />
+            <img src={user.avatar} className="h-full w-full object-cover" />
           ) : (
             user?.name?.[0] || "U"
           )}
 
         </div>
 
-        <span className="hidden sm:block text-sm font-semibold text-gray-900">
+        <span className="hidden sm:block text-sm font-semibold text-slate-900">
           {user?.name || "User"}
         </span>
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-[90vw] sm:w-72 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-xl z-[1000] overflow-hidden">
+        <div className="brand-panel-strong absolute right-0 z-[1000] mt-3 w-[90vw] overflow-hidden rounded-[28px] sm:w-72">
 
-          <div className="px-4 py-3 border-b border-blue-100">
-            <p className="text-sm font-semibold text-gray-900">
+          <div className="border-b border-slate-200/70 px-4 py-4">
+            <p className="text-sm font-semibold text-slate-900">
               {user?.name || "User"}
             </p>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-slate-500">
               {user?.email || "email@example.com"}
             </p>
           </div>
@@ -107,38 +107,38 @@ export default function ProfileDropdown() {
 
             <button
               onClick={goToProfile}
-              className="flex items-center gap-2 w-full px-3 py-2 rounded-xl hover:bg-blue-50 text-sm text-gray-800 transition"
+              className="flex w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-blue-50/80 hover:text-slate-950"
             >
               <User size={16} /> Profile
             </button>
 
             <button
               onClick={goToSettings}
-              className="flex items-center gap-2 w-full px-3 py-2 rounded-xl hover:bg-blue-50 text-sm text-gray-800 transition"
+              className="flex w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-blue-50/80 hover:text-slate-950"
             >
               <Settings size={16} /> Settings
             </button>
 
             <button
               onClick={goToUpgrade}
-              className="flex items-center gap-2 w-full px-3 py-2 rounded-xl bg-blue-50 text-gray-800 text-sm font-semibold hover:shadow-sm transition"
+              className="flex w-full items-center gap-2 rounded-2xl bg-blue-50/90 px-3 py-2.5 text-left text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-blue-100"
             >
               <Sparkles size={16} /> Upgrade Plan
             </button>
 
             <button
               onClick={goToSupport}
-              className="flex items-center gap-2 w-full px-3 py-2 rounded-xl hover:bg-blue-50 text-sm text-gray-800 transition"
+              className="flex w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-blue-50/80 hover:text-slate-950"
             >
               <HelpCircle size={16} /> Help & Support
             </button>
 
           </div>
 
-          <div className="p-2 border-t border-blue-100">
+          <div className="border-t border-slate-200/70 p-2">
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 w-full px-3 py-2 rounded-xl text-red-600 hover:bg-red-50 text-sm font-medium transition"
+              className="flex w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50"
             >
               <LogOut size={16} /> Logout
             </button>

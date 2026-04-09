@@ -53,12 +53,12 @@ export default function StageSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center justify-between gap-3 rounded-xl border border-blue-100 bg-white/70 px-4 py-2.5 text-left text-sm text-gray-900 backdrop-blur-xl transition hover:border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        className="brand-button-secondary flex w-full items-center justify-between gap-3 rounded-[18px] px-4 py-3 text-left text-sm text-slate-900"
       >
         <span className="min-w-0 truncate">{selectedOption?.label}</span>
         <ChevronDown
           size={16}
-          className={`shrink-0 text-gray-500 transition-transform ${
+          className={`shrink-0 text-slate-400 transition-transform ${
             open ? "rotate-180" : ""
           }`}
         />
@@ -66,7 +66,7 @@ export default function StageSelect({
 
       {open && (
         <div
-          className={`absolute left-0 right-0 z-30 overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-lg ${
+          className={`brand-panel-strong absolute left-0 right-0 z-30 overflow-hidden rounded-[22px] ${
             direction === "up" ? "bottom-full mb-2" : "top-full mt-2"
           }`}
         >
@@ -86,8 +86,8 @@ export default function StageSelect({
                   }}
                   className={`flex w-full items-center px-4 py-2.5 text-sm transition ${
                     active
-                      ? "bg-blue-50 font-semibold text-blue-700"
-                      : "text-gray-700 hover:bg-blue-50"
+                      ? "bg-blue-50/90 font-semibold text-blue-700"
+                      : "text-slate-700 hover:bg-blue-50/70"
                   }`}
                 >
                   <span className="min-w-0 truncate">{option.label}</span>

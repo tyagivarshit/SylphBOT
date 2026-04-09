@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { Mail } from "lucide-react";
+import { ArrowLeft, Mail, Send } from "lucide-react";
+
+import AuthShell from "@/components/brand/AuthShell";
 import { forgotPassword } from "@/lib/auth";
 
 export default function ForgotPage() {
@@ -75,114 +77,98 @@ export default function ForgotPage() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-[#f5f9ff] via-white to-[#eef4ff]">
+    <AuthShell
+      title={sent ? "Check your email" : "Forgot password?"}
+      subtitle={
+        sent
+          ? "If the address exists in your workspace, we have sent a reset link so you can securely get back into Automexia."
+          : "Enter your account email and we will send a secure reset link to restore access to your workspace."
+      }
+      footer={
+        <p className="text-center">
+          Remember your password?{" "}
+          <Link href="/auth/login" className="brand-text-link">
+            Back to login
+          </Link>
+        </p>
+      }
+    >
 
       {/* 🔥 AUTOMEXA BRAND */}
-      <div className="fixed top-6 left-6 sm:left-10 z-20">
-        <h1
-          className="text-2xl sm:text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent"
-          style={{ fontFamily: "Orbitron" }}
-        >
-          Automexia AI
-        </h1>
-      </div>
+      {sent ? (
+        <div className="space-y-5 text-center">
+          <div className="mx-auto flex size-16 items-center justify-center rounded-[24px] bg-blue-50 text-blue-700 shadow-sm">
+            <Mail size={24} />
+          </div>
 
-      <div className="h-full flex items-center justify-center px-4">
+          <div className="brand-note-card">
+            A reset link has been sent if an account exists for{" "}
+            <span className="font-semibold text-slate-900">
+              {email || "your email"}
+            </span>
+            . For security, the message is shown even if the email is not
+            registered.
+          </div>
 
-        <div className="w-full max-w-sm bg-white/70 backdrop-blur-xl border border-blue-100 rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
+          <button
+            onClick={handleReset}
+            disabled={cooldown > 0}
+            className="brand-button-primary w-full"
+          >
+            {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend link"}
+          </button>
 
-          {sent ? (
-            <div className="text-center">
-
-              {/* ICON */}
-              <div className="mx-auto w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center mb-5">
-                <Mail className="text-blue-600" size={22} />
-              </div>
-
-              {/* HEADING */}
-              <h2 className="text-lg font-bold mb-2 bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
-                Check your email
-              </h2>
-
-              <p className="text-sm text-gray-600">
-                If an account exists, we sent a reset link.
-              </p>
-
-              {/* BUTTON */}
-              <button
-                onClick={handleReset}
-                disabled={cooldown > 0}
-                className="mt-5 w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-70"
-              >
-                {cooldown > 0 ? `Wait ${cooldown}s...` : "Resend link"}
-              </button>
-
-              <Link
-                href="/auth/login"
-                className="inline-block mt-5 text-sm text-blue-600 font-medium"
-              >
-                Back to login
-              </Link>
-            </div>
-          ) : (
-            <form onSubmit={handleReset} className="space-y-4">
-
-              {/* HEADING */}
-              <div className="text-center mb-4">
-                <h2 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
-                  Forgot password?
-                </h2>
-
-                <p className="text-xs text-gray-600 mt-1">
-                  Enter your email to receive a reset link
-                </p>
-              </div>
-
-              {/* INPUT */}
-              <div className="relative">
-                <input
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 pl-10 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
-                />
-
-                <Mail
-                  size={16}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-                />
-              </div>
-
-              {/* BUTTON */}
-              <button
-                type="submit"
-                disabled={loading || cooldown > 0}
-                className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-70"
-              >
-                {loading
-                  ? "Sending..."
-                  : cooldown > 0
-                  ? `Wait ${cooldown}s...`
-                  : "Send reset link"}
-              </button>
-
-              {/* FOOTER */}
-              <p className="text-xs text-gray-600 text-center">
-                Remember your password?{" "}
-                <Link
-                  href="/auth/login"
-                  className="text-blue-600 font-medium hover:underline"
-                >
-                  Login
-                </Link>
-              </p>
-
-            </form>
-          )}
-
+          <Link
+            href="/auth/login"
+            className="inline-flex items-center justify-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-slate-900"
+          >
+            <ArrowLeft size={15} />
+            Back to login
+          </Link>
         </div>
-      </div>
-    </div>
+      ) : (
+        <form onSubmit={handleReset} className="space-y-5">
+          <div className="brand-note-card flex items-start gap-3">
+            <span className="mt-0.5 rounded-2xl bg-blue-100 p-2 text-blue-700">
+              <Send size={16} />
+            </span>
+            <p className="text-sm leading-6 text-slate-500">
+              Reset emails are rate-limited for safety, so repeated requests may
+              briefly pause before the next send.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="forgot-email" className="brand-field-label">
+              Account email
+            </label>
+
+            <div className="brand-input-shell">
+              <Mail size={17} className="brand-input-icon" />
+              <input
+                id="forgot-email"
+                type="email"
+                placeholder="you@example.com"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || cooldown > 0}
+            className="brand-button-primary w-full"
+          >
+            {loading
+              ? "Sending reset link..."
+              : cooldown > 0
+                ? `Wait ${cooldown}s...`
+                : "Send reset link"}
+          </button>
+        </form>
+      )}
+    </AuthShell>
   );
 }

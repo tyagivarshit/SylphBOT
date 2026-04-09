@@ -21,6 +21,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import BrandLockup from "@/components/brand/BrandLockup";
+
 type SidebarProps = {
   open: boolean;
   setOpen: (val: boolean) => void;
@@ -109,37 +111,37 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
       <div
         onClick={() => setOpen(false)}
         className={`
-          fixed inset-0 bg-black/40 backdrop-blur-sm z-40
+          fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm
           transition-opacity duration-300
           lg:hidden
-          ${open ? "opacity-100 visible" : "opacity-0 invisible"}
+          ${open ? "visible opacity-100" : "invisible opacity-0"}
         `}
       />
 
       {/* 🔥 SIDEBAR */}
       <aside
         className={`
-          fixed lg:relative
-          top-0 left-0
-          h-screen lg:h-full
-          w-64 max-w-[85%]
-
-          bg-white/80 backdrop-blur-xl
-          border-r border-blue-100
-
-          flex flex-col
-          z-50
-
-          transform transition-transform duration-300 ease-out
+          brand-sidebar-panel fixed left-0 top-0 z-50 flex h-screen w-[82vw] max-w-[310px]
+          flex-col rounded-none px-4 py-4 transition-transform duration-300 ease-out
 
           ${open ? "translate-x-0" : "-translate-x-full"}
-          lg:translate-x-0
+          lg:relative lg:h-auto lg:min-h-[calc(100vh-2rem)] lg:w-[290px] lg:max-w-none
+          lg:translate-x-0 lg:rounded-[32px]
         `}
       >
         {/* 🔥 MOBILE HEADER */}
-        <div className="lg:hidden h-16 flex items-center justify-between px-4 border-b border-blue-100">
-          <span className="font-semibold text-sm text-gray-700">Menu</span>
-          <button onClick={() => setOpen(false)}>
+        <div className="mb-5 flex items-center justify-between gap-3 lg:mb-7">
+          <BrandLockup
+            href="/dashboard"
+            theme="dark"
+            showTagline
+            className="min-w-0"
+          />
+
+          <button
+            onClick={() => setOpen(false)}
+            className="inline-flex size-11 items-center justify-center rounded-2xl border border-white/12 bg-white/8 text-white/80 transition hover:bg-white/12 hover:text-white lg:hidden"
+          >
             <X size={18} />
           </button>
         </div>
@@ -148,11 +150,11 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
         <nav
           ref={scrollRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-5 space-y-6"
+          className="brand-scrollbar flex-1 space-y-7 overflow-y-auto overflow-x-hidden pr-1"
         >
           {menu.map((group) => (
             <div key={group.section}>
-              <p className="px-3 mb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+              <p className="mb-3 px-3 text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-white/38">
                 {group.section}
               </p>
 
@@ -168,18 +170,24 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
                       onMouseEnter={() => router.prefetch(item.href)}
                       onClick={() => setOpen(false)}
                       className={`
-                        flex items-center gap-3
-                        px-3 py-2.5 rounded-xl text-[13px] font-medium
-                        transition-all duration-200 hover:shadow-sm
+                        flex items-center gap-3 rounded-2xl px-3.5 py-3 text-[13px] font-medium transition-all duration-200
 
                         ${
                           active
-                            ? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700"
-                            : "text-gray-600 hover:bg-blue-50"
+                            ? "bg-white text-slate-950 shadow-[0_16px_34px_rgba(8,18,35,0.22)]"
+                            : "text-white/72 hover:bg-white/10 hover:text-white"
                         }
                       `}
                     >
-                      <Icon size={18} className="flex-shrink-0" />
+                      <span
+                        className={`flex size-9 shrink-0 items-center justify-center rounded-2xl ${
+                          active
+                            ? "bg-slate-100 text-blue-600"
+                            : "bg-white/8 text-sky-100"
+                        }`}
+                      >
+                        <Icon size={18} className="flex-shrink-0" />
+                      </span>
                       <span className="truncate">{item.name}</span>
                     </Link>
                   );
@@ -190,10 +198,18 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
         </nav>
 
         {/* 🔥 FOOTER */}
-        <div className="h-[60px] flex items-center justify-center border-t border-blue-100">
-          <p className="text-[12px] text-gray-500 font-medium">
-            Automexia AI
-          </p>
+        <div className="mt-5 space-y-3 border-t border-white/10 pt-5">
+          <div className="rounded-[26px] border border-white/10 bg-white/8 p-4">
+            <span className="brand-chip brand-chip-dark w-fit">
+              Always-on AI sales desk
+            </span>
+            <p className="mt-3 text-sm leading-6 text-white/64">
+              Product-first command center for conversations, CRM, automation,
+              and lead conversion.
+            </p>
+          </div>
+
+          <p className="px-1 text-xs text-white/42">© 2026 Automexia AI</p>
         </div>
       </aside>
     </>

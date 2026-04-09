@@ -1,12 +1,13 @@
 "use client"
 
 export const dynamic = "force-dynamic"
-import { useState, useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import toast from "react-hot-toast"
-import { Eye, EyeOff, Lock } from "lucide-react"
+import { ArrowLeft, Eye, EyeOff, Lock, LockKeyhole } from "lucide-react"
 
+import AuthShell from "@/components/brand/AuthShell"
 import { resetPassword } from "@/lib/auth"
 
 export default function ResetPasswordPage() {
@@ -85,123 +86,120 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-[#f5f9ff] via-white to-[#eef4ff]">
+    <AuthShell
+      title={success ? "Password updated" : "Reset password"}
+      subtitle={
+        success
+          ? "Your workspace password has been updated successfully. You can now sign back in with the new credentials."
+          : "Create a strong new password to restore secure access to your Automexia workspace."
+      }
+      footer={
+        <p className="text-center">
+          Need to go back?{" "}
+          <Link href="/auth/login" className="brand-text-link">
+            Return to login
+          </Link>
+        </p>
+      }
+    >
 
       {/* 🔥 AUTOMEXA BRAND */}
-      <div className="fixed top-6 left-6 sm:left-10 z-20">
-        <h1
-          className="text-2xl sm:text-4xl font-extrabold tracking-wide bg-gradient-to-r from-[#0A1F44] via-[#1E90FF] to-[#00C6FF] bg-clip-text text-transparent"
-          style={{ fontFamily: "Orbitron" }}
-        >
-          Automexia AI
-        </h1>
-      </div>
+      {success ? (
+        <div className="space-y-5 text-center">
+          <div className="mx-auto flex size-16 items-center justify-center rounded-[24px] bg-blue-50 text-blue-700 shadow-sm">
+            <Lock size={24} />
+          </div>
 
-      <div className="h-full flex items-center justify-center px-4">
+          <div className="brand-note-card">
+            Your password has been reset. Use your new credentials to continue
+            into the dashboard and resume conversations, CRM work, and
+            automation tasks.
+          </div>
 
-        <div className="w-full max-w-sm bg-white/70 backdrop-blur-xl border border-blue-100 rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
-
-          {success ? (
-
-            <div className="text-center">
-
-              {/* ICON */}
-              <div className="mx-auto w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center mb-5">
-                <Lock className="text-blue-600" size={22}/>
-              </div>
-
-              {/* HEADING */}
-              <h2 className="text-lg font-bold mb-2 bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
-                Password updated
-              </h2>
-
-              <p className="text-sm text-gray-600">
-                Your password has been successfully reset.
-              </p>
-
-              <Link
-                href="/auth/login"
-                className="inline-block mt-5 w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold text-center"
-              >
-                Go to login
-              </Link>
-
-            </div>
-
-          ) : (
-
-            <form onSubmit={handleReset} className="space-y-4">
-
-              {/* HEADING */}
-              <div className="text-center mb-4">
-                <h2 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
-                  Reset password
-                </h2>
-              </div>
-
-              {/* PASSWORD */}
-              <div className="relative">
-                <input
-                  type={showPass ? "text" : "password"}
-                  placeholder="New password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 pr-10 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => setShowPass(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                >
-                  {showPass ? <EyeOff size={16}/> : <Eye size={16}/>}
-                </button>
-              </div>
-
-              {/* CONFIRM */}
-              <div className="relative">
-                <input
-                  type={showConfirm ? "text" : "password"}
-                  placeholder="Confirm password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  className="w-full bg-white text-gray-900 border border-gray-200 rounded-xl px-4 py-2.5 pr-10 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => setShowConfirm(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                >
-                  {showConfirm ? <EyeOff size={16}/> : <Eye size={16}/>}
-                </button>
-              </div>
-
-              {/* BUTTON */}
-              <button
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-70"
-              >
-                {loading ? "Resetting..." : "Reset password"}
-              </button>
-
-              {/* FOOTER */}
-              <p className="text-xs text-gray-600 text-center">
-                Back to{" "}
-                <Link
-                  href="/auth/login"
-                  className="text-blue-600 font-medium hover:underline"
-                >
-                  login
-                </Link>
-              </p>
-
-            </form>
-
-          )}
-
+          <Link href="/auth/login" className="brand-button-primary w-full">
+            Go to login
+          </Link>
         </div>
-      </div>
-    </div>
+      ) : (
+
+        <form onSubmit={handleReset} className="space-y-5">
+          <div className="brand-note-card">
+            Choose a password with uppercase, lowercase, and a number so your
+            workspace stays protected.
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="reset-password" className="brand-field-label">
+              New password
+            </label>
+
+            <div className="brand-input-shell">
+              <LockKeyhole size={17} className="brand-input-icon" />
+              <input
+                id="reset-password"
+                type={showPass ? "text" : "password"}
+                placeholder="Create a strong password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+
+              <button
+                type="button"
+                onClick={() => setShowPass((value) => !value)}
+                className="pr-4 text-slate-400 transition hover:text-slate-700"
+                aria-label={showPass ? "Hide password" : "Show password"}
+              >
+                {showPass ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="reset-confirm" className="brand-field-label">
+              Confirm password
+            </label>
+
+            <div className="brand-input-shell">
+              <LockKeyhole size={17} className="brand-input-icon" />
+              <input
+                id="reset-confirm"
+                type={showConfirm ? "text" : "password"}
+                placeholder="Repeat your new password"
+                autoComplete="new-password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+
+              <button
+                type="button"
+                onClick={() => setShowConfirm((value) => !value)}
+                className="pr-4 text-slate-400 transition hover:text-slate-700"
+                aria-label={
+                  showConfirm ? "Hide confirm password" : "Show confirm password"
+                }
+              >
+                {showConfirm ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
+          </div>
+
+          <button
+            disabled={loading}
+            className="brand-button-primary w-full"
+          >
+            {loading ? "Resetting password..." : "Reset password"}
+          </button>
+
+          <Link
+            href="/auth/login"
+            className="inline-flex items-center justify-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-slate-900"
+          >
+            <ArrowLeft size={15} />
+            Back to login
+          </Link>
+        </form>
+      )}
+    </AuthShell>
   )
 }

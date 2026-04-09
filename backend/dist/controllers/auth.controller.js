@@ -10,7 +10,7 @@ const env_1 = require("../config/env");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const generateToken_1 = require("../utils/generateToken");
-const email_service_1 = require("../services/email.service");
+const authEmail_service_1 = require("../services/authEmail.service");
 const AppError_1 = require("../utils/AppError");
 const authCookies_1 = require("../utils/authCookies");
 /* ======================================
@@ -83,7 +83,7 @@ const register = async (req, res, next) => {
             success: true,
             verificationRequired: true,
         });
-        (0, email_service_1.queueVerificationEmail)(email, verifyLink);
+        (0, authEmail_service_1.queueVerificationEmail)(email, verifyLink);
     }
     catch (err) {
         next(err);
@@ -236,7 +236,7 @@ const resendVerificationEmail = async (req, res, next) => {
                 verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
         });
-        await (0, email_service_1.sendVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${raw}`);
+        await (0, authEmail_service_1.sendVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${raw}`);
         res.json({ success: true });
     }
     catch (err) {
@@ -261,7 +261,7 @@ const forgotPassword = async (req, res, next) => {
                 resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
             },
         });
-        await (0, email_service_1.sendVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/reset-password?token=${raw}`);
+        await (0, authEmail_service_1.sendPasswordResetEmail)(email, `${env_1.env.FRONTEND_URL}/auth/reset-password?token=${raw}`);
         res.json({ success: true });
     }
     catch (err) {

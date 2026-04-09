@@ -11,7 +11,8 @@ import {
 import {
   queueVerificationEmail,
   sendVerificationEmail,
-} from "../services/email.service";
+  sendPasswordResetEmail,
+} from "../services/authEmail.service";
 import {
   badRequest,
   unauthorized,
@@ -353,7 +354,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    await sendVerificationEmail(
+    await sendPasswordResetEmail(
       email,
       `${env.FRONTEND_URL}/auth/reset-password?token=${raw}`
     );

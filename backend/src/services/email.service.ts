@@ -9,11 +9,26 @@ const transporter = nodemailer.createTransport({
   host: "smtppro.zoho.in",
   port: 465,
   secure: true,
+  pool: true,
+  maxConnections: 3,
+  maxMessages: 100,
+  connectionTimeout: 5000,
+  greetingTimeout: 5000,
+  socketTimeout: 10000,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
+
+const runInBackground = (
+  label: string,
+  task: Promise<unknown>
+) => {
+  void task.catch((error) => {
+    console.error(`[EMAIL] ${label} failed`, error);
+  });
+};
 
 /* ================= STRIPE-LEVEL BASE TEMPLATE ================= */
 
@@ -112,6 +127,16 @@ export const sendVerificationEmail = async (to: string, verifyLink: string) => {
     subject: "Verify your email - Automexia AI",
     html,
   });
+};
+
+export const queueVerificationEmail = (
+  to: string,
+  verifyLink: string
+) => {
+  runInBackground(
+    `verification email to ${to}`,
+    sendVerificationEmail(to, verifyLink)
+  );
 };
 
 /* ================= RESET PASSWORD ================= */

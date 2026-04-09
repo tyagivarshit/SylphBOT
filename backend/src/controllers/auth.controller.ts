@@ -8,7 +8,10 @@ import {
   generateAccessToken,
   generateRefreshToken,
 } from "../utils/generateToken";
-import { sendVerificationEmail } from "../services/email.service";
+import {
+  queueVerificationEmail,
+  sendVerificationEmail,
+} from "../services/email.service";
 import {
   badRequest,
   unauthorized,
@@ -117,12 +120,14 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       },
     });
 
-    await sendVerificationEmail(
-      email,
-      `${env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`
-    );
+    const verifyLink = `${env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`;
 
-    res.status(201).json({ success: true });
+    res.status(201).json({
+      success: true,
+      verificationRequired: true,
+    });
+
+    queueVerificationEmail(email, verifyLink);
 
   } catch (err) {
     next(err);

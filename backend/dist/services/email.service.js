@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendInvoiceEmail = exports.sendSubscriptionEmail = exports.sendPasswordResetEmail = exports.sendVerificationEmail = void 0;
+exports.sendInvoiceEmail = exports.sendSubscriptionEmail = exports.sendPasswordResetEmail = exports.queueVerificationEmail = exports.sendVerificationEmail = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const path_1 = __importDefault(require("path"));
@@ -13,11 +13,22 @@ const transporter = nodemailer_1.default.createTransport({
     host: "smtppro.zoho.in",
     port: 465,
     secure: true,
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100,
+    connectionTimeout: 5000,
+    greetingTimeout: 5000,
+    socketTimeout: 10000,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
     },
 });
+const runInBackground = (label, task) => {
+    void task.catch((error) => {
+        console.error(`[EMAIL] ${label} failed`, error);
+    });
+};
 /* ================= STRIPE-LEVEL BASE TEMPLATE ================= */
 const baseTemplate = (content) => `
   <div style="background:#f6f9fc;padding:40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
@@ -111,6 +122,10 @@ const sendVerificationEmail = async (to, verifyLink) => {
     });
 };
 exports.sendVerificationEmail = sendVerificationEmail;
+const queueVerificationEmail = (to, verifyLink) => {
+    runInBackground(`verification email to ${to}`, (0, exports.sendVerificationEmail)(to, verifyLink));
+};
+exports.queueVerificationEmail = queueVerificationEmail;
 /* ================= RESET PASSWORD ================= */
 const sendPasswordResetEmail = async (to, resetLink) => {
     const html = baseTemplate(`

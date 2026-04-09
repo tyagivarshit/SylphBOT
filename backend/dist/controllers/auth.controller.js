@@ -78,8 +78,12 @@ const register = async (req, res, next) => {
                 verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
         });
-        await (0, email_service_1.sendVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`);
-        res.status(201).json({ success: true });
+        const verifyLink = `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`;
+        res.status(201).json({
+            success: true,
+            verificationRequired: true,
+        });
+        (0, email_service_1.queueVerificationEmail)(email, verifyLink);
     }
     catch (err) {
         next(err);

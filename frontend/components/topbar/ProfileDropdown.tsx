@@ -24,7 +24,9 @@ export default function ProfileDropdown() {
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target)) {
+      const target = e.target;
+
+      if (ref.current && target instanceof Node && !ref.current.contains(target)) {
         setOpen(false);
       }
     }

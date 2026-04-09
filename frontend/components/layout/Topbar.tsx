@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import Link from "next/link";
 import { Menu, Search, ShieldCheck } from "lucide-react";
 import {
@@ -62,7 +63,13 @@ function TopbarComponent({ setOpen }: TopbarProps) {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
+      const target = e.target;
+
+      if (
+        containerRef.current &&
+        target instanceof Node &&
+        !containerRef.current.contains(target)
+      ) {
         setOpenSearch(false);
       }
     }
@@ -172,7 +179,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
                     <div
                       key={item.id}
                       onClick={() => {
-                        router.push(item.searchUrl || item.url);
+                        router.push((item.searchUrl || item.url) as Route);
                         setOpenSearch(false);
                         setSearch("");
                       }}

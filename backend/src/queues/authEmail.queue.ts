@@ -50,7 +50,7 @@ const createJobId = (
   to: string,
   link: string
 ) =>
-  `${type}:${crypto
+  `${type}-${crypto
     .createHash("sha256")
     .update(`${to}:${link}`)
     .digest("hex")}`;

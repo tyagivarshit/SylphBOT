@@ -1,45 +1,17 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 const APP_NAME = "Automexia AI";
 const DEFAULT_SUPPORT_EMAIL = "support@automexiaai.in";
-const SMTP_HOST = process.env.SMTP_HOST || "smtppro.zoho.in";
-const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
-const SMTP_SECURE = process.env.SMTP_SECURE
-  ? process.env.SMTP_SECURE === "true"
-  : SMTP_PORT === 465;
-const EMAIL_USER = process.env.EMAIL_USER || "";
-const EMAIL_PASS = process.env.EMAIL_PASS || "";
-const EMAIL_FROM = process.env.EMAIL_FROM || EMAIL_USER;
-const EMAIL_FROM_NAME =
-  process.env.EMAIL_FROM_NAME || `${APP_NAME} Security`;
-const EMAIL_REPLY_TO = process.env.EMAIL_REPLY_TO || EMAIL_FROM;
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const EMAIL_FROM = "Automexia AI <noreply@automexiaai.in>";
 const EMAIL_SUPPORT_EMAIL =
-  process.env.EMAIL_SUPPORT_EMAIL || EMAIL_REPLY_TO || DEFAULT_SUPPORT_EMAIL;
+  process.env.EMAIL_SUPPORT_EMAIL || DEFAULT_SUPPORT_EMAIL;
 const EMAIL_RETRY_ATTEMPTS = Math.max(
   1,
   Number(process.env.EMAIL_RETRY_ATTEMPTS || 3)
 );
 
-const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: SMTP_PORT,
-  secure: SMTP_SECURE,
-  pool: true,
-  maxConnections: 5,
-  maxMessages: 200,
-  connectionTimeout: 10000,
-  greetingTimeout: 8000,
-  socketTimeout: 15000,
-  auth:
-    EMAIL_USER && EMAIL_PASS
-      ? {
-          user: EMAIL_USER,
-          pass: EMAIL_PASS,
-        }
-      : undefined,
-});
-
-let transportReadyPromise: Promise<void> | null = null;
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 type MailPayload = {
   to: string;
@@ -82,29 +54,6 @@ const runInBackground = (
   });
 };
 
-const ensureTransportReady = async () => {
-  if (!EMAIL_USER || !EMAIL_PASS || !EMAIL_FROM) {
-    throw new Error(
-      "Email transport is not configured. Set EMAIL_USER, EMAIL_PASS, and EMAIL_FROM."
-    );
-  }
-
-  if (!transportReadyPromise) {
-    transportReadyPromise = transporter
-      .verify()
-      .then(() => {
-        console.log("[EMAIL] SMTP transport ready");
-      })
-      .catch((error) => {
-        transportReadyPromise = null;
-        console.error("[EMAIL] SMTP verification failed", error);
-        throw error;
-      });
-  }
-
-  return transportReadyPromise;
-};
-
 const sendEmail = async ({
   to,
   subject,
@@ -116,43 +65,33 @@ const sendEmail = async ({
 
   for (let attempt = 1; attempt <= EMAIL_RETRY_ATTEMPTS; attempt += 1) {
     try {
-      await ensureTransportReady();
+      if (!resend || !RESEND_API_KEY) {
+        throw new Error(
+          "Email transport is not configured. Set RESEND_API_KEY."
+        );
+      }
 
-      const info = await transporter.sendMail({
-        from: `"${EMAIL_FROM_NAME}" <${EMAIL_FROM}>`,
-        sender: EMAIL_FROM,
-        replyTo: EMAIL_REPLY_TO,
+      const info = await resend.emails.send({
         to,
+        from: EMAIL_FROM,
         subject,
         html,
         text,
-        envelope: {
-          from: EMAIL_FROM,
-          to: [to],
-        },
-        headers: {
-          "X-Automexia-Category": category,
-        },
       });
 
       console.log("[EMAIL] sent", {
         category,
         to,
-        messageId: info.messageId,
-        accepted: info.accepted,
-        rejected: info.rejected,
+        id: info.data?.id,
       });
 
-      if (info.rejected?.length) {
-        throw new Error(
-          `Email rejected for recipients: ${info.rejected.join(", ")}`
-        );
+      if (info.error) {
+        throw new Error(info.error.message || "Resend send failed");
       }
 
       return info;
     } catch (error) {
       lastError = error;
-      transportReadyPromise = null;
 
       console.error("[EMAIL] send attempt failed", {
         category,

@@ -43,6 +43,7 @@ const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
 const trial_cron_1 = require("./cron/trial.cron");
 const metaTokenRefresh_cron_1 = require("./cron/metaTokenRefresh.cron");
 const resetUsage_cron_1 = require("./cron/resetUsage.cron");
+console.log("🔥 AUTH EMAIL WORKER STARTED");
 require("./workers/bookingReminder.worker");
 require("./workers/authEmail.worker");
 const AppError_1 = require("./utils/AppError");

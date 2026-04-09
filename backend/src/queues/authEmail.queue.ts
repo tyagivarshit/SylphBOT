@@ -1,6 +1,10 @@
 import crypto from "crypto";
 import { Queue } from "bullmq";
 import { env } from "../config/env";
+import {
+  queuePasswordResetEmail,
+  queueVerificationEmail,
+} from "../services/authEmail.service";
 
 export type AuthEmailJobData =
   | {
@@ -19,6 +23,9 @@ export const authEmailQueue = new Queue<AuthEmailJobData>(
   {
     connection: {
       url: env.REDIS_URL,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      ...(env.REDIS_URL.startsWith("rediss://") ? { tls: {} } : {}),
     },
     prefix: "sylph",
     defaultJobOptions: {
@@ -80,4 +87,36 @@ export const enqueuePasswordResetEmail = async (
       jobId: createJobId("reset", to, link),
     }
   );
+};
+
+export const scheduleVerificationEmail = async (
+  to: string,
+  link: string
+) => {
+  try {
+    await enqueueVerificationEmail(to, link);
+  } catch (error) {
+    console.error("[EMAIL_QUEUE] enqueue failed, using direct fallback", {
+      type: "verify",
+      to,
+      error: error instanceof Error ? error.message : "Unknown queue error",
+    });
+    queueVerificationEmail(to, link);
+  }
+};
+
+export const schedulePasswordResetEmail = async (
+  to: string,
+  link: string
+) => {
+  try {
+    await enqueuePasswordResetEmail(to, link);
+  } catch (error) {
+    console.error("[EMAIL_QUEUE] enqueue failed, using direct fallback", {
+      type: "reset",
+      to,
+      error: error instanceof Error ? error.message : "Unknown queue error",
+    });
+    queuePasswordResetEmail(to, link);
+  }
 };

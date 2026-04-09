@@ -9,10 +9,8 @@ import {
   generateRefreshToken,
 } from "../utils/generateToken";
 import {
-} from "../services/authEmail.service";
-import {
-  enqueuePasswordResetEmail,
-  enqueueVerificationEmail,
+  schedulePasswordResetEmail,
+  scheduleVerificationEmail,
 } from "../queues/authEmail.queue";
 import {
   badRequest,
@@ -106,30 +104,54 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       );
     }
 
-    const exists = await prisma.user.findUnique({ where: { email } });
-    if (exists) throw conflict("Email already exists");
-
     const hashed = await bcrypt.hash(password, 12);
     const rawToken = crypto.randomBytes(32).toString("hex");
-
-    await prisma.user.create({
-      data: {
-        name,
-        email,
-        password: hashed,
-        verifyToken: hashToken(rawToken),
-        verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    const verifyToken = hashToken(rawToken);
+    const verifyTokenExpiry = new Date(
+      Date.now() + 24 * 60 * 60 * 1000
+    );
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        isVerified: true,
       },
     });
 
-    const verifyLink = `${env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`;
+    if (existingUser?.isVerified) {
+      throw conflict("Email already exists");
+    }
 
-    await enqueueVerificationEmail(email, verifyLink);
+    if (existingUser) {
+      await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          name,
+          password: hashed,
+          verifyToken,
+          verifyTokenExpiry,
+        },
+      });
+    } else {
+      await prisma.user.create({
+        data: {
+          name,
+          email,
+          password: hashed,
+          verifyToken,
+          verifyTokenExpiry,
+        },
+      });
+    }
+
+    const verifyLink = `${env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`;
 
     res.status(201).json({
       success: true,
       verificationRequired: true,
     });
+
+    void scheduleVerificationEmail(email, verifyLink);
 
   } catch (err) {
     next(err);
@@ -321,7 +343,7 @@ export const resendVerificationEmail = async (req: Request, res: Response, next:
       },
     });
 
-    await enqueueVerificationEmail(
+    await scheduleVerificationEmail(
       email,
       `${env.FRONTEND_URL}/auth/verify-email?token=${raw}`
     );
@@ -355,7 +377,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    await enqueuePasswordResetEmail(
+    await schedulePasswordResetEmail(
       email,
       `${env.FRONTEND_URL}/auth/reset-password?token=${raw}`
     );

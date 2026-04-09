@@ -450,3 +450,13 @@ export const sendPasswordResetEmail = async (
     category: "reset-password",
   });
 };
+
+export const queuePasswordResetEmail = (
+  to: string,
+  resetLink: string
+) => {
+  runInBackground(
+    `password reset email to ${to}`,
+    sendPasswordResetEmail(to, resetLink)
+  );
+};

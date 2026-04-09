@@ -19,6 +19,9 @@ const authEmailWorker = new Worker<AuthEmailJobData>(
   {
     connection: {
       url: env.REDIS_URL,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      ...(env.REDIS_URL.startsWith("rediss://") ? { tls: {} } : {}),
     },
     prefix: "sylph",
     concurrency: 2,

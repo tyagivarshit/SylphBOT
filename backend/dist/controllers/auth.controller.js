@@ -64,26 +64,48 @@ const register = async (req, res, next) => {
         if (!name || !email || !password || !isStrongPassword(password)) {
             throw (0, AppError_1.badRequest)("Password must be at least 8 characters and include uppercase, lowercase, and a number");
         }
-        const exists = await prisma_1.default.user.findUnique({ where: { email } });
-        if (exists)
-            throw (0, AppError_1.conflict)("Email already exists");
         const hashed = await bcryptjs_1.default.hash(password, 12);
         const rawToken = crypto_1.default.randomBytes(32).toString("hex");
-        await prisma_1.default.user.create({
-            data: {
-                name,
-                email,
-                password: hashed,
-                verifyToken: hashToken(rawToken),
-                verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        const verifyToken = hashToken(rawToken);
+        const verifyTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const existingUser = await prisma_1.default.user.findUnique({
+            where: { email },
+            select: {
+                id: true,
+                isVerified: true,
             },
         });
+        if (existingUser?.isVerified) {
+            throw (0, AppError_1.conflict)("Email already exists");
+        }
+        if (existingUser) {
+            await prisma_1.default.user.update({
+                where: { id: existingUser.id },
+                data: {
+                    name,
+                    password: hashed,
+                    verifyToken,
+                    verifyTokenExpiry,
+                },
+            });
+        }
+        else {
+            await prisma_1.default.user.create({
+                data: {
+                    name,
+                    email,
+                    password: hashed,
+                    verifyToken,
+                    verifyTokenExpiry,
+                },
+            });
+        }
         const verifyLink = `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`;
-        await (0, authEmail_queue_1.enqueueVerificationEmail)(email, verifyLink);
         res.status(201).json({
             success: true,
             verificationRequired: true,
         });
+        void (0, authEmail_queue_1.scheduleVerificationEmail)(email, verifyLink);
     }
     catch (err) {
         next(err);
@@ -236,7 +258,7 @@ const resendVerificationEmail = async (req, res, next) => {
                 verifyTokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
         });
-        await (0, authEmail_queue_1.enqueueVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${raw}`);
+        await (0, authEmail_queue_1.scheduleVerificationEmail)(email, `${env_1.env.FRONTEND_URL}/auth/verify-email?token=${raw}`);
         res.json({ success: true });
     }
     catch (err) {
@@ -261,7 +283,7 @@ const forgotPassword = async (req, res, next) => {
                 resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
             },
         });
-        await (0, authEmail_queue_1.enqueuePasswordResetEmail)(email, `${env_1.env.FRONTEND_URL}/auth/reset-password?token=${raw}`);
+        await (0, authEmail_queue_1.schedulePasswordResetEmail)(email, `${env_1.env.FRONTEND_URL}/auth/reset-password?token=${raw}`);
         res.json({ success: true });
     }
     catch (err) {

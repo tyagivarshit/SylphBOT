@@ -9,10 +9,11 @@ import {
   generateRefreshToken,
 } from "../utils/generateToken";
 import {
-  queueVerificationEmail,
-  sendVerificationEmail,
-  sendPasswordResetEmail,
 } from "../services/authEmail.service";
+import {
+  enqueuePasswordResetEmail,
+  enqueueVerificationEmail,
+} from "../queues/authEmail.queue";
 import {
   badRequest,
   unauthorized,
@@ -123,12 +124,12 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
     const verifyLink = `${env.FRONTEND_URL}/auth/verify-email?token=${rawToken}`;
 
+    await enqueueVerificationEmail(email, verifyLink);
+
     res.status(201).json({
       success: true,
       verificationRequired: true,
     });
-
-    queueVerificationEmail(email, verifyLink);
 
   } catch (err) {
     next(err);
@@ -320,7 +321,7 @@ export const resendVerificationEmail = async (req: Request, res: Response, next:
       },
     });
 
-    await sendVerificationEmail(
+    await enqueueVerificationEmail(
       email,
       `${env.FRONTEND_URL}/auth/verify-email?token=${raw}`
     );
@@ -354,7 +355,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    await sendPasswordResetEmail(
+    await enqueuePasswordResetEmail(
       email,
       `${env.FRONTEND_URL}/auth/reset-password?token=${raw}`
     );

@@ -52,7 +52,11 @@ export default function VerifyEmailPage() {
 
     const runVerification = async () => {
       try {
-        await verifyEmail(token)
+        const res = await verifyEmail(token)
+
+        if (!res.success) {
+          throw new Error(res.message || "Verification failed")
+        }
 
         if (mounted.current) {
           setStatus("success")
@@ -92,11 +96,18 @@ export default function VerifyEmailPage() {
     if (cooldown > 0) return
 
     try {
-      await resendVerification(email.trim().toLowerCase())
+      const res = await resendVerification(email.trim().toLowerCase())
+
+      if (!res.success) {
+        throw new Error(res.message || "Unable to resend verification email")
+      }
+
       toast.success("Verification email sent")
       startCooldown()
-    } catch {
-      toast.error("Try again later")
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error ? err.message : "Try again later"
+      )
     }
   }
 

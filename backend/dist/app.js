@@ -44,6 +44,7 @@ const trial_cron_1 = require("./cron/trial.cron");
 const metaTokenRefresh_cron_1 = require("./cron/metaTokenRefresh.cron");
 const resetUsage_cron_1 = require("./cron/resetUsage.cron");
 require("./workers/bookingReminder.worker");
+require("./workers/authEmail.worker");
 const AppError_1 = require("./utils/AppError");
 const app = (0, express_1.default)();
 app.set("trust proxy", 1);

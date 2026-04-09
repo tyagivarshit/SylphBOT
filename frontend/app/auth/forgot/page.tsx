@@ -51,15 +51,24 @@ export default function ForgotPage() {
     try {
       setLoading(true);
 
-      await forgotPassword(cleanEmail);
+      const res = await forgotPassword(cleanEmail);
+
+      if (!res.success) {
+        throw new Error(
+          res.message || "We could not send the reset email right now"
+        );
+      }
 
       setSent(true);
       toast.success("If email exists, reset link sent");
 
       startCooldown();
-    } catch {
-      toast.success("If email exists, reset link sent");
-      startCooldown();
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "We could not send the reset email right now"
+      );
     } finally {
       setLoading(false);
     }

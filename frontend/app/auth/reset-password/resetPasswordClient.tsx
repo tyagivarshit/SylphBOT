@@ -57,7 +57,11 @@ export default function ResetPasswordPage() {
     try {
       setLoading(true)
 
-      await resetPassword(token, password)
+      const res = await resetPassword(token, password)
+
+      if (!res.success) {
+        throw new Error(res.message || "Reset failed")
+      }
 
       if (mounted.current) setSuccess(true)
 

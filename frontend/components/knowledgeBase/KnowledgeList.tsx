@@ -83,7 +83,7 @@ export default function KnowledgeList(){
 
     <div className="min-w-0 space-y-4 sm:space-y-5">
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
 
         <h2 className="text-sm font-semibold text-gray-900">
           Knowledge Entries
@@ -94,7 +94,7 @@ export default function KnowledgeList(){
             setSelected(null)
             setOpen(true)
           }}
-          className="w-full sm:w-auto px-5 py-2.5 text-sm font-semibold rounded-xl text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md transition"
+          className="brand-button-primary w-full sm:w-auto"
         >
           Add Knowledge
         </button>
@@ -110,12 +110,12 @@ export default function KnowledgeList(){
           {Array.from({length:3}).map((_,i)=>(
             <div
               key={i}
-              className="h-28 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl animate-pulse"
+              className="h-28 rounded-[24px] border border-slate-200 bg-white/80 animate-pulse"
             />
           ))}
         </div>
       ) : knowledge.length === 0 ? (
-        <div className="text-center border border-dashed border-blue-200 rounded-2xl p-6 sm:p-8 bg-white/70 backdrop-blur-xl">
+        <div className="brand-empty-state rounded-[24px] p-6 text-center sm:p-8">
           <p className="text-sm font-semibold text-gray-900">
             No knowledge added yet
           </p>
@@ -138,7 +138,7 @@ export default function KnowledgeList(){
 
               {/* 🔥 DELETE LOADING OVERLAY */}
               {deletingId === item.id && (
-                <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center text-xs text-gray-600 rounded-2xl">
+                <div className="absolute inset-0 flex items-center justify-center rounded-[24px] bg-white/70 backdrop-blur-sm text-xs text-gray-600">
                   Deleting...
                 </div>
               )}

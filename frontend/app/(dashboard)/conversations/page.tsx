@@ -140,10 +140,8 @@ function ConversationsPageContent() {
   };
 
   return (
-    <div className="h-[calc(100vh-64px)] flex bg-gradient-to-br from-white via-blue-50 to-cyan-50">
-
-      {/* WRAPPER CARD */}
-      <div className="flex w-full bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl overflow-hidden shadow-sm">
+    <div className="min-h-[32rem] min-w-0">
+      <div className="brand-section-shell flex min-h-[32rem] w-full overflow-hidden rounded-[30px] p-0">
 
         <ChatSidebar
           leads={leads}
@@ -159,14 +157,13 @@ function ConversationsPageContent() {
         />
 
       </div>
-
     </div>
   );
 }
 
 function ConversationsPageFallback() {
   return (
-    <div className="h-[calc(100vh-64px)] flex items-center justify-center bg-gradient-to-br from-white via-blue-50 to-cyan-50">
+    <div className="flex min-h-[32rem] items-center justify-center">
       <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
     </div>
   );

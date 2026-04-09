@@ -73,10 +73,10 @@ export default function CommentAutomationList(){
 
       {/* HEADER */}
 
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+      <div className="flex flex-col gap-3 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
 
         <h2 className="text-lg font-semibold text-gray-900">
-          Comment Automations
+          Active triggers
         </h2>
 
         <button
@@ -84,7 +84,7 @@ export default function CommentAutomationList(){
             setEditData(null) // 🔥 create mode
             setOpen(true)
           }}
-          className="w-full sm:w-auto px-5 py-2 text-sm font-semibold rounded-xl text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md transition"
+          className="brand-button-primary w-full sm:w-auto"
         >
           Create Trigger
         </button>
@@ -98,7 +98,7 @@ export default function CommentAutomationList(){
           {Array.from({length:3}).map((_,i)=>(
             <div
               key={i}
-              className="h-28 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl animate-pulse shadow-sm"
+              className="h-28 rounded-[24px] border border-slate-200 bg-white/80 animate-pulse shadow-sm"
             />
           ))}
         </div>
@@ -107,7 +107,7 @@ export default function CommentAutomationList(){
       {/* ERROR */}
 
       {error && (
-        <div className="text-sm text-red-600 bg-red-100 border border-red-200 rounded-xl p-3">
+        <div className="rounded-[22px] border border-red-200 bg-red-50 p-3 text-sm text-red-600">
           {error}
         </div>
       )}
@@ -115,7 +115,7 @@ export default function CommentAutomationList(){
       {/* EMPTY */}
 
       {!loading && automations.length === 0 && (
-        <div className="text-center border border-dashed border-blue-200 rounded-2xl p-8 bg-white/70 backdrop-blur-xl">
+        <div className="brand-empty-state rounded-[24px] p-8 text-center">
           
           <p className="text-base font-semibold text-gray-900">
             No comment automations yet
@@ -130,7 +130,7 @@ export default function CommentAutomationList(){
               setEditData(null)
               setOpen(true)
             }}
-            className="mt-4 px-5 py-2 text-sm rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 shadow-sm hover:shadow-md transition w-full sm:w-auto"
+            className="brand-button-primary mt-4 w-full sm:w-auto"
           >
             Create your first automation
           </button>

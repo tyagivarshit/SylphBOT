@@ -103,11 +103,11 @@ export default function IntegrationsSettings() {
   }
 
   return (
-    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 space-y-6 shadow-sm">
+    <div className="space-y-6">
       <div>
-        <h3 className="text-base font-semibold text-gray-900">Integrations</h3>
+        <h3 className="text-base font-semibold text-gray-900">Connection status</h3>
         <p className="text-sm text-gray-500 mt-1">
-          Connect your external platforms
+          Connect your external platforms and keep access synced.
         </p>
       </div>
 
@@ -150,7 +150,7 @@ function IntegrationCard({
   onDisconnect: () => void;
 }) {
   return (
-    <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 flex items-center justify-between hover:shadow-md transition">
+      <div className="flex items-center justify-between rounded-[24px] border border-slate-200/80 bg-white/84 p-5 transition hover:-translate-y-0.5 hover:shadow-md">
       <div>
         <p className="text-sm font-semibold text-gray-900">{title}</p>
         <p className="text-xs text-gray-500">{desc}</p>
@@ -159,14 +159,14 @@ function IntegrationCard({
       {connected ? (
         <button
           onClick={onDisconnect}
-          className="bg-red-50 text-red-600 border border-red-100 px-4 py-2 rounded-xl text-sm font-semibold hover:shadow-md transition"
+          className="rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 transition hover:shadow-md"
         >
           Disconnect
         </button>
       ) : (
         <button
           onClick={onConnect}
-          className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:shadow-lg transition"
+          className="brand-button-primary px-4 py-2"
         >
           {loading ? "Connecting..." : "Connect"}
         </button>
@@ -195,13 +195,13 @@ function ApiKeySection() {
   };
 
   return (
-    <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 space-y-4">
+    <div className="rounded-[24px] border border-slate-200/80 bg-white/84 p-5 space-y-4">
       <div>
         <p className="text-sm font-semibold text-gray-900">API Key</p>
         <p className="text-xs text-gray-500">Use this key to access API</p>
       </div>
 
-      <div className="flex items-center justify-between bg-white border border-blue-100 rounded-xl px-4 py-2.5 gap-3">
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5">
         <span className="text-sm text-gray-700 truncate">
           {isError ? "Unable to load workspace API key" : maskedKey}
         </span>
@@ -209,7 +209,7 @@ function ApiKeySection() {
         <button
           onClick={handleCopy}
           disabled={!apiKey || isLoading}
-          className="text-xs font-semibold bg-blue-50 text-gray-700 px-3 py-1.5 rounded-lg hover:shadow-sm transition disabled:opacity-60"
+          className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:shadow-sm disabled:opacity-60"
         >
           {isLoading ? "Loading..." : "Copy"}
         </button>

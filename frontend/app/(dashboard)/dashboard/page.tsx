@@ -48,7 +48,11 @@ export default function DashboardPage() {
   }, [user]);
 
   if (loading || !stats)
-    return <div className="p-4 text-gray-900">Loading...</div>;
+    return (
+      <div className="brand-panel rounded-[26px] p-6 text-sm text-slate-500">
+        Loading dashboard...
+      </div>
+    );
   if (!user) return null;
 
   const usagePercent = Math.min(
@@ -57,12 +61,12 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="w-full bg-gradient-to-br from-white via-blue-50 to-cyan-50 min-h-screen relative">
+    <div className="relative min-w-0 space-y-6">
 
       {/* 🔒 LIMIT OVERLAY */}
       {limited && (
-        <div className="absolute inset-0 bg-white/80 backdrop-blur flex items-center justify-center z-50">
-          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 p-6 rounded-2xl text-center shadow-sm">
+        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-[32px] bg-white/80 backdrop-blur">
+          <div className="brand-panel-strong rounded-[28px] p-6 text-center">
             <h2 className="text-lg font-semibold text-gray-900">
               Upgrade Required 🔒
             </h2>
@@ -77,7 +81,7 @@ export default function DashboardPage() {
       )}
 
       {/* ================= MOBILE ================= */}
-      <div className="md:hidden p-3 space-y-4">
+      <div className="space-y-4 md:hidden">
 
         <div className="grid grid-cols-2 gap-3">
           <MiniCard title="Leads" value={stats.totalLeads} />
@@ -131,7 +135,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ================= DESKTOP ================= */}
-      <div className="hidden md:block p-6 space-y-8">
+      <div className="hidden space-y-8 md:block">
 
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
           <Card title="Total Leads" value={stats.totalLeads} />

@@ -9,24 +9,22 @@ import IntegrationsSettings from "@/components/settings/IntegrationsSettings";
 
 export default function SettingsPage() {
   return (
-    <div className="space-y-10">
-
-      {/* HEADER */}
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">
-          Settings
-        </h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Manage your account, billing and integrations
+    <div className="space-y-8">
+      <div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+          Workspace controls
+        </p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+          Manage integrations, billing preferences, notifications, and account
+          security from one organized command surface.
         </p>
       </div>
 
-      {/* INTEGRATIONS (TOP PRIORITY) */}
       <div className="space-y-4">
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Integrations
         </h2>
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+        <div className="brand-section-shell rounded-[28px] p-5">
           <Suspense
             fallback={
               <div className="text-sm text-gray-500 animate-pulse">
@@ -44,7 +42,7 @@ export default function SettingsPage() {
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Business
         </h2>
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+        <div className="brand-section-shell rounded-[28px] p-5">
           <BusinessSettings />
         </div>
       </div>
@@ -54,7 +52,7 @@ export default function SettingsPage() {
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Billing
         </h2>
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+        <div className="brand-section-shell rounded-[28px] p-5">
           <BillingSettings />
         </div>
       </div>
@@ -64,7 +62,7 @@ export default function SettingsPage() {
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Notifications
         </h2>
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+        <div className="brand-section-shell rounded-[28px] p-5">
           <NotificationSettings />
         </div>
       </div>
@@ -76,11 +74,11 @@ export default function SettingsPage() {
         </h2>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+          <div className="brand-section-shell rounded-[28px] p-5">
             <ChangePassword />
           </div>
 
-          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+          <div className="brand-section-shell rounded-[28px] p-5">
             <DeleteAccount />
           </div>
         </div>

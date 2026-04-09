@@ -48,7 +48,7 @@ export default function PaymentHistory({
   };
 
   return (
-    <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 md:p-6 shadow-sm space-y-6">
+    <div className="brand-section-shell rounded-[28px] p-5 md:p-6 space-y-6">
 
       {/* HEADER */}
       <div>
@@ -62,7 +62,7 @@ export default function PaymentHistory({
 
       {/* EMPTY */}
       {sorted.length === 0 && (
-        <div className="text-center py-10 text-gray-500 text-sm border border-dashed border-blue-200 rounded-xl">
+        <div className="brand-empty-state rounded-[22px] py-10 text-center text-sm text-gray-500">
           No payments yet
         </div>
       )}
@@ -77,7 +77,7 @@ export default function PaymentHistory({
           return (
             <div
               key={inv.id}
-              className="rounded-xl border border-blue-100 bg-white/80 backdrop-blur p-4 transition-all hover:shadow-md"
+              className="rounded-[22px] border border-slate-200/80 bg-white/84 p-4 transition-all hover:-translate-y-0.5 hover:shadow-md"
             >
 
               {/* MOBILE */}
@@ -120,7 +120,7 @@ export default function PaymentHistory({
                       href={inv.hosted_invoice_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-1 text-xs py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition"
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-50 py-2 text-xs text-blue-600 transition hover:bg-blue-100"
                     >
                       <ExternalLink size={14} />
                       View
@@ -132,7 +132,7 @@ export default function PaymentHistory({
                       href={inv.invoice_pdf}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-1 text-xs py-2 rounded-lg bg-green-50 text-green-600 hover:bg-green-100 transition"
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-green-50 py-2 text-xs text-green-600 transition hover:bg-green-100"
                     >
                       <Download size={14} />
                       PDF

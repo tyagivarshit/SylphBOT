@@ -1,36 +1,23 @@
-"use client"
+"use client";
 
-import AutomationList from "@/components/automation/AutomationList"
+import AutomationList from "@/components/automation/AutomationList";
 
-export default function AutomationPage(){
+export default function AutomationPage() {
+  return (
+    <div className="space-y-5">
+      <div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+          Flow operations
+        </p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+          Launch lead-capture flows, monitor live status, and keep your
+          Instagram automation stack organized in one workspace.
+        </p>
+      </div>
 
-return(
-
-<div className="space-y-6">
-
-{/* HEADER */}
-
-<div className="flex items-center justify-between">
-
-<div>
-  <h1 className="text-xl font-semibold text-gray-900">
-    Automation
-  </h1>
-
-  <p className="text-sm text-gray-500 mt-1">
-    Create and manage your Instagram automations
-  </p>
-</div>
-
-</div>
-
-{/* LIST */}
-
-<div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm hover:shadow-lg transition">
-  <AutomationList/>
-</div>
-
-</div>
-
-)
+      <section className="brand-section-shell rounded-[30px] p-4 sm:p-5 lg:p-6">
+        <AutomationList />
+      </section>
+    </div>
+  );
 }

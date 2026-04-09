@@ -95,27 +95,27 @@ return(
 <div className="space-y-6">
 
 {/* 🔥 ADD FORM CARD */}
-<div className="space-y-4 bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+<div className="space-y-4 rounded-[24px] border border-slate-200/80 bg-white/82 p-5 shadow-sm">
 
 <input
 value={question}
 onChange={(e)=>setQuestion(e.target.value)}
 placeholder="Question"
-className="w-full bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
+className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400"
 />
 
 <textarea
 value={answer}
 onChange={(e)=>setAnswer(e.target.value)}
 placeholder="Answer"
-className="w-full bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
+className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400"
 rows={4}
 />
 
 <button
 onClick={handleAdd}
 disabled={loading}
-className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition active:scale-[0.98] disabled:opacity-70"
+className="brand-button-primary w-full"
 >
 {loading ? "Adding..." : "Add FAQ"}
 </button>
@@ -127,13 +127,15 @@ className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm 
 <div className="space-y-3">
 
 {faqs.length === 0 && (
-  <p className="text-sm text-gray-500">No FAQs yet</p>
+  <p className="brand-empty-state rounded-[22px] px-4 py-6 text-center text-sm">
+    No FAQs yet
+  </p>
 )}
 
 {faqs.map((faq) => (
   <div
     key={faq.id}
-    className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-xl p-4 shadow-sm hover:shadow-md transition"
+    className="rounded-[22px] border border-slate-200/80 bg-white/80 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
   >
     <p className="font-semibold text-sm text-gray-900">
       {faq.question}

@@ -7,29 +7,27 @@ export default function AnalyticsPage(){
 
 return(
 
-<div className="space-y-6">
+<div className="space-y-5">
 
-{/* ===== HEADER ===== */}
+<div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
 
-<div>
+<p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+Performance view
+</p>
 
-<h1 className="text-xl font-semibold text-gray-900">
-Analytics
-</h1>
-
-<p className="text-sm text-gray-500 mt-1">
-Deep insights into leads, conversations and conversions
+<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+Follow funnel movement, message activity, and conversion momentum from a cleaner reporting surface.
 </p>
 
 </div>
 
 {/* 🔒 FULL LOCK (HIGH VALUE FEATURE) */}
 
-<div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
+<section className="brand-section-shell rounded-[30px] p-4 sm:p-5 lg:p-6">
   <FeatureGate feature="CRM">
     <AnalyticsLayout/>
   </FeatureGate>
-</div>
+</section>
 
 </div>
 

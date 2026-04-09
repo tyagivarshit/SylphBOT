@@ -34,6 +34,19 @@ export function useUpgrade() {
   return context;
 }
 
+function AuthStateCard({ message }: { message: string }) {
+  return (
+    <div className="brand-app brand-shell">
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <div className="brand-panel-strong w-full max-w-md rounded-[32px] p-8 text-center">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
+          <p className="mt-4 text-sm text-slate-500">{message}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -52,35 +65,33 @@ export default function DashboardLayout({
     }
   }, [loading, router, user]);
 
+  useEffect(() => {
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEsc);
+
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, []);
+
+  useEffect(() => {
+    document.body.style.overflow = open ? "hidden" : "";
+
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open]);
+
   /* 🔥 STABLE CONTEXT */
   if (loading) {
-    return (
-      <div className="brand-app brand-shell">
-        <div className="flex min-h-screen items-center justify-center p-4">
-          <div className="brand-panel-strong w-full max-w-md rounded-[32px] p-8 text-center">
-            <div className="mx-auto h-10 w-10 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" />
-            <p className="mt-4 text-sm text-slate-500">
-              Loading your Automexia workspace...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+    return <AuthStateCard message="Loading your Automexia workspace..." />;
   }
 
   if (!user) {
-    return (
-      <div className="brand-app brand-shell">
-        <div className="flex min-h-screen items-center justify-center p-4">
-          <div className="brand-panel-strong w-full max-w-md rounded-[32px] p-8 text-center">
-            <div className="mx-auto h-10 w-10 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" />
-            <p className="mt-4 text-sm text-slate-500">
-              Redirecting to secure sign-in...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+    return <AuthStateCard message="Redirecting to secure sign-in..." />;
   }
 
   return (
@@ -93,19 +104,19 @@ export default function DashboardLayout({
       <div className="brand-app brand-shell">
 
         {/* 🔥 TOPBAR */}
-        <div className="brand-layout-frame">
+        <div className="brand-layout-frame lg:h-[100dvh] lg:max-h-[100dvh] lg:overflow-hidden">
 
         {/* 🔥 BODY */}
           <Sidebar open={open} setOpen={setOpen} />
 
           {/* ✅ SIDEBAR (NO WRAPPER, DIRECT) */}
-          <div className="brand-page flex min-h-[calc(100vh-2rem)] flex-1 flex-col gap-4 overflow-hidden">
+          <div className="brand-page brand-main-column">
 
           {/* 🔥 MAIN CONTENT */}
             <Topbar setOpen={setOpen} />
 
-            <main className="brand-scrollbar flex-1 overflow-y-auto overflow-x-clip">
-              <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-2">
+            <main className="brand-content-scroll brand-scrollbar">
+              <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 pb-6 sm:gap-6">
                 {children}
               </div>
             </main>

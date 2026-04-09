@@ -9,7 +9,6 @@ import { buildApiUrl } from "@/lib/url"
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
 import FeatureGate from "@/components/FeatureGate"
-import PageHeader from "@/components/brand/PageHeader"
 
 const stageOptions = [
   { value: "", label: "All Stages" },
@@ -80,26 +79,7 @@ function LeadsPageContent(){
 
   return(
 
-    <div className="min-w-0 space-y-6">
-
-      <PageHeader
-        eyebrow="CRM"
-        title="Leads CRM"
-        description="Track captured conversations, monitor stages, and open full lead context inside the same premium Automexia product experience."
-        chip={<span className="brand-chip">Pipeline visibility</span>}
-        action={
-          <StageSelect
-            value={stage}
-            options={stageOptions}
-            ariaLabel="Filter leads by stage"
-            className="w-full sm:w-[220px]"
-            onChange={(value)=>{
-              setStage(value)
-              setPage(1)
-            }}
-          />
-        }
-      />
+    <div className="min-w-0 space-y-5">
 
       {/* CONTENT */}
       {loading ? (
@@ -110,7 +90,32 @@ function LeadsPageContent(){
 
         <FeatureGate feature="CRM">
 
-          <div className="brand-panel rounded-[28px] p-5 md:p-6">
+          <div className="brand-section-shell rounded-[30px] p-4 sm:p-5 lg:p-6">
+            <div className="mb-5 flex flex-col gap-4 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-2">
+                <span className="brand-chip w-fit">Pipeline visibility</span>
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight text-slate-950">
+                    Lead pipeline
+                  </h2>
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+                    Filter stages, review unread activity, and open lead context
+                    from one clean CRM surface.
+                  </p>
+                </div>
+              </div>
+
+              <StageSelect
+                value={stage}
+                options={stageOptions}
+                ariaLabel="Filter leads by stage"
+                className="w-full sm:w-[220px]"
+                onChange={(value)=>{
+                  setStage(value)
+                  setPage(1)
+                }}
+              />
+            </div>
 
             {!isAllowed ? (
               <p className="brand-empty-state rounded-[24px] py-10 text-center text-sm">

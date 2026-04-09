@@ -14,10 +14,16 @@ export default function AnalyticsLayout() {
     <div className="space-y-6 text-gray-900">
 
       {/* 🔥 HEADER WRAPPER (optional feel upgrade) */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-lg sm:text-xl font-semibold text-gray-800">
-          Analytics
-        </h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Reporting range
+          </p>
+          <p className="mt-1 text-sm text-slate-500">
+            Compare short-term spikes and longer trend lines without repeating
+            the page title.
+          </p>
+        </div>
 
         <DateFilter range={range} setRange={setRange} />
       </div>

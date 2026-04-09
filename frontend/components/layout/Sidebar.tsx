@@ -122,11 +122,11 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
       <aside
         className={`
           brand-sidebar-panel fixed left-0 top-0 z-50 flex h-screen w-[82vw] max-w-[310px]
-          flex-col rounded-none px-4 py-4 transition-transform duration-300 ease-out
+          flex-col overflow-hidden rounded-none px-4 py-4 transition-transform duration-300 ease-out
 
           ${open ? "translate-x-0" : "-translate-x-full"}
-          lg:relative lg:h-auto lg:min-h-[calc(100vh-2rem)] lg:w-[290px] lg:max-w-none
-          lg:translate-x-0 lg:rounded-[32px]
+          lg:sticky lg:top-0 lg:h-full lg:min-h-0 lg:w-[290px] lg:max-w-none
+          lg:translate-x-0 lg:self-stretch lg:rounded-[32px]
         `}
       >
         {/* 🔥 MOBILE HEADER */}

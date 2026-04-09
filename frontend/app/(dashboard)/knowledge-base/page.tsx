@@ -7,29 +7,27 @@ export default function KnowledgeBasePage(){
 
 return(
 
-<div className="min-w-0 space-y-4 sm:space-y-6">
+<div className="min-w-0 space-y-5">
 
-{/* PAGE HEADER */}
+<div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
 
-<div>
+<p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+Knowledge operations
+</p>
 
-<h1 className="text-lg sm:text-xl font-semibold text-gray-900">
-Knowledge Base
-</h1>
-
-<p className="text-xs sm:text-sm text-gray-500 mt-1">
-Train your AI with business knowledge and documents
+<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+Keep reusable business context, policies, and answers organized for your AI desk.
 </p>
 
 </div>
 
 {/* 🔒 FULL LOCK */}
 
-<div className="min-w-0 overflow-hidden bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 sm:p-6 shadow-sm">
+<section className="brand-section-shell min-w-0 overflow-hidden rounded-[30px] p-4 sm:p-5 lg:p-6">
   <FeatureGate feature="CUSTOM_FOLLOWUPS">
     <KnowledgeList/>
   </FeatureGate>
-</div>
+</section>
 
 </div>
 

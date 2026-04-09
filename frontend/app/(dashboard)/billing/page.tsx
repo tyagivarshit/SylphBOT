@@ -232,7 +232,7 @@ function BillingPageContent() {
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex min-h-[18rem] items-center justify-center">
         <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
       </div>
     );
@@ -240,53 +240,52 @@ function BillingPageContent() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-red-600">
+      <div className="flex min-h-[18rem] items-center justify-center text-red-600">
         {error}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-cyan-50 p-4 md:p-8 space-y-8">
-      <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-blue-600">
-            Billing
-          </p>
-          <h1 className="text-3xl md:text-4xl font-bold text-gray-900">
-            Plans, payments, and access control
-          </h1>
-          <p className="max-w-2xl text-sm text-gray-600">
+    <div className="space-y-6">
+      <div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+              Access controls
+            </p>
+            <p className="max-w-2xl text-sm leading-6 text-slate-500">
             Prices are shown in {currency}. Tax is calculated automatically at
             checkout based on the customer billing address and country.
-          </p>
-        </div>
+            </p>
+          </div>
 
-        <div className="flex bg-white/90 backdrop-blur border border-blue-100 rounded-xl p-1 shadow-sm">
+          <div className="flex rounded-2xl border border-slate-200/80 bg-white/90 p-1 shadow-sm">
           {(["monthly", "yearly"] as BillingCycle[]).map((type) => (
             <button
               key={type}
               onClick={() => setBilling(type)}
-              className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+              className={`rounded-[14px] px-5 py-2 text-sm font-semibold transition-all ${
                 billing === type
-                  ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow"
-                  : "text-gray-600"
+                  ? "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white shadow"
+                  : "text-slate-600"
               }`}
             >
               {type === "monthly" ? "Monthly" : "Yearly"}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
       {isCancelled && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+        <div className="rounded-[24px] border border-amber-200 bg-amber-50/90 px-5 py-4 text-sm text-amber-800 shadow-sm">
           Checkout was cancelled. Your plan has not changed.
         </div>
       )}
 
       {allowEarly && (
-        <div className="rounded-2xl border border-cyan-200 bg-white/90 px-5 py-4 shadow-sm">
+        <div className="brand-info-strip rounded-[24px] px-5 py-4">
           <p className="text-sm font-semibold text-gray-900">
             Early access offer live
           </p>
@@ -297,7 +296,7 @@ function BillingPageContent() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-blue-100 bg-white/85 p-5 shadow-sm">
+      <div className="brand-section-shell rounded-[26px] p-5">
         <p className="text-sm font-semibold text-gray-900">
           {billingStatus === "TRIAL"
             ? "7-day trial is active"
@@ -318,7 +317,7 @@ function BillingPageContent() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
         {PLAN_CATALOG.map((plan) => {
           const prices = plan[currency];
           const displayPrice =
@@ -392,7 +391,7 @@ function BillingPageContent() {
                 className={`mt-6 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                   current
                     ? "bg-gray-200 text-gray-600"
-                    : "bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:shadow-lg"
+                    : "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white hover:shadow-lg"
                 }`}
               >
                 {current
@@ -416,9 +415,7 @@ function BillingPageContent() {
         })}
       </div>
 
-      <div className="bg-white/85 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
-        <PaymentHistory invoices={invoices} />
-      </div>
+      <PaymentHistory invoices={invoices} />
     </div>
   );
 }

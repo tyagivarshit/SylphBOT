@@ -48,7 +48,7 @@ export default function CommentAutomationCard({
 
   return(
 
-    <div className="border border-blue-100 rounded-2xl p-5 bg-white/80 backdrop-blur-xl shadow-sm hover:shadow-lg transition flex flex-col justify-between h-full">
+    <div className="flex h-full flex-col justify-between rounded-[24px] border border-slate-200/80 bg-white/84 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
 
       {/* HEADER */}
 
@@ -61,8 +61,8 @@ export default function CommentAutomationCard({
         <span
           className={`text-xs px-2.5 py-1 rounded-full font-semibold whitespace-nowrap ${
             isActive
-              ? "bg-green-100 text-green-700"
-              : "bg-yellow-100 text-yellow-700"
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-slate-100 text-slate-600"
           }`}
         >
           {isActive ? "ACTIVE" : "PAUSED"}
@@ -127,8 +127,8 @@ export default function CommentAutomationCard({
           disabled={loading}
           className={`w-full sm:w-auto text-sm px-4 py-2 rounded-xl font-semibold transition ${
             isActive
-              ? "bg-blue-50 text-gray-700 hover:bg-blue-100"
-              : "bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:shadow-md"
+              ? "bg-blue-50 text-slate-700 hover:bg-blue-100"
+              : "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white hover:shadow-md"
           }`}
         >
           {loading ? "..." : isActive ? "Pause" : "Activate"}

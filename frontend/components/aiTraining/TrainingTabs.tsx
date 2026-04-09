@@ -11,18 +11,18 @@ const [tab,setTab] = useState("business")
 
 return(
 
-<div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-sm">
+<div className="overflow-hidden rounded-[26px] border border-slate-200/80 bg-white/80 shadow-sm">
 
 {/* 🔥 TABS */}
 
-<div className="flex border-b border-blue-100 px-2">
+<div className="flex flex-wrap gap-2 border-b border-slate-200/80 bg-slate-50/70 px-3 py-3">
 
 <button
 onClick={()=>setTab("business")}
-className={`px-4 py-3 text-sm rounded-xl transition ${
+className={`rounded-2xl px-4 py-2.5 text-sm transition ${
 tab==="business"
-? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 font-semibold"
-: "text-gray-600 hover:bg-blue-50"
+? "bg-white text-slate-950 shadow-sm font-semibold"
+: "text-slate-600 hover:bg-white/80"
 }`}
 >
 Business Info
@@ -30,10 +30,10 @@ Business Info
 
 <button
 onClick={()=>setTab("faq")}
-className={`px-4 py-3 text-sm rounded-xl transition ${
+className={`rounded-2xl px-4 py-2.5 text-sm transition ${
 tab==="faq"
-? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 font-semibold"
-: "text-gray-600 hover:bg-blue-50"
+? "bg-white text-slate-950 shadow-sm font-semibold"
+: "text-slate-600 hover:bg-white/80"
 }`}
 >
 FAQs
@@ -41,10 +41,10 @@ FAQs
 
 <button
 onClick={()=>setTab("settings")}
-className={`px-4 py-3 text-sm rounded-xl transition ${
+className={`rounded-2xl px-4 py-2.5 text-sm transition ${
 tab==="settings"
-? "bg-gradient-to-r from-blue-600/10 to-cyan-500/10 text-blue-700 font-semibold"
-: "text-gray-600 hover:bg-blue-50"
+? "bg-white text-slate-950 shadow-sm font-semibold"
+: "text-slate-600 hover:bg-white/80"
 }`}
 >
 AI Settings
@@ -54,7 +54,7 @@ AI Settings
 
 {/* 🔥 CONTENT */}
 
-<div className="p-6">
+<div className="p-4 sm:p-6">
 
 {tab==="business" && <BusinessInfoForm/>}
 {tab==="faq" && <FAQForm/>}

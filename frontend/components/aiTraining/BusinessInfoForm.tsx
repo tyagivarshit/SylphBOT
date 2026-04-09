@@ -75,9 +75,9 @@ if(fetching){
 
 return(
 
-<div className="space-y-5 bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm">
+<div className="space-y-5 rounded-[24px] border border-slate-200/80 bg-white/82 p-5 shadow-sm">
 
-<label className="text-sm font-semibold text-gray-700">
+<label className="text-sm font-semibold text-slate-800">
 Business Information
 </label>
 
@@ -85,14 +85,14 @@ Business Information
 value={info}
 onChange={(e)=>setInfo(e.target.value)}
 placeholder="Describe your business, services, pricing, policies..."
-className="w-full bg-white text-gray-900 border border-blue-100 rounded-xl px-4 py-2.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-400 outline-none transition"
+className="min-h-[170px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400"
 rows={6}
 />
 
 <button
 onClick={handleSave}
 disabled={loading}
-className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-sm font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition active:scale-[0.98] disabled:opacity-70"
+className="brand-button-primary w-full"
 >
 {loading ? "Saving..." : "Save"}
 </button>

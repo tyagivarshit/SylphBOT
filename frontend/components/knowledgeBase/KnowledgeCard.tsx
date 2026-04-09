@@ -4,7 +4,7 @@ export default function KnowledgeCard({ item, onDelete, onEdit }: any){
 
   return(
 
-    <div className="overflow-hidden border border-blue-100 rounded-2xl p-4 sm:p-5 bg-white/80 backdrop-blur-xl shadow-sm hover:shadow-lg transition">
+    <div className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/84 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg sm:p-5">
 
       <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-start sm:justify-between">
 
@@ -14,7 +14,7 @@ export default function KnowledgeCard({ item, onDelete, onEdit }: any){
           </h3>
         </div>
 
-        <span className="shrink-0 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-gray-700 font-semibold whitespace-nowrap">
+        <span className="shrink-0 rounded-full border border-blue-100 bg-blue-50/90 px-2.5 py-1 text-xs font-semibold whitespace-nowrap text-slate-700">
           {item.sourceType || "TEXT"}
         </span>
 

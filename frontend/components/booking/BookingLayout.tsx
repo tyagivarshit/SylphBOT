@@ -5,11 +5,11 @@ import DaySlots from "./DaySlots";
 
 export default function BookingLayout() {
   return (
-    <div className="flex flex-col lg:flex-row gap-6">
+    <div className="flex flex-col gap-6 lg:flex-row">
 
       {/* 🔥 LEFT - AVAILABILITY */}
       <div className="flex-1">
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all h-full flex flex-col">
+        <div className="flex h-full flex-col rounded-[26px] border border-slate-200/80 bg-white/84 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:p-6">
 
           {/* HEADER */}
           <div className="mb-5">
@@ -32,7 +32,7 @@ export default function BookingLayout() {
 
       {/* 🔥 RIGHT - BOOKINGS */}
       <div className="flex-1">
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all h-full flex flex-col">
+        <div className="flex h-full flex-col rounded-[26px] border border-slate-200/80 bg-white/84 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:p-6">
 
           {/* HEADER */}
           <div className="mb-5">

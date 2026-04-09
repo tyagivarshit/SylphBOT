@@ -6,9 +6,12 @@ import {
 } from "../services/authEmail.service";
 import type { AuthEmailJobData } from "../queues/authEmail.queue";
 
+console.log("🔥 AUTH EMAIL WORKER STARTED");
+console.log("REDIS URL:", env.REDIS_URL ? "OK" : "MISSING");
 const authEmailWorker = new Worker<AuthEmailJobData>(
   "authEmail",
   async (job) => {
+    console.log("📥 JOB RECEIVED", job.name, job.data);
     if (job.data.type === "verify") {
       await sendVerificationEmail(job.data.to, job.data.link);
       return;

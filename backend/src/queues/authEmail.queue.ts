@@ -59,6 +59,7 @@ export const enqueueVerificationEmail = async (
   to: string,
   link: string
 ) => {
+  console.log("📩 Adding email job", { type: "verify", to });
   return authEmailQueue.add(
     "verify-email",
     {
@@ -76,6 +77,7 @@ export const enqueuePasswordResetEmail = async (
   to: string,
   link: string
 ) => {
+  console.log("📩 Adding email job", { type: "reset", to });
   return authEmailQueue.add(
     "reset-password",
     {

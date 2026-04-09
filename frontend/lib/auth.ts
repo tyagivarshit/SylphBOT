@@ -38,7 +38,7 @@ export function clearUserCache() {
 
 const toAuthUrl = (path: string) => {
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  return buildAbsoluteApiUrl(normalized);
+  return buildAbsoluteApiUrl(`/api${normalized}`);
 };
 
 const getErrorMessage = (error: unknown, fallback: string) =>
@@ -166,7 +166,7 @@ export async function getCurrentUser(): Promise<
 
   fetchingPromise = (async () => {
     try {
-      const res = await authFetch<CurrentUserResponse>("/auth/me", {
+      const res = await authFetch<CurrentUserResponse>("auth/me", {
         headers: {
           "Cache-Control": "no-cache",
         },

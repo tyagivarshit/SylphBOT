@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Menu, Search, ShieldCheck } from "lucide-react";
 import {
   Dispatch,
@@ -14,16 +15,24 @@ import { useQuery } from "@tanstack/react-query";
 import NotificationsDropdown from "../topbar/NotificationsDropdown";
 import ProfileDropdown from "../topbar/ProfileDropdown";
 import { usePathname, useRouter } from "next/navigation";
-import BrandLockup from "@/components/brand/BrandLockup";
 import {
   fetchCurrentUser,
-  fetchNotifications,
   searchApp,
 } from "@/lib/userApi";
 
 interface TopbarProps {
   setOpen: Dispatch<SetStateAction<boolean>>;
 }
+
+type SearchResult = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  searchUrl?: string;
+  url: string;
+};
+
+const brandLogoSrc = "/logo%20.png";
 
 function TopbarComponent({ setOpen }: TopbarProps) {
   const [search, setSearch] = useState("");
@@ -42,24 +51,17 @@ function TopbarComponent({ setOpen }: TopbarProps) {
     queryFn: fetchCurrentUser,
   });
 
-  const { data } = useQuery({
-    queryKey: ["notifications"],
-    queryFn: fetchNotifications,
-  });
-
-  const unreadCount = data?.unreadCount ?? 0;
-
   const { data: searchData, isLoading } = useQuery({
     queryKey: ["search", normalizedQuery],
     queryFn: () => searchApp(normalizedQuery),
     enabled: shouldSearch,
   });
 
-  const results = Array.isArray(searchData) ? searchData : [];
+  const results = Array.isArray(searchData) ? (searchData as SearchResult[]) : [];
   const currentPage = getPageMeta(pathname);
 
   useEffect(() => {
-    function handleClickOutside(e: any) {
+    function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target)) {
         setOpenSearch(false);
       }
@@ -69,22 +71,37 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   }, []);
 
   return (
-    <div className="brand-topbar sticky top-0 z-40 shrink-0 rounded-[28px] px-3 py-3 sm:px-4 lg:px-5">
-      <div className="flex items-center gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+    <div className="brand-topbar sticky top-0 z-40 shrink-0 rounded-[24px] px-2.5 py-2 sm:rounded-[28px] sm:px-4 sm:py-3 lg:px-5">
+      <div className="flex items-center gap-2.5 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
           <button
             onClick={() => setOpen((prev) => !prev)}
-            className="inline-flex size-11 items-center justify-center rounded-2xl border border-slate-200 bg-white/70 text-slate-700 transition hover:text-slate-950 lg:hidden"
+            className="inline-flex size-10 items-center justify-center rounded-[18px] border border-slate-200 bg-white/70 text-slate-700 transition hover:text-slate-950 sm:size-11 sm:rounded-2xl lg:hidden"
           >
-            <Menu size={20} />
+            <Menu size={18} />
           </button>
 
-          <BrandLockup
+          <Link
             href="/dashboard"
-            compact
-            showTagline={false}
-            className="min-w-0 lg:hidden"
-          />
+            className="flex min-w-0 items-center gap-2.5 lg:hidden"
+          >
+            <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border border-slate-200/80 bg-white/90 shadow-[0_12px_24px_rgba(15,23,42,0.08)] sm:size-11 sm:rounded-[20px]">
+              <img
+                src={brandLogoSrc}
+                alt="Automexia AI"
+                className="h-full w-full object-cover"
+              />
+            </span>
+
+            <span className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+              <span className="hidden min-[380px]:inline truncate text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500 sm:text-[11px]">
+                Automexia
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-100/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+                Lead OS
+              </span>
+            </span>
+          </Link>
 
           <div className="hidden min-w-0 flex-1 lg:block">
             <div className="flex items-center gap-3">
@@ -108,7 +125,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
 
         <div
           ref={containerRef}
-          className="relative hidden md:block w-52 lg:w-72 xl:w-80"
+          className="relative hidden w-52 md:block lg:w-72 xl:w-80"
         >
           <Search
             size={15}
@@ -151,7 +168,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
                 </div>
               ) : null}
               {search.trim().length >= 2
-                ? results.map((item: any, index: number) => (
+                ? results.map((item, index: number) => (
                     <div
                       key={item.id}
                       onClick={() => {
@@ -182,9 +199,6 @@ function TopbarComponent({ setOpen }: TopbarProps) {
 
         <div className="relative z-[100] flex-shrink-0">
           <NotificationsDropdown userId={userData?.id} />
-          {unreadCount > 0 ? (
-            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500" />
-          ) : null}
         </div>
 
         <div className="relative z-[1000] flex-shrink-0">

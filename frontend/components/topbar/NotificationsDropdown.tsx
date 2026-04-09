@@ -8,13 +8,20 @@ import {
   markAllNotificationsRead,
 } from "@/lib/userApi";
 
+type NotificationItem = {
+  id: string;
+  title: string;
+  message: string;
+  read?: boolean;
+};
+
 export default function NotificationsDropdown({
   userId,
 }: {
   userId?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
 
   /* ---------------- FETCH INITIAL ---------------- */
@@ -27,7 +34,7 @@ export default function NotificationsDropdown({
 
         console.log("NOTIFICATIONS API:", data);
 
-        const notificationsData = data?.notifications || [];
+        const notificationsData = (data?.notifications || []) as NotificationItem[];
         const unreadCount = data?.unreadCount ?? 0;
 
         setNotifications(notificationsData);
@@ -46,7 +53,7 @@ export default function NotificationsDropdown({
 
     socket.emit("join_user_room", userId);
 
-    socket.on("new_notification", (notification) => {
+    socket.on("new_notification", (notification: NotificationItem) => {
       setNotifications((prev) => [notification, ...prev]);
       setUnread((prev) => prev + 1);
     });
@@ -70,23 +77,25 @@ export default function NotificationsDropdown({
     }
   };
 
+  const badgeLabel = unread > 99 ? "99+" : String(unread);
+
   return (
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="relative p-2 rounded-xl hover:bg-blue-50 transition"
+        className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl hover:bg-blue-50 transition sm:h-11 sm:w-11"
       >
-        <Bell size={18} className="text-gray-700" />
+        <Bell size={17} className="text-gray-700" />
 
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full">
-            {unread}
+          <span className="absolute -right-0.5 -top-0.5 flex h-[1.2rem] min-w-[1.2rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white shadow-sm sm:-right-1 sm:-top-1 sm:h-[1.35rem] sm:min-w-[1.35rem] sm:text-[11px]">
+            {badgeLabel}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-80 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl shadow-lg p-4 max-h-96 overflow-y-auto z-50">
+        <div className="absolute right-0 z-50 mt-3 max-h-96 w-[min(20rem,calc(100vw-1rem))] overflow-y-auto rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-lg backdrop-blur-xl sm:w-80">
 
           {/* HEADER ACTION */}
           {notifications.length > 0 && (
@@ -117,10 +126,10 @@ export default function NotificationsDropdown({
                     : "bg-white/60 backdrop-blur"
                 }`}
               >
-                <p className="text-sm font-semibold text-gray-900">
+                <p className="break-words text-sm font-semibold text-gray-900">
                   {n.title}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="mt-1 break-words text-xs text-gray-500">
                   {n.message}
                 </p>
               </div>

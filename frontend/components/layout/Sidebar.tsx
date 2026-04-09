@@ -21,8 +21,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import BrandLockup from "@/components/brand/BrandLockup";
-
 type SidebarProps = {
   open: boolean;
   setOpen: (val: boolean) => void;
@@ -79,6 +77,8 @@ const menu: MenuSection[] = [
   },
 ];
 
+const brandLogoSrc = "/logo%20.png";
+
 function isActiveRoute(pathname: string, href: string) {
   if (href === "/dashboard") return pathname === href;
   return pathname.startsWith(href);
@@ -131,12 +131,30 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
       >
         {/* 🔥 MOBILE HEADER */}
         <div className="mb-5 flex items-center justify-between gap-3 lg:mb-7">
-          <BrandLockup
-            href="/dashboard"
-            theme="dark"
-            showTagline
-            className="min-w-0"
-          />
+          <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border border-white/16 bg-white/90 shadow-[0_16px_30px_rgba(8,18,35,0.24)]">
+              <img
+                src={brandLogoSrc}
+                alt="Automexia AI"
+                className="h-full w-full object-cover"
+              />
+            </span>
+
+            <span className="min-w-0">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-[10px] font-semibold uppercase tracking-[0.3em] text-white/58 sm:text-[11px]">
+                  Automexia
+                </span>
+                <span className="rounded-full border border-white/12 bg-white/8 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/86 sm:text-[11px]">
+                  Lead OS
+                </span>
+              </span>
+
+              <span className="mt-1 block truncate text-base font-semibold tracking-tight text-white sm:text-lg">
+                Automexia AI
+              </span>
+            </span>
+          </Link>
 
           <button
             onClick={() => setOpen(false)}

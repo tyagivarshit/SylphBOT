@@ -23,7 +23,7 @@ export default function ProfileDropdown() {
   });
 
   useEffect(() => {
-    function handleClick(e: any) {
+    function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target)) {
         setOpen(false);
       }
@@ -74,12 +74,16 @@ export default function ProfileDropdown() {
 
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/72 px-2.5 py-2 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:px-3"
+        className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-white/72 px-2 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:rounded-2xl sm:px-3 sm:py-2"
       >
-        <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#0b2a5b_0%,#1e5eff_55%,#7dd3fc_100%)] text-xs font-semibold text-white shadow-[0_14px_30px_rgba(30,94,255,0.22)]">
+        <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl bg-[linear-gradient(135deg,#0b2a5b_0%,#1e5eff_55%,#7dd3fc_100%)] text-[11px] font-semibold text-white shadow-[0_14px_30px_rgba(30,94,255,0.22)] sm:h-9 sm:w-9 sm:rounded-2xl sm:text-xs">
           
           {user?.avatar ? (
-            <img src={user.avatar} className="h-full w-full object-cover" />
+            <img
+              src={user.avatar}
+              alt={user?.name ? `${user.name} avatar` : "User avatar"}
+              className="h-full w-full object-cover"
+            />
           ) : (
             user?.name?.[0] || "U"
           )}
@@ -92,13 +96,13 @@ export default function ProfileDropdown() {
       </button>
 
       {open && (
-        <div className="brand-panel-strong absolute right-0 z-[1000] mt-3 w-[90vw] overflow-hidden rounded-[28px] sm:w-72">
+        <div className="brand-panel-strong absolute right-0 z-[1000] mt-3 w-[min(18rem,calc(100vw-1rem))] overflow-hidden rounded-[28px] sm:w-72">
 
           <div className="border-b border-slate-200/70 px-4 py-4">
             <p className="text-sm font-semibold text-slate-900">
               {user?.name || "User"}
             </p>
-            <p className="text-xs text-slate-500">
+            <p className="break-all text-xs text-slate-500">
               {user?.email || "email@example.com"}
             </p>
           </div>

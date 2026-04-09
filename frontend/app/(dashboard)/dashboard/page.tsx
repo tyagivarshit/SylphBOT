@@ -7,12 +7,47 @@ import LeadsChart from "@/components/charts/LeadsCharts";
 import axios from "axios";
 import { buildApiUrl } from "@/lib/url";
 
+type DashboardValue = number | string;
+
+type ActivityItem = {
+  id: string;
+  text: string;
+  time: string;
+};
+
+type ChartPoint = {
+  date: string;
+  leads: number;
+};
+
+type DashboardStats = {
+  totalLeads: DashboardValue;
+  leadsToday: DashboardValue;
+  leadsThisMonth: DashboardValue;
+  messagesToday: DashboardValue;
+  qualifiedLeads: DashboardValue;
+  plan: DashboardValue;
+  usagePercent: number;
+  aiCallsUsed: DashboardValue;
+  isUnlimited: boolean;
+  aiCallsLimit: DashboardValue;
+  nearLimit?: boolean;
+  chartData: ChartPoint[];
+  recentActivity: ActivityItem[];
+};
+
+type ConversationStats = {
+  active: DashboardValue;
+  waitingReplies: DashboardValue;
+  resolved: DashboardValue;
+};
+
 export default function DashboardPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  const [stats, setStats] = useState<any>(null);
-  const [convo, setConvo] = useState<any>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [convo, setConvo] = useState<ConversationStats | null>(null);
   const [limited, setLimited] = useState(false);
 
   useEffect(() => {
@@ -49,7 +84,7 @@ export default function DashboardPage() {
 
   if (loading || !stats)
     return (
-      <div className="brand-panel rounded-[26px] p-6 text-sm text-slate-500">
+      <div className="brand-panel overflow-hidden rounded-[26px] p-6 text-sm text-slate-500">
         Loading dashboard...
       </div>
     );
@@ -81,18 +116,18 @@ export default function DashboardPage() {
       )}
 
       {/* ================= MOBILE ================= */}
-      <div className="space-y-4 md:hidden">
+      <div className="space-y-3.5 md:hidden">
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2.5">
           <MiniCard title="Leads" value={stats.totalLeads} />
           <MiniCard title="Today" value={stats.leadsToday} />
           <MiniCard title="Month" value={stats.leadsThisMonth} />
           <MiniCard title="Msgs" value={stats.messagesToday} />
         </div>
 
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4">
+        <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 backdrop-blur-xl">
           <p className="text-xs text-gray-500 font-medium">AI Usage</p>
-          <h2 className="text-base font-bold text-gray-900">
+          <h2 className="break-words text-base font-bold text-gray-900">
             {stats.aiCallsUsed} /{" "}
             {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
           </h2>
@@ -106,25 +141,30 @@ export default function DashboardPage() {
         </div>
 
         {convo && (
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-2.5">
             <MiniCard title="Active" value={convo.active} />
             <MiniCard title="Waiting" value={convo.waitingReplies} />
             <MiniCard title="Done" value={convo.resolved} />
           </div>
         )}
 
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4">
+        <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-3 backdrop-blur-xl">
           <LeadsChart data={stats.chartData} />
         </div>
 
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4">
+        <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 backdrop-blur-xl">
           <h2 className="text-sm font-semibold text-gray-900 mb-3">
             Activity
           </h2>
 
-          {stats.recentActivity.map((item: any) => (
-            <div key={item.id} className="py-2 border-b border-blue-100 last:border-none">
-              <p className="text-xs text-gray-900">{item.text}</p>
+          {stats.recentActivity.map((item) => (
+            <div
+              key={item.id}
+              className="min-w-0 border-b border-blue-100 py-2 last:border-none"
+            >
+              <p className="break-words text-xs leading-5 text-gray-900">
+                {item.text}
+              </p>
               <span className="text-[10px] text-gray-500">
                 {new Date(item.time).toLocaleTimeString()}
               </span>
@@ -193,10 +233,15 @@ export default function DashboardPage() {
             Recent Activity
           </h2>
 
-          {stats.recentActivity.map((item: any) => (
-            <div key={item.id} className="flex justify-between py-3 border-b border-blue-100 last:border-none">
-              <p className="text-gray-900 text-sm">{item.text}</p>
-              <span className="text-sm text-gray-500">
+          {stats.recentActivity.map((item) => (
+            <div
+              key={item.id}
+              className="flex min-w-0 justify-between gap-4 border-b border-blue-100 py-3 last:border-none"
+            >
+              <p className="min-w-0 break-words text-sm text-gray-900">
+                {item.text}
+              </p>
+              <span className="shrink-0 text-sm text-gray-500">
                 {new Date(item.time).toLocaleTimeString()}
               </span>
             </div>
@@ -210,20 +255,24 @@ export default function DashboardPage() {
 
 /* COMPONENTS */
 
-function Card({ title, value }: any) {
+function Card({ title, value }: { title: string; value: DashboardValue }) {
   return (
-    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition">
+    <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-sm transition hover:shadow-md">
       <p className="text-sm text-gray-500 font-medium">{title}</p>
-      <h2 className="text-xl font-semibold text-gray-900 mt-1">{value}</h2>
+      <h2 className="mt-1 break-words text-xl font-semibold text-gray-900">
+        {value}
+      </h2>
     </div>
   );
 }
 
-function MiniCard({ title, value }: any) {
+function MiniCard({ title, value }: { title: string; value: DashboardValue }) {
   return (
-    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-xl p-3 shadow-sm">
+    <div className="overflow-hidden rounded-xl border border-blue-100 bg-white/80 p-3 shadow-sm">
       <p className="text-[10px] text-gray-500 font-medium">{title}</p>
-      <h2 className="text-sm font-semibold text-gray-900">{value}</h2>
+      <h2 className="break-words text-sm font-semibold text-gray-900">
+        {value}
+      </h2>
     </div>
   );
 }

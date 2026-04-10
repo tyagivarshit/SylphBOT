@@ -33,7 +33,7 @@ type SearchResult = {
   url: string;
 };
 
-const brandLogoSrc = "/logo%20.png";
+const brandLogoSrc = "/logo.png";
 
 function TopbarComponent({ setOpen }: TopbarProps) {
   const [search, setSearch] = useState("");

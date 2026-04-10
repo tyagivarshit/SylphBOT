@@ -14,6 +14,8 @@ const PUBLIC_ROUTES = [
   "/auth/verify-email",
 ];
 
+const PUBLIC_FILE_PATTERN = /\.[^/]+$/;
+
 export function proxy(request: NextRequest) {
   const host = (request.headers.get("host") || "").split(":")[0];
   const { pathname } = request.nextUrl;
@@ -28,7 +30,8 @@ export function proxy(request: NextRequest) {
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon.ico") ||
-    pathname.startsWith("/images")
+    pathname.startsWith("/images") ||
+    PUBLIC_FILE_PATTERN.test(pathname)
   ) {
     return NextResponse.next();
   }
@@ -48,5 +51,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
 };

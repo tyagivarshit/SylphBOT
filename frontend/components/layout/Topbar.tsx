@@ -88,27 +88,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
             <Menu size={18} />
           </button>
 
-          <Link
-            href="/dashboard"
-            className="flex min-w-0 items-center gap-2.5 lg:hidden"
-          >
-            <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border border-slate-200/80 bg-white/90 shadow-[0_12px_24px_rgba(15,23,42,0.08)] sm:size-11 sm:rounded-[20px]">
-              <img
-                src={brandLogoSrc}
-                alt="Automexia AI"
-                className="h-full w-full object-cover"
-              />
-            </span>
-
-            <span className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-              <span className="hidden min-[380px]:inline truncate text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500 sm:text-[11px]">
-                Automexia
-              </span>
-              <span className="rounded-full border border-slate-200 bg-slate-100/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-700">
-                Lead OS
-              </span>
-            </span>
-          </Link>
+          
 
           <div className="hidden min-w-0 flex-1 lg:block">
             <div className="flex items-center gap-3">

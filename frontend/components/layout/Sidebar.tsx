@@ -77,7 +77,7 @@ const menu: MenuSection[] = [
   },
 ];
 
-const brandLogoSrc = "/logo%20.png";
+const brandLogoSrc = "/logo.png";
 
 function isActiveRoute(pathname: string, href: string) {
   if (href === "/dashboard") return pathname === href;
@@ -142,12 +142,7 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
 
             <span className="min-w-0">
               <span className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-[10px] font-semibold uppercase tracking-[0.3em] text-white/58 sm:text-[11px]">
-                  Automexia
-                </span>
-                <span className="rounded-full border border-white/12 bg-white/8 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/86 sm:text-[11px]">
-                  Lead OS
-                </span>
+                
               </span>
 
               <span className="mt-1 block truncate text-base font-semibold tracking-tight text-white sm:text-lg">

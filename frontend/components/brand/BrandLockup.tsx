@@ -11,7 +11,7 @@ type BrandLockupProps = {
   className?: string;
 };
 
-const brandLogoSrc = "/logo%20.png";
+const brandLogoSrc = "/logo.png";
 
 export default function BrandLockup({
   href = "/dashboard",

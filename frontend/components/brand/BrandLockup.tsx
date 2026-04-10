@@ -34,23 +34,13 @@ export default function BrandLockup({
         <img
           src={brandLogoSrc}
           alt="Automexia AI"
-          className="h-full w-full object-contain p-2"
+          className="h-full w-full object-cover"
         />
       </div>
 
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
-          <p
-            className={`truncate text-[11px] font-semibold uppercase tracking-[0.34em] ${eyebrowClass}`}
-          >
-            Automexia
-          </p>
-
-          <span
-            className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${badgeClass}`}
-          >
-            Lead OS
-          </span>
+          
         </div>
 
         <div className="mt-1 flex min-w-0 items-center gap-2">

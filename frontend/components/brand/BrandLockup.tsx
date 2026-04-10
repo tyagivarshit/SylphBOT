@@ -31,13 +31,9 @@ export default function BrandLockup({
 
   return (
     <Link href={href} className={`flex min-w-0 items-center gap-3 ${className}`}>
-      <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border border-white/16 bg-white/90 shadow-[0_16px_30px_rgba(8,18,35,0.24)]">
-              <img
-                src={brandLogoSrc}
-                alt="Automexia AI"
-                className="h-full w-full object-cover"
-              />
-            </span>
+      <div className="bg-red-500 p-2">
+  <Image src="/logo.png" alt="test" width={56} height={56} />
+</div>
 
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">

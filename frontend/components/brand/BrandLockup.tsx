@@ -34,7 +34,7 @@ export default function BrandLockup({
         <img
           src={brandLogoSrc}
           alt="Automexia AI"
-          className="h-full w-full object-cover"
+          className="h-full w-full object-contain p-2"
         />
       </div>
 

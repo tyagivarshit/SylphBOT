@@ -226,7 +226,6 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
               and lead conversion.
             </p>
           </div>
-
           <p className="px-1 text-xs text-white/42">© 2026 Automexia AI</p>
         </div>
       </aside>

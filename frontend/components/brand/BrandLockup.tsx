@@ -1,6 +1,7 @@
 "use client";
 
 import type { Route } from "next";
+import Image from "next/image";
 import Link from "next/link";
 
 type BrandLockupProps = {
@@ -31,9 +32,11 @@ export default function BrandLockup({
   return (
     <Link href={href} className={`flex min-w-0 items-center gap-3 ${className}`}>
       <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[20px] border border-white/20 bg-white/90 shadow-[0_16px_30px_rgba(15,23,42,0.14)]">
-        <img
+        <Image
           src={brandLogoSrc}
           alt="Automexia AI"
+          width={56}
+          height={56}
           className="h-full w-full object-cover"
         />
       </div>

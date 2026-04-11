@@ -20,6 +20,7 @@ import { createNotification } from "../services/notification.service";
 import { automationQueue } from "../queues/automation.queue";
 
 const router = Router();
+const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
 
 /* --------------------------------------------------- */
 
@@ -243,6 +244,10 @@ router.post("/", async (req: any, res: Response) => {
         leadId: lead.id,
         content: text,
         sender: "USER",
+        metadata: {
+          externalEventId: eventId,
+          platform: "INSTAGRAM",
+        },
       },
     });
 
@@ -263,14 +268,14 @@ router.post("/", async (req: any, res: Response) => {
     --------------------------------------------------- */
 
     const plan = client.business?.subscription?.plan || null;
-    console.log("PLAN DEBUG FULL:", JSON.stringify(plan, null, 2));
-
-    console.log("ROUTER JOB DATA:", {
-      businessId: client.businessId,
-      leadId: lead.id,
-      message: text,
-      plan,
-    });
+    if (WEBHOOK_DEBUG) {
+      console.log("ROUTER JOB DATA:", {
+        businessId: client.businessId,
+        leadId: lead.id,
+        message: text,
+        planType: plan?.type || null,
+      });
+    }
 
     await addRouterJob({
       businessId: client.businessId,
@@ -281,6 +286,7 @@ router.post("/", async (req: any, res: Response) => {
       senderId,
       pageId,
       accessTokenEncrypted: client.accessToken,
+      externalEventId: eventId,
     });
 
     /* ---------------------------------------------------

@@ -108,8 +108,8 @@ router.post("/", async (req, res) => {
             console.log("❌ No subscription");
             return res.sendStatus(200);
         }
-        const plan = subscription.plan.name;
-        if (plan === "BASIC") {
+        const planName = subscription.plan.name;
+        if (planName === "BASIC") {
             console.log("🚫 BASIC plan blocked");
             return res.sendStatus(200);
         }
@@ -143,6 +143,10 @@ router.post("/", async (req, res) => {
                 leadId: lead.id,
                 content: text,
                 sender: "USER",
+                metadata: {
+                    externalEventId: eventId || null,
+                    platform: "WHATSAPP",
+                },
             },
         });
         /*
@@ -153,14 +157,16 @@ router.post("/", async (req, res) => {
         /*
         ADD AI JOB
         */
-        await (0, ai_queue_1.addAIJob)({
+        await (0, ai_queue_1.addRouterJob)({
             businessId: client.businessId,
             leadId: lead.id,
             message: text,
+            plan: subscription.plan,
             platform: "WHATSAPP",
             senderId: from,
             phoneNumberId,
             accessTokenEncrypted: client.accessToken,
+            externalEventId: eventId,
         });
         /*
         UPDATE LEAD

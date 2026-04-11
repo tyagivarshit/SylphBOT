@@ -54,21 +54,30 @@ const checkRedis = async () => {
 ================================ */
 const checkQueues = async () => {
     try {
-        const [aiWaiting, aiActive, aiFailed, aiDelayed, funnelWaiting, funnelActive, funnelFailed,] = await Promise.all([
-            ai_queue_1.aiQueue.getWaitingCount(),
-            ai_queue_1.aiQueue.getActiveCount(),
-            ai_queue_1.aiQueue.getFailedCount(),
-            ai_queue_1.aiQueue.getDelayedCount(),
+        const aiQueues = (0, ai_queue_1.getAIQueues)();
+        const aiQueueStats = await Promise.all(aiQueues.map(async (queue) => ({
+            name: queue.name,
+            waiting: await queue.getWaitingCount(),
+            active: await queue.getActiveCount(),
+            failed: await queue.getFailedCount(),
+            delayed: await queue.getDelayedCount(),
+        })));
+        const [funnelWaiting, funnelActive, funnelFailed,] = await Promise.all([
             funnel_queue_1.funnelQueue.getWaitingCount(),
             funnel_queue_1.funnelQueue.getActiveCount(),
             funnel_queue_1.funnelQueue.getFailedCount(),
         ]);
+        const aiWaiting = aiQueueStats.reduce((total, queue) => total + queue.waiting, 0);
+        const aiActive = aiQueueStats.reduce((total, queue) => total + queue.active, 0);
+        const aiFailed = aiQueueStats.reduce((total, queue) => total + queue.failed, 0);
+        const aiDelayed = aiQueueStats.reduce((total, queue) => total + queue.delayed, 0);
         return {
             aiQueue: {
                 waiting: aiWaiting,
                 active: aiActive,
                 failed: aiFailed,
                 delayed: aiDelayed,
+                partitions: aiQueueStats,
             },
             funnelQueue: {
                 waiting: funnelWaiting,

@@ -63,7 +63,7 @@ app_1.default.use(passport_1.default.initialize());
 WORKERS (CONTROLLED LOAD)
 ====================================== */
 if (process.env.ENABLE_WORKERS === "true") {
-    require("./workers/ai.worker");
+    require("./workers/ai.partition.worker");
     require("./workers/funnel.worker");
 }
 /* ======================================

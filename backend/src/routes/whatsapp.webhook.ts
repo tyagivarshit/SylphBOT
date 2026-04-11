@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import prisma from "../config/prisma";
 
-import { addAIJob } from "../queues/ai.queue";
+import { addRouterJob } from "../queues/ai.queue";
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
 
 import { getIO } from "../sockets/socket.server";
@@ -167,9 +167,9 @@ router.post("/", async (req: any, res: Response) => {
 
     }
 
-    const plan = subscription.plan.name;
+    const planName = subscription.plan.name;
 
-    if (plan === "BASIC") {
+    if (planName === "BASIC") {
 
       console.log("🚫 BASIC plan blocked");
 
@@ -214,6 +214,10 @@ router.post("/", async (req: any, res: Response) => {
         leadId: lead.id,
         content: text,
         sender: "USER",
+        metadata: {
+          externalEventId: eventId || null,
+          platform: "WHATSAPP",
+        },
       },
     });
 
@@ -229,14 +233,16 @@ router.post("/", async (req: any, res: Response) => {
     ADD AI JOB
     */
 
-    await addAIJob({
+    await addRouterJob({
       businessId: client.businessId,
       leadId: lead.id,
       message: text,
+      plan: subscription.plan,
       platform: "WHATSAPP",
       senderId: from,
       phoneNumberId,
       accessTokenEncrypted: client.accessToken,
+      externalEventId: eventId,
     });
 
     /*

@@ -1,10 +1,8 @@
 import { Router } from "express";
 import os from "os";
-import { Queue } from "bullmq";
-
 const router = Router();
 import redis from "../config/redis";
-import { aiQueue } from "../queues/ai.queue";
+import { getAIQueues } from "../queues/ai.queue";
 import { funnelQueue } from "../queues/funnel.queue";
 
 /* ================================
@@ -59,23 +57,43 @@ const checkRedis = async () => {
 
 const checkQueues = async () => {
   try {
+    const aiQueues = getAIQueues();
+    const aiQueueStats = await Promise.all(
+      aiQueues.map(async (queue) => ({
+        name: queue.name,
+        waiting: await queue.getWaitingCount(),
+        active: await queue.getActiveCount(),
+        failed: await queue.getFailedCount(),
+        delayed: await queue.getDelayedCount(),
+      }))
+    );
+
     const [
-      aiWaiting,
-      aiActive,
-      aiFailed,
-      aiDelayed,
       funnelWaiting,
       funnelActive,
       funnelFailed,
     ] = await Promise.all([
-      aiQueue.getWaitingCount(),
-      aiQueue.getActiveCount(),
-      aiQueue.getFailedCount(),
-      aiQueue.getDelayedCount(),
       funnelQueue.getWaitingCount(),
       funnelQueue.getActiveCount(),
       funnelQueue.getFailedCount(),
     ]);
+
+    const aiWaiting = aiQueueStats.reduce(
+      (total, queue) => total + queue.waiting,
+      0
+    );
+    const aiActive = aiQueueStats.reduce(
+      (total, queue) => total + queue.active,
+      0
+    );
+    const aiFailed = aiQueueStats.reduce(
+      (total, queue) => total + queue.failed,
+      0
+    );
+    const aiDelayed = aiQueueStats.reduce(
+      (total, queue) => total + queue.delayed,
+      0
+    );
 
     return {
       aiQueue: {
@@ -83,6 +101,7 @@ const checkQueues = async () => {
         active: aiActive,
         failed: aiFailed,
         delayed: aiDelayed,
+        partitions: aiQueueStats,
       },
       funnelQueue: {
         waiting: funnelWaiting,

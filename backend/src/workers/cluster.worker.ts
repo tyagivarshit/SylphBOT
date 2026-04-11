@@ -21,7 +21,7 @@ export const startWorkerCluster = () => {
 
     console.log("👷 Worker started", process.pid);
 
-    require("./ai.worker");
+    require("./ai.partition.worker");
     require("./followup.worker");
 
   }

@@ -15,6 +15,7 @@ const notification_service_1 = require("../services/notification.service");
 /* 🔥 ADDED (QUEUE) */
 const automation_queue_1 = require("../queues/automation.queue");
 const router = (0, express_1.Router)();
+const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
 /* --------------------------------------------------- */
 const log = (...args) => {
     console.log("[INSTAGRAM WEBHOOK]", ...args);
@@ -202,6 +203,10 @@ router.post("/", async (req, res) => {
                 leadId: lead.id,
                 content: text,
                 sender: "USER",
+                metadata: {
+                    externalEventId: eventId,
+                    platform: "INSTAGRAM",
+                },
             },
         });
         await (0, notification_service_1.createNotification)({
@@ -219,13 +224,14 @@ router.post("/", async (req, res) => {
         🧠 ROUTER JOB (FINAL FIX)
         --------------------------------------------------- */
         const plan = client.business?.subscription?.plan || null;
-        console.log("PLAN DEBUG FULL:", JSON.stringify(plan, null, 2));
-        console.log("ROUTER JOB DATA:", {
-            businessId: client.businessId,
-            leadId: lead.id,
-            message: text,
-            plan,
-        });
+        if (WEBHOOK_DEBUG) {
+            console.log("ROUTER JOB DATA:", {
+                businessId: client.businessId,
+                leadId: lead.id,
+                message: text,
+                planType: plan?.type || null,
+            });
+        }
         await (0, ai_queue_1.addRouterJob)({
             businessId: client.businessId,
             leadId: lead.id,
@@ -235,6 +241,7 @@ router.post("/", async (req, res) => {
             senderId,
             pageId,
             accessTokenEncrypted: client.accessToken,
+            externalEventId: eventId,
         });
         /* ---------------------------------------------------
         UPDATE LEAD

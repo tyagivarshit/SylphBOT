@@ -1,10 +1,12 @@
 import { Job, Worker } from "bullmq";
 import axios from "axios";
 import * as Sentry from "@sentry/node";
-import prisma from "../config/prisma";
 import { env } from "../config/env";
+import prisma from "../config/prisma";
+import { getWorkerRedisConnection } from "../config/redis";
 import {
   AIJobPayload,
+  AIMessagePayload,
   AI_QUEUE_PARTITIONS,
   getAIQueueNames,
 } from "../queues/ai.queue";
@@ -42,6 +44,14 @@ class LeadQueueBusyError extends Error {
 }
 
 type AIWorkerJob = Job<AIJobPayload>;
+type AIWorkerMessage = AIMessagePayload;
+type AIWorkerMessageKind = NonNullable<AIWorkerMessage["kind"]>;
+type AIWorkerTask = {
+  job: AIWorkerJob;
+  message: AIWorkerMessage;
+  jobKey: string;
+  kind: AIWorkerMessageKind;
+};
 type NormalizedReply = {
   text: string;
   cta?: string | null;
@@ -52,6 +62,31 @@ const delay = (ms: number) =>
 
 const buildJobKey = (job: AIWorkerJob) =>
   `${job.queueName}:${job.id ?? `${job.name}:${job.timestamp}`}`;
+
+const buildMessageJobKey = (
+  job: AIWorkerJob,
+  messageIndex: number
+) => `${buildJobKey(job)}:${messageIndex}`;
+
+const getTaskKind = (
+  job: AIWorkerJob,
+  message: AIWorkerMessage
+): AIWorkerMessageKind =>
+  message.kind || (job.data.source === "router" ? "router" : "message");
+
+const createWorkerTask = (
+  job: AIWorkerJob,
+  message: AIWorkerMessage,
+  messageIndex: number
+): AIWorkerTask => ({
+  job,
+  message,
+  jobKey: buildMessageJobKey(job, messageIndex),
+  kind: getTaskKind(job, message),
+});
+
+const getJobLeadId = (job?: AIWorkerJob | null) =>
+  job?.data?.messages?.[0]?.leadId;
 
 const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
   if (typeof aiReply === "string") {
@@ -134,7 +169,7 @@ const saveReplyMessage = async (
 };
 
 const sendPlatformReply = async (
-  data: AIJobPayload,
+  data: AIWorkerMessage,
   replyText: string
 ) => {
   const { platform, senderId, phoneNumberId, accessTokenEncrypted } = data;
@@ -215,7 +250,7 @@ const sendPlatformReply = async (
 };
 
 const processAndSendReply = async (
-  job: AIWorkerJob,
+  task: AIWorkerTask,
   aiReply: unknown
 ) => {
   const normalizedReply = normalizeReply(aiReply);
@@ -224,8 +259,7 @@ const processAndSendReply = async (
     return;
   }
 
-  const jobKey = buildJobKey(job);
-  const existingState = await getReplyDeliveryState(jobKey);
+  const existingState = await getReplyDeliveryState(task.jobKey);
   const replyText =
     normalizedReply.text.length > 1000
       ? normalizedReply.text.slice(0, 1000)
@@ -233,17 +267,17 @@ const processAndSendReply = async (
 
   if (!existingState.savedMessageId) {
     const rate = await checkAIRateLimit({
-      businessId: job.data.businessId,
-      leadId: job.data.leadId,
-      platform: job.data.platform || "UNKNOWN",
+      businessId: task.message.businessId,
+      leadId: task.message.leadId,
+      platform: task.message.platform || "UNKNOWN",
     });
 
     if (rate.blocked) {
       logger.warn(
         {
-          businessId: job.data.businessId,
-          leadId: job.data.leadId,
-          platform: job.data.platform,
+          businessId: task.message.businessId,
+          leadId: task.message.leadId,
+          platform: task.message.platform,
           reason: rate.reason,
         },
         "AI reply blocked by rate limit"
@@ -253,17 +287,17 @@ const processAndSendReply = async (
   }
 
   const { message, created } = await saveReplyMessage(
-    jobKey,
-    job.data.leadId,
+    task.jobKey,
+    task.message.leadId,
     replyText,
     normalizedReply.cta
   );
 
   if (created) {
-    emitRealtimeMessage(job.data.leadId, message, normalizedReply.cta);
+    emitRealtimeMessage(task.message.leadId, message, normalizedReply.cta);
 
     await prisma.lead.update({
-      where: { id: job.data.leadId },
+      where: { id: task.message.leadId },
       data: {
         lastMessageAt: new Date(),
         unreadCount: { increment: 1 },
@@ -276,31 +310,31 @@ const processAndSendReply = async (
   }
 
   await retryAsync(
-    () => sendPlatformReply(job.data, replyText),
+    () => sendPlatformReply(task.message, replyText),
     3,
     800
   );
 
-  await markReplySent(jobKey);
+  await markReplySent(task.jobKey);
 };
 
-const executeRouterFlow = async (job: AIWorkerJob) => {
+const executeRouterFlow = async (task: AIWorkerTask) => {
   const reply = await handleIncomingMessage({
-    ...job.data,
-    plan: job.data.plan || null,
+    ...task.message,
+    plan: task.message.plan || null,
   });
 
   if (!reply) {
     return;
   }
 
-  return processAndSendReply(job, reply);
+  return processAndSendReply(task, reply);
 };
 
-const executeLegacyFlow = async (job: AIWorkerJob) => {
+const executeLegacyFlow = async (task: AIWorkerTask) => {
   const { businessId, leadId, message, plan } = {
-    ...job.data,
-    plan: job.data.plan || null,
+    ...task.message,
+    plan: task.message.plan || null,
   };
 
   const lowerMessage = message?.toLowerCase() || "";
@@ -379,30 +413,32 @@ const executeLegacyFlow = async (job: AIWorkerJob) => {
     return;
   }
 
-  return processAndSendReply(job, aiReply);
+  return processAndSendReply(task, aiReply);
 };
 
-const processAIJob = async (job: AIWorkerJob) => {
-  const jobKey = buildJobKey(job);
-  const lockAcquired = await acquireLeadProcessingLock(job.data.leadId, jobKey);
+const processAIMessage = async (task: AIWorkerTask) => {
+  const lockAcquired = await acquireLeadProcessingLock(
+    task.message.leadId,
+    task.jobKey
+  );
 
   if (!lockAcquired) {
-    throw new LeadQueueBusyError(job.data.leadId);
+    throw new LeadQueueBusyError(task.message.leadId);
   }
 
   try {
-    if (job.name === "router") {
-      return await executeRouterFlow(job);
+    if (task.kind === "router") {
+      return await executeRouterFlow(task);
     }
 
-    return await executeLegacyFlow(job);
+    return await executeLegacyFlow(task);
   } catch (error) {
     if (!(error instanceof LeadQueueBusyError)) {
       logger.error(
         {
-          jobId: job.id,
-          queueName: job.queueName,
-          leadId: job.data.leadId,
+          jobId: task.job.id,
+          queueName: task.job.queueName,
+          leadId: task.message.leadId,
           error,
         },
         "AI worker job failed"
@@ -412,46 +448,67 @@ const processAIJob = async (job: AIWorkerJob) => {
 
     throw error;
   } finally {
-    await releaseLeadProcessingLock(job.data.leadId, jobKey);
+    await releaseLeadProcessingLock(task.message.leadId, task.jobKey);
   }
 };
 
-const workers = getAIQueueNames().map((queueName) => {
-  const worker = new Worker<AIJobPayload>(
-    queueName,
-    async (job) => processAIJob(job),
-    {
-      connection: { url: env.REDIS_URL },
-      concurrency: AI_WORKER_CONCURRENCY,
-    }
-  );
-
-  worker.on("failed", (job, error) => {
-    if (error instanceof LeadQueueBusyError) {
-      logger.warn(
-        {
-          jobId: job?.id,
-          queueName,
-          leadId: job?.data?.leadId,
-        },
-        "Lead queue busy, BullMQ will retry"
-      );
-      return;
-    }
-
-    logger.error(
+const processAIJob = async (job: AIWorkerJob) => {
+  if (!job.data.messages.length) {
+    logger.warn(
       {
-        jobId: job?.id,
-        queueName,
-        leadId: job?.data?.leadId,
-        error,
+        jobId: job.id,
+        queueName: job.queueName,
       },
-      "AI partition worker failed"
+      "AI worker received empty batch"
     );
-  });
+    return;
+  }
 
-  return worker;
-});
+  for (const [messageIndex, message] of job.data.messages.entries()) {
+    await processAIMessage(createWorkerTask(job, message, messageIndex));
+  }
+};
+
+const workers =
+  process.env.RUN_WORKER === "true"
+    ? getAIQueueNames().map((queueName) => {
+        const worker = new Worker<AIJobPayload>(
+          queueName,
+          async (job) => processAIJob(job),
+          {
+            connection: getWorkerRedisConnection(),
+            prefix: env.AI_QUEUE_PREFIX,
+            concurrency: AI_WORKER_CONCURRENCY,
+          }
+        );
+
+        worker.on("failed", (job, error) => {
+          if (error instanceof LeadQueueBusyError) {
+            logger.warn(
+              {
+                jobId: job?.id,
+                queueName,
+                leadId: getJobLeadId(job),
+              },
+              "Lead queue busy, BullMQ will retry"
+            );
+            return;
+          }
+
+          logger.error(
+            {
+              jobId: job?.id,
+              queueName,
+              leadId: getJobLeadId(job),
+              error,
+            },
+            "AI partition worker failed"
+          );
+        });
+
+        return worker;
+      })
+    : [];
 
 logger.info(
   {

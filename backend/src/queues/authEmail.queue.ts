@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { Queue } from "bullmq";
-import { env } from "../config/env";
+import { getQueueRedisConnection } from "../config/redis";
 import {
   queuePasswordResetEmail,
   queueVerificationEmail,
@@ -21,12 +21,7 @@ export type AuthEmailJobData =
 export const authEmailQueue = new Queue<AuthEmailJobData>(
   "authEmail",
   {
-    connection: {
-      url: env.REDIS_URL,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      ...(env.REDIS_URL.startsWith("rediss://") ? { tls: {} } : {}),
-    },
+    connection: getQueueRedisConnection(),
     prefix: "sylph",
     defaultJobOptions: {
       attempts: 5,

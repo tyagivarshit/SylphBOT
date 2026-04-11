@@ -2,10 +2,12 @@ import { Worker } from "bullmq";
 import { routeAIMessage } from "../services/aiRouter.service";
 import { handleIncomingMessage } from "../services/message.service";
 import * as Sentry from "@sentry/node";
-import { env } from "../config/env"; 
+import { getWorkerRedisConnection } from "../config/redis";
 
 
-const worker = new Worker(
+const worker =
+  process.env.RUN_WORKER === "true"
+    ? new Worker(
   "inboxQueue",
   async (job) => {
     const { businessId, leadId, message, plan } = job.data;
@@ -48,8 +50,9 @@ const worker = new Worker(
     }
   },
   {
-    connection: { url: process.env.REDIS_URL }
+    connection: getWorkerRedisConnection()
   }
-);
+)
+    : null;
 
 export default worker;

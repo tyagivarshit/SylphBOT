@@ -44,9 +44,6 @@ import { monitoringMiddleware } from "./middleware/monitoring.middleware";
 import { startTrialExpiryCron } from "./cron/trial.cron";
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "./cron/resetUsage.cron";
-console.log("🔥 AUTH EMAIL WORKER STARTED");
-import "./workers/bookingReminder.worker";
-import "./workers/authEmail.worker";
 
 import { isAppError } from "./utils/AppError";
 

@@ -1,27 +1,82 @@
 import Redis, { type RedisOptions } from "ioredis";
 import { env } from "./env";
 
-type RedisClientCache = {
-  defaultRedis?: Redis;
-  workerRedis?: Redis;
+const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
+const RECONNECT_TIMEOUT_SYMBOL = Symbol.for("sylph.redis.reconnectTimeout");
+
+type ManagedRedisClient = Redis & {
+  [MANUAL_CLOSE_SYMBOL]?: boolean;
+  [RECONNECT_TIMEOUT_SYMBOL]?: NodeJS.Timeout | null;
 };
 
 const globalForRedis = globalThis as typeof globalThis & {
-  __sylphRedis?: RedisClientCache;
+  __sylphRedis?: ManagedRedisClient;
 };
 
-const isRetryableRedisError = (message: string) =>
-  /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|READONLY/i.test(message);
+const isRetryableRedisError = (error: unknown) => {
+  const message = String((error as { message?: unknown })?.message || error || "");
+
+  return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly/i.test(
+    message
+  );
+};
+
+const scheduleReconnect = (client: ManagedRedisClient, label: string) => {
+  if (client[MANUAL_CLOSE_SYMBOL]) {
+    return;
+  }
+
+  if (
+    client.status === "ready" ||
+    client.status === "connect" ||
+    client.status === "connecting" ||
+    client.status === "reconnecting"
+  ) {
+    return;
+  }
+
+  if (client[RECONNECT_TIMEOUT_SYMBOL]) {
+    return;
+  }
+
+  client[RECONNECT_TIMEOUT_SYMBOL] = setTimeout(() => {
+    client[RECONNECT_TIMEOUT_SYMBOL] = null;
+
+    if (
+      client[MANUAL_CLOSE_SYMBOL] ||
+      (client.status !== "wait" && client.status !== "end")
+    ) {
+      return;
+    }
+
+    void client.connect().catch((error) => {
+      console.error(
+        `[redis:${label}] reconnect failed: ${String(
+          (error as { message?: unknown })?.message || error
+        )}`
+      );
+      scheduleReconnect(client, label);
+    });
+  }, env.REDIS_RETRY_DELAY_MS);
+
+  client[RECONNECT_TIMEOUT_SYMBOL]?.unref?.();
+};
 
 const buildRedisOptions = (connectionName: string): RedisOptions => {
-  const usesTls = env.REDIS_URL.startsWith("rediss://");
+  if (!env.REDIS_URL.startsWith("rediss://")) {
+    throw new Error("REDIS_URL must use rediss:// for Upstash TLS connections");
+  }
 
   return {
     connectionName,
     enableReadyCheck: false,
     enableAutoPipelining: true,
+    enableOfflineQueue: true,
+    autoResubscribe: true,
+    autoResendUnfulfilledCommands: true,
     lazyConnect: true,
     keepAlive: 30000,
+    noDelay: true,
     maxRetriesPerRequest: null,
     connectTimeout: env.REDIS_CONNECT_TIMEOUT_MS,
     retryStrategy(attempts) {
@@ -31,48 +86,61 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
       );
     },
     reconnectOnError(error) {
-      return isRetryableRedisError(error.message) ? 1 : false;
+      return isRetryableRedisError(error) ? 1 : false;
     },
-    ...(usesTls ? { tls: {} } : {}),
+    tls: {},
   };
 };
 
-const attachRedisListeners = (client: Redis, label: string) => {
+const attachRedisListeners = (client: ManagedRedisClient, label: string) => {
   client.on("error", (error) => {
-    if (isRetryableRedisError(error.message)) {
-      return;
-    }
-
     console.error(`[redis:${label}] ${error.message}`);
+  });
+
+  client.on("close", () => {
+    console.warn(`[redis:${label}] connection closed`);
+    scheduleReconnect(client, label);
+  });
+
+  client.on("reconnecting", (delay?: number) => {
+    console.warn(
+      `[redis:${label}] reconnecting in ${delay ?? env.REDIS_RETRY_DELAY_MS}ms`
+    );
+  });
+
+  client.on("end", () => {
+    console.warn(`[redis:${label}] connection ended`);
+    scheduleReconnect(client, label);
   });
 };
 
 const createRedisClient = (label: string) => {
-  const client = new Redis(env.REDIS_URL, buildRedisOptions(label));
+  const client = new Redis(
+    env.REDIS_URL,
+    buildRedisOptions(label)
+  ) as ManagedRedisClient;
+
   attachRedisListeners(client, label);
   return client;
 };
 
-const cache = globalForRedis.__sylphRedis || {};
-
-export const redis = cache.defaultRedis || createRedisClient("app");
-cache.defaultRedis = redis;
-globalForRedis.__sylphRedis = cache;
+export const redis = globalForRedis.__sylphRedis || createRedisClient("shared");
+globalForRedis.__sylphRedis = redis;
 
 export const getQueueRedisConnection = () => redis;
 
-export const getWorkerRedisConnection = () => {
-  if (!cache.workerRedis) {
-    cache.workerRedis = createRedisClient("ai-worker");
-    globalForRedis.__sylphRedis = cache;
-  }
+export const getWorkerRedisConnection = () => redis;
 
-  return cache.workerRedis;
-};
-
-const closeClient = async (client?: Redis) => {
+const closeClient = async (client?: ManagedRedisClient) => {
   if (!client) {
     return;
+  }
+
+  client[MANUAL_CLOSE_SYMBOL] = true;
+
+  if (client[RECONNECT_TIMEOUT_SYMBOL]) {
+    clearTimeout(client[RECONNECT_TIMEOUT_SYMBOL]);
+    client[RECONNECT_TIMEOUT_SYMBOL] = null;
   }
 
   try {
@@ -87,15 +155,8 @@ const closeClient = async (client?: Redis) => {
 };
 
 export const closeRedisConnection = async () => {
-  const clients = Array.from(
-    new Set([cache.defaultRedis, cache.workerRedis].filter(Boolean))
-  ) as Redis[];
-
-  await Promise.allSettled(clients.map((client) => closeClient(client)));
-
-  cache.defaultRedis = undefined;
-  cache.workerRedis = undefined;
-  globalForRedis.__sylphRedis = cache;
+  await closeClient(globalForRedis.__sylphRedis);
+  globalForRedis.__sylphRedis = undefined;
 };
 
 export default redis;

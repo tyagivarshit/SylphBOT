@@ -1,9 +1,9 @@
 import { Worker } from "bullmq";
 import axios from "axios";
 import prisma from "../config/prisma";
+import { getWorkerRedisConnection } from "../config/redis";
 import { decrypt } from "../utils/encrypt";
 import { getIO } from "../sockets/socket.server";
-import {env} from "../config/env";
 
 /* 🔥 SMART FOLLOWUP GENERATOR (UPGRADED 🔥) */
 const generateSmartFollowup = (
@@ -103,7 +103,8 @@ const isSystemGenerated = (msg: string) => {
   );
 };
 
-new Worker(
+if (process.env.RUN_WORKER === "true") {
+  new Worker(
   "followupQueue",
   async (job) => {
 
@@ -245,9 +246,10 @@ new Worker(
 
   },
   {
-    connection: { url: process.env.REDIS_URL } ,
+    connection: getWorkerRedisConnection(),
     concurrency: 5,
   }
-);
+  );
 
-console.log("🚀 Followup Worker Started");
+  console.log("🚀 Followup Worker Started");
+}

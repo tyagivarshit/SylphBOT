@@ -1,14 +1,14 @@
 import { Worker } from "bullmq";
-import { env } from "../config/env";
+import { getWorkerRedisConnection } from "../config/redis";
 import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "../services/authEmail.service";
 import type { AuthEmailJobData } from "../queues/authEmail.queue";
 
-console.log("🔥 AUTH EMAIL WORKER STARTED");
-console.log("REDIS URL:", env.REDIS_URL ? "OK" : "MISSING");
-const authEmailWorker = new Worker<AuthEmailJobData>(
+const authEmailWorker =
+  process.env.RUN_WORKER === "true"
+    ? new Worker<AuthEmailJobData>(
   "authEmail",
   async (job) => {
     console.log("📥 JOB RECEIVED", job.name, job.data);
@@ -20,34 +20,32 @@ const authEmailWorker = new Worker<AuthEmailJobData>(
     await sendPasswordResetEmail(job.data.to, job.data.link);
   },
   {
-    connection: {
-      url: env.REDIS_URL,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      ...(env.REDIS_URL.startsWith("rediss://") ? { tls: {} } : {}),
-    },
+    connection: getWorkerRedisConnection(),
     prefix: "sylph",
     concurrency: 2,
   }
-);
+)
+    : null;
 
-authEmailWorker.on("completed", (job) => {
-  console.log("[EMAIL_QUEUE] completed", {
-    id: job.id,
-    name: job.name,
-    type: job.data.type,
-    to: job.data.to,
+if (authEmailWorker) {
+  authEmailWorker.on("completed", (job) => {
+    console.log("[EMAIL_QUEUE] completed", {
+      id: job.id,
+      name: job.name,
+      type: job.data.type,
+      to: job.data.to,
+    });
   });
-});
 
-authEmailWorker.on("failed", (job, error) => {
-  console.error("[EMAIL_QUEUE] failed", {
-    id: job?.id,
-    name: job?.name,
-    type: job?.data?.type,
-    to: job?.data?.to,
-    error: error.message,
+  authEmailWorker.on("failed", (job, error) => {
+    console.error("[EMAIL_QUEUE] failed", {
+      id: job?.id,
+      name: job?.name,
+      type: job?.data?.type,
+      to: job?.data?.to,
+      error: error.message,
+    });
   });
-});
+}
 
 export default authEmailWorker;

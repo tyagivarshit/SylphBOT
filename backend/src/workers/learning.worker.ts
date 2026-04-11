@@ -1,9 +1,13 @@
 import { Worker } from "bullmq";
 
-import { env } from "../config/env";
+import { getWorkerRedisConnection } from "../config/redis";
 
 
 export const startLearningWorker = () => {
+  if (process.env.RUN_WORKER !== "true") {
+    return null;
+  }
+
   const worker = new Worker(
     "learning-queue",
     async (job) => {
@@ -11,7 +15,7 @@ export const startLearningWorker = () => {
 
       // 🔥 Yaha tera AI / automation logic aayega
     },{
-    connection: { url: process.env.REDIS_URL } }
+    connection: getWorkerRedisConnection() }
   );
 
   worker.on("completed", (job) => {
@@ -23,4 +27,5 @@ export const startLearningWorker = () => {
   });
 
   console.log("🧠 Learning Worker Started 🚀");
+  return worker;
 };

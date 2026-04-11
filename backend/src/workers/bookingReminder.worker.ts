@@ -1,8 +1,8 @@
 import { Worker } from "bullmq";
 import prisma from "../config/prisma";
+import { getWorkerRedisConnection } from "../config/redis";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
 import { BOOKING_REMINDER_QUEUE_NAME } from "../queues/bookingReminder.queue";
-import {env} from "../config/env";
 
 /*
 =========================================================
@@ -15,7 +15,9 @@ type ReminderJob = {
   appointmentId: string;
 };
 
-export const bookingReminderWorker = new Worker<ReminderJob>(
+export const bookingReminderWorker =
+  process.env.RUN_WORKER === "true"
+    ? new Worker<ReminderJob>(
   BOOKING_REMINDER_QUEUE_NAME,
   async (job) => {
     const { type, appointmentId } = job.data;
@@ -159,7 +161,8 @@ Please be ready 🚀`;
     }
   },
   {
-    connection: { url: process.env.REDIS_URL } ,
+    connection: getWorkerRedisConnection(),
     concurrency: 5,
   }
-);
+)
+    : null;

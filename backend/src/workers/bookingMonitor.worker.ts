@@ -1,16 +1,17 @@
 import { Worker } from "bullmq";
 import prisma from "../config/prisma";
+import { getWorkerRedisConnection } from "../config/redis";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
 import { sendAIFollowup } from "../services/aiFollowup.service";
-
-import {env} from "../config/env";
 /*
 =========================================================
 MISSED BOOKING MONITOR (PRODUCTION SAFE)
 =========================================================
 */
 
-export const bookingMonitorWorker = new Worker(
+export const bookingMonitorWorker =
+  process.env.RUN_WORKER === "true"
+    ? new Worker(
   "booking-monitor",
   async () => {
     try {
@@ -127,7 +128,8 @@ Reply YES and we’ll set it up again 👍`,
     }
   },
   {
-    connection: { url: process.env.REDIS_URL } ,
+    connection: getWorkerRedisConnection(),
     concurrency: 1, // 🔥 IMPORTANT (avoid race condition)
   }
-);
+)
+    : null;

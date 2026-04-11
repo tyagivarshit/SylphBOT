@@ -1,10 +1,8 @@
 import { Queue } from "bullmq";
-import { env } from "../config/env";
+import { getQueueRedisConnection } from "../config/redis";
 
 export const learningQueue = new Queue("learning-queue", {
-  connection: {
-    url: env.REDIS_URL,
-  },
+  connection: getQueueRedisConnection(),
 });
 
 // 🔥 Add job helper

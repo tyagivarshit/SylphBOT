@@ -1,11 +1,13 @@
 import { Worker } from "bullmq";
 import prisma from "../config/prisma";
-import {env} from "../config/env";
+import { getWorkerRedisConnection } from "../config/redis";
 
 /* SENTRY MONITORING */
 import * as Sentry from "@sentry/node";
 
-const worker = new Worker(
+const worker =
+  process.env.RUN_WORKER === "true"
+    ? new Worker(
   "funnelQueue",
   async (job) => {
 
@@ -32,10 +34,15 @@ const worker = new Worker(
 
   },
   {
-    connection: { url: process.env.REDIS_URL } ,
+    connection: getWorkerRedisConnection(),
     concurrency: 3,
   }
-);
+)
+    : ({
+        on() {
+          return undefined;
+        },
+      } as { on: (...args: any[]) => void });
 
 /* WORKER FAILURE MONITORING */
 
@@ -46,4 +53,6 @@ worker.on("failed", (job, err) => {
 
 });
 
-console.log("🚀 Funnel Worker Started");
+if (process.env.RUN_WORKER === "true") {
+  console.log("🚀 Funnel Worker Started");
+}

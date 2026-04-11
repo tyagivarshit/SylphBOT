@@ -1,15 +1,22 @@
 import { Worker } from "bullmq";
-import {env} from "../config/env";
+import { getWorkerRedisConnection } from "../config/redis";
 
-const worker = new Worker(
+const worker =
+  process.env.RUN_WORKER === "true"
+    ? new Worker(
   "example-queue",
   async (job) => {
     console.log("Processing job:", job.data);
   },
   {
-    connection: { url: process.env.REDIS_URL },
+    connection: getWorkerRedisConnection(),
   }
-);
+)
+    : ({
+        on() {
+          return undefined;
+        },
+      } as { on: (...args: any[]) => void });
 
 worker.on("completed", (job) => {
   console.log(`✅ Job completed: ${job.id}`);

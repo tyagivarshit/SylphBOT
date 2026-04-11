@@ -1,9 +1,10 @@
 import { Worker } from "bullmq";
-import { env } from "../config/env"; // ✅ add only
+import { getWorkerRedisConnection } from "../config/redis";
 import { handleCommentAutomation } from "../services/commentAutomation.service";
 
 
-new Worker(
+if (process.env.RUN_WORKER === "true") {
+  new Worker(
   "automation",
   async (job) => {
     if (job.name === "comment") {
@@ -11,7 +12,8 @@ new Worker(
     }
   },
   {
-    connection: { url: process.env.REDIS_URL } ,
+    connection: getWorkerRedisConnection(),
     concurrency: 20,
   }
-);
+  );
+}

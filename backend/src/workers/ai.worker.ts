@@ -66,7 +66,7 @@ const isRetryableError = (error: unknown) => {
     return true;
   }
 
-  return /ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|timed out|temporar/i.test(
+  return /ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|Connection is closed|timed out|temporar/i.test(
     message
   );
 };
@@ -399,8 +399,10 @@ process.on("unhandledRejection", (error) => {
   );
 });
 
-void bootstrap().catch(async (error) => {
-  console.error(`[ai.worker] ${String(error.message || error)}`);
-  await shutdown("bootstrap");
-  process.exit(1);
-});
+if (process.env.RUN_WORKER === "true") {
+  void bootstrap().catch(async (error) => {
+    console.error(`[ai.worker] ${String(error.message || error)}`);
+    await shutdown("bootstrap");
+    process.exit(1);
+  });
+}

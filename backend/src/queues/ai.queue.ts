@@ -1,31 +1,18 @@
-import { JobsOptions, Queue } from "bullmq";
+import crypto from "crypto";
+import { Job, JobsOptions, Queue } from "bullmq";
 import { env } from "../config/env";
+import { getQueueRedisConnection } from "../config/redis";
 
-export const AI_QUEUE_PARTITIONS = Math.max(
-  1,
-  Number(process.env.AI_QUEUE_PARTITIONS || 24)
-);
-const AI_QUEUE_BASE_NAME = "aiQueue";
+export const AI_QUEUE_NAME = env.AI_QUEUE_NAME;
+export const AI_QUEUE_PARTITIONS = 1;
 
-const defaultJobOptions: JobsOptions = {
-  attempts: 8,
-  backoff: {
-    type: "fixed",
-    delay: 500,
-  },
-  removeOnComplete: {
-    age: 3600,
-    count: 10000,
-  },
-  removeOnFail: {
-    age: 24 * 3600,
-  },
-};
+export type AIMessageKind = "router" | "message";
 
-export type AIJobPayload = {
+export type AIMessagePayload = {
   businessId: string;
   leadId: string;
   message: string;
+  kind?: AIMessageKind;
   plan?: unknown;
   platform?: string;
   senderId?: string;
@@ -33,61 +20,202 @@ export type AIJobPayload = {
   phoneNumberId?: string;
   accessTokenEncrypted?: string;
   externalEventId?: string;
+  idempotencyKey?: string;
+  metadata?: Record<string, unknown>;
+  skipInboundPersist?: boolean;
+  retryCount?: number;
 };
 
-const buildQueueName = (partition: number) =>
-  `${AI_QUEUE_BASE_NAME}-p${partition}`;
+export type AIJobPayload = {
+  batchId: string;
+  source: "api" | "router" | "message" | "retry";
+  createdAt: string;
+  messages: AIMessagePayload[];
+};
 
-const getLeadPartition = (leadId: string) => {
-  let hash = 0;
+type EnqueueOptions = {
+  source?: AIJobPayload["source"];
+  idempotencyKey?: string;
+  delayMs?: number;
+  forceUniqueJobId?: boolean;
+};
 
-  for (let index = 0; index < leadId.length; index += 1) {
-    hash = (hash * 31 + leadId.charCodeAt(index)) >>> 0;
+const defaultJobOptions: JobsOptions = {
+  attempts: env.AI_JOB_ATTEMPTS,
+  backoff: {
+    type: "exponential",
+    delay: env.AI_JOB_BACKOFF_MS,
+  },
+  removeOnComplete: {
+    age: 3600,
+    count: 1000,
+  },
+  removeOnFail: {
+    age: 86400,
+    count: 1000,
+  },
+};
+
+const globalForAIQueue = globalThis as typeof globalThis & {
+  __sylphAIQueue?: Queue<AIJobPayload>;
+};
+
+export const aiQueue =
+  globalForAIQueue.__sylphAIQueue ||
+  new Queue<AIJobPayload>(AI_QUEUE_NAME, {
+    connection: getQueueRedisConnection(),
+    prefix: env.AI_QUEUE_PREFIX,
+    defaultJobOptions,
+    streams: {
+      events: {
+        maxLen: 1000,
+      },
+    },
+  });
+
+if (!globalForAIQueue.__sylphAIQueue) {
+  globalForAIQueue.__sylphAIQueue = aiQueue;
+}
+
+const normalizeMessage = (message: AIMessagePayload): AIMessagePayload => ({
+  ...message,
+  businessId: String(message.businessId || "").trim(),
+  leadId: String(message.leadId || "").trim(),
+  message: String(message.message || "").trim(),
+  kind: message.kind || "router",
+  externalEventId: message.externalEventId?.trim(),
+  idempotencyKey: message.idempotencyKey?.trim(),
+  skipInboundPersist: Boolean(message.skipInboundPersist),
+  retryCount: message.retryCount || 0,
+});
+
+const chunkMessages = <T>(messages: T[], chunkSize: number) => {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < messages.length; index += chunkSize) {
+    chunks.push(messages.slice(index, index + chunkSize));
   }
 
-  return hash % AI_QUEUE_PARTITIONS;
+  return chunks;
 };
 
-export const aiQueues = Array.from(
-  { length: AI_QUEUE_PARTITIONS },
-  (_, partition) =>
-    new Queue(buildQueueName(partition), {
-      connection: {
-        url: env.REDIS_URL,
-      },
-      defaultJobOptions,
-    })
-);
+const buildStableToken = (messages: AIMessagePayload[], idempotencyKey?: string) => {
+  if (idempotencyKey) {
+    return idempotencyKey;
+  }
 
-export const aiQueue = aiQueues[0];
+  const messageTokens = messages
+    .map((message) => message.idempotencyKey || message.externalEventId)
+    .filter(Boolean);
 
-export const getAIQueues = () => aiQueues;
-
-export const getAIQueueNames = () => aiQueues.map((queue) => queue.name);
-
-export const getAIQueueForLead = (leadId: string) =>
-  aiQueues[getLeadPartition(leadId)];
-
-const buildJobId = (name: "message" | "router", data: AIJobPayload) => {
-  if (!data.externalEventId) {
+  if (!messageTokens.length) {
     return undefined;
   }
 
-  return `${name}:${(data.platform || "UNKNOWN").toUpperCase()}:${data.externalEventId}`;
+  return messageTokens.join("|");
 };
 
-const addLeadScopedJob = (
-  name: "message" | "router",
-  data: AIJobPayload
+const buildJobId = (
+  messages: AIMessagePayload[],
+  chunkIndex: number,
+  options?: EnqueueOptions
 ) => {
-  const queue = getAIQueueForLead(data.leadId);
-  const jobId = buildJobId(name, data);
+  if (options?.forceUniqueJobId) {
+    return `ai:${crypto.randomUUID()}`;
+  }
 
-  return queue.add(name, data, jobId ? { jobId } : undefined);
+  const stableToken = buildStableToken(messages, options?.idempotencyKey);
+
+  if (!stableToken) {
+    return `ai:${crypto.randomUUID()}`;
+  }
+
+  const retrySuffix = Math.max(
+    0,
+    ...messages.map((message) => message.retryCount || 0)
+  );
+
+  const digest = crypto
+    .createHash("sha1")
+    .update(stableToken)
+    .digest("hex");
+
+  return `ai:${digest}:c${chunkIndex}:r${retrySuffix}`;
 };
 
-export const addAIJob = async (data: AIJobPayload) =>
-  addLeadScopedJob("message", data);
+export const enqueueAIBatch = async (
+  messages: AIMessagePayload[],
+  options?: EnqueueOptions
+) => {
+  const normalizedMessages = messages
+    .map(normalizeMessage)
+    .filter((message) => message.businessId && message.leadId && message.message);
 
-export const addRouterJob = async (data: AIJobPayload) =>
-  addLeadScopedJob("router", data);
+  if (!normalizedMessages.length) {
+    throw new Error("At least one valid message is required");
+  }
+
+  const chunks = chunkMessages(normalizedMessages, env.AI_JOB_BATCH_SIZE);
+  const jobs = chunks.map((chunk, chunkIndex) => ({
+    name: "process",
+    data: {
+      batchId: crypto.randomUUID(),
+      source: options?.source || "api",
+      createdAt: new Date().toISOString(),
+      messages: chunk,
+    },
+    opts: {
+      jobId: buildJobId(chunk, chunkIndex, options),
+      delay: options?.delayMs || 0,
+    },
+  }));
+
+  return aiQueue.addBulk(jobs);
+};
+
+export const enqueueAIMessage = async (
+  message: AIMessagePayload,
+  options?: EnqueueOptions
+) => {
+  const [job] = await enqueueAIBatch([message], options);
+  return job;
+};
+
+export const addAIJob = async (data: AIMessagePayload) =>
+  enqueueAIMessage(
+    {
+      ...data,
+      kind: data.kind || "message",
+      skipInboundPersist: data.skipInboundPersist ?? false,
+    },
+    {
+      source: "message",
+      idempotencyKey: data.idempotencyKey || data.externalEventId,
+    }
+  );
+
+export const addRouterJob = async (data: AIMessagePayload) =>
+  enqueueAIMessage(
+    {
+      ...data,
+      kind: "router",
+      skipInboundPersist: data.skipInboundPersist ?? true,
+    },
+    {
+      source: "router",
+      idempotencyKey: data.idempotencyKey || data.externalEventId,
+    }
+  );
+
+export const getAIQueues = () => [aiQueue];
+
+export const getAIQueueNames = () => [aiQueue.name];
+
+export const getAIQueueForLead = (_leadId: string) => aiQueue;
+
+export const closeAIQueue = async () => {
+  await aiQueue.close();
+  globalForAIQueue.__sylphAIQueue = undefined;
+};
+
+export type AIQueueJob = Job<AIJobPayload>;

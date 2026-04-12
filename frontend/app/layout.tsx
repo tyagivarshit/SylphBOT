@@ -1,11 +1,28 @@
 import "./globals.css";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Toaster } from "react-hot-toast";
+import PWAInstallPrompt from "@/components/pwa/PWAInstallPrompt";
 import Providers from "@/providers";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Automexia AI",
   description: "Automexia AI automation platform",
+  applicationName: "Automexia AI",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Automexia AI",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0b2a5b",
 };
 
 export default function RootLayout({
@@ -17,6 +34,8 @@ export default function RootLayout({
     <html lang="en">
       <body className="brand-body bg-background text-foreground min-h-screen font-sans antialiased">
         <Providers>
+          <PWAInstallPrompt />
+
           <Script
             id="facebook-sdk"
             src="https://connect.facebook.net/en_US/sdk.js"

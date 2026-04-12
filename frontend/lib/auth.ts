@@ -3,7 +3,7 @@
 ====================================== */
 
 import type { ApiResponse } from "./apiClient";
-import { buildAbsoluteApiUrl } from "./url";
+import { buildApiUrl } from "./url";
 
 /* ======================================
 🔥 TYPES (STRICT)
@@ -38,7 +38,7 @@ export function clearUserCache() {
 
 const toAuthUrl = (path: string) => {
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  return buildAbsoluteApiUrl(`/api${normalized}`);
+  return buildApiUrl(`/api${normalized}`);
 };
 
 const getErrorMessage = (error: unknown, fallback: string) =>

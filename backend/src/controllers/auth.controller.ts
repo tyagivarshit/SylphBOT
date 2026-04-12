@@ -83,7 +83,6 @@ const setCookies = (
 
 
 
-    console.log("🍪 Cookies set");
 };
 
 /* ======================================

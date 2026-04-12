@@ -4,7 +4,9 @@ import cors, { type CorsOptions } from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import cookieParser from "cookie-parser";
+import passport from "passport";
 import { env } from "./config/env";
+import { configurePassport } from "./config/passport";
 import { protect } from "./middleware/auth.middleware";
 import { attachBillingContext } from "./middleware/subscription.middleware";
 
@@ -34,6 +36,11 @@ import oauthRoutes from "./routes/oauth.routes";
 import bookingRoutes from "./routes/booking.routes";
 import availabilityRoutes from "./routes/availability.routes";
 import conversationRoutes from "./routes/conversation.routes";
+import {
+  AIMessagePayload,
+  AI_QUEUE_NAME,
+  enqueueAIBatch,
+} from "./queues/ai.queue";
 
 import {
   aiLimiter,
@@ -48,6 +55,7 @@ import { startUsageResetCron } from "./cron/resetUsage.cron";
 import { isAppError } from "./utils/AppError";
 
 const app = express();
+configurePassport();
 
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
@@ -153,6 +161,7 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(globalLimiter);
 app.use(cookieParser());
+app.use(passport.initialize());
 
 app.use((req: any, res, next) => {
   const headerValue = req.headers["x-request-id"];
@@ -226,12 +235,112 @@ app.use(
 
 app.use(express.json({ limit: "1mb" }));
 
+type EnqueueRequestBody = Partial<AIMessagePayload> & {
+  messages?: Partial<AIMessagePayload>[];
+  idempotencyKey?: string;
+};
+
+const normalizeIncomingMessage = (
+  raw: Partial<AIMessagePayload>
+): AIMessagePayload => {
+  const message = String(raw.message || "").trim();
+  const businessId = String(raw.businessId || "").trim();
+  const leadId = String(raw.leadId || "").trim();
+
+  if (!message || !businessId || !leadId) {
+    throw new Error("businessId, leadId, and message are required");
+  }
+
+  return {
+    businessId,
+    leadId,
+    message,
+    kind: raw.kind || "router",
+    plan: raw.plan,
+    platform: raw.platform,
+    senderId: raw.senderId,
+    pageId: raw.pageId,
+    phoneNumberId: raw.phoneNumberId,
+    accessTokenEncrypted: raw.accessTokenEncrypted,
+    externalEventId: raw.externalEventId?.trim(),
+    idempotencyKey: raw.idempotencyKey?.trim(),
+    metadata: raw.metadata,
+    skipInboundPersist: raw.skipInboundPersist ?? false,
+    retryCount: raw.retryCount ?? 0,
+  };
+};
+
+const extractMessages = (body: EnqueueRequestBody) => {
+  const payload = Array.isArray(body.messages) ? body.messages : [body];
+
+  if (!payload.length) {
+    throw new Error("messages array is required");
+  }
+
+  if (payload.length > env.AI_API_MAX_BATCH_SIZE) {
+    throw new Error(
+      `messages array exceeds limit of ${env.AI_API_MAX_BATCH_SIZE}`
+    );
+  }
+
+  return payload.map(normalizeIncomingMessage);
+};
+
 app.get("/", (_req, res) => {
   res.json({
     success: true,
     message: "API Running",
     environment: env.NODE_ENV,
+    queue: AI_QUEUE_NAME,
   });
+});
+
+app.post("/v1/messages", async (req: any, res) => {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+
+  try {
+    const body = (req.body || {}) as EnqueueRequestBody;
+    const messages = extractMessages(body);
+
+    const enqueue = enqueueAIBatch(messages, {
+      source: "api",
+      idempotencyKey:
+        typeof body.idempotencyKey === "string"
+          ? body.idempotencyKey.trim()
+          : undefined,
+    });
+
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error("Queue enqueue timeout"));
+      }, env.API_REQUEST_TIMEOUT_MS);
+    });
+
+    const jobs = await Promise.race([enqueue, timeout]);
+
+    res.status(202).json({
+      success: true,
+      requestId: req.requestId,
+      queue: AI_QUEUE_NAME,
+      accepted: messages.length,
+      jobs: jobs.length,
+    });
+  } catch (error) {
+    const message = String(
+      (error as { message?: unknown })?.message || "Unable to enqueue messages"
+    );
+    const statusCode = /timeout/i.test(message) ? 503 : 400;
+
+    res.status(statusCode).json({
+      success: false,
+      requestId: req.requestId,
+      message,
+    });
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 });
 
 app.use("/api/auth", authRoutes);

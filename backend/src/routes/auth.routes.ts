@@ -16,6 +16,11 @@ import { loginLimiter } from "../middleware/loginLimiter";
 
 const router = Router();
 
+router.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+
 /* ================= AUTH ================= */
 
 router.post("/register", authLimiter, register);

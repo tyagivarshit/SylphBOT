@@ -10,7 +10,20 @@ const GOOGLE_CALLBACK_URL =
     ? `${env.BACKEND_URL}/api/auth/google/callback`
     : "http://localhost:5000/api/auth/google/callback";
 
+let passportConfigured = false;
+
 export const configurePassport = () => {
+  if (passportConfigured) {
+    return;
+  }
+
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    console.warn(
+      "Google OAuth disabled: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET missing"
+    );
+    return;
+  }
+
   passport.use(
     new GoogleStrategy(
       {
@@ -59,4 +72,6 @@ export const configurePassport = () => {
       }
     )
   );
+
+  passportConfigured = true;
 };

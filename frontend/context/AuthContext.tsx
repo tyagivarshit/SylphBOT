@@ -10,7 +10,7 @@ import {
 } from "react";
 import { getCurrentUser } from "@/lib/auth";
 
-type User = {
+export type AuthUser = {
   id: string;
   email: string;
   role: string;
@@ -18,7 +18,7 @@ type User = {
 };
 
 type AuthContextType = {
-  user: User | null;
+  user: AuthUser | null;
   loading: boolean;
   isAuthenticated: boolean;
   refreshUser: () => Promise<void>;
@@ -36,7 +36,7 @@ export const AuthProvider = ({
 }: {
   children: React.ReactNode;
 }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const hasFetched = useRef(false);

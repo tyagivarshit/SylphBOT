@@ -88,7 +88,17 @@ function TopbarComponent({ setOpen }: TopbarProps) {
             <Menu size={18} />
           </button>
 
-          
+          <div className="min-w-0 flex-1 lg:hidden">
+            <div className="flex items-center gap-2">
+              <span className="brand-eyebrow truncate">
+                {currentPage.eyebrow}
+              </span>
+            </div>
+
+            <h1 className="mt-1 truncate text-sm font-semibold tracking-tight text-slate-950 sm:text-base">
+              {currentPage.title}
+            </h1>
+          </div>
 
           <div className="hidden min-w-0 flex-1 lg:block">
             <div className="flex items-center gap-3">

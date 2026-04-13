@@ -53,10 +53,6 @@ export default function DashboardLayout({
   🔥 OVERLAY CLICK CLOSE
   ====================================== */
 
-  const handleOverlayClick = () => {
-    closeSidebar();
-  };
-
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-white via-blue-50 to-cyan-50">
 
@@ -72,14 +68,6 @@ export default function DashboardLayout({
         <div className="shrink-0">
           <Sidebar open={open} setOpen={setOpen} />
         </div>
-
-        {/* ===== OVERLAY (MOBILE) ===== */}
-        {open && (
-          <div
-            className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-            onClick={handleOverlayClick}
-          />
-        )}
 
         {/* ===== MAIN CONTENT ===== */}
         <div className="flex flex-col flex-1 min-w-0">

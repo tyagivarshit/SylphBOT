@@ -132,7 +132,11 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
       >
         {/* 🔥 MOBILE HEADER */}
         <div className="mb-5 flex items-center justify-between gap-3 lg:mb-7">
-          <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
+          <Link
+            href="/dashboard"
+            onClick={() => setOpen(false)}
+            className="flex min-w-0 items-center gap-3"
+          >
             <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border border-white/16 bg-white/90 shadow-[0_16px_30px_rgba(8,18,35,0.24)]">
               <img
                 src={brandLogoSrc}

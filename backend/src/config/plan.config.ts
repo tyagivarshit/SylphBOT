@@ -112,21 +112,42 @@ type DBPlan = {
   type?: string | null;
 };
 
+const normalizePlanValue = (
+  value?: string | null
+): PlanType | null => {
+  if (!value) return null;
+
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (
+    normalized === "FREE" ||
+    normalized === "FREE_LOCKED" ||
+    normalized === "FREE_TRIAL" ||
+    normalized === "STARTER"
+  ) {
+    return "FREE_LOCKED";
+  }
+
+  if (normalized.includes("ELITE")) return "ELITE";
+  if (normalized.includes("PRO")) return "PRO";
+  if (normalized.includes("BASIC")) return "BASIC";
+
+  return null;
+};
+
 /* ======================================
 GET PLAN KEY
 ====================================== */
 
 export const getPlanKey = (plan: DBPlan | null): PlanType => {
-  const name = plan?.name?.toUpperCase();
-  const type = plan?.type?.toUpperCase();
-
-  const key = (name || type) as PlanType;
-
-  if (!key || !PLAN_CONFIG[key]) {
-    return "FREE_LOCKED";
-  }
-
-  return key;
+  return (
+    normalizePlanValue(plan?.type) ||
+    normalizePlanValue(plan?.name) ||
+    "FREE_LOCKED"
+  );
 };
 
 /* ======================================

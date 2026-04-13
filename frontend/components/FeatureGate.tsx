@@ -2,7 +2,7 @@
 
 import { ReactNode } from "react"
 import { usePlan } from "@/hooks/usePlan"
-import { hasFeature, getNextPlan, isHigherPlan, PLAN_LABELS } from "@/lib/featureGuard"
+import { hasFeature, getNextPlan, PLAN_LABELS } from "@/lib/featureGuard"
 import { useUpgrade } from "@/app/(dashboard)/layout"
 
 /* ✅ UPDATED TYPE */

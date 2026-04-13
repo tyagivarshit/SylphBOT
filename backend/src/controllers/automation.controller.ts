@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import { getPlanKey, type PlanType } from "../config/plan.config";
 
 /* ---------------- CREATE FLOW ---------------- */
 
@@ -8,7 +9,7 @@ export const createAutomationFlow = async (
   res: Response
 ) => {
   try {
-    const userId = req.user?.id;
+    const userId = (req as any).user?.id as string | undefined;
 
     if (!userId) {
       return res.status(401).json({
@@ -26,6 +27,7 @@ export const createAutomationFlow = async (
           select: {
             plan: {
               select: {
+                name: true,
                 type: true,
               },
             },
@@ -40,8 +42,7 @@ export const createAutomationFlow = async (
       });
     }
 
-    const planType =
-      business.subscription?.plan?.type || "FREE";
+    const planKey = getPlanKey(business.subscription?.plan || null);
 
     const {
       name,
@@ -84,18 +85,21 @@ export const createAutomationFlow = async (
 
     /* ---------------- PLAN RESTRICTIONS ---------------- */
 
-    const restrictedTypesBasic = ["DELAY", "CONDITION", "BOOKING"];
+    const allowedStepTypesByPlan: Record<PlanType, string[]> = {
+      FREE_LOCKED: [],
+      BASIC: ["MESSAGE"],
+      PRO: ["MESSAGE", "DELAY", "CONDITION"],
+      ELITE: ["MESSAGE", "DELAY", "CONDITION", "BOOKING"],
+    };
+    const allowedStepTypes = allowedStepTypesByPlan[planKey];
+    const invalidStep = sanitizedSteps.find(
+      (step: any) => !allowedStepTypes.includes(step.stepType)
+    );
 
-    if (planType === "BASIC") {
-      const invalidStep = sanitizedSteps.find((s: any) =>
-        restrictedTypesBasic.includes(s.stepType)
-      );
-
-      if (invalidStep) {
-        return res.status(403).json({
-          message: `Step '${invalidStep.stepType}' not allowed in BASIC plan`,
-        });
-      }
+    if (invalidStep) {
+      return res.status(403).json({
+        message: `Step '${invalidStep.stepType}' not allowed in ${planKey} plan`,
+      });
     }
 
     /* ---------------- CREATE FLOW + STEPS ---------------- */
@@ -151,7 +155,7 @@ export const getFlows = async (
   res: Response
 ) => {
   try {
-    const userId = req.user?.id;
+    const userId = (req as any).user?.id as string | undefined;
 
     if (!userId) {
       return res.status(401).json({

@@ -2,6 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { buildApiUrl } from "@/lib/userApi"
+import { normalizePlan } from "@/lib/featureGuard"
 
 /* ================= FETCH ================= */
 
@@ -39,14 +40,20 @@ export function usePlan() {
   })
 
   /* 🔥 SAFE FALLBACK */
-  const plan =
-    data?.billing?.planKey ||
-    data?.subscription?.plan?.type ||
-    "FREE_LOCKED"
   const status =
     data?.billing?.status ||
     data?.subscription?.status ||
     "INACTIVE"
+  const billingPlan = normalizePlan(data?.billing?.planKey)
+  const subscriptionPlan = normalizePlan(
+    data?.subscription?.plan?.type ||
+    data?.subscription?.plan?.name
+  )
+  const plan =
+    (status === "ACTIVE" || status === "TRIAL") &&
+    billingPlan === "FREE_LOCKED"
+      ? subscriptionPlan
+      : billingPlan
 
   /* 🔥 FORCE REFRESH (AFTER CHECKOUT) */
   const refreshPlan = async () => {

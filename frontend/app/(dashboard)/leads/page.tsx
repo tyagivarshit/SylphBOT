@@ -9,6 +9,7 @@ import { buildApiUrl } from "@/lib/url"
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
 import FeatureGate from "@/components/FeatureGate"
+import { hasFeature } from "@/lib/featureGuard"
 
 const stageOptions = [
   { value: "", label: "All Stages" },
@@ -39,8 +40,7 @@ function LeadsPageContent(){
   const [totalPages,setTotalPages] = useState(1)
   const initialSelectedLeadId = searchParams.get("leadId")
 
-  const isAllowed =
-    plan !== "FREE_LOCKED" && plan !== "BASIC"
+  const isAllowed = hasFeature(plan, "CRM")
 
   useEffect(()=>{
 

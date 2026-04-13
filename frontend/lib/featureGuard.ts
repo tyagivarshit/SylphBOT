@@ -4,6 +4,8 @@ PLAN TYPES
 
 export type PlanType = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE"
 
+const PLAN_ORDER: PlanType[] = ["FREE_LOCKED", "BASIC", "PRO", "ELITE"]
+
 /* =========================================
 FEATURE TYPES (SYNCED WITH BACKEND)
 ========================================= */
@@ -62,29 +64,58 @@ export const PLAN_FEATURES: Record<PlanType, Feature[]> = {
 
 }
 
+export function normalizePlan(plan?: string | null): PlanType {
+
+  if (!plan) return "FREE_LOCKED"
+
+  const normalized = plan
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_")
+
+  if (
+    normalized === "FREE" ||
+    normalized === "FREE_LOCKED" ||
+    normalized === "FREE_TRIAL" ||
+    normalized === "STARTER"
+  ) {
+    return "FREE_LOCKED"
+  }
+
+  if (normalized.includes("ELITE")) return "ELITE"
+  if (normalized.includes("PRO")) return "PRO"
+  if (normalized.includes("BASIC")) return "BASIC"
+
+  return "FREE_LOCKED"
+}
+
 /* =========================================
 FEATURE CHECK (SAFE)
 ========================================= */
 
 export function hasFeature(
-  plan?: PlanType,
+  plan?: string | null,
   feature?: Feature
 ): boolean {
 
-  if (!plan || !feature) return false
+  if (!feature) return false
 
-  return PLAN_FEATURES[plan]?.includes(feature) || false
+  const planKey = normalizePlan(plan)
+
+  return PLAN_FEATURES[planKey]?.includes(feature) || false
 }
 
 /* =========================================
 GET ALL FEATURES OF PLAN
 ========================================= */
 
-export function getPlanFeatures(plan?: PlanType): Feature[] {
+export function getPlanFeatures(plan?: string | null): Feature[] {
 
   if (!plan) return []
 
-  return PLAN_FEATURES[plan] || []
+  const planKey = normalizePlan(plan)
+
+  return PLAN_FEATURES[planKey] || []
 }
 
 /* =========================================
@@ -92,7 +123,7 @@ GET MISSING FEATURES (FOR UPGRADE UI)
 ========================================= */
 
 export function getMissingFeatures(
-  plan?: PlanType,
+  plan?: string | null,
   requiredFeatures: Feature[] = []
 ): Feature[] {
 
@@ -107,18 +138,19 @@ export function getMissingFeatures(
 PLAN ORDER (UPGRADE LOGIC)
 ========================================= */
 
-const PLAN_ORDER: PlanType[] = ["FREE_LOCKED", "BASIC", "PRO", "ELITE"]
-
 export function isHigherPlan(
-  current?: PlanType,
-  target?: PlanType
+  current?: string | null,
+  target?: string | null
 ): boolean {
 
   if (!current || !target) return false
 
+  const currentPlan = normalizePlan(current)
+  const targetPlan = normalizePlan(target)
+
   return (
-    PLAN_ORDER.indexOf(target) >
-    PLAN_ORDER.indexOf(current)
+    PLAN_ORDER.indexOf(targetPlan) >
+    PLAN_ORDER.indexOf(currentPlan)
   )
 }
 
@@ -126,11 +158,11 @@ export function isHigherPlan(
 GET NEXT PLAN (UPSELL)
 ========================================= */
 
-export function getNextPlan(plan?: PlanType): PlanType | null {
+export function getNextPlan(plan?: string | null): PlanType | null {
 
   if (!plan) return null
 
-  const index = PLAN_ORDER.indexOf(plan)
+  const index = PLAN_ORDER.indexOf(normalizePlan(plan))
 
   if (index === -1 || index === PLAN_ORDER.length - 1) {
     return null

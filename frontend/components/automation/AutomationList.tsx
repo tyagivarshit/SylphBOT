@@ -3,12 +3,33 @@
 import { useEffect, useState, useCallback } from "react";
 import AutomationFlowCard from "./AutomationFlowCard";
 import CreateAutomationModal from "./CreateAutomationModal";
+import { usePlan } from "@/hooks/usePlan";
+
+type AutomationStep = {
+  stepKey?: string;
+  stepType?: string;
+  message?: string | null;
+  condition?: string | null;
+};
+
+type AutomationFlow = {
+  id: string;
+  name?: string | null;
+  triggerValue?: string | null;
+  triggerType?: string | null;
+  channel?: string | null;
+  status?: string | null;
+  steps?: AutomationStep[];
+};
 
 export default function AutomationList() {
+  const { plan } = usePlan();
   const [open, setOpen] = useState(false);
-  const [automations, setAutomations] = useState<any[]>([]);
+  const [automations, setAutomations] = useState<AutomationFlow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const modalPlan =
+    plan === "ELITE" ? "ELITE" : plan === "PRO" ? "PRO" : "BASIC";
 
   /* ---------------- FETCH ---------------- */
 
@@ -118,6 +139,7 @@ export default function AutomationList() {
       {/* 🔥 MODAL */}
       <CreateAutomationModal
         open={open}
+        plan={modalPlan}
         onClose={() => {
           setOpen(false);
           fetchAutomations();

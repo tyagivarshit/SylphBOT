@@ -17,8 +17,10 @@ export const commentTriggersQueryKey = ["comment-triggers"] as const;
 export const knowledgeEntriesQueryKey = ["knowledge-base"] as const;
 export const clientsQueryKey = ["clients"] as const;
 export const bookingListQueryKey = ["booking-list"] as const;
-export const analyticsFunnelQueryKey = ["funnel"] as const;
-export const analyticsSourcesQueryKey = ["sources"] as const;
+export const analyticsFunnelQueryKey = (range = "30d") =>
+  ["analytics-funnel-compat", range] as const;
+export const analyticsSourcesQueryKey = (range = "30d") =>
+  ["analytics-sources-compat", range] as const;
 
 export const dashboardLeadsQueryKey = (page: number, stage: string) =>
   ["dashboard-leads", page, stage || "ALL"] as const;
@@ -30,10 +32,10 @@ export const availabilityQueryKey = (businessId: string) =>
   ["availability", businessId] as const;
 
 export const analyticsOverviewQueryKey = (range: string) =>
-  ["overview", range] as const;
+  ["analytics-overview-compat", range] as const;
 
 export const analyticsChartsQueryKey = (range: string) =>
-  ["charts", range] as const;
+  ["analytics-charts-compat", range] as const;
 
 export async function fetchDashboardStats() {
   const res = await axios.get(buildApiUrl("/dashboard/stats"), {
@@ -206,12 +208,12 @@ export async function prefetchDashboardRoute(
         queryFn: () => analyticsApi.getCharts("7d"),
       }),
       queryClient.prefetchQuery({
-        queryKey: analyticsFunnelQueryKey,
-        queryFn: analyticsApi.getFunnel,
+        queryKey: analyticsFunnelQueryKey("30d"),
+        queryFn: () => analyticsApi.getFunnel("30d"),
       }),
       queryClient.prefetchQuery({
-        queryKey: analyticsSourcesQueryKey,
-        queryFn: analyticsApi.getSources,
+        queryKey: analyticsSourcesQueryKey("30d"),
+        queryFn: () => analyticsApi.getSources("30d"),
       }),
     ]);
     return;

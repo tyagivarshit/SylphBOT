@@ -127,3 +127,19 @@ export async function getAnalyticsDashboard(
 
   return res.data;
 }
+
+export async function getOverview(range: string) {
+  return (await getAnalyticsDashboard(range)).summary;
+}
+
+export async function getCharts(range: string) {
+  return (await getAnalyticsDashboard(range)).trends.series;
+}
+
+export async function getFunnel(range = "30d") {
+  return (await getAnalyticsDashboard(range)).funnel;
+}
+
+export async function getSources(range = "30d") {
+  return (await getAnalyticsDashboard(range)).sourcePerformance;
+}

@@ -16,7 +16,7 @@ export default function AnalyticsCharts({ range }: any) {
         <h2 className="text-sm font-semibold text-gray-800 mb-4">
           Lead Growth
         </h2>
-        <LeadsChart data={data} />
+        <LeadsChart data={data ?? []} />
       </div>
 
       {/* 🔥 CARD 2 */}
@@ -24,7 +24,7 @@ export default function AnalyticsCharts({ range }: any) {
         <h2 className="text-sm font-semibold text-gray-800 mb-4">
           Message Activity
         </h2>
-        <LeadsChart data={data} />
+        <LeadsChart data={data ?? []} />
       </div>
 
     </div>

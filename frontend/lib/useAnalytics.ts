@@ -1,30 +1,37 @@
 import { useQuery } from "@tanstack/react-query";
-import * as api from "./analytics";
+import { getAnalyticsDashboard } from "./analytics";
+
+export const useAnalyticsDashboard = (range: string) => {
+  return useQuery({
+    queryKey: ["analytics-dashboard", range],
+    queryFn: () => getAnalyticsDashboard(range),
+  });
+};
 
 export const useOverview = (range: string) => {
   return useQuery({
-    queryKey: ["overview", range],
-    queryFn: () => api.getOverview(range)
+    queryKey: ["analytics-overview-compat", range],
+    queryFn: async () => (await getAnalyticsDashboard(range)).summary,
   });
 };
 
 export const useCharts = (range: string) => {
   return useQuery({
-    queryKey: ["charts", range],
-    queryFn: () => api.getCharts(range)
+    queryKey: ["analytics-charts-compat", range],
+    queryFn: async () => (await getAnalyticsDashboard(range)).trends.series,
   });
 };
 
-export const useFunnel = () => {
+export const useFunnel = (range = "30d") => {
   return useQuery({
-    queryKey: ["funnel"],
-    queryFn: api.getFunnel
+    queryKey: ["analytics-funnel-compat", range],
+    queryFn: async () => (await getAnalyticsDashboard(range)).funnel,
   });
 };
 
-export const useSources = () => {
+export const useSources = (range = "30d") => {
   return useQuery({
-    queryKey: ["sources"],
-    queryFn: api.getSources
+    queryKey: ["analytics-sources-compat", range],
+    queryFn: async () => (await getAnalyticsDashboard(range)).sourcePerformance,
   });
 };

@@ -1,8 +1,54 @@
 "use client";
 
-export default function StatCard({ stat }: any) {
+import type { AnalyticsMetric } from "@/lib/analytics";
+import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 
-  const isPositive = stat.change?.includes("+");
+type StatCardProps = {
+  stat: {
+    title: string;
+    helper: string;
+    metric: AnalyticsMetric;
+  };
+};
+
+function formatMetric(metric: AnalyticsMetric) {
+  if (metric.format === "percent") {
+    return `${metric.value}%`;
+  }
+
+  if (metric.format === "minutes") {
+    return `${metric.value}m`;
+  }
+
+  return Intl.NumberFormat("en-US").format(metric.value);
+}
+
+function formatDelta(metric: AnalyticsMetric) {
+  const prefix = metric.delta > 0 ? "+" : "";
+  return `${prefix}${metric.delta}% vs prev`;
+}
+
+export default function StatCard({ stat }: StatCardProps) {
+  const isGood =
+    stat.metric.trend === "flat"
+      ? null
+      : stat.metric.improvedWhen === "higher"
+      ? stat.metric.trend === "up"
+      : stat.metric.trend === "down";
+
+  const deltaTone =
+    isGood === null
+      ? "bg-slate-100 text-slate-600"
+      : isGood
+      ? "bg-emerald-100 text-emerald-700"
+      : "bg-rose-100 text-rose-700";
+
+  const Icon =
+    stat.metric.trend === "up"
+      ? ArrowUpRight
+      : stat.metric.trend === "down"
+      ? ArrowDownRight
+      : Minus;
 
   return (
     <div className="relative bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition overflow-hidden">
@@ -19,23 +65,24 @@ export default function StatCard({ stat }: any) {
         </p>
 
         {/* VALUE + CHANGE */}
-        <div className="flex items-end justify-between mt-2">
+        <div className="flex items-end justify-between mt-2 gap-3">
           
           <p className="text-2xl font-bold text-gray-900 tracking-tight">
-            {stat.value}
+            {formatMetric(stat.metric)}
           </p>
 
           <span
-            className={`text-xs font-semibold px-2 py-1 rounded-md ${
-              isPositive
-                ? "bg-green-100 text-green-600"
-                : "bg-red-100 text-red-600"
-            }`}
+            className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md ${deltaTone}`}
           >
-            {stat.change}
+            <Icon size={12} />
+            {formatDelta(stat.metric)}
           </span>
 
         </div>
+
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          {stat.helper}
+        </p>
 
       </div>
     </div>

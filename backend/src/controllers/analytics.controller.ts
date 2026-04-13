@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import * as service from "../services/analytics.service"
+import { getAnalyticsDashboard } from "../services/analyticsDashboard.service";
 import prisma from "../config/prisma";
 
 const getBusinessId = async (userId: string) => {
@@ -70,6 +71,42 @@ export const getTopSources = async (req: Request, res: Response) => {
     res.json({ success: true, data });
   } catch (error) {
     console.error("Sources Error:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+export const getDeepAnalyticsDashboard = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const businessId = (req as any).user?.businessId as string | null;
+    const range = (req.query.range as string) || "30d";
+    const planKey =
+      ((req as any).billing?.planKey as
+        | "FREE_LOCKED"
+        | "BASIC"
+        | "PRO"
+        | "ELITE"
+        | undefined) || "FREE_LOCKED";
+
+    if (!businessId) {
+      return res.status(403).json({
+        success: false,
+        message: "Business not found",
+      });
+    }
+
+    const data = await getAnalyticsDashboard(businessId, range, planKey);
+
+    res.json({
+      success: true,
+      data,
+      limited: data.meta.upgradeRequired,
+      upgradeRequired: data.meta.upgradeRequired,
+    });
+  } catch (error) {
+    console.error("Deep Analytics Error:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };

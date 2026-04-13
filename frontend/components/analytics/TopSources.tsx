@@ -9,7 +9,8 @@ export default function TopSources() {
     return <p className="text-sm text-gray-500">Loading...</p>;
   }
 
-  const max = Math.max(...data.map((s: any) => s.value || 0));
+  const sources = data ?? [];
+  const max = Math.max(...sources.map((s) => s.leads || 0));
 
   return (
     <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
@@ -19,8 +20,8 @@ export default function TopSources() {
       </h2>
 
       <div className="space-y-4">
-        {data.map((s: any, i: number) => {
-          const percent = max ? (s.value / max) * 100 : 0;
+        {sources.map((s, i) => {
+          const percent = max ? (s.leads / max) * 100 : 0;
 
           return (
             <div key={i} className="space-y-1">
@@ -28,10 +29,10 @@ export default function TopSources() {
               {/* LABEL + VALUE */}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">
-                  {s.name}
+                  {s.source}
                 </span>
                 <span className="font-semibold text-gray-900">
-                  {s.value}
+                  {s.leads}
                 </span>
               </div>
 

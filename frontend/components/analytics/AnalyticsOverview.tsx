@@ -1,7 +1,17 @@
 "use client";
 
 import { useOverview } from "@/lib/useAnalytics";
+import type { AnalyticsMetric } from "@/lib/analytics";
 import StatCard from "./StatCard";
+
+const EMPTY_METRIC: AnalyticsMetric = {
+  value: 0,
+  previous: 0,
+  delta: 0,
+  trend: "flat",
+  format: "number",
+  improvedWhen: "higher",
+};
 
 export default function AnalyticsOverview({ range }: any) {
   const { data, isLoading } = useOverview(range);
@@ -10,18 +20,27 @@ export default function AnalyticsOverview({ range }: any) {
     return <p className="text-sm text-gray-500">Loading...</p>;
   }
 
-  const summary = data ?? {
-    totalLeads: 0,
-    messages: 0,
-    aiReplies: 0,
-    bookings: 0,
-  };
-
   const stats = [
-    { title: "Total Leads", value: summary.totalLeads, change: "+0%" },
-    { title: "Messages", value: summary.messages, change: "+0%" },
-    { title: "AI Replies", value: summary.aiReplies, change: "+0%" },
-    { title: "Bookings", value: summary.bookings, change: "+0%" }
+    {
+      title: "Total Leads",
+      helper: "All captured leads in the selected range.",
+      metric: data?.leadsCaptured ?? EMPTY_METRIC,
+    },
+    {
+      title: "Qualified Leads",
+      helper: "Leads that moved into a qualified state.",
+      metric: data?.qualifiedLeads ?? EMPTY_METRIC,
+    },
+    {
+      title: "Bookings",
+      helper: "Meetings booked from active conversations.",
+      metric: data?.bookedMeetings ?? EMPTY_METRIC,
+    },
+    {
+      title: "AI Reply Share",
+      helper: "Share of replies handled by AI.",
+      metric: data?.aiReplyShare ?? EMPTY_METRIC,
+    }
   ];
 
   return (

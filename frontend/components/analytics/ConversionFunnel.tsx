@@ -9,12 +9,10 @@ export default function ConversionFunnel() {
     return <p className="text-sm text-gray-500">Loading...</p>;
   }
 
-  const stages = [
-    { label: "Leads", value: data.leads },
-    { label: "Interested", value: data.interested },
-    { label: "Qualified", value: data.qualified },
-    { label: "Booked", value: data.booked }
-  ];
+  const stages = (data ?? []).map((stage) => ({
+    label: stage.label,
+    value: stage.count,
+  }));
 
   const max = Math.max(...stages.map(s => s.value || 0));
 

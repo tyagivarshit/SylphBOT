@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { useSearchParams } from "next/navigation";
 import ChatSidebar from "@/components/conversations/ChatSidebar";
@@ -13,6 +13,7 @@ export interface Lead {
   lastMessage?: string;
   lastMessageTime?: string;
   unreadCount?: number;
+  rawUnreadCount?: number;
 }
 
 export interface Message {
@@ -22,6 +23,113 @@ export interface Message {
   createdAt: string;
 }
 
+type SeenConversationState = Record<
+  string,
+  {
+    seenAt?: string;
+    seenUnreadCount?: number;
+  }
+>;
+
+const SEEN_CONVERSATIONS_STORAGE_KEY = "automexia.conversations.seen.v1";
+
+function readSeenConversationState(): SeenConversationState {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(SEEN_CONVERSATIONS_STORAGE_KEY);
+
+    if (!rawValue) {
+      return {};
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    return typeof parsedValue === "object" && parsedValue !== null
+      ? parsedValue
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSeenConversationState(state: SeenConversationState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      SEEN_CONVERSATIONS_STORAGE_KEY,
+      JSON.stringify(state)
+    );
+  } catch {}
+}
+
+function getLatestTimestamp(currentValue?: string, nextValue?: string) {
+  if (!currentValue) {
+    return nextValue;
+  }
+
+  if (!nextValue) {
+    return currentValue;
+  }
+
+  const currentTime = Date.parse(currentValue);
+  const nextTime = Date.parse(nextValue);
+
+  if (Number.isNaN(currentTime)) {
+    return nextValue;
+  }
+
+  if (Number.isNaN(nextTime)) {
+    return currentValue;
+  }
+
+  return nextTime > currentTime ? nextValue : currentValue;
+}
+
+function applySeenState(
+  nextLeads: Lead[],
+  seenState: SeenConversationState
+): Lead[] {
+  return nextLeads.map((lead) => {
+    const serverUnreadCount = lead.unreadCount || 0;
+    const persistedLeadState = seenState[lead.id];
+    let effectiveUnreadCount = serverUnreadCount;
+
+    if (persistedLeadState) {
+      const lastMessageTime = lead.lastMessageTime
+        ? Date.parse(lead.lastMessageTime)
+        : Number.NaN;
+      const seenAtTime = persistedLeadState.seenAt
+        ? Date.parse(persistedLeadState.seenAt)
+        : Number.NaN;
+
+      if (
+        !Number.isNaN(lastMessageTime) &&
+        !Number.isNaN(seenAtTime) &&
+        lastMessageTime <= seenAtTime
+      ) {
+        effectiveUnreadCount = 0;
+      } else if (typeof persistedLeadState.seenUnreadCount === "number") {
+        effectiveUnreadCount =
+          serverUnreadCount >= persistedLeadState.seenUnreadCount
+            ? serverUnreadCount - persistedLeadState.seenUnreadCount
+            : serverUnreadCount;
+      }
+    }
+
+    return {
+      ...lead,
+      rawUnreadCount: serverUnreadCount,
+      unreadCount: Math.max(effectiveUnreadCount, 0),
+    };
+  });
+}
+
 function ConversationsPageContent() {
   const searchParams = useSearchParams();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -29,28 +137,88 @@ function ConversationsPageContent() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isMobileView, setIsMobileView] = useState(false);
   const leadIdFromQuery = searchParams.get("leadId");
+  const seenStateRef = useRef<SeenConversationState>({});
+  const selectedLeadRef = useRef<Lead | null>(null);
 
-  const markLeadAsSeen = useCallback((leadId: string) => {
-    setLeads((prev) =>
-      prev.map((lead) =>
-        lead.id === leadId
+  const persistSeenState = useCallback(
+    (
+      leadId: string,
+      options?: {
+        latestSeenAt?: string;
+        seenUnreadCount?: number;
+      }
+    ) => {
+      const previousState = seenStateRef.current[leadId] || {};
+      const nextStateForLead = {
+        seenAt: getLatestTimestamp(previousState.seenAt, options?.latestSeenAt),
+        seenUnreadCount:
+          typeof options?.seenUnreadCount === "number"
+            ? Math.max(previousState.seenUnreadCount || 0, options.seenUnreadCount)
+            : previousState.seenUnreadCount,
+      };
+
+      seenStateRef.current = {
+        ...seenStateRef.current,
+        [leadId]: nextStateForLead,
+      };
+
+      writeSeenConversationState(seenStateRef.current);
+    },
+    []
+  );
+
+  const markLeadAsSeen = useCallback(
+    (
+      leadId: string,
+      options?: {
+        latestSeenAt?: string;
+        seenUnreadCount?: number;
+      }
+    ) => {
+      persistSeenState(leadId, options);
+
+      setLeads((prev) =>
+        prev.map((lead) =>
+          lead.id === leadId
+            ? {
+                ...lead,
+                unreadCount: 0,
+                rawUnreadCount:
+                  typeof options?.seenUnreadCount === "number"
+                    ? Math.max(lead.rawUnreadCount || 0, options.seenUnreadCount)
+                    : lead.rawUnreadCount,
+                lastMessageTime: getLatestTimestamp(
+                  lead.lastMessageTime,
+                  options?.latestSeenAt
+                ),
+              }
+            : lead
+        )
+      );
+
+      setSelectedLead((prev) =>
+        prev?.id === leadId
           ? {
-              ...lead,
+              ...prev,
               unreadCount: 0,
+              rawUnreadCount:
+                typeof options?.seenUnreadCount === "number"
+                  ? Math.max(prev.rawUnreadCount || 0, options.seenUnreadCount)
+                  : prev.rawUnreadCount,
+              lastMessageTime: getLatestTimestamp(
+                prev.lastMessageTime,
+                options?.latestSeenAt
+              ),
             }
-          : lead
-      )
-    );
+          : prev
+      );
+    },
+    [persistSeenState]
+  );
 
-    setSelectedLead((prev) =>
-      prev?.id === leadId
-        ? {
-            ...prev,
-            unreadCount: 0,
-          }
-        : prev
-    );
-  }, []);
+  useEffect(() => {
+    selectedLeadRef.current = selectedLead;
+  }, [selectedLead]);
 
   /* ================= MOBILE DETECT ================= */
   useEffect(() => {
@@ -76,8 +244,13 @@ function ConversationsPageContent() {
 
         console.log("🔥 conversations API:", data);
 
-        const nextLeads = data.conversations || [];
+        const persistedSeenState = readSeenConversationState();
+        const nextLeads = applySeenState(
+          data.conversations || [],
+          persistedSeenState
+        );
 
+        seenStateRef.current = persistedSeenState;
         setLeads(nextLeads);
 
         if (leadIdFromQuery) {
@@ -101,6 +274,8 @@ function ConversationsPageContent() {
   /* ================= FETCH MESSAGES ================= */
   useEffect(() => {
     const activeLeadId = selectedLead?.id;
+    const activeRawUnreadCount = selectedLead?.rawUnreadCount || 0;
+    const activeLastMessageTime = selectedLead?.lastMessageTime;
     if (!activeLeadId) return;
 
     const fetchMessages = async () => {
@@ -116,8 +291,16 @@ function ConversationsPageContent() {
 
         console.log("🔥 messages API:", data);
 
-        setMessages(data.messages || []);
-        markLeadAsSeen(activeLeadId);
+        const fetchedMessages = data.messages || [];
+        const latestSeenAt =
+          fetchedMessages[fetchedMessages.length - 1]?.createdAt ||
+          activeLastMessageTime;
+
+        setMessages(fetchedMessages);
+        markLeadAsSeen(activeLeadId, {
+          latestSeenAt,
+          seenUnreadCount: activeRawUnreadCount,
+        });
       } catch (err) {
         console.error(err);
         setMessages([]);
@@ -125,7 +308,12 @@ function ConversationsPageContent() {
     };
 
     fetchMessages();
-  }, [markLeadAsSeen, selectedLead?.id]);
+  }, [
+    markLeadAsSeen,
+    selectedLead?.id,
+    selectedLead?.lastMessageTime,
+    selectedLead?.rawUnreadCount,
+  ]);
 
   /* ================= SOCKET ================= */
   useEffect(() => {
@@ -140,6 +328,13 @@ function ConversationsPageContent() {
     socket.emit("join_conversation", activeLeadId);
 
     socket.on("new_message", (msg: Message) => {
+      const unreadDelta = msg.sender === "USER" ? 1 : 0;
+      const currentLead = selectedLeadRef.current;
+      const nextRawUnreadCount =
+        currentLead?.id === activeLeadId
+          ? (currentLead.rawUnreadCount || 0) + unreadDelta
+          : unreadDelta;
+
       setMessages((prev) => [...prev, msg]);
 
       setLeads((prev) =>
@@ -149,17 +344,36 @@ function ConversationsPageContent() {
                 ...lead,
                 lastMessage: msg.content,
                 lastMessageTime: msg.createdAt,
+                rawUnreadCount: nextRawUnreadCount,
                 unreadCount: 0,
               }
             : lead
         )
       );
+
+      const nextSelectedLead =
+        currentLead?.id === activeLeadId
+          ? {
+              ...currentLead,
+              lastMessage: msg.content,
+              lastMessageTime: msg.createdAt,
+              rawUnreadCount: nextRawUnreadCount,
+              unreadCount: 0,
+            }
+          : currentLead;
+
+      selectedLeadRef.current = nextSelectedLead;
+      setSelectedLead(nextSelectedLead);
+      persistSeenState(activeLeadId, {
+        latestSeenAt: msg.createdAt,
+        seenUnreadCount: nextRawUnreadCount,
+      });
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [selectedLead?.id]);
+  }, [persistSeenState, selectedLead?.id]);
 
   /* ================= MOBILE BACK ================= */
   const handleBack = () => {
@@ -167,8 +381,8 @@ function ConversationsPageContent() {
   };
 
   return (
-    <div className="min-h-[32rem] min-w-0">
-      <div className="brand-section-shell flex min-h-[32rem] w-full overflow-hidden rounded-[30px] p-0">
+    <div className="min-h-[32rem] min-w-0 lg:h-[calc(100dvh-10.5rem)]">
+      <div className="brand-section-shell flex h-full min-h-[32rem] w-full overflow-hidden rounded-[30px] p-0">
 
         <ChatSidebar
           leads={leads}

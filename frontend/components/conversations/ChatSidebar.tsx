@@ -28,7 +28,9 @@ export default function ChatSidebar({
       className={`
       ${selectedLead ? "hidden md:flex" : "flex"}
       w-full md:w-[320px]
+      min-h-0
       flex-col
+      overflow-hidden
       border-r border-blue-100
       bg-white/80 backdrop-blur-xl
     `}

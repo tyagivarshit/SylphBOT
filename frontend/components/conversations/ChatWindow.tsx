@@ -204,7 +204,7 @@ export default function ChatWindow({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-1 flex-col bg-[linear-gradient(180deg,rgba(239,245,255,0.6),rgba(248,251,255,0.96))]">
+    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(239,245,255,0.6),rgba(248,251,255,0.96))]">
       {onBack && (
         <button
           onClick={onBack}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { useSearchParams } from "next/navigation";
 import ChatSidebar from "@/components/conversations/ChatSidebar";
@@ -30,6 +30,28 @@ function ConversationsPageContent() {
   const [isMobileView, setIsMobileView] = useState(false);
   const leadIdFromQuery = searchParams.get("leadId");
 
+  const markLeadAsSeen = useCallback((leadId: string) => {
+    setLeads((prev) =>
+      prev.map((lead) =>
+        lead.id === leadId
+          ? {
+              ...lead,
+              unreadCount: 0,
+            }
+          : lead
+      )
+    );
+
+    setSelectedLead((prev) =>
+      prev?.id === leadId
+        ? {
+            ...prev,
+            unreadCount: 0,
+          }
+        : prev
+    );
+  }, []);
+
   /* ================= MOBILE DETECT ================= */
   useEffect(() => {
     const check = () => {
@@ -54,7 +76,19 @@ function ConversationsPageContent() {
 
         console.log("🔥 conversations API:", data);
 
-        setLeads(data.conversations || []);
+        const nextLeads = data.conversations || [];
+
+        setLeads(nextLeads);
+
+        if (leadIdFromQuery) {
+          const matchedLead = nextLeads.find(
+            (lead: Lead) => lead.id === leadIdFromQuery
+          );
+
+          if (matchedLead) {
+            setSelectedLead(matchedLead);
+          }
+        }
       } catch (err) {
         console.error(err);
         setLeads([]);
@@ -62,16 +96,17 @@ function ConversationsPageContent() {
     };
 
     fetchLeads();
-  }, []);
+  }, [leadIdFromQuery]);
 
   /* ================= FETCH MESSAGES ================= */
   useEffect(() => {
-    if (!selectedLead) return;
+    const activeLeadId = selectedLead?.id;
+    if (!activeLeadId) return;
 
     const fetchMessages = async () => {
       try {
         const res = await fetch(
-          buildApiUrl(`/conversations/${selectedLead.id}/messages`),
+          buildApiUrl(`/conversations/${activeLeadId}/messages`),
           {
             credentials: "include",
           }
@@ -82,6 +117,7 @@ function ConversationsPageContent() {
         console.log("🔥 messages API:", data);
 
         setMessages(data.messages || []);
+        markLeadAsSeen(activeLeadId);
       } catch (err) {
         console.error(err);
         setMessages([]);
@@ -89,35 +125,26 @@ function ConversationsPageContent() {
     };
 
     fetchMessages();
-  }, [selectedLead]);
-
-  useEffect(() => {
-    if (!leadIdFromQuery || leads.length === 0) return;
-
-    const matchedLead = leads.find((lead) => lead.id === leadIdFromQuery);
-
-    if (matchedLead) {
-      setSelectedLead(matchedLead);
-    }
-  }, [leadIdFromQuery, leads]);
+  }, [markLeadAsSeen, selectedLead?.id]);
 
   /* ================= SOCKET ================= */
   useEffect(() => {
-    if (!selectedLead) return;
+    const activeLeadId = selectedLead?.id;
+    if (!activeLeadId) return;
 
     const socket = io(getAbsoluteApiOrigin(), {
       transports: ["websocket"],
       withCredentials: true,
     });
 
-    socket.emit("join_conversation", selectedLead.id);
+    socket.emit("join_conversation", activeLeadId);
 
     socket.on("new_message", (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
 
       setLeads((prev) =>
         prev.map((lead) =>
-          lead.id === selectedLead.id
+          lead.id === activeLeadId
             ? {
                 ...lead,
                 lastMessage: msg.content,
@@ -132,7 +159,7 @@ function ConversationsPageContent() {
     return () => {
       socket.disconnect();
     };
-  }, [selectedLead]);
+  }, [selectedLead?.id]);
 
   /* ================= MOBILE BACK ================= */
   const handleBack = () => {

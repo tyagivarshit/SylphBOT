@@ -40,14 +40,22 @@ export default function ChatWindow({
   const unreadMarkerRef = useRef<HTMLDivElement>(null);
   const initialPositionedRef = useRef(false);
   const previousMessageCountRef = useRef(0);
+  const previousLeadIdRef = useRef<string | null>(null);
 
   /* ================= AUTO SCROLL ================= */
   useEffect(() => {
+    const activeLeadId = selectedLead?.id || null;
+
+    if (previousLeadIdRef.current === activeLeadId) {
+      return;
+    }
+
+    previousLeadIdRef.current = activeLeadId;
     initialPositionedRef.current = false;
     previousMessageCountRef.current = 0;
     setOpeningUnreadCount(selectedLead?.unreadCount || 0);
     setUnreadAnchorId(null);
-  }, [selectedLead?.id, selectedLead?.unreadCount]);
+  }, [selectedLead]);
 
   useEffect(() => {
     if (!selectedLead || !messages.length || unreadAnchorId || openingUnreadCount <= 0) {
@@ -195,43 +203,23 @@ export default function ChatWindow({
     );
   }
 
-  const contactName = selectedLead.name || "User";
-  const contactInitial = contactName.charAt(0).toUpperCase();
-  const unreadLabel =
-    openingUnreadCount > 0
-      ? `${openingUnreadCount} new ${
-          openingUnreadCount === 1 ? "message" : "messages"
-        }`
-      : "Live conversation";
-
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-[linear-gradient(180deg,rgba(239,245,255,0.6),rgba(248,251,255,0.96))]">
-
-      {/* HEADER */}
-      <div className="flex min-h-[72px] items-center gap-3 border-b border-slate-200/80 bg-white/88 px-4 py-3 backdrop-blur-xl md:px-5">
+    <div className="relative flex h-full min-h-0 flex-1 flex-col bg-[linear-gradient(180deg,rgba(239,245,255,0.6),rgba(248,251,255,0.96))]">
+      {onBack && (
         <button
           onClick={onBack}
-          className="text-slate-600 transition hover:text-slate-900 md:hidden"
+          className="absolute left-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/92 text-slate-600 shadow-sm backdrop-blur transition hover:text-slate-900 md:hidden"
         >
           <ArrowLeft size={18} />
         </button>
-
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-400 text-sm font-semibold text-white shadow-sm">
-          {contactInitial}
-        </div>
-
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900">
-            {contactName}
-          </p>
-          <p className="text-xs text-slate-500">{unreadLabel}</p>
-        </div>
-      </div>
+      )}
 
       {/* MESSAGES */}
       <div
         ref={scrollViewportRef}
-        className="brand-scrollbar flex-1 overflow-y-auto px-3 py-4 md:px-5 md:py-5"
+        className={`brand-scrollbar flex-1 overflow-y-auto px-3 py-4 md:px-5 md:py-5 ${
+          onBack ? "pt-16 md:pt-5" : ""
+        }`}
       >
         <div className="flex min-h-full flex-col justify-end gap-2.5">
           {(messages || []).length === 0 ? (
@@ -250,11 +238,7 @@ export default function ChatWindow({
               return (
                 <Fragment key={msg.id}>
                   {msg.id === unreadAnchorId && openingUnreadCount > 0 && (
-                    <div ref={unreadMarkerRef} className="py-1">
-                      <div className="mx-auto w-fit rounded-full border border-blue-200 bg-white/92 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-700 shadow-sm">
-                        {unreadLabel}
-                      </div>
-                    </div>
+                    <div ref={unreadMarkerRef} className="h-0" />
                   )}
 
                   <div

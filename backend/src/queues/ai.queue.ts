@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Job, JobsOptions, Queue } from "bullmq";
 import { env } from "../config/env";
 import { getQueueRedisConnection } from "../config/redis";
+import logger from "../utils/logger";
 
 export const AI_QUEUE_NAME = env.AI_QUEUE_NAME;
 export const AI_QUEUE_PARTITIONS = 1;
@@ -99,7 +100,10 @@ const chunkMessages = <T>(messages: T[], chunkSize: number) => {
   return chunks;
 };
 
-const buildStableToken = (messages: AIMessagePayload[], idempotencyKey?: string) => {
+const buildStableToken = (
+  messages: AIMessagePayload[],
+  idempotencyKey?: string
+) => {
   if (idempotencyKey) {
     return idempotencyKey;
   }
@@ -112,7 +116,10 @@ const buildStableToken = (messages: AIMessagePayload[], idempotencyKey?: string)
     return undefined;
   }
 
-  return messageTokens.join("|");
+  return crypto
+  .createHash("sha1")
+  .update(messageTokens.join("|"))
+  .digest("hex");
 };
 
 const buildJobId = (
@@ -120,28 +127,9 @@ const buildJobId = (
   chunkIndex: number,
   options?: EnqueueOptions
 ) => {
-  if (options?.forceUniqueJobId) {
-    return `ai:${crypto.randomUUID()}`;
-  }
-
-  const stableToken = buildStableToken(messages, options?.idempotencyKey);
-
-  if (!stableToken) {
-    return `ai:${crypto.randomUUID()}`;
-  }
-
-  const retrySuffix = Math.max(
-    0,
-    ...messages.map((message) => message.retryCount || 0)
-  );
-
-  const digest = crypto
-    .createHash("sha1")
-    .update(stableToken)
-    .digest("hex");
-
-  return `ai:${digest}:c${chunkIndex}:r${retrySuffix}`;
+  return `ai_${crypto.randomUUID()}`;
 };
+
 
 export const enqueueAIBatch = async (
   messages: AIMessagePayload[],
@@ -170,7 +158,31 @@ export const enqueueAIBatch = async (
     },
   }));
 
-  return aiQueue.addBulk(jobs);
+  logger.info(
+    {
+      queue: AI_QUEUE_NAME,
+      source: options?.source || "api",
+      requestedMessages: messages.length,
+      acceptedMessages: normalizedMessages.length,
+      chunks: chunks.length,
+      leadIds: Array.from(new Set(normalizedMessages.map((item) => item.leadId))),
+      idempotencyKey: options?.idempotencyKey || null,
+    },
+    "AI reply batch enqueue requested"
+  );
+
+  const createdJobs = await aiQueue.addBulk(jobs);
+
+  logger.info(
+    {
+      queue: AI_QUEUE_NAME,
+      source: options?.source || "api",
+      jobs: createdJobs.map((job) => String(job.id)),
+    },
+    "AI reply batch enqueued"
+  );
+
+  return createdJobs;
 };
 
 export const enqueueAIMessage = async (

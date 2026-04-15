@@ -21,6 +21,10 @@ const getConversationMemory = async (leadId: string) => {
     where: { leadId },
     orderBy: { createdAt: "asc" },
     take: 10,
+    select: {
+      sender: true,
+      content: true,
+    },
   });
 
   return messages.map((m) => ({
@@ -32,6 +36,11 @@ const getConversationMemory = async (leadId: string) => {
 const getBusinessContext = async (businessId: string) => {
   const client = await prisma.client.findFirst({
     where: { businessId, isActive: true },
+    select: {
+      businessInfo: true,
+      pricingInfo: true,
+      aiTone: true,
+    },
   });
 
   if (!client) return null;
@@ -116,6 +125,7 @@ IMPORTANT:
     const response = await openai.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: messages as any,
+      max_tokens: 120,
       temperature: 0.6, // 🔥 controlled (less random)
     });
 
@@ -132,7 +142,7 @@ IMPORTANT:
     🔥 SAVE
     ================================================= */
 
-    await prisma.message.create({
+    if (false) await prisma.message.create({
       data: {
         leadId,
         content: reply,

@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import { fetchInstagramUsername } from "../services/instagramProfile.service";
 
 /* ======================================================
 GET CONVERSATIONS
@@ -17,6 +18,11 @@ export const getConversations = async (req: Request, res: Response) => {
         businessId: user.businessId,
       },
       include: {
+        client: {
+          select: {
+            accessToken: true,
+          },
+        },
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
@@ -27,13 +33,46 @@ export const getConversations = async (req: Request, res: Response) => {
       },
     });
 
-    const conversations = leads.map((lead) => ({
-      id: lead.id,
-      name: lead.name || lead.phone || "User",
-      lastMessage: lead.messages[0]?.content || "",
-      lastMessageTime: lead.messages[0]?.createdAt || null,
-      unreadCount: lead.unreadCount || 0,
-    }));
+    const conversations = await Promise.all(
+      leads.map(async (lead) => {
+        let instagramUsername = lead.name || null;
+
+        if (
+          !instagramUsername &&
+          lead.platform === "INSTAGRAM" &&
+          lead.instagramId &&
+          lead.client?.accessToken
+        ) {
+          instagramUsername = await fetchInstagramUsername(
+            lead.instagramId,
+            lead.client.accessToken
+          );
+
+          if (instagramUsername) {
+            await prisma.lead
+              .update({
+                where: { id: lead.id },
+                data: { name: instagramUsername },
+              })
+              .catch(() => null);
+          }
+        }
+
+        return {
+          id: lead.id,
+          name:
+            lead.platform === "WHATSAPP"
+              ? lead.phone || lead.name || "User"
+              : instagramUsername || lead.name || "User",
+          phone: lead.phone || null,
+          instagramId: lead.instagramId || null,
+          platform: lead.platform || null,
+          lastMessage: lead.messages[0]?.content || "",
+          lastMessageTime: lead.messages[0]?.createdAt || null,
+          unreadCount: lead.unreadCount || 0,
+        };
+      })
+    );
 
     return res.json({ conversations });
 

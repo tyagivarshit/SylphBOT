@@ -10,6 +10,9 @@ import { buildApiUrl, getAbsoluteApiOrigin } from "@/lib/url";
 export interface Lead {
   id: string;
   name?: string;
+  phone?: string | null;
+  instagramId?: string | null;
+  platform?: string | null;
   lastMessage?: string;
   lastMessageTime?: string;
   unreadCount?: number;

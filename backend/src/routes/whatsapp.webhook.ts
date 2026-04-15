@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import prisma from "../config/prisma";
 
-import { addRouterJob } from "../queues/ai.queue";
+import { enqueueAIBatch } from "../queues/ai.queue";
 import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
 
 import { getIO } from "../sockets/socket.server";
@@ -233,16 +233,33 @@ router.post("/", async (req: any, res: Response) => {
     ADD AI JOB
     */
 
-    await addRouterJob({
+    await enqueueAIBatch(
+      [
+        {
+          businessId: client.businessId,
+          leadId: lead.id,
+          message: text,
+          kind: "router",
+          plan: subscription.plan,
+          platform: "WHATSAPP",
+          senderId: from,
+          phoneNumberId,
+          accessTokenEncrypted: client.accessToken,
+          externalEventId: eventId,
+          skipInboundPersist: true,
+        },
+      ],
+      {
+        source: "router",
+        idempotencyKey: eventId,
+      }
+    );
+
+    console.log("[WHATSAPP WEBHOOK] queued AI reply", {
       businessId: client.businessId,
       leadId: lead.id,
-      message: text,
-      plan: subscription.plan,
-      platform: "WHATSAPP",
-      senderId: from,
+      eventId,
       phoneNumberId,
-      accessTokenEncrypted: client.accessToken,
-      externalEventId: eventId,
     });
 
     /*

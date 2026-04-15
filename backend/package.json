@@ -6,10 +6,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "dev:worker": "ts-node-dev --respawn --transpile-only src/workers/ai.worker.ts",
+    "dev:worker": "ts-node-dev --respawn --transpile-only src/workers/ai.partition.worker.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "start:worker": "node dist/workers/ai.worker.js"
+    "start:worker": "node dist/workers/ai.partition.worker.js"
   },
   "keywords": [],
   "author": "",
@@ -18,6 +18,7 @@
     "@prisma/client": "^6.19.2",
     "@sentry/node": "^10.43.0",
     "@types/socket.io": "^3.0.1",
+    "@upstash/redis": "^1.37.0",
     "@xenova/transformers": "^2.17.2",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.70.1",

@@ -10,6 +10,20 @@ interface Props {
   setSelectedLead: (lead: Lead) => void;
 }
 
+function getLeadDisplayName(lead: Lead) {
+  const platform = (lead?.platform || "").toUpperCase();
+
+  if (platform === "WHATSAPP") {
+    return lead?.phone || lead?.name || lead?.id || "User";
+  }
+
+  if (platform === "INSTAGRAM") {
+    return lead?.name || (lead?.instagramId ? `@${lead.instagramId}` : lead?.id) || "User";
+  }
+
+  return lead?.name || lead?.phone || lead?.id || "User";
+}
+
 export default function ChatSidebar({
   leads,
   selectedLead,
@@ -18,7 +32,7 @@ export default function ChatSidebar({
   const [search, setSearch] = useState("");
 
   const filteredLeads = (leads || []).filter((lead) =>
-    (lead?.name || "")
+    getLeadDisplayName(lead)
       .toLowerCase()
       .includes((search || "").toLowerCase())
   );
@@ -70,7 +84,7 @@ export default function ChatSidebar({
         {filteredLeads.map((lead) => {
           const isActive = selectedLead?.id === lead?.id;
 
-          const name = lead?.name || lead?.id || "User";
+          const name = getLeadDisplayName(lead);
           const lastMessage = lead?.lastMessage || "Start conversation";
           const unreadCount = lead?.unreadCount || 0;
 

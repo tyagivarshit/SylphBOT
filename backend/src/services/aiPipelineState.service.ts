@@ -5,6 +5,8 @@ const REPLY_STATE_PREFIX = "ai_pipeline:reply_state";
 
 const LEAD_LOCK_TTL_SECONDS = 120;
 const REPLY_STATE_TTL_SECONDS = 60 * 60 * 24;
+const DEFAULT_LOCK_WAIT_MS = 1200;
+const DEFAULT_LOCK_POLL_MS = 50;
 
 type ReplyDeliveryState = {
   savedMessageId?: string | null;
@@ -16,18 +18,38 @@ const buildReplyStateKey = (jobKey: string) => `${REPLY_STATE_PREFIX}:${jobKey}`
 
 export const acquireLeadProcessingLock = async (
   leadId: string,
-  jobKey: string
+  jobKey: string,
+  options?: {
+    waitMs?: number;
+    pollMs?: number;
+  }
 ) => {
   const key = buildLeadLockKey(leadId);
-  const result = await redis.set(
-    key,
-    jobKey,
-    "EX",
-    LEAD_LOCK_TTL_SECONDS,
-    "NX"
-  );
+  const waitMs = Math.max(0, options?.waitMs ?? DEFAULT_LOCK_WAIT_MS);
+  const pollMs = Math.max(10, options?.pollMs ?? DEFAULT_LOCK_POLL_MS);
+  const deadline = Date.now() + waitMs;
 
-  return result === "OK";
+  do {
+    const result = await redis.set(
+      key,
+      jobKey,
+      "EX",
+      LEAD_LOCK_TTL_SECONDS,
+      "NX"
+    );
+
+    if (result === "OK") {
+      return true;
+    }
+
+    if (Date.now() >= deadline) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  } while (Date.now() <= deadline);
+
+  return false;
 };
 
 export const releaseLeadProcessingLock = async (

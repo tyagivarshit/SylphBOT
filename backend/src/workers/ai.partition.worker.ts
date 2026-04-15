@@ -3,7 +3,10 @@ import axios from "axios";
 import * as Sentry from "@sentry/node";
 import { env } from "../config/env";
 import prisma from "../config/prisma";
-import { getWorkerRedisConnection } from "../config/redis";
+import {
+  closeRedisConnection,
+  getWorkerRedisConnection,
+} from "../config/redis";
 import {
   AIJobPayload,
   AIMessagePayload,
@@ -18,9 +21,6 @@ import {
   markReplySent,
   releaseLeadProcessingLock,
 } from "../services/aiPipelineState.service";
-import { routeAIMessage } from "../services/aiRouter.service";
-import { runAutomationEngine } from "../services/automationEngine.service";
-import { bookingPriorityRouter } from "../services/bookingPriorityRouter.service";
 import { handleIncomingMessage } from "../services/executionRouter.servce";
 import { getIO } from "../sockets/socket.server";
 import { decrypt } from "../utils/encrypt";
@@ -29,7 +29,7 @@ import { retryAsync } from "../utils/retry.utils";
 
 const AI_WORKER_CONCURRENCY = Math.max(
   1,
-  Number(process.env.AI_WORKER_CONCURRENCY || 1)
+  Number(process.env.AI_WORKER_CONCURRENCY || env.AI_WORKER_CONCURRENCY || 1)
 );
 const INSTAGRAM_SEND_DELAY_MS = Math.max(
   0,
@@ -55,6 +55,9 @@ type AIWorkerTask = {
 type NormalizedReply = {
   text: string;
   cta?: string | null;
+  source?: string | null;
+  latencyMs?: number | null;
+  traceId?: string | null;
 };
 
 const delay = (ms: number) =>
@@ -98,7 +101,18 @@ const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
     return null;
   }
 
-  const reply = aiReply as { message?: unknown; cta?: unknown };
+  const reply = aiReply as {
+    message?: unknown;
+    cta?: unknown;
+    source?: unknown;
+    latencyMs?: unknown;
+    traceId?: unknown;
+    meta?: {
+      source?: unknown;
+      latencyMs?: unknown;
+      traceId?: unknown;
+    };
+  };
   const text = String(reply.message ?? "").trim();
 
   if (!text) {
@@ -108,6 +122,24 @@ const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
   return {
     text,
     cta: typeof reply.cta === "string" ? reply.cta : null,
+    source:
+      typeof reply.source === "string"
+        ? reply.source
+        : typeof reply.meta?.source === "string"
+          ? reply.meta.source
+          : null,
+    latencyMs:
+      typeof reply.latencyMs === "number"
+        ? reply.latencyMs
+        : typeof reply.meta?.latencyMs === "number"
+          ? reply.meta.latencyMs
+          : null,
+    traceId:
+      typeof reply.traceId === "string"
+        ? reply.traceId
+        : typeof reply.meta?.traceId === "string"
+          ? reply.meta.traceId
+          : null,
   };
 };
 
@@ -128,12 +160,11 @@ const emitRealtimeMessage = (
 };
 
 const saveReplyMessage = async (
-  jobKey: string,
-  leadId: string,
+  task: AIWorkerTask,
   replyText: string,
-  cta?: string | null
+  reply: NormalizedReply
 ) => {
-  const currentState = await getReplyDeliveryState(jobKey);
+  const currentState = await getReplyDeliveryState(task.jobKey);
 
   if (currentState.savedMessageId) {
     const existingMessage = await prisma.message.findUnique({
@@ -150,17 +181,23 @@ const saveReplyMessage = async (
 
   const createdMessage = await prisma.message.create({
     data: {
-      leadId,
+      leadId: task.message.leadId,
       content: replyText,
       sender: "AI",
       metadata: {
-        cta: cta || null,
-        deliveryJobKey: jobKey,
+        cta: reply.cta || null,
+        deliveryJobKey: task.jobKey,
+        sourceKind: task.kind,
+        replySource: reply.source || task.kind,
+        platform: task.message.platform || null,
+        externalEventId: task.message.externalEventId || null,
+        latencyMs: reply.latencyMs || null,
+        traceId: reply.traceId || task.jobKey,
       },
     },
   });
 
-  await markReplySaved(jobKey, createdMessage.id);
+  await markReplySaved(task.jobKey, createdMessage.id);
 
   return {
     message: createdMessage,
@@ -169,12 +206,20 @@ const saveReplyMessage = async (
 };
 
 const sendPlatformReply = async (
-  data: AIWorkerMessage,
+  task: AIWorkerTask,
   replyText: string
 ) => {
-  const { platform, senderId, phoneNumberId, accessTokenEncrypted } = data;
+  const { platform, senderId, phoneNumberId, accessTokenEncrypted } =
+    task.message;
 
   if (!platform) {
+    logger.info(
+      {
+        leadId: task.message.leadId,
+        jobKey: task.jobKey,
+      },
+      "AI reply kept local because no platform delivery was requested"
+    );
     return;
   }
 
@@ -189,6 +234,16 @@ const sendPlatformReply = async (
   }
 
   const normalizedPlatform = platform.toUpperCase();
+
+  logger.info(
+    {
+      leadId: task.message.leadId,
+      jobKey: task.jobKey,
+      platform: normalizedPlatform,
+      senderId: senderId || null,
+    },
+    "Sending AI reply to platform"
+  );
 
   if (normalizedPlatform === "WHATSAPP") {
     if (!senderId || !phoneNumberId) {
@@ -243,7 +298,8 @@ const sendPlatformReply = async (
   logger.warn(
     {
       platform: normalizedPlatform,
-      leadId: data.leadId,
+      leadId: task.message.leadId,
+      jobKey: task.jobKey,
     },
     "Unsupported AI delivery platform"
   );
@@ -256,6 +312,13 @@ const processAndSendReply = async (
   const normalizedReply = normalizeReply(aiReply);
 
   if (!normalizedReply) {
+    logger.warn(
+      {
+        leadId: task.message.leadId,
+        jobKey: task.jobKey,
+      },
+      "AI reply generation returned an empty payload"
+    );
     return;
   }
 
@@ -278,6 +341,7 @@ const processAndSendReply = async (
           businessId: task.message.businessId,
           leadId: task.message.leadId,
           platform: task.message.platform,
+          jobKey: task.jobKey,
           reason: rate.reason,
         },
         "AI reply blocked by rate limit"
@@ -287,10 +351,9 @@ const processAndSendReply = async (
   }
 
   const { message, created } = await saveReplyMessage(
-    task.jobKey,
-    task.message.leadId,
+    task,
     replyText,
-    normalizedReply.cta
+    normalizedReply
   );
 
   if (created) {
@@ -306,120 +369,75 @@ const processAndSendReply = async (
   }
 
   if (existingState.sent) {
+    logger.info(
+      {
+        leadId: task.message.leadId,
+        jobKey: task.jobKey,
+      },
+      "Skipping platform delivery because reply was already sent"
+    );
     return;
   }
 
-  await retryAsync(
-    () => sendPlatformReply(task.message, replyText),
-    3,
-    800
-  );
+  await retryAsync(() => sendPlatformReply(task, replyText), 3, 800);
 
   await markReplySent(task.jobKey);
+
+  logger.info(
+    {
+      leadId: task.message.leadId,
+      jobKey: task.jobKey,
+      replySource: normalizedReply.source || task.kind,
+      latencyMs: normalizedReply.latencyMs || null,
+    },
+    "AI reply completed"
+  );
 };
 
 const executeRouterFlow = async (task: AIWorkerTask) => {
   const reply = await handleIncomingMessage({
     ...task.message,
     plan: task.message.plan || null,
+    traceId: task.jobKey,
   });
 
   if (!reply) {
+    logger.info(
+      {
+        leadId: task.message.leadId,
+        jobKey: task.jobKey,
+      },
+      "AI reply task ended without a reply"
+    );
     return;
   }
 
   return processAndSendReply(task, reply);
 };
 
-const executeLegacyFlow = async (task: AIWorkerTask) => {
-  const { businessId, leadId, message, plan } = {
-    ...task.message,
-    plan: task.message.plan || null,
-  };
-
-  const lowerMessage = message?.toLowerCase() || "";
-
-  if (
-    lowerMessage.includes("conversation limit reached") ||
-    lowerMessage.includes("our team will assist") ||
-    lowerMessage.includes("please wait")
-  ) {
-    logger.warn(
-      { leadId },
-      "Blocked loop or system message from AI queue"
-    );
-    return;
-  }
-
-  const lead = await prisma.lead.findUnique({
-    where: { id: leadId },
-    select: { isHumanActive: true },
-  });
-
-  if (lead?.isHumanActive) {
-    return;
-  }
-
-  let aiReply: string | { message: string; cta?: string } | null = null;
-
-  try {
-    const bookingReply = await bookingPriorityRouter({
-      businessId,
-      leadId,
-      message,
-      plan,
-    });
-
-    if (bookingReply) {
-      aiReply = bookingReply;
-    }
-  } catch (error) {
-    logger.warn({ error, leadId }, "Booking router failed");
-  }
-
-  if (!aiReply) {
-    try {
-      const automationReply = await runAutomationEngine({
-        businessId,
-        leadId,
-        message,
-      });
-
-      if (automationReply) {
-        aiReply = automationReply;
-      }
-    } catch (error) {
-      logger.warn({ error, leadId }, "Automation engine failed");
-    }
-  }
-
-  if (!aiReply) {
-    const aiResponse = await routeAIMessage({
-      businessId,
-      leadId,
-      message,
-      plan,
-    });
-
-    aiReply =
-      typeof aiResponse === "string"
-        ? aiResponse
-        : aiResponse?.message
-          ? aiResponse
-          : null;
-  }
-
-  if (!aiReply) {
-    return;
-  }
-
-  return processAndSendReply(task, aiReply);
-};
+const executeLegacyFlow = async (task: AIWorkerTask) =>
+  executeRouterFlow(task);
 
 const processAIMessage = async (task: AIWorkerTask) => {
+  logger.info(
+    {
+      leadId: task.message.leadId,
+      businessId: task.message.businessId,
+      jobKey: task.jobKey,
+      source: task.kind,
+      platform: task.message.platform || null,
+      externalEventId: task.message.externalEventId || null,
+    },
+    "AI reply task started"
+  );
+
   const lockAcquired = await acquireLeadProcessingLock(
     task.message.leadId,
-    task.jobKey
+    task.jobKey,
+    {
+      waitMs: 1200,
+      pollMs: 50,
+    }
   );
 
   if (!lockAcquired) {
@@ -464,6 +482,20 @@ const processAIJob = async (job: AIWorkerJob) => {
     return;
   }
 
+  logger.info(
+    {
+      jobId: job.id,
+      queueName: job.queueName,
+      batchId: job.data.batchId,
+      source: job.data.source,
+      messages: job.data.messages.length,
+      leadIds: Array.from(
+        new Set(job.data.messages.map((message) => message.leadId))
+      ),
+    },
+    "AI worker batch started"
+  );
+
   for (const [messageIndex, message] of job.data.messages.entries()) {
     await processAIMessage(createWorkerTask(job, message, messageIndex));
   }
@@ -481,6 +513,28 @@ const workers =
             concurrency: AI_WORKER_CONCURRENCY,
           }
         );
+
+        worker.on("active", (job) => {
+          logger.info(
+            {
+              jobId: job.id,
+              queueName,
+              leadId: getJobLeadId(job),
+            },
+            "AI worker activated job"
+          );
+        });
+
+        worker.on("completed", (job) => {
+          logger.info(
+            {
+              jobId: job.id,
+              queueName,
+              leadId: getJobLeadId(job),
+            },
+            "AI worker completed job"
+          );
+        });
 
         worker.on("failed", (job, error) => {
           if (error instanceof LeadQueueBusyError) {
@@ -506,9 +560,36 @@ const workers =
           );
         });
 
+        worker.on("error", (error) => {
+          logger.error(
+            {
+              queueName,
+              error,
+            },
+            "AI partition worker error"
+          );
+        });
+
         return worker;
       })
     : [];
+
+let isShuttingDown = false;
+
+const shutdown = async (signal: string) => {
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
+
+  await Promise.allSettled(workers.map((worker) => worker.close()));
+  await Promise.allSettled([prisma.$disconnect(), closeRedisConnection()]);
+
+  if (signal === "uncaughtException") {
+    process.exit(1);
+  }
+};
 
 logger.info(
   {
@@ -518,3 +599,20 @@ logger.info(
   },
   "AI partition workers started"
 );
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
+});
+
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+
+process.on("uncaughtException", (error) => {
+  logger.error({ error }, "AI worker uncaught exception");
+  void shutdown("uncaughtException");
+});
+
+process.on("unhandledRejection", (error) => {
+  logger.error({ error }, "AI worker unhandled rejection");
+});

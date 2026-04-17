@@ -13,7 +13,15 @@ const env_1 = require("./env");
 const GOOGLE_CALLBACK_URL = env_1.env.BACKEND_URL
     ? `${env_1.env.BACKEND_URL}/api/auth/google/callback`
     : "http://localhost:5000/api/auth/google/callback";
+let passportConfigured = false;
 const configurePassport = () => {
+    if (passportConfigured) {
+        return;
+    }
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+        console.warn("Google OAuth disabled: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET missing");
+        return;
+    }
     passport_1.default.use(new passport_google_oauth20_1.Strategy({
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -55,5 +63,6 @@ const configurePassport = () => {
             return done(error);
         }
     }));
+    passportConfigured = true;
 };
 exports.configurePassport = configurePassport;

@@ -7,6 +7,7 @@ import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
 
 import { getIO } from "../sockets/socket.server";
 import { processWebhookEvent } from "../services/webhookDedup.service";
+import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 
 const router = Router();
 
@@ -220,6 +221,19 @@ router.post("/", async (req: any, res: Response) => {
         },
       },
     });
+
+    await recordConversionEvent({
+      businessId: client.businessId,
+      leadId: lead.id,
+      outcome: "replied",
+      source: "WHATSAPP_WEBHOOK",
+      idempotencyKey: `reply:${eventId}`,
+      occurredAt: userMessage.createdAt,
+      metadata: {
+        platform: "WHATSAPP",
+        externalEventId: eventId,
+      },
+    }).catch(() => {});
 
     /*
     REALTIME SOCKET

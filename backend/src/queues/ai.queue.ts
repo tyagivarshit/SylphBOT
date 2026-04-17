@@ -127,6 +127,16 @@ const buildJobId = (
   chunkIndex: number,
   options?: EnqueueOptions
 ) => {
+  if (options?.forceUniqueJobId) {
+    return `ai_${crypto.randomUUID()}`;
+  }
+
+  const stableToken = buildStableToken(messages, options?.idempotencyKey);
+
+  if (stableToken) {
+    return `ai_${stableToken}_${chunkIndex}`;
+  }
+
   return `ai_${crypto.randomUUID()}`;
 };
 

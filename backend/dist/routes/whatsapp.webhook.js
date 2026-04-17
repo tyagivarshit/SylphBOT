@@ -10,6 +10,7 @@ const ai_queue_1 = require("../queues/ai.queue");
 const followup_queue_1 = require("../queues/followup.queue");
 const socket_server_1 = require("../sockets/socket.server");
 const webhookDedup_service_1 = require("../services/webhookDedup.service");
+const conversionTracker_service_1 = require("../services/salesAgent/conversionTracker.service");
 const router = (0, express_1.Router)();
 /*
 ---------------------------------------------------
@@ -149,6 +150,18 @@ router.post("/", async (req, res) => {
                 },
             },
         });
+        await (0, conversionTracker_service_1.recordConversionEvent)({
+            businessId: client.businessId,
+            leadId: lead.id,
+            outcome: "replied",
+            source: "WHATSAPP_WEBHOOK",
+            idempotencyKey: `reply:${eventId}`,
+            occurredAt: userMessage.createdAt,
+            metadata: {
+                platform: "WHATSAPP",
+                externalEventId: eventId,
+            },
+        }).catch(() => { });
         /*
         REALTIME SOCKET
         */
@@ -157,16 +170,29 @@ router.post("/", async (req, res) => {
         /*
         ADD AI JOB
         */
-        await (0, ai_queue_1.addRouterJob)({
+        await (0, ai_queue_1.enqueueAIBatch)([
+            {
+                businessId: client.businessId,
+                leadId: lead.id,
+                message: text,
+                kind: "router",
+                plan: subscription.plan,
+                platform: "WHATSAPP",
+                senderId: from,
+                phoneNumberId,
+                accessTokenEncrypted: client.accessToken,
+                externalEventId: eventId,
+                skipInboundPersist: true,
+            },
+        ], {
+            source: "router",
+            idempotencyKey: eventId,
+        });
+        console.log("[WHATSAPP WEBHOOK] queued AI reply", {
             businessId: client.businessId,
             leadId: lead.id,
-            message: text,
-            plan: subscription.plan,
-            platform: "WHATSAPP",
-            senderId: from,
+            eventId,
             phoneNumberId,
-            accessTokenEncrypted: client.accessToken,
-            externalEventId: eventId,
         });
         /*
         UPDATE LEAD

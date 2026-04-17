@@ -20,6 +20,38 @@ export type AnalyticsMessageRecord = {
   createdAt: Date;
 };
 
+export type AnalyticsConversionEventRecord = {
+  id: string;
+  leadId: string;
+  messageId: string | null;
+  variantId: string | null;
+  outcome: string;
+  value: number | null;
+  occurredAt: Date;
+};
+
+export type AnalyticsTrackedMessageRecord = {
+  id: string;
+  messageId: string;
+  leadId: string;
+  variantId: string | null;
+  cta: string | null;
+  angle: string | null;
+  leadState: string | null;
+  messageType: string;
+  sentAt: Date;
+  message: {
+    content: string;
+  };
+  variant: {
+    variantKey: string;
+    label: string;
+    tone: string;
+    ctaStyle: string;
+    messageLength: string;
+  } | null;
+};
+
 export type AnalyticsAppointmentRecord = {
   leadId: string | null;
   status: string;
@@ -54,6 +86,16 @@ const messageSelect = {
   leadId: true,
   sender: true,
   createdAt: true,
+} as const;
+
+const conversionEventSelect = {
+  id: true,
+  leadId: true,
+  messageId: true,
+  variantId: true,
+  outcome: true,
+  value: true,
+  occurredAt: true,
 } as const;
 
 const appointmentSelect = {
@@ -124,6 +166,55 @@ export async function getMessagesInRange(
       createdAt: "asc",
     },
     select: messageSelect,
+  });
+}
+
+export async function getConversionEventsInRange(
+  businessId: string,
+  start: Date,
+  end: Date
+): Promise<AnalyticsConversionEventRecord[]> {
+  return prisma.conversionEvent.findMany({
+    where: {
+      businessId,
+      occurredAt: {
+        gte: start,
+        lte: end,
+      },
+    },
+    select: conversionEventSelect,
+  });
+}
+
+export async function getTrackedMessagesInRange(
+  businessId: string,
+  start: Date,
+  end: Date
+): Promise<AnalyticsTrackedMessageRecord[]> {
+  return prisma.salesMessageTracking.findMany({
+    where: {
+      businessId,
+      sentAt: {
+        gte: start,
+        lte: end,
+      },
+    },
+    include: {
+      message: {
+        select: {
+          content: true,
+        },
+      },
+      variant: {
+        select: {
+          variantKey: true,
+          label: true,
+          tone: true,
+          ctaStyle: true,
+          messageLength: true,
+        },
+      },
+    },
   });
 }
 

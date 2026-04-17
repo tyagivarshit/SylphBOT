@@ -113,6 +113,11 @@ model Business {
   appointments        Appointment[]
 
   knowledgeBases KnowledgeBase[]
+  salesMessageTrackings SalesMessageTracking[]
+  conversionEvents ConversionEvent[]
+  salesMessageVariants SalesMessageVariant[]
+  salesOptimizationInsights SalesOptimizationInsight[]
+  leadStateHistories LeadStateHistory[]
 
   createdAt     DateTime @default(now())
   deletedAt DateTime?
@@ -147,6 +152,11 @@ model Client {
 
   leads         Lead[]
   commentTriggers CommentTrigger[]
+  knowledgeBases KnowledgeBase[]
+  salesMessageTrackings SalesMessageTracking[]
+  conversionEvents ConversionEvent[]
+  salesMessageVariants SalesMessageVariant[]
+  salesOptimizationInsights SalesOptimizationInsight[]
 
   isActive      Boolean  @default(true)
   deletedAt     DateTime?
@@ -233,6 +243,7 @@ model Lead {
 
   stage          String   @default("NEW")
   aiStage        String?  @default("NEW")
+  revenueState   String   @default("COLD")
 
   isHumanActive Boolean @default(false)
   assignedAgentId String?
@@ -244,10 +255,17 @@ model Lead {
 
   followupCount  Int      @default(0)
   lastFollowupAt DateTime?
+  lastEngagedAt  DateTime?
+  lastClickedAt  DateTime?
+  lastBookedAt   DateTime?
+  lastConvertedAt DateTime?
 
   messages       Message[]
   memories       Memory[]
   summaries      ConversationSummary[]
+  salesMessageTrackings SalesMessageTracking[]
+  conversionEvents ConversionEvent[]
+  leadStateHistories LeadStateHistory[]
 
   lastMessageAt  DateTime?
 
@@ -280,9 +298,183 @@ model Message {
   metadata  Json? 
 
   createdAt DateTime @default(now())
+  salesTracking SalesMessageTracking?
+  conversionEvents ConversionEvent[]
 
   @@index([leadId])
   @@index([createdAt])
+}
+
+/* =====================================================
+REVENUE OPTIMIZATION ENGINE
+===================================================== */
+
+model SalesMessageVariant {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  clientId    String?  @db.ObjectId
+  client      Client?  @relation(fields: [clientId], references: [id])
+
+  messageType String   @default("AI_REPLY")
+  variantKey  String
+  label       String
+
+  tone         String
+  ctaStyle     String
+  messageLength String
+  instructions String
+
+  weight      Int      @default(1)
+  impressions Int     @default(0)
+  conversions Int     @default(0)
+  conversionValue Float @default(0)
+
+  isActive    Boolean  @default(true)
+  isPromoted  Boolean  @default(false)
+
+  trackings   SalesMessageTracking[]
+  conversionEvents ConversionEvent[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([businessId, clientId, messageType, variantKey])
+  @@index([businessId, clientId])
+  @@index([messageType, isActive])
+  @@index([isPromoted])
+}
+
+model SalesMessageTracking {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  messageId   String   @unique @db.ObjectId
+  message     Message  @relation(fields: [messageId], references: [id])
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  leadId      String   @db.ObjectId
+  lead        Lead     @relation(fields: [leadId], references: [id])
+
+  clientId    String?  @db.ObjectId
+  client      Client?  @relation(fields: [clientId], references: [id])
+
+  variantId   String?  @db.ObjectId
+  variant     SalesMessageVariant? @relation(fields: [variantId], references: [id])
+
+  source      String   @default("AI_ROUTER")
+  cta         String?
+  angle       String?
+  leadState   String?
+  messageType String   @default("AI_REPLY")
+  traceId     String?
+  metadata    Json?
+
+  sentAt      DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  conversionEvents ConversionEvent[]
+
+  @@index([businessId, sentAt])
+  @@index([leadId])
+  @@index([clientId])
+  @@index([variantId])
+  @@index([messageType])
+}
+
+model ConversionEvent {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  leadId      String   @db.ObjectId
+  lead        Lead     @relation(fields: [leadId], references: [id])
+
+  clientId    String?  @db.ObjectId
+  client      Client?  @relation(fields: [clientId], references: [id])
+
+  messageId   String?  @db.ObjectId
+  message     Message? @relation(fields: [messageId], references: [id])
+
+  trackingId  String?  @db.ObjectId
+  tracking    SalesMessageTracking? @relation(fields: [trackingId], references: [id])
+
+  variantId   String?  @db.ObjectId
+  variant     SalesMessageVariant? @relation(fields: [variantId], references: [id])
+
+  outcome     String
+  value       Float?
+  source      String?
+  idempotencyKey String?
+  metadata    Json?
+
+  occurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([businessId, occurredAt])
+  @@index([leadId, occurredAt])
+  @@index([clientId])
+  @@index([messageId])
+  @@index([trackingId])
+  @@index([variantId])
+  @@index([outcome])
+  @@index([idempotencyKey])
+}
+
+model SalesOptimizationInsight {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  clientId    String?  @db.ObjectId
+  client      Client?  @relation(fields: [clientId], references: [id])
+
+  insightType String
+  summary     String
+  recommendedTone String?
+  recommendedCTAStyle String?
+  recommendedMessageLength String?
+  bestMessages Json?
+  worstMessages Json?
+  recommendations Json?
+  sampleSize   Int      @default(0)
+  confidence   Float    @default(0)
+  expiresAt    DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId, createdAt])
+  @@index([clientId])
+  @@index([insightType])
+}
+
+model LeadStateHistory {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  leadId      String   @db.ObjectId
+  lead        Lead     @relation(fields: [leadId], references: [id])
+
+  previousState String?
+  nextState     String
+  reason        String
+  scoreDelta    Int      @default(0)
+  metadata      Json?
+
+  createdAt     DateTime @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([leadId, createdAt])
+  @@index([nextState])
 }
 
 /* =====================================================
@@ -587,6 +779,9 @@ model KnowledgeBase {
   businessId  String   @db.ObjectId
   business    Business @relation(fields: [businessId], references: [id])
 
+  clientId    String?  @db.ObjectId
+  client      Client?  @relation(fields: [clientId], references: [id])
+
   title       String
   content     String
 
@@ -602,9 +797,10 @@ model KnowledgeBase {
   updatedAt   DateTime @updatedAt
 
   @@index([businessId])
+  @@index([clientId])
+  @@index([businessId, clientId])
 
-  /* 🔥 ADD THIS */
-  @@unique([businessId, title])
+  @@index([businessId, clientId, title])
 }
 model Notification {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId

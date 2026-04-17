@@ -1,4 +1,5 @@
 import { resolveAIReply } from "./aiReplyOrchestrator.service";
+import { buildSalesAgentRecoveryReply } from "./salesAgent/reply.service";
 import logger from "../utils/logger";
 
 export const handleIncomingMessage = async (data: any) => {
@@ -24,9 +25,7 @@ export const handleIncomingMessage = async (data: any) => {
     );
 
     return {
-      message:
-        "I got your message. Tell me if you want pricing, details, or booking help.",
-      cta: "NONE",
+      ...buildSalesAgentRecoveryReply(message),
       source: "SYSTEM",
       latencyMs: 0,
       traceId,

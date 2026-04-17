@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getFlows = exports.createAutomationFlow = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
+const plan_config_1 = require("../config/plan.config");
 /* ---------------- CREATE FLOW ---------------- */
 const createAutomationFlow = async (req, res) => {
     try {
@@ -23,6 +24,7 @@ const createAutomationFlow = async (req, res) => {
                     select: {
                         plan: {
                             select: {
+                                name: true,
                                 type: true,
                             },
                         },
@@ -35,7 +37,7 @@ const createAutomationFlow = async (req, res) => {
                 message: "Business not found",
             });
         }
-        const planType = business.subscription?.plan?.type || "FREE";
+        const planKey = (0, plan_config_1.getPlanKey)(business.subscription?.plan || null);
         const { name, triggerValue, triggerType = "KEYWORD", channel = "INSTAGRAM", steps = [], } = req.body;
         /* ---------------- VALIDATION ---------------- */
         const cleanName = name?.trim();
@@ -62,14 +64,18 @@ const createAutomationFlow = async (req, res) => {
             metadata: step.config || {},
         }));
         /* ---------------- PLAN RESTRICTIONS ---------------- */
-        const restrictedTypesBasic = ["DELAY", "CONDITION", "BOOKING"];
-        if (planType === "BASIC") {
-            const invalidStep = sanitizedSteps.find((s) => restrictedTypesBasic.includes(s.stepType));
-            if (invalidStep) {
-                return res.status(403).json({
-                    message: `Step '${invalidStep.stepType}' not allowed in BASIC plan`,
-                });
-            }
+        const allowedStepTypesByPlan = {
+            FREE_LOCKED: [],
+            BASIC: ["MESSAGE"],
+            PRO: ["MESSAGE", "DELAY", "CONDITION"],
+            ELITE: ["MESSAGE", "DELAY", "CONDITION", "BOOKING"],
+        };
+        const allowedStepTypes = allowedStepTypesByPlan[planKey];
+        const invalidStep = sanitizedSteps.find((step) => !allowedStepTypes.includes(step.stepType));
+        if (invalidStep) {
+            return res.status(403).json({
+                message: `Step '${invalidStep.stepType}' not allowed in ${planKey} plan`,
+            });
         }
         /* ---------------- CREATE FLOW + STEPS ---------------- */
         const flow = await prisma_1.default.$transaction(async (tx) => {

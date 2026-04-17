@@ -14,7 +14,7 @@ return(
 Response tuning
 </p>
 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-Shape tone, FAQs, and sales instructions from one focused training workspace.
+Shape tone, FAQs, and sales instructions for either the shared business brain or a specific client workspace.
 </p>
 </div>
 

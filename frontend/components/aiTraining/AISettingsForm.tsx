@@ -2,20 +2,26 @@
 
 import { useEffect, useState } from "react"
 
-export default function AISettingsForm(){
+type AISettingsFormProps = {
+  clientId?: string
+}
+
+export default function AISettingsForm({ clientId = "" }: AISettingsFormProps){
 
 const [tone,setTone] = useState("Friendly")
 const [instructions,setInstructions] = useState("")
 
 const [loading,setLoading] = useState(false)
 const [fetching,setFetching] = useState(true)
+const query = clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""
 
 /* ================= LOAD SETTINGS ================= */
 
 useEffect(() => {
   const loadSettings = async () => {
     try {
-      const res = await fetch("/api/training/settings")
+      setFetching(true)
+      const res = await fetch(`/api/training/settings${query}`)
       const data = await res.json()
 
       if(res.ok && data){
@@ -31,7 +37,7 @@ useEffect(() => {
   }
 
   loadSettings()
-}, [])
+}, [query])
 
 /* ================= SAVE ================= */
 
@@ -48,7 +54,8 @@ const handleSave = async () => {
       },
       body: JSON.stringify({
         aiTone: tone,
-        salesInstructions: instructions
+        salesInstructions: instructions,
+        clientId: clientId || undefined
       })
     })
 

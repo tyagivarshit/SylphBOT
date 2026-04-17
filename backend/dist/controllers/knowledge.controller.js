@@ -6,6 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteKnowledge = exports.updateKnowledge = exports.getSingleKnowledge = exports.getKnowledge = exports.createKnowledge = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const embedding_service_1 = require("../services/embedding.service");
+const clientScope_service_1 = require("../services/clientScope.service");
+const getRequestedClientId = (req) => (0, clientScope_service_1.normalizeClientId)(req.body?.clientId || req.query?.clientId);
+const getScopedKnowledgeClientId = (client) => client.platform === "SYSTEM" ? null : client.id;
 /* =====================================================
 CREATE KNOWLEDGE
 ===================================================== */
@@ -19,6 +22,9 @@ const createKnowledge = async (req, res) => {
             });
         }
         const { title, content, sourceUrl } = req.body;
+        const requestedClientId = getRequestedClientId(req);
+        const client = await (0, clientScope_service_1.getScopedTrainingClient)(businessId, requestedClientId);
+        const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
         if (!title || !content) {
             return res.status(400).json({
                 success: false,
@@ -31,6 +37,7 @@ const createKnowledge = async (req, res) => {
         const knowledge = await prisma_1.default.knowledgeBase.create({
             data: {
                 businessId,
+                clientId: scopedKnowledgeClientId,
                 title,
                 content,
                 sourceType: "MANUAL", // 🔥 FORCE MANUAL
@@ -48,9 +55,11 @@ const createKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Create knowledge error:", error);
-        return res.status(500).json({
+        return res.status(error?.message === "Client not found" ? 404 : 500).json({
             success: false,
-            message: "Knowledge creation failed",
+            message: error?.message === "Client not found"
+                ? "Client not found"
+                : "Knowledge creation failed",
         });
     }
 };
@@ -67,10 +76,13 @@ const getKnowledge = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        /* 🔥 ONLY MANUAL KB */
+        const requestedClientId = getRequestedClientId(req);
+        const client = await (0, clientScope_service_1.getScopedTrainingClient)(businessId, requestedClientId);
+        const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
         const knowledge = await prisma_1.default.knowledgeBase.findMany({
             where: {
                 businessId,
+                clientId: scopedKnowledgeClientId,
                 sourceType: "MANUAL", // 🔥 FILTER
                 isActive: true,
             },
@@ -85,9 +97,11 @@ const getKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Fetch knowledge error:", error);
-        return res.status(500).json({
+        return res.status(error?.message === "Client not found" ? 404 : 500).json({
             success: false,
-            message: "Fetch knowledge failed",
+            message: error?.message === "Client not found"
+                ? "Client not found"
+                : "Fetch knowledge failed",
         });
     }
 };
@@ -161,6 +175,13 @@ const updateKnowledge = async (req, res) => {
                 message: "Knowledge not found",
             });
         }
+        const requestedClientId = getRequestedClientId(req);
+        const currentScopeClient = knowledge.clientId
+            ? await (0, clientScope_service_1.getScopedTrainingClient)(businessId, knowledge.clientId)
+            : await (0, clientScope_service_1.getSystemClient)(businessId);
+        const nextScopeClient = requestedClientId
+            ? await (0, clientScope_service_1.getScopedTrainingClient)(businessId, requestedClientId)
+            : currentScopeClient;
         /* 🔥 RE-EMBED IF CONTENT CHANGED */
         let embedding = knowledge.embedding;
         if (title || content) {
@@ -169,6 +190,7 @@ const updateKnowledge = async (req, res) => {
         const updatedKnowledge = await prisma_1.default.knowledgeBase.update({
             where: { id },
             data: {
+                clientId: getScopedKnowledgeClientId(nextScopeClient),
                 title: title ?? knowledge.title,
                 content: content ?? knowledge.content,
                 sourceUrl: sourceUrl ?? knowledge.sourceUrl,
@@ -183,9 +205,11 @@ const updateKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Update knowledge error:", error);
-        return res.status(500).json({
+        return res.status(error?.message === "Client not found" ? 404 : 500).json({
             success: false,
-            message: "Knowledge update failed",
+            message: error?.message === "Client not found"
+                ? "Client not found"
+                : "Knowledge update failed",
         });
     }
 };

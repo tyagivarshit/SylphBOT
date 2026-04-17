@@ -5,7 +5,11 @@ import KnowledgeCard from "./KnowledgeCard"
 import CreateKnowledgeModal from "./CreateKnowledgeModal"
 import { api } from "@/lib/api"
 
-export default function KnowledgeList(){
+type KnowledgeListProps = {
+  clientId?: string
+}
+
+export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
   const [open,setOpen] = useState(false)
   const [selected,setSelected] = useState<any>(null)
@@ -22,7 +26,9 @@ export default function KnowledgeList(){
     try{
       setLoading(true)
 
-      const res = await api.get("/api/knowledge")
+      const res = await api.get("/api/knowledge", {
+        params: clientId ? { clientId } : undefined
+      })
 
       setKnowledge(res.data.knowledge || [])
 
@@ -36,7 +42,7 @@ export default function KnowledgeList(){
 
   useEffect(()=>{
     fetchKnowledge()
-  },[])
+  },[clientId])
 
   /* ============================= */
   /* DELETE KNOWLEDGE */
@@ -48,7 +54,9 @@ export default function KnowledgeList(){
 
       setDeletingId(id)
 
-      await api.delete(`/api/knowledge/${id}`)
+      await api.delete(`/api/knowledge/${id}`, {
+        params: clientId ? { clientId } : undefined
+      })
 
       setKnowledge(prev => prev.filter(item => item.id !== id))
 
@@ -154,6 +162,7 @@ export default function KnowledgeList(){
         open={open}
         onClose={handleClose}
         selected={selected}
+        clientId={clientId}
       />
 
     </div>

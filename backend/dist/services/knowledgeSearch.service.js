@@ -35,16 +35,27 @@ const keywordScore = (query, content) => {
 /* ------------------------------------------ */
 /* 🔥 SEARCH KNOWLEDGE (FINAL CLEAN)
 ------------------------------------------- */
-const searchKnowledge = async (businessId, message) => {
+const searchKnowledge = async (businessId, message, options) => {
     try {
         /* 🔥 CREATE EMBEDDING */
         const messageEmbedding = await (0, embedding_service_1.createEmbedding)(message);
+        const normalizedClientId = String(options?.clientId || "").trim() || null;
+        const includeShared = options?.includeShared !== false;
         /* =================================================
         🔥 CRITICAL FIX: ONLY TRAINED + TRUSTED DATA
         ================================================= */
         const knowledge = await prisma_1.default.knowledgeBase.findMany({
             where: {
                 businessId,
+                ...(normalizedClientId
+                    ? {
+                        OR: includeShared
+                            ? [{ clientId: normalizedClientId }, { clientId: null }]
+                            : [{ clientId: normalizedClientId }],
+                    }
+                    : {
+                        clientId: null,
+                    }),
                 isActive: true,
                 sourceType: {
                     in: ["SYSTEM", "FAQ", "MANUAL"], // ✅ NO AUTO_LEARN
@@ -55,6 +66,7 @@ const searchKnowledge = async (businessId, message) => {
                 content: true,
                 embedding: true,
                 priority: true,
+                clientId: true,
             },
         });
         if (!knowledge.length)
@@ -81,15 +93,22 @@ const searchKnowledge = async (businessId, message) => {
             /* 🔥 PRIORITY BOOST (SAFE) */
             const priorityKey = item.priority || "MEDIUM";
             const priorityBoost = PRIORITY_WEIGHT[priorityKey] || 0;
+            const scopeBoost = normalizedClientId && item.clientId === normalizedClientId
+                ? 0.35
+                : !item.clientId
+                    ? 0.05
+                    : 0;
             /* 🔥 FINAL SCORE */
             const finalScore = semantic * 0.7 +
                 keyword * 0.3 +
                 boost +
-                priorityBoost;
+                priorityBoost +
+                scopeBoost;
             return {
                 id: item.id,
                 content: item.content,
                 score: finalScore,
+                clientId: item.clientId || null,
             };
         });
         /* =================================================

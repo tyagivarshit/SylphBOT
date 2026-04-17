@@ -1,8 +1,27 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import KnowledgeList from "./KnowledgeList"
+import ClientScopeSelector from "@/components/clients/ClientScopeSelector"
+import { getClients } from "@/lib/clients"
 
 export default function KnowledgeBasePage(){
+  const [selectedClientId,setSelectedClientId] = useState("")
+  const [clients,setClients] = useState<any[]>([])
+
+  useEffect(() => {
+    const loadClients = async () => {
+      try {
+        const data = await getClients()
+        setClients((data || []).filter((client: any) => client.platform !== "SYSTEM"))
+      } catch (error) {
+        console.error("Client load error:", error)
+        setClients([])
+      }
+    }
+
+    loadClients()
+  }, [])
 
   return(
 
@@ -14,11 +33,19 @@ export default function KnowledgeBasePage(){
         </h1>
 
         <p className="text-xs sm:text-sm text-gray-500 mt-1">
-          Manage and organize your AI training knowledge
+          Manage and organize client-specific and shared AI sales knowledge
         </p>
       </div>
 
-      <KnowledgeList/>
+      <ClientScopeSelector
+        clients={clients}
+        value={selectedClientId}
+        onChange={setSelectedClientId}
+        label="Knowledge Scope"
+        helperText="Shared Business Brain is used as fallback knowledge. Select a client to manage only that client’s sales knowledge."
+      />
+
+      <KnowledgeList clientId={selectedClientId}/>
 
     </div>
 

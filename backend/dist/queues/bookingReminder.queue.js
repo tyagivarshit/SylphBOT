@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.scheduleReminderJobs = exports.bookingReminderQueue = exports.BOOKING_REMINDER_QUEUE_NAME = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
+const redis_1 = require("../config/redis");
 /*
 =========================================================
 BOOKING REMINDER QUEUE (SAAS LEVEL)
@@ -13,7 +14,7 @@ BOOKING REMINDER QUEUE (SAAS LEVEL)
 */
 exports.BOOKING_REMINDER_QUEUE_NAME = "booking-reminder-queue";
 exports.bookingReminderQueue = new bullmq_1.Queue(exports.BOOKING_REMINDER_QUEUE_NAME, {
-    connection: { url: process.env.REDIS_URL }, // ✅ FIX
+    connection: (0, redis_1.getQueueRedisConnection)(),
     defaultJobOptions: {
         attempts: 3,
         backoff: {

@@ -2,6 +2,7 @@ import { enqueueLearning } from "./learningQueue.service"
 
 export const processAutoLearning = async ({
   businessId,
+  clientId,
   message,
   aiReply,
 }: any) => {
@@ -10,6 +11,7 @@ export const processAutoLearning = async ({
 
     await enqueueLearning({
       businessId,
+      clientId,
       input: message,
       output: aiReply,
     });

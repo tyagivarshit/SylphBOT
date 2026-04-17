@@ -5,21 +5,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getOrCreateClient = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const getOrCreateClient = async (businessId) => {
-    let client = await prisma_1.default.client.findFirst({
-        where: { businessId, isActive: true }
+const getOrCreateClient = async (businessId, phoneNumberId) => {
+    const client = await prisma_1.default.client.upsert({
+        where: { phoneNumberId }, // 🔥 FIX
+        update: {
+            isActive: true
+        },
+        create: {
+            businessId,
+            phoneNumberId, // 🔥 MUST
+            platform: "SYSTEM",
+            accessToken: "AUTO_GENERATED",
+            isActive: true
+        }
     });
-    if (!client) {
-        client = await prisma_1.default.client.create({
-            data: {
-                businessId,
-                platform: "SYSTEM",
-                accessToken: "AUTO_GENERATED",
-                isActive: true
-            }
-        });
-        console.log("✅ Auto-created client for business:", businessId);
-    }
     return client;
 };
 exports.getOrCreateClient = getOrCreateClient;

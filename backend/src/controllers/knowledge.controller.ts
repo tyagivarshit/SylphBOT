@@ -1,14 +1,41 @@
-import { Request, Response } from "express";
+import { Response } from "express";
 import prisma from "../config/prisma";
 import { createEmbedding } from "../services/embedding.service";
+import {
+  getScopedTrainingClient,
+  getSystemClient,
+  normalizeClientId,
+} from "../services/clientScope.service";
+import { AuthenticatedRequest } from "../types/request";
+
+type KnowledgeQuery = {
+  clientId?: string;
+};
+
+type KnowledgeBody = {
+  title?: string;
+  content?: string;
+  sourceUrl?: string;
+  clientId?: string;
+};
+
+const getRequestedClientId = (
+  req: AuthenticatedRequest<any, any, KnowledgeQuery>
+) => normalizeClientId(req.body?.clientId || req.query?.clientId);
+
+const getScopedKnowledgeClientId = (client: { platform?: string; id: string }) =>
+  client.platform === "SYSTEM" ? null : client.id;
 
 /* =====================================================
 CREATE KNOWLEDGE
 ===================================================== */
 
-export const createKnowledge = async (req: Request, res: Response) => {
+export const createKnowledge = async (
+  req: AuthenticatedRequest<KnowledgeBody, any, KnowledgeQuery>,
+  res: Response
+) => {
   try {
-    const businessId = (req as any).user?.businessId;
+    const businessId = req.user?.businessId;
 
     if (!businessId) {
       return res.status(401).json({
@@ -18,6 +45,9 @@ export const createKnowledge = async (req: Request, res: Response) => {
     }
 
     const { title, content, sourceUrl } = req.body;
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
+    const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
 
     if (!title || !content) {
       return res.status(400).json({
@@ -33,6 +63,7 @@ export const createKnowledge = async (req: Request, res: Response) => {
     const knowledge = await prisma.knowledgeBase.create({
       data: {
         businessId,
+        clientId: scopedKnowledgeClientId,
         title,
         content,
         sourceType: "MANUAL", // 🔥 FORCE MANUAL
@@ -48,12 +79,15 @@ export const createKnowledge = async (req: Request, res: Response) => {
       message: "Knowledge created successfully",
       knowledge,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Create knowledge error:", error);
 
-    return res.status(500).json({
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
       success: false,
-      message: "Knowledge creation failed",
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Knowledge creation failed",
     });
   }
 };
@@ -62,9 +96,12 @@ export const createKnowledge = async (req: Request, res: Response) => {
 GET KNOWLEDGE LIST
 ===================================================== */
 
-export const getKnowledge = async (req: Request, res: Response) => {
+export const getKnowledge = async (
+  req: AuthenticatedRequest<any, any, KnowledgeQuery>,
+  res: Response
+) => {
   try {
-    const businessId = (req as any).user?.businessId;
+    const businessId = req.user?.businessId;
 
     if (!businessId) {
       return res.status(401).json({
@@ -73,10 +110,14 @@ export const getKnowledge = async (req: Request, res: Response) => {
       });
     }
 
-    /* 🔥 ONLY MANUAL KB */
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
+    const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
+
     const knowledge = await prisma.knowledgeBase.findMany({
       where: {
         businessId,
+        clientId: scopedKnowledgeClientId,
         sourceType: "MANUAL", // 🔥 FILTER
         isActive: true,
       },
@@ -89,12 +130,15 @@ export const getKnowledge = async (req: Request, res: Response) => {
       success: true,
       knowledge,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Fetch knowledge error:", error);
 
-    return res.status(500).json({
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
       success: false,
-      message: "Fetch knowledge failed",
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Fetch knowledge failed",
     });
   }
 };
@@ -103,9 +147,12 @@ export const getKnowledge = async (req: Request, res: Response) => {
 GET SINGLE KNOWLEDGE
 ===================================================== */
 
-export const getSingleKnowledge = async (req: Request, res: Response) => {
+export const getSingleKnowledge = async (
+  req: AuthenticatedRequest<any, { id: string }, KnowledgeQuery>,
+  res: Response
+) => {
   try {
-    const businessId = (req as any).user?.businessId;
+    const businessId = req.user?.businessId;
     const id = req.params.id as string;
 
     if (!businessId) {
@@ -149,9 +196,12 @@ export const getSingleKnowledge = async (req: Request, res: Response) => {
 UPDATE KNOWLEDGE
 ===================================================== */
 
-export const updateKnowledge = async (req: Request, res: Response) => {
+export const updateKnowledge = async (
+  req: AuthenticatedRequest<KnowledgeBody, { id: string }, KnowledgeQuery>,
+  res: Response
+) => {
   try {
-    const businessId = (req as any).user?.businessId;
+    const businessId = req.user?.businessId;
     const id = req.params.id as string;
 
     if (!businessId) {
@@ -179,6 +229,14 @@ export const updateKnowledge = async (req: Request, res: Response) => {
       });
     }
 
+    const requestedClientId = getRequestedClientId(req);
+    const currentScopeClient = knowledge.clientId
+      ? await getScopedTrainingClient(businessId, knowledge.clientId)
+      : await getSystemClient(businessId);
+    const nextScopeClient = requestedClientId
+      ? await getScopedTrainingClient(businessId, requestedClientId)
+      : currentScopeClient;
+
     /* 🔥 RE-EMBED IF CONTENT CHANGED */
     let embedding = knowledge.embedding;
 
@@ -191,6 +249,7 @@ export const updateKnowledge = async (req: Request, res: Response) => {
     const updatedKnowledge = await prisma.knowledgeBase.update({
       where: { id },
       data: {
+        clientId: getScopedKnowledgeClientId(nextScopeClient),
         title: title ?? knowledge.title,
         content: content ?? knowledge.content,
         sourceUrl: sourceUrl ?? knowledge.sourceUrl,
@@ -203,12 +262,15 @@ export const updateKnowledge = async (req: Request, res: Response) => {
       message: "Knowledge updated successfully",
       knowledge: updatedKnowledge,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Update knowledge error:", error);
 
-    return res.status(500).json({
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
       success: false,
-      message: "Knowledge update failed",
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Knowledge update failed",
     });
   }
 };
@@ -217,9 +279,12 @@ export const updateKnowledge = async (req: Request, res: Response) => {
 DELETE KNOWLEDGE
 ===================================================== */
 
-export const deleteKnowledge = async (req: Request, res: Response) => {
+export const deleteKnowledge = async (
+  req: AuthenticatedRequest<any, { id: string }, KnowledgeQuery>,
+  res: Response
+) => {
   try {
-    const businessId = (req as any).user?.businessId;
+    const businessId = req.user?.businessId;
     const id = req.params.id as string;
 
     if (!businessId) {

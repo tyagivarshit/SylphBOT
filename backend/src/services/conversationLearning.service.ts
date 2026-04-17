@@ -2,6 +2,7 @@ import prisma from "../config/prisma";
 
 export const saveConversationLearning = async ({
   businessId,
+  clientId,
   input,
   output,
   embedding,
@@ -24,6 +25,7 @@ export const saveConversationLearning = async ({
     const existing = await prisma.knowledgeBase.findFirst({
       where: {
         businessId,
+        clientId: clientId || null,
         content,
         sourceType: "AUTO_LEARN", // 🔥 only check inside learning
       },
@@ -46,6 +48,7 @@ export const saveConversationLearning = async ({
     return await prisma.knowledgeBase.create({
       data: {
         businessId,
+        clientId: clientId || null,
         title: input.slice(0, 80),
         content,
         embedding,

@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ingestKnowledge = void 0;
 const embedding_service_1 = require("./embedding.service");
 const conversationLearning_service_1 = require("./conversationLearning.service");
-const ingestKnowledge = async ({ businessId, input, output, }) => {
+const ingestKnowledge = async ({ businessId, clientId, input, output, }) => {
     try {
         /* 🔥 SAFE GUARD */
         if (!input || !output)
@@ -32,6 +32,7 @@ const ingestKnowledge = async ({ businessId, input, output, }) => {
         ===================================================== */
         await (0, conversationLearning_service_1.saveConversationLearning)({
             businessId,
+            clientId,
             input,
             output,
             embedding,

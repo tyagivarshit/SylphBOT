@@ -2,6 +2,7 @@ import { bookingPriorityRouter } from "./bookingPriorityRouter.service";
 import { getConversationState } from "./conversationState.service";
 import { isHumanActive } from "./humanTakeoverManager.service";
 import { routeAIMessage } from "./aiRouter.service";
+import { buildSalesAgentRecoveryReply } from "./salesAgent/reply.service";
 import { runAutomationEngine } from "./automationEngine.service";
 import logger from "../utils/logger";
 
@@ -14,10 +15,12 @@ export type AIReplySource =
 export type AIReplyDecision = {
   message: string;
   cta?: string;
+  angle?: string | null;
+  reason?: string | null;
   source: AIReplySource;
   latencyMs: number;
   traceId?: string;
-  meta: {
+  meta: Record<string, unknown> & {
     source: AIReplySource;
     latencyMs: number;
     traceId?: string;
@@ -35,6 +38,9 @@ type RouterInput = {
 type ReplyCandidate = {
   message: string;
   cta?: string | null;
+  angle?: string | null;
+  reason?: string | null;
+  meta?: Record<string, unknown>;
 };
 
 const TOTAL_REPLY_BUDGET_MS = 1900;
@@ -42,8 +48,6 @@ const BOOKING_STAGE_TIMEOUT_MS = 550;
 const AUTOMATION_STAGE_TIMEOUT_MS = 450;
 const MIN_STAGE_TIMEOUT_MS = 200;
 const BUDGET_RESERVE_MS = 125;
-const BOOKING_ASSIST_SUFFIX =
-  "If you'd like, I can also check available slots for you.";
 
 const withTimeout = async <T>(
   fn: () => Promise<T>,
@@ -82,7 +86,13 @@ const normalizeReplyCandidate = (reply: unknown): ReplyCandidate | null => {
     return null;
   }
 
-  const candidate = reply as { message?: unknown; cta?: unknown };
+  const candidate = reply as {
+    message?: unknown;
+    cta?: unknown;
+    angle?: unknown;
+    reason?: unknown;
+    meta?: unknown;
+  };
   const message = String(candidate.message || "").trim();
 
   if (!message) {
@@ -92,6 +102,12 @@ const normalizeReplyCandidate = (reply: unknown): ReplyCandidate | null => {
   return {
     message,
     cta: typeof candidate.cta === "string" ? candidate.cta : null,
+    angle: typeof candidate.angle === "string" ? candidate.angle : null,
+    reason: typeof candidate.reason === "string" ? candidate.reason : null,
+    meta:
+      candidate.meta && typeof candidate.meta === "object"
+        ? (candidate.meta as Record<string, unknown>)
+        : {},
   };
 };
 
@@ -125,28 +141,27 @@ const attachBookingAssist = (
   reply: ReplyCandidate,
   shouldAttach: boolean
 ): ReplyCandidate => {
-  if (!shouldAttach) {
-    return reply;
-  }
-
-  if (/available slot|check available|schedule|appointment/i.test(reply.message)) {
+  if (!shouldAttach || (reply.cta && reply.cta !== "NONE")) {
     return reply;
   }
 
   return {
-    ...reply,
-    message: `${reply.message}\n\n${BOOKING_ASSIST_SUFFIX}`,
+    message: "I can check the fastest available slot for you.\nWant the booking link?",
+    cta: "BOOK_CALL",
+    angle: reply.angle || "urgency",
+    reason: reply.reason || "booking_assist",
+    meta: reply.meta || {},
   };
 };
 
-const buildSystemReply = (shouldAttachBookingAssist: boolean): ReplyCandidate => {
-  const message = shouldAttachBookingAssist
-    ? `I got your message. Tell me if you want pricing, details, or booking help.\n\n${BOOKING_ASSIST_SUFFIX}`
-    : "I got your message. Tell me if you want pricing, details, booking, or a quick explanation.";
+const buildSystemReply = (message: string): ReplyCandidate => {
+  const recovery = buildSalesAgentRecoveryReply(message);
 
   return {
-    message,
-    cta: "NONE",
+    message: recovery.message,
+    cta: recovery.cta,
+    angle: recovery.angle,
+    reason: recovery.reason || null,
   };
 };
 
@@ -162,13 +177,19 @@ const finalizeReply = (
   return {
     message: reply.message,
     cta,
+    angle: reply.angle || null,
+    reason: reply.reason || null,
     source,
     latencyMs,
     traceId,
     meta: {
+      ...(reply.meta || {}),
       source,
       latencyMs,
       traceId,
+      cta,
+      angle: reply.angle || null,
+      reason: reply.reason || null,
     },
   };
 };
@@ -266,7 +287,12 @@ export const resolveAIReply = async ({
   const normalizedMessage = String(message || "").trim();
 
   if (!normalizedMessage) {
-    return finalizeReply("SYSTEM", buildSystemReply(false), startedAt, traceId);
+    return finalizeReply(
+      "SYSTEM",
+      buildSystemReply(normalizedMessage),
+      startedAt,
+      traceId
+    );
   }
 
   if (await isHumanActive(leadId)) {
@@ -416,9 +442,7 @@ export const resolveAIReply = async ({
 
   return finalizeReply(
     "SYSTEM",
-    buildSystemReply(
-      shouldOfferBookingAssist(curiosityIntent, bookingActive, "SYSTEM")
-    ),
+    buildSystemReply(normalizedMessage),
     startedAt,
     traceId
   );

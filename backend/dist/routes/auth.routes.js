@@ -6,6 +6,10 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const rateLimit_middleware_1 = require("../middleware/rateLimit.middleware");
 const loginLimiter_1 = require("../middleware/loginLimiter");
 const router = (0, express_1.Router)();
+router.use((_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+});
 /* ================= AUTH ================= */
 router.post("/register", rateLimit_middleware_1.authLimiter, auth_controller_1.register);
 /* 🔐 LOGIN (STRICT PROTECTION) */

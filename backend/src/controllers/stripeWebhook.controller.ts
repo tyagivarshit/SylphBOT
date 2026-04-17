@@ -14,6 +14,7 @@ import {
   syncCheckoutSession,
   syncStripeSubscriptionState,
 } from "../services/billingSync.service";
+import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 
 function getSubscriptionId(
   subscription: string | Stripe.Subscription | null | undefined
@@ -65,10 +66,25 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         const session = event.data.object as Stripe.Checkout.Session;
         const businessId = session.metadata?.businessId;
         const planType = session.metadata?.plan as string | undefined;
+        const leadId = session.metadata?.leadId;
 
         if (!businessId || !planType) break;
 
         await syncCheckoutSession(session);
+
+        if (leadId) {
+          await recordConversionEvent({
+            businessId,
+            leadId,
+            outcome: "payment_completed",
+            source: "STRIPE_CHECKOUT",
+            idempotencyKey: `stripe:${event.id}`,
+            metadata: {
+              checkoutSessionId: session.id,
+              planType,
+            },
+          }).catch(() => {});
+        }
 
         const user = await prisma.user.findFirst({
           where: { businessId },

@@ -3,6 +3,7 @@ import { saveConversationLearning } from "./conversationLearning.service";
 
 export const ingestKnowledge = async ({
   businessId,
+  clientId,
   input,
   output,
 }: any) => {
@@ -45,6 +46,7 @@ export const ingestKnowledge = async ({
 
     await saveConversationLearning({
       businessId,
+      clientId,
       input,
       output,
       embedding,

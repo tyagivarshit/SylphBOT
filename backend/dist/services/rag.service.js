@@ -8,6 +8,7 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const knowledgeSearch_service_1 = require("./knowledgeSearch.service");
 const openai_1 = __importDefault(require("openai"));
 const redis_1 = __importDefault(require("../config/redis"));
+const clientScope_service_1 = require("./clientScope.service");
 const groq = new openai_1.default({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: "https://api.groq.com/openai/v1",
@@ -106,12 +107,24 @@ const getLeadStage = async (leadId) => {
 const generateRAGReply = async (businessId, message, leadId) => {
     try {
         const intent = detectIntent(message);
-        const businessKey = `biz:${businessId}`;
+        const lead = leadId
+            ? await prisma_1.default.lead.findUnique({
+                where: { id: leadId },
+                select: {
+                    clientId: true,
+                },
+            })
+            : null;
+        const scopedClientId = lead?.clientId || null;
+        const businessKey = `biz:${businessId}:client:${scopedClientId || "shared"}`;
         /* ================= SEARCH ================= */
         const queries = generateQueries(message);
         let allResults = [];
         for (const q of queries) {
-            const res = await (0, knowledgeSearch_service_1.searchKnowledge)(businessId, q);
+            const res = await (0, knowledgeSearch_service_1.searchKnowledge)(businessId, q, {
+                clientId: scopedClientId,
+                includeShared: true,
+            });
             allResults.push(...res);
         }
         const uniqueMap = new Map();
@@ -149,16 +162,32 @@ const generateRAGReply = async (businessId, message, leadId) => {
         /* ================= BUSINESS CACHE ================= */
         let businessData = await getCache(businessKey);
         if (!businessData) {
-            const client = await prisma_1.default.client.findFirst({
-                where: { businessId, isActive: true },
-                select: {
-                    businessInfo: true,
-                    pricingInfo: true,
-                    aiTone: true,
-                    salesInstructions: true,
-                },
-            });
-            businessData = client || {};
+            const [leadClient, systemClient] = await Promise.all([
+                scopedClientId
+                    ? prisma_1.default.client.findFirst({
+                        where: {
+                            id: scopedClientId,
+                            businessId,
+                            isActive: true,
+                        },
+                        select: {
+                            businessInfo: true,
+                            pricingInfo: true,
+                            aiTone: true,
+                            salesInstructions: true,
+                        },
+                    })
+                    : null,
+                (0, clientScope_service_1.getSystemClient)(businessId),
+            ]);
+            businessData = {
+                businessInfo: leadClient?.businessInfo || systemClient.businessInfo || "",
+                pricingInfo: leadClient?.pricingInfo || systemClient.pricingInfo || "",
+                aiTone: leadClient?.aiTone || systemClient.aiTone || "Friendly",
+                salesInstructions: leadClient?.salesInstructions ||
+                    systemClient.salesInstructions ||
+                    "",
+            };
             await setCache(businessKey, businessData, 300);
         }
         /* ================= PROMPT ================= */

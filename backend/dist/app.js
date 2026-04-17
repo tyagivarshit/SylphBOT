@@ -9,7 +9,9 @@ const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const compression_1 = __importDefault(require("compression"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
+const passport_1 = __importDefault(require("passport"));
 const env_1 = require("./config/env");
+const passport_2 = require("./config/passport");
 const auth_middleware_1 = require("./middleware/auth.middleware");
 const subscription_middleware_1 = require("./middleware/subscription.middleware");
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
@@ -38,16 +40,15 @@ const oauth_routes_1 = __importDefault(require("./routes/oauth.routes"));
 const booking_routes_1 = __importDefault(require("./routes/booking.routes"));
 const availability_routes_1 = __importDefault(require("./routes/availability.routes"));
 const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
+const ai_queue_1 = require("./queues/ai.queue");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
 const trial_cron_1 = require("./cron/trial.cron");
 const metaTokenRefresh_cron_1 = require("./cron/metaTokenRefresh.cron");
 const resetUsage_cron_1 = require("./cron/resetUsage.cron");
-console.log("🔥 AUTH EMAIL WORKER STARTED");
-require("./workers/bookingReminder.worker");
-require("./workers/authEmail.worker");
 const AppError_1 = require("./utils/AppError");
 const app = (0, express_1.default)();
+(0, passport_2.configurePassport)();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 const allowedOrigins = new Set(env_1.env.ALLOWED_FRONTEND_ORIGINS);
@@ -135,6 +136,7 @@ app.use((0, cors_1.default)(corsOptions));
 app.options(/.*/, (0, cors_1.default)(corsOptions));
 app.use(rateLimit_middleware_1.globalLimiter);
 app.use((0, cookie_parser_1.default)());
+app.use(passport_1.default.initialize());
 app.use((req, res, next) => {
     const headerValue = req.headers["x-request-id"];
     const requestId = (Array.isArray(headerValue) ? headerValue[0] : headerValue) ||
@@ -181,12 +183,88 @@ app.use("/api/webhook/instagram", express_1.default.raw({
     },
 }), instagram_webhook_1.default);
 app.use(express_1.default.json({ limit: "1mb" }));
+const normalizeIncomingMessage = (raw) => {
+    const message = String(raw.message || "").trim();
+    const businessId = String(raw.businessId || "").trim();
+    const leadId = String(raw.leadId || "").trim();
+    if (!message || !businessId || !leadId) {
+        throw new Error("businessId, leadId, and message are required");
+    }
+    return {
+        businessId,
+        leadId,
+        message,
+        kind: raw.kind || "router",
+        plan: raw.plan,
+        platform: raw.platform,
+        senderId: raw.senderId,
+        pageId: raw.pageId,
+        phoneNumberId: raw.phoneNumberId,
+        accessTokenEncrypted: raw.accessTokenEncrypted,
+        externalEventId: raw.externalEventId?.trim(),
+        idempotencyKey: raw.idempotencyKey?.trim(),
+        metadata: raw.metadata,
+        skipInboundPersist: raw.skipInboundPersist ?? false,
+        retryCount: raw.retryCount ?? 0,
+    };
+};
+const extractMessages = (body) => {
+    const payload = Array.isArray(body.messages) ? body.messages : [body];
+    if (!payload.length) {
+        throw new Error("messages array is required");
+    }
+    if (payload.length > env_1.env.AI_API_MAX_BATCH_SIZE) {
+        throw new Error(`messages array exceeds limit of ${env_1.env.AI_API_MAX_BATCH_SIZE}`);
+    }
+    return payload.map(normalizeIncomingMessage);
+};
 app.get("/", (_req, res) => {
     res.json({
         success: true,
         message: "API Running",
         environment: env_1.env.NODE_ENV,
+        queue: ai_queue_1.AI_QUEUE_NAME,
     });
+});
+app.post("/v1/messages", async (req, res) => {
+    let timeoutHandle;
+    try {
+        const body = (req.body || {});
+        const messages = extractMessages(body);
+        const enqueue = (0, ai_queue_1.enqueueAIBatch)(messages, {
+            source: "api",
+            idempotencyKey: typeof body.idempotencyKey === "string"
+                ? body.idempotencyKey.trim()
+                : undefined,
+        });
+        const timeout = new Promise((_resolve, reject) => {
+            timeoutHandle = setTimeout(() => {
+                reject(new Error("Queue enqueue timeout"));
+            }, env_1.env.API_REQUEST_TIMEOUT_MS);
+        });
+        const jobs = await Promise.race([enqueue, timeout]);
+        res.status(202).json({
+            success: true,
+            requestId: req.requestId,
+            queue: ai_queue_1.AI_QUEUE_NAME,
+            accepted: messages.length,
+            jobs: jobs.length,
+        });
+    }
+    catch (error) {
+        const message = String(error?.message || "Unable to enqueue messages");
+        const statusCode = /timeout/i.test(message) ? 503 : 400;
+        res.status(statusCode).json({
+            success: false,
+            requestId: req.requestId,
+            message,
+        });
+    }
+    finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
 });
 app.use("/api/auth", auth_routes_1.default);
 app.use("/api/auth", googleAuth_routes_1.default);

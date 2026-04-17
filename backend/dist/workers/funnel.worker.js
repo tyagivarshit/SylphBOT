@@ -38,30 +38,39 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
+const redis_1 = require("../config/redis");
 /* SENTRY MONITORING */
 const Sentry = __importStar(require("@sentry/node"));
-const worker = new bullmq_1.Worker("funnelQueue", async (job) => {
-    const { executionId } = job.data;
-    try {
-        const execution = await prisma_1.default.automationExecution.findUnique({
-            where: { id: executionId },
-        });
-        if (!execution)
-            return;
-        console.log("Running funnel job:", executionId);
-    }
-    catch (error) {
-        console.error("Funnel worker error:", error);
-        Sentry.captureException(error);
-        throw error;
-    }
-}, {
-    connection: { url: process.env.REDIS_URL },
-    concurrency: 3,
-});
+const worker = process.env.RUN_WORKER === "true"
+    ? new bullmq_1.Worker("funnelQueue", async (job) => {
+        const { executionId } = job.data;
+        try {
+            const execution = await prisma_1.default.automationExecution.findUnique({
+                where: { id: executionId },
+            });
+            if (!execution)
+                return;
+            console.log("Running funnel job:", executionId);
+        }
+        catch (error) {
+            console.error("Funnel worker error:", error);
+            Sentry.captureException(error);
+            throw error;
+        }
+    }, {
+        connection: (0, redis_1.getWorkerRedisConnection)(),
+        concurrency: 3,
+    })
+    : {
+        on() {
+            return undefined;
+        },
+    };
 /* WORKER FAILURE MONITORING */
 worker.on("failed", (job, err) => {
     console.error("Funnel Worker Failed:", job?.id, err);
     Sentry.captureException(err);
 });
-console.log("🚀 Funnel Worker Started");
+if (process.env.RUN_WORKER === "true") {
+    console.log("🚀 Funnel Worker Started");
+}

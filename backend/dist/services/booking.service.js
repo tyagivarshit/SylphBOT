@@ -7,6 +7,7 @@ exports.rescheduleAppointment = exports.cancelExistingAppointment = exports.auto
 const prisma_1 = __importDefault(require("../config/prisma"));
 const bookingReminder_queue_1 = require("../queues/bookingReminder.queue");
 const ownerNotification_service_1 = require("./ownerNotification.service");
+const optimizer_service_1 = require("./salesAgent/optimizer.service");
 /*
 =====================================================
 🔥 FETCH AVAILABLE SLOTS (FIXED)
@@ -71,7 +72,7 @@ const fetchAvailableSlots = async (businessId, date) => {
 exports.fetchAvailableSlots = fetchAvailableSlots;
 const createNewAppointment = async (data) => {
     const { businessId, leadId, name, email, phone, startTime, endTime, } = data;
-    return prisma_1.default.$transaction(async (tx) => {
+    const appointment = await prisma_1.default.$transaction(async (tx) => {
         /* 🔥 PREVENT MULTIPLE BOOKINGS PER USER */
         if (leadId) {
             const existingUserBooking = await tx.appointment.findFirst({
@@ -121,9 +122,27 @@ const createNewAppointment = async (data) => {
                 slot: startTime,
                 type: "BOOKED",
             }).catch(() => { });
+            await tx.lead.update({
+                where: {
+                    id: leadId,
+                },
+                data: {
+                    stage: "BOOKED_CALL",
+                    aiStage: "HOT",
+                },
+            });
         }
         return appointment;
     });
+    if (leadId) {
+        void (0, optimizer_service_1.recordSalesConversionEvent)({
+            businessId,
+            leadId,
+            outcome: "BOOKED_CALL",
+            idempotencyKey: `booking:${appointment.id}`,
+        });
+    }
+    return appointment;
 };
 exports.createNewAppointment = createNewAppointment;
 /*

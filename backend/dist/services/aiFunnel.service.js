@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateAIFunnelReply = void 0;
 const openai_1 = __importDefault(require("openai"));
 const prisma_1 = __importDefault(require("../config/prisma"));
+const clientScope_service_1 = require("./clientScope.service");
 const openai = new openai_1.default({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: "https://api.groq.com/openai/v1",
@@ -18,22 +19,46 @@ const getConversationMemory = async (leadId) => {
         where: { leadId },
         orderBy: { createdAt: "asc" },
         take: 10,
+        select: {
+            sender: true,
+            content: true,
+        },
     });
     return messages.map((m) => ({
         role: m.sender === "AI" ? "assistant" : "user",
         content: m.content,
     }));
 };
-const getBusinessContext = async (businessId) => {
-    const client = await prisma_1.default.client.findFirst({
-        where: { businessId, isActive: true },
+const getBusinessContext = async (businessId, leadId) => {
+    const lead = await prisma_1.default.lead.findUnique({
+        where: {
+            id: leadId,
+        },
+        select: {
+            clientId: true,
+        },
     });
-    if (!client)
-        return null;
+    const [leadClient, systemClient] = await Promise.all([
+        lead?.clientId
+            ? prisma_1.default.client.findFirst({
+                where: {
+                    id: lead.clientId,
+                    businessId,
+                    isActive: true,
+                },
+                select: {
+                    businessInfo: true,
+                    pricingInfo: true,
+                    aiTone: true,
+                },
+            })
+            : null,
+        (0, clientScope_service_1.getSystemClient)(businessId),
+    ]);
     return {
-        businessInfo: client.businessInfo || "",
-        pricingInfo: client.pricingInfo || "",
-        aiTone: client.aiTone || "Professional",
+        businessInfo: leadClient?.businessInfo || systemClient.businessInfo || "",
+        pricingInfo: leadClient?.pricingInfo || systemClient.pricingInfo || "",
+        aiTone: leadClient?.aiTone || systemClient.aiTone || "Professional",
     };
 };
 /* =================================================
@@ -41,7 +66,7 @@ const getBusinessContext = async (businessId) => {
 ================================================= */
 const generateAIFunnelReply = async ({ businessId, leadId, message, }) => {
     try {
-        const context = await getBusinessContext(businessId);
+        const context = await getBusinessContext(businessId, leadId);
         if (!context)
             return null;
         const memory = await getConversationMemory(leadId);
@@ -100,6 +125,7 @@ IMPORTANT:
         const response = await openai.chat.completions.create({
             model: "llama-3.1-8b-instant",
             messages: messages,
+            max_tokens: 120,
             temperature: 0.6, // 🔥 controlled (less random)
         });
         let reply = response.choices?.[0]?.message?.content?.trim() ||
@@ -111,13 +137,14 @@ IMPORTANT:
         /* =================================================
         🔥 SAVE
         ================================================= */
-        await prisma_1.default.message.create({
-            data: {
-                leadId,
-                content: reply,
-                sender: "AI",
-            },
-        });
+        if (false)
+            await prisma_1.default.message.create({
+                data: {
+                    leadId,
+                    content: reply,
+                    sender: "AI",
+                },
+            });
         return reply;
     }
     catch (error) {

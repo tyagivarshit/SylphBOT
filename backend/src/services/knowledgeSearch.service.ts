@@ -6,6 +6,7 @@ interface KnowledgeResult {
   id: string;
   content: string;
   score: number;
+  clientId?: string | null;
 }
 
 /* ------------------------------------------ */
@@ -47,11 +48,17 @@ const keywordScore = (query: string, content: string): number => {
 
 export const searchKnowledge = async (
   businessId: string,
-  message: string
+  message: string,
+  options?: {
+    clientId?: string | null;
+    includeShared?: boolean;
+  }
 ): Promise<KnowledgeResult[]> => {
   try {
     /* 🔥 CREATE EMBEDDING */
     const messageEmbedding = await createEmbedding(message);
+    const normalizedClientId = String(options?.clientId || "").trim() || null;
+    const includeShared = options?.includeShared !== false;
 
     /* =================================================
     🔥 CRITICAL FIX: ONLY TRAINED + TRUSTED DATA
@@ -60,6 +67,15 @@ export const searchKnowledge = async (
     const knowledge = await prisma.knowledgeBase.findMany({
       where: {
         businessId,
+        ...(normalizedClientId
+          ? {
+              OR: includeShared
+                ? [{ clientId: normalizedClientId }, { clientId: null }]
+                : [{ clientId: normalizedClientId }],
+            }
+          : {
+              clientId: null,
+            }),
         isActive: true,
         sourceType: {
           in: ["SYSTEM", "FAQ", "MANUAL"], // ✅ NO AUTO_LEARN
@@ -70,6 +86,7 @@ export const searchKnowledge = async (
         content: true,
         embedding: true,
         priority: true,
+        clientId: true,
       },
     });
 
@@ -110,17 +127,26 @@ export const searchKnowledge = async (
       const priorityBoost =
         PRIORITY_WEIGHT[priorityKey as keyof typeof PRIORITY_WEIGHT] || 0;
 
+      const scopeBoost =
+        normalizedClientId && item.clientId === normalizedClientId
+          ? 0.35
+          : !item.clientId
+            ? 0.05
+            : 0;
+
       /* 🔥 FINAL SCORE */
       const finalScore =
         semantic * 0.7 +
         keyword * 0.3 +
         boost +
-        priorityBoost;
+        priorityBoost +
+        scopeBoost;
 
       return {
         id: item.id,
         content: item.content,
         score: finalScore,
+        clientId: item.clientId || null,
       };
     });
 

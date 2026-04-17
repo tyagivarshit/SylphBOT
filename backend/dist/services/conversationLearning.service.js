@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.saveConversationLearning = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const saveConversationLearning = async ({ businessId, input, output, embedding, priority, }) => {
+const saveConversationLearning = async ({ businessId, clientId, input, output, embedding, priority, }) => {
     try {
         /* =====================================================
         🔥 CLEAN & SAFE DEFAULTS
@@ -18,6 +18,7 @@ const saveConversationLearning = async ({ businessId, input, output, embedding, 
         const existing = await prisma_1.default.knowledgeBase.findFirst({
             where: {
                 businessId,
+                clientId: clientId || null,
                 content,
                 sourceType: "AUTO_LEARN", // 🔥 only check inside learning
             },
@@ -36,6 +37,7 @@ const saveConversationLearning = async ({ businessId, input, output, embedding, 
         return await prisma_1.default.knowledgeBase.create({
             data: {
                 businessId,
+                clientId: clientId || null,
                 title: input.slice(0, 80),
                 content,
                 embedding,

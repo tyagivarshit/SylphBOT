@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { api } from "@/lib/api"
 
-export default function CreateKnowledgeModal({ open, onClose, selected }: any){
+export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "" }: any){
 
   const [title,setTitle] = useState("")
   const [content,setContent] = useState("")
@@ -45,12 +45,14 @@ export default function CreateKnowledgeModal({ open, onClose, selected }: any){
       if(selected){
         await api.put(`/api/knowledge/${selected.id}`,{
           title,
-          content
+          content,
+          clientId: clientId || undefined
         })
       }else{
         await api.post("/api/knowledge",{
           title,
-          content
+          content,
+          clientId: clientId || undefined
         })
       }
 

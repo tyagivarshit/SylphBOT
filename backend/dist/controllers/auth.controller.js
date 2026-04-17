@@ -50,7 +50,6 @@ SET COOKIES
 ====================================== */
 const setCookies = (req, res, access, refresh) => {
     (0, authCookies_1.setAuthCookies)(res, req, access, refresh);
-    console.log("🍪 Cookies set");
 };
 /* ======================================
 REGISTER

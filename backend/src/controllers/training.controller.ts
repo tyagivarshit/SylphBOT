@@ -1,45 +1,78 @@
 import { Response } from "express";
 import prisma from "../config/prisma";
 import { createEmbedding } from "../services/embedding.service";
+import {
+  getScopedTrainingClient,
+  normalizeClientId,
+} from "../services/clientScope.service";
 import { AuthenticatedRequest } from "../types/request";
+
+type TrainingQuery = {
+  clientId?: string;
+};
 
 type BusinessInfoBody = {
   content?: string;
+  clientId?: string;
 };
 
 type FAQBody = {
   question?: string;
   answer?: string;
+  clientId?: string;
 };
 
 type AISettingsBody = {
   aiTone?: string;
   salesInstructions?: string;
+  clientId?: string;
 };
 
-const getOrCreateClient = async (businessId: string) => {
-  let client = await prisma.client.findFirst({
-    where: { businessId, isActive: true },
+const getScopedKnowledgeClientId = (client: { platform?: string; id: string }) =>
+  client.platform === "SYSTEM" ? null : client.id;
+
+const syncScopedFAQKnowledge = async ({
+  businessId,
+  clientId,
+}: {
+  businessId: string;
+  clientId: string | null;
+}) => {
+  const scopeClient = await getScopedTrainingClient(businessId, clientId);
+  const scopedKnowledgeClientId = getScopedKnowledgeClientId(scopeClient);
+
+  const faqs = await prisma.knowledgeBase.findMany({
+    where: {
+      businessId,
+      clientId: scopedKnowledgeClientId,
+      sourceType: "FAQ",
+      isActive: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      content: true,
+    },
   });
 
-  if (!client) {
-    client = await prisma.client.create({
-      data: {
-        businessId,
-        platform: "SYSTEM",
-        accessToken: "AUTO_GENERATED",
-        isActive: true,
-      },
-    });
-
-    console.log("Auto-created client:", businessId);
-  }
-
-  return client;
+  await prisma.client.update({
+    where: {
+      id: scopeClient.id,
+    },
+    data: {
+      faqKnowledge:
+        faqs.length > 0 ? faqs.map((item) => item.content).join("\n\n") : null,
+    },
+  });
 };
 
+const getRequestedClientId = (
+  req: AuthenticatedRequest<any, any, TrainingQuery>
+) => normalizeClientId(req.body?.clientId || req.query?.clientId);
+
 export const saveBusinessInfo = async (
-  req: AuthenticatedRequest<BusinessInfoBody>,
+  req: AuthenticatedRequest<BusinessInfoBody, any, TrainingQuery>,
   res: Response
 ) => {
   try {
@@ -54,7 +87,9 @@ export const saveBusinessInfo = async (
       return res.status(400).json({ message: "Content required" });
     }
 
-    const client = await getOrCreateClient(businessId);
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
+    const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
 
     await prisma.client.update({
       where: { id: client.id },
@@ -64,6 +99,7 @@ export const saveBusinessInfo = async (
     await prisma.knowledgeBase.deleteMany({
       where: {
         businessId,
+        clientId: scopedKnowledgeClientId,
         sourceType: "SYSTEM",
         title: "BUSINESS_INFO",
       },
@@ -80,6 +116,7 @@ export const saveBusinessInfo = async (
       await prisma.knowledgeBase.create({
         data: {
           businessId,
+          clientId: scopedKnowledgeClientId,
           title: "BUSINESS_INFO",
           content: chunk,
           embedding,
@@ -90,15 +127,23 @@ export const saveBusinessInfo = async (
       });
     }
 
-    return res.json({ message: "Business info saved" });
-  } catch (error) {
+    return res.json({
+      message: "Business info saved",
+      clientId: requestedClientId,
+    });
+  } catch (error: any) {
     console.error("Business info error:", error);
-    return res.status(500).json({ message: "Failed to save business info" });
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Failed to save business info",
+    });
   }
 };
 
 export const getBusinessInfo = async (
-  req: AuthenticatedRequest,
+  req: AuthenticatedRequest<any, any, TrainingQuery>,
   res: Response
 ) => {
   try {
@@ -108,24 +153,26 @@ export const getBusinessInfo = async (
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await prisma.client.findFirst({
-      where: { businessId, isActive: true },
-      select: {
-        businessInfo: true,
-      },
-    });
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
 
     return res.json({
       content: client?.businessInfo || "",
+      clientId: requestedClientId,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Get business info error:", error);
-    return res.status(500).json({ message: "Failed to fetch business info" });
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Failed to fetch business info",
+    });
   }
 };
 
 export const saveFAQ = async (
-  req: AuthenticatedRequest<FAQBody>,
+  req: AuthenticatedRequest<FAQBody, any, TrainingQuery>,
   res: Response
 ) => {
   try {
@@ -141,12 +188,17 @@ export const saveFAQ = async (
       return res.status(400).json({ message: "Question & Answer required" });
     }
 
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
+    const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
+
     const content = `Q: ${question}\nA: ${answer}`;
     const embedding = await createEmbedding(content);
 
-    await prisma.knowledgeBase.create({
+    const faq = await prisma.knowledgeBase.create({
       data: {
         businessId,
+        clientId: scopedKnowledgeClientId,
         title: question,
         content,
         embedding,
@@ -156,19 +208,30 @@ export const saveFAQ = async (
       },
     });
 
+    await syncScopedFAQKnowledge({
+      businessId,
+      clientId: requestedClientId,
+    });
+
     return res.json({
-      id: "new",
+      id: faq.id,
       question,
       answer,
+      clientId: requestedClientId,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("FAQ error:", error);
-    return res.status(500).json({ message: "Failed to save FAQ" });
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Failed to save FAQ",
+    });
   }
 };
 
 export const getFAQs = async (
-  req: AuthenticatedRequest,
+  req: AuthenticatedRequest<any, any, TrainingQuery>,
   res: Response
 ) => {
   try {
@@ -178,9 +241,14 @@ export const getFAQs = async (
       return res.status(401).json({ message: "Unauthorized" });
     }
 
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
+    const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
+
     const faqs = await prisma.knowledgeBase.findMany({
       where: {
         businessId,
+        clientId: scopedKnowledgeClientId,
         sourceType: "FAQ",
         isActive: true,
       },
@@ -200,18 +268,24 @@ export const getFAQs = async (
         id: faq.id,
         question: faq.title,
         answer: parts[1]?.replace("A: ", "") || "",
+        clientId: requestedClientId,
       };
     });
 
     return res.json(formatted);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Get FAQs error:", error);
-    return res.status(500).json({ message: "Failed to fetch FAQs" });
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Failed to fetch FAQs",
+    });
   }
 };
 
 export const saveAISettings = async (
-  req: AuthenticatedRequest<AISettingsBody>,
+  req: AuthenticatedRequest<AISettingsBody, any, TrainingQuery>,
   res: Response
 ) => {
   try {
@@ -221,7 +295,8 @@ export const saveAISettings = async (
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await getOrCreateClient(businessId);
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
 
     await prisma.client.update({
       where: { id: client.id },
@@ -231,15 +306,23 @@ export const saveAISettings = async (
       },
     });
 
-    return res.json({ message: "AI settings saved" });
-  } catch (error) {
+    return res.json({
+      message: "AI settings saved",
+      clientId: requestedClientId,
+    });
+  } catch (error: any) {
     console.error("AI settings error:", error);
-    return res.status(500).json({ message: "Failed to save AI settings" });
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Failed to save AI settings",
+    });
   }
 };
 
 export const getAISettings = async (
-  req: AuthenticatedRequest,
+  req: AuthenticatedRequest<any, any, TrainingQuery>,
   res: Response
 ) => {
   try {
@@ -249,17 +332,21 @@ export const getAISettings = async (
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await prisma.client.findFirst({
-      where: { businessId, isActive: true },
-      select: {
-        aiTone: true,
-        salesInstructions: true,
-      },
-    });
+    const requestedClientId = getRequestedClientId(req);
+    const client = await getScopedTrainingClient(businessId, requestedClientId);
 
-    return res.json(client || {});
-  } catch (error) {
+    return res.json({
+      aiTone: client.aiTone || null,
+      salesInstructions: client.salesInstructions || null,
+      clientId: requestedClientId,
+    });
+  } catch (error: any) {
     console.error("Get settings error:", error);
-    return res.status(500).json({ message: "Failed to fetch settings" });
+    return res.status(error?.message === "Client not found" ? 404 : 500).json({
+      message:
+        error?.message === "Client not found"
+          ? "Client not found"
+          : "Failed to fetch settings",
+    });
   }
 };

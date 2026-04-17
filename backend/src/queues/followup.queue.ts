@@ -1,6 +1,8 @@
 import { Queue } from "bullmq";
 import prisma from "../config/prisma";
 import { getQueueRedisConnection } from "../config/redis";
+import { getSalesFollowupSchedule } from "../services/salesAgent/followup.service";
+import type { SalesFollowupTrigger } from "../services/salesAgent/types";
 
 export const followupQueue = new Queue("followupQueue", {
   connection: getQueueRedisConnection(),
@@ -22,10 +24,12 @@ export const followupQueue = new Queue("followupQueue", {
   },
 });
 
-/* 🔥 LIMIT SAFETY */
-const MAX_FOLLOWUPS_PER_LEAD = 3;
-
-export const scheduleFollowups = async (leadId: string) => {
+export const scheduleFollowups = async (
+  leadId: string,
+  options?: {
+    trigger?: SalesFollowupTrigger;
+  }
+) => {
   if (!leadId) return;
 
   /* 🔥 CHECK LEAD STATUS */
@@ -36,14 +40,10 @@ export const scheduleFollowups = async (leadId: string) => {
 
   if (!lead || lead.stage === "CLOSED") return;
 
-  const delays = [
-    { label: "2hr", delay: 2 * 60 * 60 * 1000 },
-    { label: "12hr", delay: 12 * 60 * 60 * 1000 },
-    { label: "24hr", delay: 24 * 60 * 60 * 1000 },
-  ];
+  const schedule = await getSalesFollowupSchedule(leadId, options);
 
-  for (const item of delays.slice(0, MAX_FOLLOWUPS_PER_LEAD)) {
-    const jobId = `followup:${leadId}:${item.label}`;
+  for (const item of schedule) {
+    const jobId = `followup:${leadId}:${item.step}`;
 
     /* 🔥 REMOVE EXISTING (avoid duplicates) */
     const existingJob = await followupQueue.getJob(jobId);
@@ -55,10 +55,12 @@ export const scheduleFollowups = async (leadId: string) => {
       "sendFollowup",
       {
         leadId,
-        type: item.label,
+        type: item.step,
+        trigger: item.trigger,
+        scheduledFor: new Date(Date.now() + item.delayMs).toISOString(),
       },
       {
-        delay: item.delay,
+        delay: item.delayMs,
         jobId,
         removeOnComplete: true,
       }
@@ -72,6 +74,14 @@ export const cancelFollowups = async (leadId: string) => {
   if (!leadId) return;
 
   const jobIds = [
+    `followup:${leadId}:1h`,
+    `followup:${leadId}:24h`,
+    `followup:${leadId}:48h`,
+    `followup:${leadId}:NO_REPLY_1H`,
+    `followup:${leadId}:NO_REPLY_24H`,
+    `followup:${leadId}:NO_REPLY_48H`,
+    `followup:${leadId}:OPENED_NO_RESPONSE`,
+    `followup:${leadId}:CLICKED_NOT_BOOKED`,
     `followup:${leadId}:2hr`,
     `followup:${leadId}:12hr`,
     `followup:${leadId}:24hr`,

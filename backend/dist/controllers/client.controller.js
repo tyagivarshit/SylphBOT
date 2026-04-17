@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startMetaOAuth = exports.getSingleClient = exports.deleteClient = exports.updateClient = exports.getClients = exports.updateAITraining = exports.metaOAuthConnect = exports.createClient = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
+const clientUpsert_service_1 = require("../services/clientUpsert.service");
 const encrypt_1 = require("../utils/encrypt");
 const axios_1 = __importDefault(require("axios"));
 /*
@@ -82,21 +83,17 @@ const createClient = async (req, res) => {
             });
         }
         const encryptedToken = (0, encrypt_1.encrypt)(accessToken);
-        const client = await prisma_1.default.client.create({
-            data: {
-                businessId: business.id,
-                platform,
-                phoneNumberId: phoneNumberId || null,
-                pageId: pageId || null,
-                accessToken: encryptedToken,
-                aiTone: aiTone || null,
-                businessInfo: businessInfo || null,
-                pricingInfo: pricingInfo || null,
-                /* NEW */
-                faqKnowledge: faqKnowledge || null,
-                salesInstructions: salesInstructions || null,
-                isActive: true,
-            },
+        const client = await (0, clientUpsert_service_1.upsertClientByUniqueKey)({
+            businessId: business.id,
+            platform,
+            phoneNumberId,
+            pageId,
+            accessToken: encryptedToken,
+            aiTone,
+            businessInfo,
+            pricingInfo,
+            faqKnowledge,
+            salesInstructions,
         });
         return res.status(201).json({
             message: "Client created successfully",
@@ -104,9 +101,24 @@ const createClient = async (req, res) => {
         });
     }
     catch (error) {
+        if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
+            return res.status(400).json({
+                message: "phoneNumberId or pageId required",
+            });
+        }
+        if (error.code === "CLIENT_OWNERSHIP_CONFLICT") {
+            return res.status(400).json({
+                message: "This connected account already exists for another business",
+            });
+        }
+        if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT") {
+            return res.status(400).json({
+                message: "This connected account already exists for your business",
+            });
+        }
         if (error.code === "P2002") {
             return res.status(400).json({
-                message: "This platform already exists for your business",
+                message: "This connected account already exists for your business",
             });
         }
         console.error("Create client error:", error);
@@ -180,52 +192,43 @@ const metaOAuthConnect = async (req, res) => {
             });
         }
         const encryptedToken = (0, encrypt_1.encrypt)(page.access_token);
-        const existingClient = await prisma_1.default.client.findFirst({
-            where: {
-                businessId: business.id,
-                platform: "INSTAGRAM",
-            },
+        const client = await (0, clientUpsert_service_1.upsertClientByUniqueKey)({
+            businessId: business.id,
+            platform: "INSTAGRAM",
+            pageId: instagramId,
+            accessToken: encryptedToken,
+            aiTone,
+            businessInfo,
+            pricingInfo,
+            faqKnowledge,
+            salesInstructions,
         });
-        let client;
-        if (existingClient) {
-            client = await prisma_1.default.client.update({
-                where: { id: existingClient.id },
-                data: {
-                    pageId: instagramId,
-                    accessToken: encryptedToken,
-                    aiTone: aiTone || null,
-                    businessInfo: businessInfo || null,
-                    pricingInfo: pricingInfo || null,
-                    /* NEW */
-                    faqKnowledge: faqKnowledge || null,
-                    salesInstructions: salesInstructions || null,
-                    isActive: true,
-                },
-            });
-        }
-        else {
-            client = await prisma_1.default.client.create({
-                data: {
-                    businessId: business.id,
-                    platform: "INSTAGRAM",
-                    pageId: instagramId,
-                    accessToken: encryptedToken,
-                    aiTone: aiTone || null,
-                    businessInfo: businessInfo || null,
-                    pricingInfo: pricingInfo || null,
-                    /* NEW */
-                    faqKnowledge: faqKnowledge || null,
-                    salesInstructions: salesInstructions || null,
-                    isActive: true,
-                },
-            });
-        }
         return res.json({
             message: "Instagram connected successfully",
             client,
         });
     }
     catch (error) {
+        if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
+            return res.status(400).json({
+                message: "phoneNumberId or pageId required",
+            });
+        }
+        if (error.code === "CLIENT_OWNERSHIP_CONFLICT") {
+            return res.status(400).json({
+                message: "This connected account already exists for another business",
+            });
+        }
+        if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT") {
+            return res.status(400).json({
+                message: "This connected account already exists for your business",
+            });
+        }
+        if (error.code === "P2002") {
+            return res.status(400).json({
+                message: "This connected account already exists for your business",
+            });
+        }
         console.error("Meta OAuth error:", error);
         return res.status(500).json({
             message: "Instagram connection failed",

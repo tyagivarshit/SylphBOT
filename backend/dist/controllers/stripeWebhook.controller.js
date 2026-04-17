@@ -12,6 +12,7 @@ const tax_service_1 = require("../services/tax.service");
 const invoice_service_1 = require("../services/invoice.service");
 const redis_1 = __importDefault(require("../config/redis"));
 const billingSync_service_1 = require("../services/billingSync.service");
+const conversionTracker_service_1 = require("../services/salesAgent/conversionTracker.service");
 function getSubscriptionId(subscription) {
     if (!subscription)
         return null;
@@ -52,9 +53,23 @@ const stripeWebhook = async (req, res) => {
                 const session = event.data.object;
                 const businessId = session.metadata?.businessId;
                 const planType = session.metadata?.plan;
+                const leadId = session.metadata?.leadId;
                 if (!businessId || !planType)
                     break;
                 await (0, billingSync_service_1.syncCheckoutSession)(session);
+                if (leadId) {
+                    await (0, conversionTracker_service_1.recordConversionEvent)({
+                        businessId,
+                        leadId,
+                        outcome: "payment_completed",
+                        source: "STRIPE_CHECKOUT",
+                        idempotencyKey: `stripe:${event.id}`,
+                        metadata: {
+                            checkoutSessionId: session.id,
+                            planType,
+                        },
+                    }).catch(() => { });
+                }
                 const user = await prisma_1.default.user.findFirst({
                     where: { businessId },
                 });

@@ -8,7 +8,11 @@ interface FAQ {
   answer: string
 }
 
-export default function FAQForm(){
+type FAQFormProps = {
+  clientId?: string
+}
+
+export default function FAQForm({ clientId = "" }: FAQFormProps){
 
 const [question,setQuestion] = useState("")
 const [answer,setAnswer] = useState("")
@@ -16,13 +20,15 @@ const [faqs,setFaqs] = useState<FAQ[]>([])
 
 const [loading,setLoading] = useState(false)
 const [fetching,setFetching] = useState(true)
+const query = clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""
 
 /* ================= LOAD FAQs ================= */
 
 useEffect(() => {
   const loadFAQs = async () => {
     try {
-      const res = await fetch("/api/training/faq")
+      setFetching(true)
+      const res = await fetch(`/api/training/faq${query}`)
       const data = await res.json()
 
       if(res.ok){
@@ -37,7 +43,7 @@ useEffect(() => {
   }
 
   loadFAQs()
-}, [])
+}, [query])
 
 /* ================= ADD FAQ ================= */
 
@@ -56,7 +62,7 @@ const handleAdd = async () => {
       headers:{
         "Content-Type":"application/json"
       },
-      body: JSON.stringify({ question, answer })
+      body: JSON.stringify({ question, answer, clientId: clientId || undefined })
     })
 
     const data = await res.json()

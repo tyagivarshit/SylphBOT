@@ -37,7 +37,6 @@ const protect = async (req, res, next) => {
     try {
         const accessToken = req.cookies?.accessToken;
         const refreshToken = req.cookies?.refreshToken;
-        console.log("🍪 Cookies:", req.cookies);
         if (!accessToken && !refreshToken) {
             throw (0, AppError_1.unauthorized)("Not authorized");
         }

@@ -1,6 +1,7 @@
 import prisma from "../config/prisma";
 import { scheduleReminderJobs } from "../queues/bookingReminder.queue";
 import { sendOwnerWhatsAppNotification } from "./ownerNotification.service";
+import { recordSalesConversionEvent } from "./salesAgent/optimizer.service";
 
 /*
 =====================================================
@@ -122,7 +123,7 @@ export const createNewAppointment = async (
     endTime,
   } = data;
 
-  return prisma.$transaction(async (tx) => {
+  const appointment = await prisma.$transaction(async (tx) => {
 
     /* 🔥 PREVENT MULTIPLE BOOKINGS PER USER */
     if (leadId) {
@@ -179,10 +180,31 @@ export const createNewAppointment = async (
         slot: startTime,
         type: "BOOKED",
       }).catch(() => {});
+
+      await tx.lead.update({
+        where: {
+          id: leadId,
+        },
+        data: {
+          stage: "BOOKED_CALL",
+          aiStage: "HOT",
+        },
+      });
     }
 
     return appointment;
   });
+
+  if (leadId) {
+    void recordSalesConversionEvent({
+      businessId,
+      leadId,
+      outcome: "BOOKED_CALL",
+      idempotencyKey: `booking:${appointment.id}`,
+    });
+  }
+
+  return appointment;
 };
 
 /*

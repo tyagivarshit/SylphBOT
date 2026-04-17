@@ -22,6 +22,8 @@ import {
   releaseLeadProcessingLock,
 } from "../services/aiPipelineState.service";
 import { handleIncomingMessage } from "../services/executionRouter.servce";
+import { scheduleFollowups } from "../queues/followup.queue";
+import { trackAIMessage } from "../services/salesAgent/conversionTracker.service";
 import { getIO } from "../sockets/socket.server";
 import { decrypt } from "../utils/encrypt";
 import logger from "../utils/logger";
@@ -55,6 +57,12 @@ type AIWorkerTask = {
 type NormalizedReply = {
   text: string;
   cta?: string | null;
+  angle?: string | null;
+  variantId?: string | null;
+  variantKey?: string | null;
+  leadState?: string | null;
+  messageType?: string | null;
+  meta?: Record<string, unknown>;
   source?: string | null;
   latencyMs?: number | null;
   traceId?: string | null;
@@ -107,10 +115,20 @@ const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
     source?: unknown;
     latencyMs?: unknown;
     traceId?: unknown;
+    angle?: unknown;
+    variantId?: unknown;
+    variantKey?: unknown;
+    leadState?: unknown;
+    messageType?: unknown;
     meta?: {
       source?: unknown;
       latencyMs?: unknown;
       traceId?: unknown;
+      angle?: unknown;
+      variantId?: unknown;
+      variantKey?: unknown;
+      leadState?: unknown;
+      messageType?: unknown;
     };
   };
   const text = String(reply.message ?? "").trim();
@@ -122,6 +140,40 @@ const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
   return {
     text,
     cta: typeof reply.cta === "string" ? reply.cta : null,
+    angle:
+      typeof reply.angle === "string"
+        ? reply.angle
+        : typeof reply.meta?.angle === "string"
+          ? reply.meta.angle
+          : null,
+    variantId:
+      typeof reply.variantId === "string"
+        ? reply.variantId
+        : typeof reply.meta?.variantId === "string"
+          ? reply.meta.variantId
+          : null,
+    variantKey:
+      typeof reply.variantKey === "string"
+        ? reply.variantKey
+        : typeof reply.meta?.variantKey === "string"
+          ? reply.meta.variantKey
+          : null,
+    leadState:
+      typeof reply.leadState === "string"
+        ? reply.leadState
+        : typeof reply.meta?.leadState === "string"
+          ? reply.meta.leadState
+          : null,
+    messageType:
+      typeof reply.messageType === "string"
+        ? reply.messageType
+        : typeof reply.meta?.messageType === "string"
+          ? reply.meta.messageType
+          : null,
+    meta:
+      reply.meta && typeof reply.meta === "object"
+        ? (reply.meta as Record<string, unknown>)
+        : {},
     source:
       typeof reply.source === "string"
         ? reply.source
@@ -185,7 +237,13 @@ const saveReplyMessage = async (
       content: replyText,
       sender: "AI",
       metadata: {
+        ...(reply.meta || {}),
         cta: reply.cta || null,
+        angle: reply.angle || null,
+        variantId: reply.variantId || null,
+        variantKey: reply.variantKey || null,
+        leadState: reply.leadState || null,
+        messageType: reply.messageType || "AI_REPLY",
         deliveryJobKey: task.jobKey,
         sourceKind: task.kind,
         replySource: reply.source || task.kind,
@@ -356,6 +414,37 @@ const processAndSendReply = async (
     normalizedReply
   );
 
+  await trackAIMessage({
+    messageId: message.id,
+    businessId: task.message.businessId,
+    leadId: task.message.leadId,
+    variantId: normalizedReply.variantId || null,
+    source: normalizedReply.source || task.kind || "AI_ROUTER",
+    cta: normalizedReply.cta || null,
+    angle: normalizedReply.angle || null,
+    leadState: normalizedReply.leadState || null,
+    messageType: normalizedReply.messageType || "AI_REPLY",
+    traceId: normalizedReply.traceId || task.jobKey,
+    metadata: {
+      ...(normalizedReply.meta || {}),
+      platform: task.message.platform || null,
+      externalEventId: task.message.externalEventId || null,
+      deliveryJobKey: task.jobKey,
+      sourceKind: task.kind,
+    },
+  }).catch((error) => {
+    logger.warn(
+      {
+        businessId: task.message.businessId,
+        leadId: task.message.leadId,
+        messageId: message.id,
+        jobKey: task.jobKey,
+        error,
+      },
+      "AI reply attribution failed"
+    );
+  });
+
   if (created) {
     emitRealtimeMessage(task.message.leadId, message, normalizedReply.cta);
 
@@ -366,6 +455,7 @@ const processAndSendReply = async (
         unreadCount: { increment: 1 },
       },
     });
+
   }
 
   if (existingState.sent) {
@@ -382,6 +472,19 @@ const processAndSendReply = async (
   await retryAsync(() => sendPlatformReply(task, replyText), 3, 800);
 
   await markReplySent(task.jobKey);
+
+  if (created) {
+    void scheduleFollowups(task.message.leadId).catch((error) => {
+      logger.warn(
+        {
+          leadId: task.message.leadId,
+          jobKey: task.jobKey,
+          error,
+        },
+        "Follow-up scheduling after AI reply failed"
+      );
+    });
+  }
 
   logger.info(
     {

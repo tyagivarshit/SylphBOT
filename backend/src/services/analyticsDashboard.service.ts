@@ -1,6 +1,5 @@
 import {
   differenceInMinutes,
-  eachDayOfInterval,
   endOfDay,
   format,
   startOfDay,
@@ -8,16 +7,22 @@ import {
 } from "date-fns";
 import {
   AnalyticsAppointmentRecord,
+  AnalyticsConversionEventRecord,
   AnalyticsLeadRecord,
   AnalyticsMessageRecord,
+  AnalyticsTrackedMessageRecord,
   getAllLeadAppointments,
   getAllLeads,
   getAppointmentsForLeadIds,
   getAppointmentsInRange,
   getBusinessProfile,
+  getConversionEventsInRange,
   getLeadsInRange,
   getMessagesInRange,
+  getTrackedMessagesInRange,
 } from "../analytics/analyticsDashboard.repository";
+import { getVariantPerformance } from "./salesAgent/abTesting.service";
+import { runSalesOptimizer } from "./salesAgent/optimizer.service";
 
 type PlanKey = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE";
 type MetricFormat = "number" | "percent" | "minutes";
@@ -295,6 +300,18 @@ function getResponseMetrics(messages: AnalyticsMessageRecord[]) {
   };
 }
 
+function getDaysInInterval(start: Date, end: Date) {
+  const days: Date[] = [];
+  const cursor = startOfDay(start);
+
+  while (cursor <= end) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return days;
+}
+
 function buildDailySeries(
   start: Date,
   end: Date,
@@ -302,8 +319,20 @@ function buildDailySeries(
   messages: AnalyticsMessageRecord[],
   appointments: AnalyticsAppointmentRecord[]
 ) {
-  const days = eachDayOfInterval({ start, end });
-  const map = new Map(
+  const days = getDaysInInterval(start, end);
+  const map = new Map<
+    string,
+    {
+      date: string;
+      label: string;
+      leads: number;
+      qualified: number;
+      bookings: number;
+      inboundMessages: number;
+      aiReplies: number;
+      agentReplies: number;
+    }
+  >(
     days.map((date) => [
       format(date, "yyyy-MM-dd"),
       {
@@ -556,6 +585,179 @@ function buildFunnel(
   }));
 }
 
+function buildRevenueEngineMetrics(
+  trackedMessages: AnalyticsTrackedMessageRecord[],
+  conversionEvents: AnalyticsConversionEventRecord[],
+  leads: AnalyticsLeadRecord[],
+  bookedLeadIds: Set<string>
+) {
+  const byMessage = new Map<
+    string,
+    {
+      tracking: AnalyticsTrackedMessageRecord;
+      events: AnalyticsConversionEventRecord[];
+    }
+  >();
+
+  for (const tracking of trackedMessages) {
+    byMessage.set(tracking.messageId, {
+      tracking,
+      events: [],
+    });
+  }
+
+  for (const event of conversionEvents) {
+    if (!event.messageId) {
+      continue;
+    }
+
+    const item = byMessage.get(event.messageId);
+
+    if (item) {
+      item.events.push(event);
+    }
+  }
+
+  const outcomeCounts = conversionEvents.reduce(
+    (acc, event) => {
+      const outcome = event.outcome.toLowerCase();
+      acc[outcome] = (acc[outcome] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+  const convertedMessages = Array.from(byMessage.values()).filter(
+    (item) => item.events.length > 0
+  ).length;
+  const topPerformingMessages = Array.from(byMessage.values())
+    .map(({ tracking, events }) => {
+      const conversionValue = events.reduce((sum, event) => {
+        if (event.outcome === "payment_completed") return sum + (event.value || 8);
+        if (event.outcome === "booked_call") return sum + 5;
+        if (event.outcome === "link_clicked") return sum + 2;
+        if (event.outcome === "replied") return sum + 1;
+        return sum + 0.25;
+      }, 0);
+
+      return {
+        messageId: tracking.messageId,
+        preview: tracking.message.content.slice(0, 180),
+        cta: tracking.cta,
+        angle: tracking.angle,
+        leadState: tracking.leadState,
+        variantKey: tracking.variant?.variantKey || null,
+        variantLabel: tracking.variant?.label || null,
+        sentAt: tracking.sentAt,
+        conversions: events.length,
+        conversionValue,
+        outcomes: events.reduce((acc, event) => {
+          acc[event.outcome] = (acc[event.outcome] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>),
+      };
+    })
+    .sort((left, right) => {
+      if (right.conversionValue !== left.conversionValue) {
+        return right.conversionValue - left.conversionValue;
+      }
+
+      return right.conversions - left.conversions;
+    })
+    .slice(0, 8);
+  const worstPerformingMessages = Array.from(byMessage.values())
+    .map(({ tracking, events }) => ({
+      messageId: tracking.messageId,
+      preview: tracking.message.content.slice(0, 180),
+      cta: tracking.cta,
+      angle: tracking.angle,
+      leadState: tracking.leadState,
+      variantKey: tracking.variant?.variantKey || null,
+      variantLabel: tracking.variant?.label || null,
+      sentAt: tracking.sentAt,
+      conversions: events.length,
+      conversionValue: events.reduce((sum, event) => {
+        if (event.outcome === "payment_completed") return sum + (event.value || 8);
+        if (event.outcome === "booked_call") return sum + 5;
+        if (event.outcome === "link_clicked") return sum + 2;
+        if (event.outcome === "replied") return sum + 1;
+        return sum + 0.25;
+      }, 0),
+    }))
+    .filter((item) => item.conversions === 0 && item.conversionValue === 0)
+    .sort((left, right) => left.sentAt.getTime() - right.sentAt.getTime())
+    .slice(0, 8);
+  const revenueByVariant = Array.from(byMessage.values())
+    .reduce((acc, { tracking, events }) => {
+      const key = tracking.variant?.variantKey || "no_variant";
+      const current = acc.get(key) || {
+        variantKey: key,
+        revenue: 0,
+        messages: 0,
+      };
+      current.messages += 1;
+      current.revenue += events.reduce((sum, event) => {
+        if (event.outcome === "payment_completed") return sum + (event.value || 8);
+        if (event.outcome === "booked_call") return sum + 5;
+        if (event.outcome === "link_clicked") return sum + 2;
+        if (event.outcome === "replied") return sum + 1;
+        return sum + 0.25;
+      }, 0);
+      acc.set(key, current);
+      return acc;
+    }, new Map<string, { variantKey: string; revenue: number; messages: number }>());
+  const revenueByFunnelStage = Array.from(byMessage.values())
+    .reduce((acc, { tracking, events }) => {
+      const key = tracking.leadState || "UNKNOWN";
+      const current = acc.get(key) || {
+        leadState: key,
+        revenue: 0,
+        messages: 0,
+      };
+      current.messages += 1;
+      current.revenue += events.reduce((sum, event) => {
+        if (event.outcome === "payment_completed") return sum + (event.value || 8);
+        if (event.outcome === "booked_call") return sum + 5;
+        if (event.outcome === "link_clicked") return sum + 2;
+        if (event.outcome === "replied") return sum + 1;
+        return sum + 0.25;
+      }, 0);
+      acc.set(key, current);
+      return acc;
+    }, new Map<string, { leadState: string; revenue: number; messages: number }>());
+
+  return {
+    conversionRate: percent(convertedMessages, trackedMessages.length),
+    replyRate: percent(outcomeCounts.replied || 0, trackedMessages.length),
+    bookingRate: percent(outcomeCounts.booked_call || bookedLeadIds.size, leads.length),
+    linkClickRate: percent(outcomeCounts.link_clicked || 0, trackedMessages.length),
+    paymentRate: percent(outcomeCounts.payment_completed || 0, leads.length),
+    trackedMessages: trackedMessages.length,
+    conversionEvents: conversionEvents.length,
+    outcomes: {
+      replied: outcomeCounts.replied || 0,
+      linkClicked: outcomeCounts.link_clicked || 0,
+      bookedCall: outcomeCounts.booked_call || 0,
+      paymentCompleted: outcomeCounts.payment_completed || 0,
+    },
+    topPerformingMessages,
+    worstPerformingMessages,
+    revenueByVariant: Array.from(revenueByVariant.values())
+      .map((item) => ({
+        ...item,
+        revenuePerMessage:
+          item.messages > 0 ? round(item.revenue / item.messages, 2) : 0,
+      }))
+      .sort((left, right) => right.revenuePerMessage - left.revenuePerMessage),
+    revenueByFunnelStage: Array.from(revenueByFunnelStage.values())
+      .map((item) => ({
+        ...item,
+        revenuePerMessage:
+          item.messages > 0 ? round(item.revenue / item.messages, 2) : 0,
+      }))
+      .sort((left, right) => right.revenuePerMessage - left.revenuePerMessage),
+  };
+}
+
 function getHealthScore(params: {
   leadToBookingRate: number;
   qualificationRate: number;
@@ -639,6 +841,9 @@ export async function getAnalyticsDashboard(
     currentAppointments,
     previousAppointments,
     allLeadAppointments,
+    currentConversionEvents,
+    currentTrackedMessages,
+    variantPerformance,
   ] = await Promise.all([
     getBusinessProfile(businessId),
     getLeadsInRange(businessId, window.current.start, window.current.end),
@@ -649,6 +854,9 @@ export async function getAnalyticsDashboard(
     getAppointmentsInRange(businessId, window.current.start, window.current.end),
     getAppointmentsInRange(businessId, window.previous.start, window.previous.end),
     getAllLeadAppointments(businessId),
+    getConversionEventsInRange(businessId, window.current.start, window.current.end),
+    getTrackedMessagesInRange(businessId, window.current.start, window.current.end),
+    getVariantPerformance({ businessId }),
   ]);
 
   const [currentLeadAppointments, previousLeadAppointments] = await Promise.all([
@@ -659,6 +867,16 @@ export async function getAnalyticsDashboard(
   const currentLeadBookedIds = getActiveBookedLeadIds(currentLeadAppointments);
   const previousLeadBookedIds = getActiveBookedLeadIds(previousLeadAppointments);
   const allBookedLeadIds = getActiveBookedLeadIds(allLeadAppointments);
+  const revenueEngine = buildRevenueEngineMetrics(
+    currentTrackedMessages,
+    currentConversionEvents,
+    currentLeads,
+    currentLeadBookedIds
+  );
+
+  if (currentTrackedMessages.length >= 10) {
+    void runSalesOptimizer({ businessId }).catch(() => {});
+  }
 
   const currentResponse = getResponseMetrics(currentMessages);
   const previousResponse = getResponseMetrics(previousMessages);
@@ -843,6 +1061,11 @@ export async function getAnalyticsDashboard(
       },
     },
     funnel: buildFunnel(allLeads, allBookedLeadIds),
+    revenueEngine: {
+      ...revenueEngine,
+      variantPerformance,
+      funnelBreakdown: buildFunnel(allLeads, allBookedLeadIds),
+    },
     sourcePerformance,
     deepDive,
   };

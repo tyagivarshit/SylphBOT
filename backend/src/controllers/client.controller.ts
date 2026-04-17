@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import { upsertClientByUniqueKey } from "../services/clientUpsert.service";
 import { encrypt } from "../utils/encrypt";
 import axios from "axios";
 
@@ -114,24 +115,17 @@ export const createClient = async (req: Request, res: Response) => {
 
     const encryptedToken = encrypt(accessToken);
 
-    const client = await prisma.client.create({
-      data: {
-        businessId: business.id,
-        platform,
-        phoneNumberId: phoneNumberId || null,
-        pageId: pageId || null,
-        accessToken: encryptedToken,
-
-        aiTone: aiTone || null,
-        businessInfo: businessInfo || null,
-        pricingInfo: pricingInfo || null,
-
-        /* NEW */
-        faqKnowledge: faqKnowledge || null,
-        salesInstructions: salesInstructions || null,
-
-        isActive: true,
-      },
+    const client = await upsertClientByUniqueKey({
+      businessId: business.id,
+      platform,
+      phoneNumberId,
+      pageId,
+      accessToken: encryptedToken,
+      aiTone,
+      businessInfo,
+      pricingInfo,
+      faqKnowledge,
+      salesInstructions,
     });
 
     return res.status(201).json({
@@ -141,9 +135,27 @@ export const createClient = async (req: Request, res: Response) => {
 
   } catch (error: any) {
 
+    if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
+      return res.status(400).json({
+        message: "phoneNumberId or pageId required",
+      });
+    }
+
+    if (error.code === "CLIENT_OWNERSHIP_CONFLICT") {
+      return res.status(400).json({
+        message: "This connected account already exists for another business",
+      });
+    }
+
+    if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT") {
+      return res.status(400).json({
+        message: "This connected account already exists for your business",
+      });
+    }
+
     if (error.code === "P2002") {
       return res.status(400).json({
-        message: "This platform already exists for your business",
+        message: "This connected account already exists for your business",
       });
     }
 
@@ -259,64 +271,48 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     const encryptedToken = encrypt(page.access_token);
 
-    const existingClient = await prisma.client.findFirst({
-      where: {
-        businessId: business.id,
-        platform: "INSTAGRAM",
-      },
+    const client = await upsertClientByUniqueKey({
+      businessId: business.id,
+      platform: "INSTAGRAM",
+      pageId: instagramId,
+      accessToken: encryptedToken,
+      aiTone,
+      businessInfo,
+      pricingInfo,
+      faqKnowledge,
+      salesInstructions,
     });
-
-    let client;
-
-    if (existingClient) {
-
-      client = await prisma.client.update({
-        where: { id: existingClient.id },
-        data: {
-          pageId: instagramId,
-          accessToken: encryptedToken,
-
-          aiTone: aiTone || null,
-          businessInfo: businessInfo || null,
-          pricingInfo: pricingInfo || null,
-
-          /* NEW */
-          faqKnowledge: faqKnowledge || null,
-          salesInstructions: salesInstructions || null,
-
-          isActive: true,
-        },
-      });
-
-    } else {
-
-      client = await prisma.client.create({
-        data: {
-          businessId: business.id,
-          platform: "INSTAGRAM",
-          pageId: instagramId,
-          accessToken: encryptedToken,
-
-          aiTone: aiTone || null,
-          businessInfo: businessInfo || null,
-          pricingInfo: pricingInfo || null,
-
-          /* NEW */
-          faqKnowledge: faqKnowledge || null,
-          salesInstructions: salesInstructions || null,
-
-          isActive: true,
-        },
-      });
-
-    }
 
     return res.json({
       message: "Instagram connected successfully",
       client,
     });
 
-  } catch (error) {
+  } catch (error: any) {
+
+    if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
+      return res.status(400).json({
+        message: "phoneNumberId or pageId required",
+      });
+    }
+
+    if (error.code === "CLIENT_OWNERSHIP_CONFLICT") {
+      return res.status(400).json({
+        message: "This connected account already exists for another business",
+      });
+    }
+
+    if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT") {
+      return res.status(400).json({
+        message: "This connected account already exists for your business",
+      });
+    }
+
+    if (error.code === "P2002") {
+      return res.status(400).json({
+        message: "This connected account already exists for your business",
+      });
+    }
 
     console.error("Meta OAuth error:", error);
 

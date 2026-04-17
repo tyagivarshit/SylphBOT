@@ -19,6 +19,7 @@ import { createNotification } from "../services/notification.service";
 
 /* 🔥 ADDED (QUEUE) */
 import { automationQueue } from "../queues/automation.queue";
+import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 
 const router = Router();
 const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
@@ -265,6 +266,19 @@ router.post("/", async (req: any, res: Response) => {
         },
       },
     });
+
+    await recordConversionEvent({
+      businessId: client.businessId,
+      leadId: lead.id,
+      outcome: "replied",
+      source: "INSTAGRAM_WEBHOOK",
+      idempotencyKey: `reply:${eventId}`,
+      occurredAt: userMessage.createdAt,
+      metadata: {
+        platform: "INSTAGRAM",
+        externalEventId: eventId,
+      },
+    }).catch(() => {});
 
     await createNotification({
       userId: client.business.ownerId,

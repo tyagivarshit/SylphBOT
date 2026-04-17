@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import prisma from "../config/prisma";
+import { getSystemClient } from "./clientScope.service";
 
 const openai = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
@@ -33,22 +34,38 @@ const getConversationMemory = async (leadId: string) => {
   }));
 };
 
-const getBusinessContext = async (businessId: string) => {
-  const client = await prisma.client.findFirst({
-    where: { businessId, isActive: true },
+const getBusinessContext = async (businessId: string, leadId: string) => {
+  const lead = await prisma.lead.findUnique({
+    where: {
+      id: leadId,
+    },
     select: {
-      businessInfo: true,
-      pricingInfo: true,
-      aiTone: true,
+      clientId: true,
     },
   });
 
-  if (!client) return null;
+  const [leadClient, systemClient] = await Promise.all([
+    lead?.clientId
+      ? prisma.client.findFirst({
+          where: {
+            id: lead.clientId,
+            businessId,
+            isActive: true,
+          },
+          select: {
+            businessInfo: true,
+            pricingInfo: true,
+            aiTone: true,
+          },
+        })
+      : null,
+    getSystemClient(businessId),
+  ]);
 
   return {
-    businessInfo: client.businessInfo || "",
-    pricingInfo: client.pricingInfo || "",
-    aiTone: client.aiTone || "Professional",
+    businessInfo: leadClient?.businessInfo || systemClient.businessInfo || "",
+    pricingInfo: leadClient?.pricingInfo || systemClient.pricingInfo || "",
+    aiTone: leadClient?.aiTone || systemClient.aiTone || "Professional",
   };
 };
 
@@ -62,7 +79,7 @@ export const generateAIFunnelReply = async ({
   message,
 }: FunnelInput) => {
   try {
-    const context = await getBusinessContext(businessId);
+    const context = await getBusinessContext(businessId, leadId);
     if (!context) return null;
 
     const memory = await getConversationMemory(leadId);

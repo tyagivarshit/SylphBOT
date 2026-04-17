@@ -2,33 +2,43 @@
 
 import { useEffect, useState } from "react"
 
-export default function BusinessInfoForm(){
+type BusinessInfoFormProps = {
+  clientId?: string
+}
+
+export default function BusinessInfoForm({ clientId = "" }: BusinessInfoFormProps){
 
 const [info,setInfo] = useState("")
 const [loading,setLoading] = useState(false)
 const [fetching,setFetching] = useState(true)
+
+const query = clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""
 
 /* ================= LOAD DATA ================= */
 
 useEffect(() => {
   const loadData = async () => {
     try {
-      const res = await fetch("/api/training/business")
+      setFetching(true)
+      const res = await fetch(`/api/training/business${query}`)
       const data = await res.json()
 
       if (res.ok && data?.content) {
         setInfo(data.content)
+      } else if (res.ok) {
+        setInfo("")
       }
 
     } catch (err) {
       console.error("Load error:", err)
+      setInfo("")
     } finally {
       setFetching(false)
     }
   }
 
   loadData()
-}, [])
+}, [query])
 
 /* ================= SAVE ================= */
 
@@ -45,7 +55,7 @@ const handleSave = async () => {
       headers:{
         "Content-Type":"application/json"
       },
-      body: JSON.stringify({ content: info })
+      body: JSON.stringify({ content: info, clientId: clientId || undefined })
     })
 
     const data = await res.json()

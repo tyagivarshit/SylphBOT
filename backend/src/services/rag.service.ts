@@ -2,6 +2,7 @@ import prisma from "../config/prisma";
 import { searchKnowledge } from "./knowledgeSearch.service";
 import OpenAI from "openai";
 import redis from "../config/redis";
+import { getSystemClient } from "./clientScope.service";
 
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
@@ -128,8 +129,17 @@ export const generateRAGReply = async (
   try {
 
     const intent = detectIntent(message);
+    const lead = leadId
+      ? await prisma.lead.findUnique({
+          where: { id: leadId },
+          select: {
+            clientId: true,
+          },
+        })
+      : null;
+    const scopedClientId = lead?.clientId || null;
 
-    const businessKey = `biz:${businessId}`;
+    const businessKey = `biz:${businessId}:client:${scopedClientId || "shared"}`;
 
     /* ================= SEARCH ================= */
 
@@ -138,7 +148,10 @@ export const generateRAGReply = async (
     let allResults: any[] = [];
 
     for (const q of queries) {
-      const res = await searchKnowledge(businessId, q);
+      const res = await searchKnowledge(businessId, q, {
+        clientId: scopedClientId,
+        includeShared: true,
+      });
       allResults.push(...res);
     }
 
@@ -190,17 +203,36 @@ export const generateRAGReply = async (
     let businessData = await getCache(businessKey);
 
     if (!businessData) {
-      const client = await prisma.client.findFirst({
-        where: { businessId, isActive: true },
-        select: {
-          businessInfo: true,
-          pricingInfo: true,
-          aiTone: true,
-          salesInstructions: true,
-        },
-      });
+      const [leadClient, systemClient] = await Promise.all([
+        scopedClientId
+          ? prisma.client.findFirst({
+              where: {
+                id: scopedClientId,
+                businessId,
+                isActive: true,
+              },
+              select: {
+                businessInfo: true,
+                pricingInfo: true,
+                aiTone: true,
+                salesInstructions: true,
+              },
+            })
+          : null,
+        getSystemClient(businessId),
+      ]);
 
-      businessData = client || {};
+      businessData = {
+        businessInfo:
+          leadClient?.businessInfo || systemClient.businessInfo || "",
+        pricingInfo:
+          leadClient?.pricingInfo || systemClient.pricingInfo || "",
+        aiTone: leadClient?.aiTone || systemClient.aiTone || "Friendly",
+        salesInstructions:
+          leadClient?.salesInstructions ||
+          systemClient.salesInstructions ||
+          "",
+      };
       await setCache(businessKey, businessData, 300);
     }
 

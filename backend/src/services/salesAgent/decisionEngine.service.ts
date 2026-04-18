@@ -1,5 +1,9 @@
 import redis from "../../config/redis";
 import logger from "../../utils/logger";
+import {
+  SALES_DECISION_TTL_SECONDS,
+  writeRedisJsonIfChanged,
+} from "../redisState.service";
 import { getMessageVariantPool } from "./abTesting.service";
 import { getSalesPerformanceSnapshot } from "./conversionTracker.service";
 import { getLeadStateContext } from "./leadState.service";
@@ -65,7 +69,7 @@ const STATES: LeadRevenueState[] = ["COLD", "WARM", "HOT", "CONVERTED"];
 const INTENTS: SalesDecisionIntent[] = ["buy", "explore", "doubt", "ignore"];
 const EMOTIONS: SalesEmotion[] = ["curious", "skeptical", "urgent", "cold"];
 const CACHE_PREFIX = "sales_decision_engine";
-const CACHE_TTL_SECONDS = 15 * 60;
+const CACHE_TTL_SECONDS = SALES_DECISION_TTL_SECONDS;
 const MEMORY_TTL_MS = 5 * 60 * 1000;
 
 const globalForDecisionCache = globalThis as typeof globalThis & {
@@ -729,7 +733,7 @@ const writeDecisionCache = async (
   });
 
   try {
-    await redis.set(key, JSON.stringify(payload), "EX", CACHE_TTL_SECONDS);
+    await writeRedisJsonIfChanged(key, payload, CACHE_TTL_SECONDS);
   } catch (error) {
     logger.debug({ key, error }, "Decision cache write skipped");
   }

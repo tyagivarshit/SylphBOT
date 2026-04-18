@@ -22,7 +22,7 @@ exports.bookingReminderQueue = new bullmq_1.Queue(exports.BOOKING_REMINDER_QUEUE
             delay: 5000,
         },
         removeOnComplete: true,
-        removeOnFail: false,
+        removeOnFail: true,
     },
 });
 /*

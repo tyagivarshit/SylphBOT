@@ -6,45 +6,55 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const crypto_1 = __importDefault(require("crypto"));
 const prisma_1 = __importDefault(require("../config/prisma"));
-const followup_queue_1 = require("../queues/followup.queue");
-/* 🔥 CHANGED: AI → ROUTER */
 const ai_queue_1 = require("../queues/ai.queue");
+const automation_queue_1 = require("../queues/automation.queue");
+const followup_queue_1 = require("../queues/followup.queue");
 const socket_server_1 = require("../sockets/socket.server");
 const instagramProfile_service_1 = require("../services/instagramProfile.service");
-const webhookDedup_service_1 = require("../services/webhookDedup.service");
 const notification_service_1 = require("../services/notification.service");
-/* 🔥 ADDED (QUEUE) */
-const automation_queue_1 = require("../queues/automation.queue");
 const conversionTracker_service_1 = require("../services/salesAgent/conversionTracker.service");
+const webhookDedup_service_1 = require("../services/webhookDedup.service");
 const router = (0, express_1.Router)();
 const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
-/* --------------------------------------------------- */
+const isProduction = process.env.NODE_ENV === "production";
 const log = (...args) => {
     console.log("[INSTAGRAM WEBHOOK]", ...args);
 };
-/* --------------------------------------------------- */
-/* SIGNATURE VERIFY */
-/* --------------------------------------------------- */
 const verifySignature = (req) => {
     try {
         const signature = req.headers["x-hub-signature-256"];
         const appSecret = process.env.META_APP_SECRET;
-        if (!signature || !appSecret)
+        const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : req.body;
+        if (!signature || !appSecret || !Buffer.isBuffer(rawBody)) {
             return false;
-        const expected = "sha256=" +
+        }
+        const expected = Buffer.from("sha256=" +
             crypto_1.default
                 .createHmac("sha256", appSecret)
-                .update(req.rawBody)
-                .digest("hex");
-        return signature === expected;
+                .update(rawBody)
+                .digest("hex"));
+        const received = Buffer.from(signature);
+        if (expected.length !== received.length) {
+            return false;
+        }
+        return crypto_1.default.timingSafeEqual(received, expected);
     }
     catch {
         return false;
     }
 };
-/* --------------------------------------------------- */
-/* WEBHOOK VERIFY */
-/* --------------------------------------------------- */
+const parseWebhookBody = (req) => {
+    if (Buffer.isBuffer(req.body)) {
+        return JSON.parse(req.body.toString("utf8"));
+    }
+    if (Buffer.isBuffer(req.rawBody)) {
+        return JSON.parse(req.rawBody.toString("utf8"));
+    }
+    if (req.body && typeof req.body === "object") {
+        return req.body;
+    }
+    throw new Error("Invalid webhook body");
+};
 router.get("/", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
@@ -56,61 +66,60 @@ router.get("/", (req, res) => {
     log("Webhook verification failed");
     return res.sendStatus(403);
 });
-/* --------------------------------------------------- */
-/* INSTAGRAM WEBHOOK */
-/* --------------------------------------------------- */
 router.post("/", async (req, res) => {
-    console.log("🔥 RAW BODY:", JSON.stringify(req.body, null, 2));
-    console.log("🔥 INSTAGRAM WEBHOOK HIT");
     let body;
     try {
-        body = Buffer.isBuffer(req.body)
-            ? JSON.parse(req.body.toString("utf8"))
-            : req.body;
+        body = parseWebhookBody(req);
     }
-    catch {
-        log("Body parse failed");
+    catch (error) {
+        log("Body parse failed", {
+            message: error?.message || "Unknown error",
+        });
         return res.sendStatus(400);
     }
     try {
-        if (!verifySignature(req)) {
-            console.log("❌ Signature failed (IGNORED FOR TEST)");
+        if (WEBHOOK_DEBUG) {
+            log("Webhook received", {
+                entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+            });
+        }
+        if (isProduction && !verifySignature(req)) {
+            log("Signature verification failed");
+            return res.sendStatus(403);
         }
         const entry = body.entry?.[0];
-        if (!entry)
+        if (!entry) {
             return res.sendStatus(200);
-        /* ---------------------------------------------------
-        COMMENT AUTOMATION
-        --------------------------------------------------- */
-        for (const change of entry?.changes || []) {
-            if (change.field === "comments") {
-                const commentText = change.value.comment?.text;
-                const instagramUserId = change.value.from?.id;
-                const reelId = change.value.media?.id;
-                const pageId = change.value.id;
-                if (!commentText || !instagramUserId || !reelId)
-                    continue;
-                const client = await prisma_1.default.client.findFirst({
-                    where: {
-                        platform: "INSTAGRAM",
-                        pageId,
-                        isActive: true,
-                    },
-                });
-                if (!client)
-                    continue;
-                await automation_queue_1.automationQueue.add("comment", {
-                    businessId: client.businessId,
-                    clientId: client.id,
-                    instagramUserId,
-                    reelId,
-                    commentText,
-                });
-            }
         }
-        /* ---------------------------------------------------
-        MESSAGE DETECTION
-        --------------------------------------------------- */
+        for (const change of entry?.changes || []) {
+            if (change.field !== "comments") {
+                continue;
+            }
+            const commentText = change.value.comment?.text;
+            const instagramUserId = change.value.from?.id;
+            const reelId = change.value.media?.id;
+            const pageId = change.value.id;
+            if (!commentText || !instagramUserId || !reelId) {
+                continue;
+            }
+            const client = await prisma_1.default.client.findFirst({
+                where: {
+                    platform: "INSTAGRAM",
+                    pageId,
+                    isActive: true,
+                },
+            });
+            if (!client) {
+                continue;
+            }
+            await automation_queue_1.automationQueue.add("comment", {
+                businessId: client.businessId,
+                clientId: client.id,
+                instagramUserId,
+                reelId,
+                commentText,
+            });
+        }
         let senderId;
         let text;
         let eventId;
@@ -129,26 +138,27 @@ router.post("/", async (req, res) => {
             pageId = entry.id;
             eventId = changeMessage.id;
         }
-        if (!senderId || !text)
+        if (!senderId || !text || !pageId) {
             return res.sendStatus(200);
-        if (pageId && senderId === pageId)
+        }
+        if (senderId === pageId) {
             return res.sendStatus(200);
+        }
         const lowerText = text.toLowerCase();
         if (lowerText.includes("please wait") ||
             lowerText.includes("moment before sending")) {
             return res.sendStatus(200);
         }
-        if (!eventId)
+        if (!eventId) {
             return res.sendStatus(200);
+        }
         const shouldProcess = await (0, webhookDedup_service_1.processWebhookEvent)({
             eventId,
             platform: "INSTAGRAM",
         });
-        if (!shouldProcess)
+        if (!shouldProcess) {
             return res.sendStatus(200);
-        /* ---------------------------------------------------
-        CLIENT (🔥 FIXED PLAN FETCH)
-        --------------------------------------------------- */
+        }
         const client = await prisma_1.default.client.findFirst({
             where: {
                 platform: "INSTAGRAM",
@@ -161,18 +171,16 @@ router.post("/", async (req, res) => {
                         ownerId: true,
                         subscription: {
                             include: {
-                                plan: true, // 🔥 FIX
+                                plan: true,
                             },
                         },
                     },
                 },
             },
         });
-        if (!client)
+        if (!client) {
             return res.sendStatus(200);
-        /* ---------------------------------------------------
-        LEAD
-        --------------------------------------------------- */
+        }
         let lead = await prisma_1.default.lead.findFirst({
             where: {
                 businessId: client.businessId,
@@ -208,9 +216,6 @@ router.post("/", async (req, res) => {
                 },
             });
         }
-        /* ---------------------------------------------------
-        SAVE MESSAGE
-        --------------------------------------------------- */
         const userMessage = await prisma_1.default.message.create({
             data: {
                 leadId: lead.id,
@@ -245,12 +250,9 @@ router.post("/", async (req, res) => {
             io.to(`lead_${lead.id}`).emit("new_message", userMessage);
         }
         catch { }
-        /* ---------------------------------------------------
-        🧠 ROUTER JOB (FINAL FIX)
-        --------------------------------------------------- */
         const plan = client.business?.subscription?.plan || null;
         if (WEBHOOK_DEBUG) {
-            console.log("ROUTER JOB DATA:", {
+            log("Router job data", {
                 businessId: client.businessId,
                 leadId: lead.id,
                 message: text,
@@ -263,7 +265,7 @@ router.post("/", async (req, res) => {
                 leadId: lead.id,
                 message: text,
                 kind: "router",
-                plan, // ✅ FINAL FIX
+                plan,
                 platform: "INSTAGRAM",
                 senderId,
                 pageId,
@@ -275,16 +277,13 @@ router.post("/", async (req, res) => {
             source: "router",
             idempotencyKey: eventId,
         });
-        console.log("[INSTAGRAM WEBHOOK] queued AI reply", {
+        log("Queued AI reply", {
             businessId: client.businessId,
             leadId: lead.id,
             eventId,
             pageId,
             senderId,
         });
-        /* ---------------------------------------------------
-        UPDATE LEAD
-        --------------------------------------------------- */
         await prisma_1.default.lead.update({
             where: { id: lead.id },
             data: {

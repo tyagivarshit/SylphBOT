@@ -23,6 +23,7 @@ import {
 } from "../services/aiPipelineState.service";
 import { handleIncomingMessage } from "../services/executionRouter.servce";
 import { scheduleFollowups } from "../queues/followup.queue";
+import { clearSalesReplyState } from "../services/salesAgent/replyCache.service";
 import { trackAIMessage } from "../services/salesAgent/conversionTracker.service";
 import { getIO } from "../sockets/socket.server";
 import { decrypt } from "../utils/encrypt";
@@ -459,6 +460,17 @@ const processAndSendReply = async (
   }
 
   if (existingState.sent) {
+    await clearSalesReplyState(task.message.leadId).catch((error) => {
+      logger.warn(
+        {
+          leadId: task.message.leadId,
+          jobKey: task.jobKey,
+          error,
+        },
+        "Sales reply cache cleanup skipped after duplicate send detection"
+      );
+    });
+
     logger.info(
       {
         leadId: task.message.leadId,
@@ -472,6 +484,16 @@ const processAndSendReply = async (
   await retryAsync(() => sendPlatformReply(task, replyText), 3, 800);
 
   await markReplySent(task.jobKey);
+  await clearSalesReplyState(task.message.leadId).catch((error) => {
+    logger.warn(
+      {
+        leadId: task.message.leadId,
+        jobKey: task.jobKey,
+        error,
+      },
+      "Sales reply cache cleanup skipped after send"
+    );
+  });
 
   if (created) {
     void scheduleFollowups(task.message.leadId).catch((error) => {

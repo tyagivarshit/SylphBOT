@@ -21,7 +21,7 @@ export const bookingReminderQueue = new Queue(
         delay: 5000,
       },
       removeOnComplete: true,
-      removeOnFail: false,
+      removeOnFail: true,
     },
   }
 );

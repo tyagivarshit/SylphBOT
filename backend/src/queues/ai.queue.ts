@@ -42,19 +42,13 @@ type EnqueueOptions = {
 };
 
 const defaultJobOptions: JobsOptions = {
-  attempts: env.AI_JOB_ATTEMPTS,
+  attempts: 3,
   backoff: {
     type: "exponential",
     delay: env.AI_JOB_BACKOFF_MS,
   },
-  removeOnComplete: {
-    age: 3600,
-    count: 1000,
-  },
-  removeOnFail: {
-    age: 86400,
-    count: 1000,
-  },
+  removeOnComplete: true,
+  removeOnFail: true,
 };
 
 const globalForAIQueue = globalThis as typeof globalThis & {

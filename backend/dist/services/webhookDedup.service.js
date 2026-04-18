@@ -6,43 +6,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.processWebhookEvent = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
-/*
-====================================================
-CONFIG
-====================================================
-*/
-const REDIS_PREFIX = "sylph:webhook:event:";
-const REDIS_TTL = 60 * 10; // 🔥 10 min (better than 1 hour)
-/*
-====================================================
-KEY BUILDER (🔥 FIXED)
-====================================================
-*/
-const buildKey = (eventId, platform) => {
-    return `${REDIS_PREFIX}${platform}:${eventId}`;
-};
-/*
-====================================================
-REDIS LOCK
-====================================================
-*/
+const redisState_service_1 = require("./redisState.service");
+const buildKey = (eventId, platform) => (0, redisState_service_1.buildIdempotencyRedisKey)(`${platform}:${eventId}`);
 const acquireRedisLock = async (eventId, platform) => {
     const key = buildKey(eventId, platform);
     try {
-        const result = await redis_1.default.set(key, "1", "EX", REDIS_TTL, "NX");
+        const result = await redis_1.default.set(key, "1", "EX", redisState_service_1.IDEMPOTENCY_TTL_SECONDS, "NX");
         return result === "OK";
     }
     catch (error) {
         console.error("[WEBHOOK REDIS ERROR]", error);
-        /* fail-open */
         return true;
     }
 };
-/*
-====================================================
-DATABASE CHECK
-====================================================
-*/
 const checkDatabaseDuplicate = async (eventId) => {
     try {
         const existing = await prisma_1.default.webhookEvent.findUnique({
@@ -56,11 +32,6 @@ const checkDatabaseDuplicate = async (eventId) => {
         return false;
     }
 };
-/*
-====================================================
-SAVE EVENT (SAFE)
-====================================================
-*/
 const saveWebhookEvent = async (eventId, platform) => {
     try {
         await prisma_1.default.webhookEvent.create({
@@ -77,32 +48,24 @@ const saveWebhookEvent = async (eventId, platform) => {
         console.error("[WEBHOOK SAVE ERROR]", error);
     }
 };
-/*
-====================================================
-MAIN PROCESSOR (10/10 FINAL)
-====================================================
-*/
 const processWebhookEvent = async ({ eventId, platform, }) => {
     if (!eventId)
         return true;
     try {
-        /* STEP 1 — REDIS LOCK */
         const lockAcquired = await acquireRedisLock(eventId, platform);
         if (!lockAcquired) {
             return false;
         }
-        /* STEP 2 — DB CHECK */
         const exists = await checkDatabaseDuplicate(eventId);
         if (exists) {
             return false;
         }
-        /* STEP 3 — SAVE */
         await saveWebhookEvent(eventId, platform);
         return true;
     }
     catch (error) {
         console.error("[WEBHOOK PROCESS ERROR]", error);
-        return true; // fail-open
+        return true;
     }
 };
 exports.processWebhookEvent = processWebhookEvent;

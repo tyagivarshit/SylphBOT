@@ -12,19 +12,13 @@ const logger_1 = __importDefault(require("../utils/logger"));
 exports.AI_QUEUE_NAME = env_1.env.AI_QUEUE_NAME;
 exports.AI_QUEUE_PARTITIONS = 1;
 const defaultJobOptions = {
-    attempts: env_1.env.AI_JOB_ATTEMPTS,
+    attempts: 3,
     backoff: {
         type: "exponential",
         delay: env_1.env.AI_JOB_BACKOFF_MS,
     },
-    removeOnComplete: {
-        age: 3600,
-        count: 1000,
-    },
-    removeOnFail: {
-        age: 86400,
-        count: 1000,
-    },
+    removeOnComplete: true,
+    removeOnFail: true,
 };
 const globalForAIQueue = globalThis;
 exports.aiQueue = globalForAIQueue.__sylphAIQueue ||

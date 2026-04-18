@@ -1,4 +1,5 @@
 import redis from "../config/redis";
+import { writeRedisJsonIfChanged } from "./redisState.service";
 
 const LEAD_LOCK_PREFIX = "ai_pipeline:lead_lock";
 const REPLY_STATE_PREFIX = "ai_pipeline:reply_state";
@@ -90,10 +91,9 @@ const saveReplyDeliveryState = async (
   jobKey: string,
   state: ReplyDeliveryState
 ) => {
-  await redis.set(
+  await writeRedisJsonIfChanged(
     buildReplyStateKey(jobKey),
-    JSON.stringify(state),
-    "EX",
+    state,
     REPLY_STATE_TTL_SECONDS
   );
 };

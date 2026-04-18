@@ -1,4 +1,3 @@
-import { clearConversationState } from "./conversationState.service";
 import {
   buildSalesAgentRecoveryReply,
   generateSalesAgentReply,
@@ -20,9 +19,6 @@ type RouterReply = {
   meta?: Record<string, unknown>;
 };
 
-const isGreeting = (msg: string) =>
-  ["hi", "hello", "hey", "hii", "yo"].includes(msg.trim().toLowerCase());
-
 export const routeAIMessage = async ({
   businessId,
   leadId,
@@ -36,10 +32,6 @@ export const routeAIMessage = async ({
   }
 
   try {
-    if (isGreeting(normalizedMessage)) {
-      void clearConversationState(leadId).catch(() => {});
-    }
-
     return await generateSalesAgentReply({
       businessId,
       leadId,

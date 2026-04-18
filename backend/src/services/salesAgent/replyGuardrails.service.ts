@@ -1,4 +1,5 @@
 import type {
+  SalesActionType,
   SalesAgentContext,
   SalesAgentReply,
   SalesAngle,
@@ -165,6 +166,46 @@ const extractPlanSnippet = (value?: string | null) => {
   return hint ? toSentence(hint.slice(0, 140)) : null;
 };
 
+const extractBusinessSnippet = (value?: string | null) => {
+  const lines = String(value || "")
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean);
+
+  const hint =
+    lines.find((line) =>
+      /service|services|offer|help|business|company|speciali|work|solution|support/i.test(
+        line
+      )
+    ) || lines[0];
+
+  return hint ? toSentence(hint.slice(0, 140)) : null;
+};
+
+const extractKnowledgeSnippet = (context: SalesAgentContext) => {
+  const businessSnippet = extractBusinessSnippet(context.client.businessInfo);
+  const knowledgeHit = context.knowledge.find((line) =>
+    /price|pricing|service|offer|process|result|review|proof|book|call|support|works/i.test(
+      line
+    )
+  );
+
+  return knowledgeHit
+    ? toSentence(knowledgeHit.slice(0, 140))
+    : businessSnippet;
+};
+
+const isGreetingOnlyMessage = (message: string) =>
+  /^(hi|hello|hey|hii|yo|namaste|hola|hello there|hey there)$/i.test(
+    String(message || "").trim()
+  );
+
+const isDirectInfoMessage = (message: string) =>
+  String(message || "").includes("?") ||
+  /\b(what|which|how|can you|tell me|share|show|details|info|information|about|services|service|price|pricing|cost|package|plan|kya|kaise|kitna)\b/i.test(
+    String(message || "")
+  );
+
 export const getFallbackAngle = (context: SalesAgentContext): SalesAngle => {
   if (context.profile.intentDirective?.angle) {
     return context.profile.intentDirective.angle;
@@ -189,6 +230,217 @@ export const getFallbackCta = (context: SalesAgentContext): SalesCTA => {
   ];
 
   return candidates.find((cta) => cta && cta !== "NONE") || "REPLY_DM";
+};
+
+const advanceAction = (action: SalesActionType): SalesActionType => {
+  if (action === "SHOW_PRICING") return "SUGGEST_PLAN";
+  if (action === "SUGGEST_PLAN") return "PUSH_CTA";
+  if (action === "PUSH_CTA") return "CLOSE";
+  if (action === "HANDLE_OBJECTION") return "PUSH_CTA";
+  if (action === "QUALIFY") return "PUSH_CTA";
+  if (action === "ENGAGE") return "QUALIFY";
+  return action;
+};
+
+const funnelPositionForAction = (action: SalesActionType) => {
+  if (action === "SHOW_PRICING") return "pricing_shown";
+  if (action === "SUGGEST_PLAN") return "plan_suggested";
+  if (action === "PUSH_CTA") return "cta_pushed";
+  if (action === "CLOSE") return "closing";
+  if (action === "BOOK") return "booking";
+  if (action === "HANDLE_OBJECTION") return "objection_handling";
+  if (action === "QUALIFY") return "qualification";
+  return "engagement";
+};
+
+const actionPriorityForGuardrail = (action: SalesActionType) => {
+  if (action === "SHOW_PRICING" || action === "CLOSE") return 100;
+  if (action === "SUGGEST_PLAN") return 95;
+  if (action === "PUSH_CTA") return 92;
+  if (action === "BOOK") return 90;
+  if (action === "HANDLE_OBJECTION") return 70;
+  if (action === "QUALIFY") return 50;
+  return 30;
+};
+
+const pricingStepForAction = (
+  action: SalesActionType,
+  currentStep: number
+): 0 | 1 | 2 | 3 | 4 => {
+  if (action === "SHOW_PRICING") return 1;
+  if (action === "SUGGEST_PLAN") return 2;
+  if (action === "PUSH_CTA") return 3;
+  if (action === "CLOSE" || action === "BOOK") return 4;
+  return Math.max(0, Math.min(currentStep, 4)) as 0 | 1 | 2 | 3 | 4;
+};
+
+const pickGuardrailCta = (
+  context: SalesAgentContext,
+  action: SalesActionType
+): SalesCTA => {
+  const allowed = context.capabilities.primaryCtas?.length
+    ? context.capabilities.primaryCtas
+    : ([
+        "REPLY_DM",
+        "VIEW_DEMO",
+        "BOOK_CALL",
+        "BUY_NOW",
+        "CAPTURE_LEAD",
+      ] as SalesCTA[]);
+  const candidatesByAction: Record<SalesActionType, SalesCTA[]> = {
+    SHOW_PRICING: ["REPLY_DM", "VIEW_DEMO", "BOOK_CALL", context.decision?.cta || "NONE"],
+    SUGGEST_PLAN: ["BOOK_CALL", "VIEW_DEMO", "REPLY_DM", context.decision?.cta || "NONE"],
+    PUSH_CTA: ["BOOK_CALL", "VIEW_DEMO", "BUY_NOW", context.decision?.cta || "NONE"],
+    CLOSE: ["BUY_NOW", "BOOK_CALL", "VIEW_DEMO", context.decision?.cta || "NONE"],
+    BOOK: ["BOOK_CALL", "VIEW_DEMO", context.decision?.cta || "NONE"],
+    HANDLE_OBJECTION: ["VIEW_DEMO", "BOOK_CALL", "REPLY_DM", context.decision?.cta || "NONE"],
+    QUALIFY: ["CAPTURE_LEAD", "REPLY_DM", "VIEW_DEMO", context.decision?.cta || "NONE"],
+    ENGAGE: ["REPLY_DM", "CAPTURE_LEAD", context.decision?.cta || "NONE"],
+  };
+
+  return (
+    candidatesByAction[action].find(
+      (cta) => cta !== "NONE" && allowed.includes(cta)
+    ) || getFallbackCta(context)
+  );
+};
+
+const pickGuardrailTone = (
+  action: SalesActionType,
+  fallback?: string | null
+) => {
+  if (action === "SHOW_PRICING" || action === "SUGGEST_PLAN") {
+    return "clear-confident";
+  }
+
+  if (action === "PUSH_CTA" || action === "CLOSE" || action === "BOOK") {
+    return "decisive-closer";
+  }
+
+  if (action === "HANDLE_OBJECTION") {
+    return "confident-proof";
+  }
+
+  return fallback || "human-confident";
+};
+
+const pickGuardrailStructure = (
+  action: SalesActionType,
+  fallback?: string | null
+) => {
+  if (action === "SHOW_PRICING") return "pricing_value_cta";
+  if (action === "SUGGEST_PLAN") return "plan_recommendation_cta";
+  if (action === "PUSH_CTA" || action === "CLOSE" || action === "BOOK") {
+    return "direct_close";
+  }
+
+  if (action === "HANDLE_OBJECTION") return "value_proof_cta";
+  if (action === "QUALIFY") return "qualification_cta";
+  return fallback || "engage_to_next_step";
+};
+
+const getReplyMeta = (reply: SalesAgentReply) =>
+  reply.meta && typeof reply.meta === "object"
+    ? (reply.meta as Record<string, unknown>)
+    : {};
+
+const buildGuardrailContext = (
+  context: SalesAgentContext,
+  issues: string[]
+) => {
+  const currentAction = context.decision?.action || context.progression.currentAction;
+  const shouldAdvanceAction =
+    context.progression.loopDetected ||
+    issues.includes("repeated_response") ||
+    issues.includes("no_progression");
+
+  if (!shouldAdvanceAction) {
+    return {
+      context,
+      actionAdvanced: false,
+    };
+  }
+
+  const nextAction = advanceAction(currentAction);
+
+  if (nextAction === currentAction) {
+    return {
+      context,
+      actionAdvanced: false,
+    };
+  }
+
+  const nextPriority = actionPriorityForGuardrail(nextAction);
+  const nextPricingStep = pricingStepForAction(
+    nextAction,
+    context.progression.pricingStep
+  );
+
+  return {
+    actionAdvanced: true,
+    context: {
+      ...context,
+      decision: context.decision
+        ? {
+            ...context.decision,
+            action: nextAction,
+            priority: nextPriority,
+            cta: pickGuardrailCta(context, nextAction),
+            tone: pickGuardrailTone(nextAction, context.decision.tone),
+            structure: pickGuardrailStructure(
+              nextAction,
+              context.decision.structure
+            ),
+          }
+        : context.decision,
+      progression: {
+        ...context.progression,
+        currentAction: nextAction,
+        actionPriority: nextPriority,
+        funnelPosition: funnelPositionForAction(nextAction),
+        pricingStep: nextPricingStep,
+        loopDetected: true,
+        shouldAdvance: false,
+      },
+    },
+  };
+};
+
+const applyGuardrailOverrides = (
+  reply: SalesAgentReply,
+  context: SalesAgentContext,
+  issues: string[],
+  options?: {
+    actionAdvanced?: boolean;
+  }
+): SalesAgentReply => {
+  const meta = {
+    ...getReplyMeta(reply),
+    guardrailIssues: issues,
+  };
+
+  if (!options?.actionAdvanced) {
+    return {
+      ...reply,
+      meta,
+    };
+  }
+
+  const action = context.decision?.action || context.progression.currentAction;
+  const priority =
+    context.decision?.priority || context.progression.actionPriority;
+
+  return {
+    ...reply,
+    meta: {
+      ...meta,
+      actionOverride: action,
+      actionPriorityOverride: priority,
+      funnelPositionOverride: context.progression.funnelPosition,
+      pricingStepOverride: context.progression.pricingStep,
+      loopDetectedOverride: context.progression.loopDetected,
+    },
+  };
 };
 
 const buildQualificationCtaLine = (context: SalesAgentContext) => {
@@ -220,6 +472,21 @@ const buildQualificationCtaLine = (context: SalesAgentContext) => {
 
 const buildCtaLine = (context: SalesAgentContext, cta: SalesCTA) => {
   const intent = String(context.profile.intent || "").toUpperCase();
+  const action = context.decision?.action || context.progression.currentAction;
+  const inboundMessage = context.inboundMessage;
+
+  if (intent === "GREETING" || isGreetingOnlyMessage(inboundMessage)) {
+    return "Tell me if you want pricing, services, or booking first.";
+  }
+
+  if (
+    isDirectInfoMessage(inboundMessage) &&
+    action !== "BOOK" &&
+    action !== "CLOSE" &&
+    action !== "PUSH_CTA"
+  ) {
+    return "Want the best-fit option for your use case next?";
+  }
 
   if (cta === "BUY_NOW") {
     return intent === "PURCHASE"
@@ -239,12 +506,29 @@ const buildCtaLine = (context: SalesAgentContext, cta: SalesCTA) => {
       : "Want the quick walkthrough?";
   }
 
+  if (action === "BOOK") {
+    return "Reply and I'll send the booking option.";
+  }
+
+  if (action === "SHOW_PRICING") {
+    return "Reply and I'll break down the most relevant pricing.";
+  }
+
+  if (action === "SUGGEST_PLAN") {
+    return "Reply and I'll point you to the best-fit option.";
+  }
+
+  if (action === "PUSH_CTA" || action === "CLOSE") {
+    return "Reply and I'll send the fastest next step.";
+  }
+
   return buildQualificationCtaLine(context);
 };
 
 const buildValueLine = (context: SalesAgentContext, cta: SalesCTA) => {
   const pricingSnippet = extractPricingSnippet(context.client.pricingInfo);
   const proofSnippet = extractProofSnippet(context);
+  const knowledgeSnippet = extractKnowledgeSnippet(context);
   const intent = context.profile.intent;
 
   if (intent === "PRICING") {
@@ -285,6 +569,14 @@ const buildValueLine = (context: SalesAgentContext, cta: SalesCTA) => {
     intent === "QUALIFICATION" ||
     intent === "GREETING"
   ) {
+    if (intent === "GREETING") {
+      return "Hey, happy to help with this.";
+    }
+
+    if (knowledgeSnippet && isDirectInfoMessage(context.inboundMessage)) {
+      return knowledgeSnippet;
+    }
+
     if (context.profile.intentDirective.qualificationCue === "budget range") {
       return "I can narrow this fast once I know the budget range.";
     }
@@ -294,6 +586,10 @@ const buildValueLine = (context: SalesAgentContext, cta: SalesCTA) => {
     }
 
     return "I can point you to the right fit without dragging this out.";
+  }
+
+  if (knowledgeSnippet && isDirectInfoMessage(context.inboundMessage)) {
+    return knowledgeSnippet;
   }
 
   if (context.decision?.structure?.includes("proof") && proofSnippet) {
@@ -494,12 +790,15 @@ export const finalizeSalesReply = (
   context: SalesAgentContext,
   maxLength: number
 ): SalesAgentReply => {
-  const fallback = (alternate = false): SalesAgentReply => ({
-    message: buildActionDrivenReplyMessage(context, {
+  const fallback = (
+    targetContext: SalesAgentContext,
+    alternate = false
+  ): SalesAgentReply => ({
+    message: buildActionDrivenReplyMessage(targetContext, {
       alternate,
     }),
-    cta: getFallbackCta(context),
-    angle: getFallbackAngle(context),
+    cta: getFallbackCta(targetContext),
+    angle: getFallbackAngle(targetContext),
     reason: "fallback",
   });
   const normalized: SalesAgentReply = {
@@ -514,23 +813,43 @@ export const finalizeSalesReply = (
   const issues = validateReply(normalized, context);
 
   if (issues.length) {
-    const refined = fallback(
-      context.progression.loopDetected || issues.includes("repeated_response")
+    const { context: guardrailContext, actionAdvanced } = buildGuardrailContext(
+      context,
+      issues
     );
-    const guarded = {
-      ...refined,
-      reason: `guardrail:${issues.join(",")}`,
-    };
-    const refinedIssues = validateReply(guarded, context);
+    const preferAlternate =
+      actionAdvanced ||
+      context.progression.loopDetected ||
+      issues.includes("repeated_response") ||
+      issues.includes("repeated_question");
+    const guarded = applyGuardrailOverrides(
+      {
+        ...fallback(guardrailContext, preferAlternate),
+        reason: `guardrail:${issues.join(",")}`,
+      },
+      guardrailContext,
+      issues,
+      {
+        actionAdvanced,
+      }
+    );
+    const refinedIssues = validateReply(guarded, guardrailContext);
 
     if (!refinedIssues.length) {
       return guarded;
     }
 
-    return {
-      ...fallback(true),
-      reason: `guardrail:${issues.join(",")}`,
-    };
+    return applyGuardrailOverrides(
+      {
+        ...fallback(guardrailContext, true),
+        reason: `guardrail:${issues.join(",")}`,
+      },
+      guardrailContext,
+      Array.from(new Set([...issues, ...refinedIssues])),
+      {
+        actionAdvanced,
+      }
+    );
   }
 
   return normalized;
@@ -540,6 +859,16 @@ export const buildRecoverySalesReply = (
   message?: string | null
 ): SalesAgentReply => {
   const text = String(message || "").trim().toLowerCase();
+
+  if (isGreetingOnlyMessage(text)) {
+    return {
+      message:
+        "Hey, happy to help.\nTell me if you want pricing, services, or booking first.",
+      cta: "REPLY_DM",
+      angle: "personalization",
+      reason: "recovery",
+    };
+  }
 
   if (/book|booking|schedule|slot|call|meeting|demo/.test(text)) {
     return {
@@ -583,9 +912,9 @@ export const buildRecoverySalesReply = (
 
   return {
     message:
-      "I can point you to the best next step without dragging this out.\nWhat budget range are you working with?",
-    cta: "CAPTURE_LEAD",
-    angle: "personalization",
+      "I can help with pricing, services, or the best next step.\nTell me what you want first.",
+    cta: "REPLY_DM",
+    angle: "value",
     reason: "recovery",
   };
 };

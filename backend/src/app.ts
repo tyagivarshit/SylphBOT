@@ -233,6 +233,17 @@ app.use(
   instagramWebhook
 );
 
+app.use(
+  "/webhook/instagram",
+  express.raw({
+    type: "application/json",
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+  instagramWebhook
+);
+
 app.use(express.json({ limit: "1mb" }));
 
 type EnqueueRequestBody = Partial<AIMessagePayload> & {

@@ -32,12 +32,33 @@ const normalizeText = (value?: string | null) =>
     .trim()
     .toLowerCase();
 
+const isGreetingOnly = (text: string) =>
+  /^(hi|hello|hey|hii|yo|namaste|hola|hello there|hey there)$/i.test(
+    text.trim()
+  );
+
+const hasStrongBuyingSignal = (text: string) =>
+  /\b(ready|let s do it|go ahead|send (me )?(the )?(payment|checkout|booking|buy|link)|book it|book me|sign me up|start now|start today|how do i pay|pay now|buy now)\b/.test(
+    text
+  );
+
+const isDirectInfoRequest = (text: string) =>
+  text.includes("?") ||
+  /\b(what|which|how|can you|do you|does it|tell me|share|show me|explain|details|detail|info|information|about|services|service|pricing|price|cost|package|plan|process|works|kya|kaise|kitna)\b/.test(
+    text
+  );
+
 const detectIntent = (message: string): SalesIntent => {
   const text = normalizeText(message);
 
   if (!text) return "GENERAL";
-  if (/^hi$|^hello$|^hey$|^yo$|^hii$/.test(text)) return "GREETING";
-  if (/price|pricing|cost|fees|package/.test(text)) return "PRICING";
+  if (isGreetingOnly(text)) return "GREETING";
+  if (
+    /price|pricing|cost|fees|package|packages|plan|plans|investment|charges/.test(
+      text
+    )
+  )
+    return "PRICING";
   if (/book|booking|schedule|slot|call|meeting|demo/.test(text))
     return "BOOKING";
   if (/buy|purchase|pay|payment|checkout|invoice|link/.test(text))
@@ -45,6 +66,13 @@ const detectIntent = (message: string): SalesIntent => {
   if (/not interested|later|think|thinking|expensive|trust|proof|review/.test(text))
     return "OBJECTION";
   if (/follow up|checking in|reminder/.test(text)) return "FOLLOW_UP";
+  if (
+    /what do you do|what do you offer|services|service|about|how it works|how does it work|process|workflow|information|info/.test(
+      text
+    )
+  ) {
+    return "GENERAL";
+  }
   if (/need|looking for|want|help me|tell me more|details/.test(text))
     return "QUALIFICATION";
   if (/comment|dm|link|send info/.test(text)) return "ENGAGEMENT";
@@ -214,10 +242,7 @@ const resolveIntentCategory = ({
   if (
     intent === "PURCHASE" ||
     intent === "BOOKING" ||
-    intent === "PRICING" ||
-    /buy|purchase|pay|checkout|invoice|book|schedule|ready|start today|let's do it|price|pricing|cost/.test(
-      text
-    )
+    hasStrongBuyingSignal(text)
   ) {
     return "buy" as const;
   }
@@ -235,6 +260,14 @@ const resolveIntentCategory = ({
     /expensive|proof|trust|review|not sure|can i think|later|maybe/.test(text)
   ) {
     return "doubt" as const;
+  }
+
+  if (intent === "PRICING") {
+    return hasStrongBuyingSignal(text) ? ("buy" as const) : ("explore" as const);
+  }
+
+  if (isDirectInfoRequest(text)) {
+    return "explore" as const;
   }
 
   return "explore" as const;
@@ -364,7 +397,7 @@ const buildIntentDirective = ({
     return {
       primaryGoal: "Share concrete pricing context and move to a clear next step.",
       responseRule:
-        "State the relevant price, package, or starting point, then use one direct CTA.",
+        "Answer the pricing question first with the clearest available pricing or starting point, then guide to one next step.",
       cta: pricingCta,
       angle: "value",
       qualificationCue,
@@ -402,15 +435,27 @@ const buildIntentDirective = ({
     };
   }
 
+  if (intent === "GREETING") {
+    return {
+      primaryGoal: "Greet briefly and open the most useful business path.",
+      responseRule:
+        "Greet once, stay short, and offer pricing, services, or booking instead of jumping into qualification.",
+      cta: pickSupportedCta(
+        ["REPLY_DM", "CAPTURE_LEAD", "VIEW_DEMO"],
+        capabilities.primaryCtas
+      ),
+      angle: "personalization",
+    };
+  }
+
   if (
     intent === "ENGAGEMENT" ||
-    intent === "QUALIFICATION" ||
-    intent === "GREETING"
+    intent === "QUALIFICATION"
   ) {
     return {
-      primaryGoal: "Qualify with one sharp question that moves the deal forward.",
+      primaryGoal: "Answer clearly, then qualify only when it genuinely helps the next step.",
       responseRule:
-        "Ask exactly one specific qualification question, based on the next missing field.",
+        "If the user asked a direct question, answer it first. Ask one specific qualification question only if the answer is still missing.",
       cta: qualificationCta,
       angle: "personalization",
       qualificationCue,
@@ -418,9 +463,9 @@ const buildIntentDirective = ({
   }
 
   return {
-    primaryGoal: "Create momentum and steer the lead toward the best next step.",
+    primaryGoal: "Answer the current message clearly and steer the lead toward the best next step.",
     responseRule:
-      "Stay brief, stay specific, and use a single CTA that fits the current buying signal.",
+      "Stay brief, answer first, and use a single next step only after the answer is useful.",
     cta: qualificationCta,
     angle: qualificationCue ? "personalization" : "value",
     qualificationCue,

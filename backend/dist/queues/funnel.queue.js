@@ -6,4 +6,9 @@ const redis_1 = require("../config/redis");
 exports.funnelQueue = new bullmq_1.Queue("funnelQueue", {
     connection: (0, redis_1.getQueueRedisConnection)(),
     prefix: "sylph",
+    defaultJobOptions: {
+        attempts: 3,
+        removeOnComplete: true,
+        removeOnFail: true,
+    },
 });

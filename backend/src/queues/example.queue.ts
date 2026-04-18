@@ -6,6 +6,11 @@ import {
 
 export const exampleQueue = new Queue("example-queue", {
   connection: getQueueRedisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    removeOnComplete: true,
+    removeOnFail: true,
+  },
 });
 
 export const exampleWorker =

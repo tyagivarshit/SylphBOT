@@ -17,13 +17,8 @@ exports.followupQueue = new bullmq_1.Queue("followupQueue", {
             type: "exponential",
             delay: 5000,
         },
-        removeOnComplete: {
-            age: 3600,
-            count: 500,
-        },
-        removeOnFail: {
-            age: 24 * 3600,
-        },
+        removeOnComplete: true,
+        removeOnFail: true,
     },
 });
 const scheduleFollowups = async (leadId, options) => {
@@ -53,6 +48,8 @@ const scheduleFollowups = async (leadId, options) => {
             delay: item.delayMs,
             jobId,
             removeOnComplete: true,
+            removeOnFail: true,
+            attempts: 3,
         });
     }
     console.log(`📅 Followups scheduled for lead ${leadId}`);

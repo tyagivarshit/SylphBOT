@@ -182,6 +182,12 @@ app.use("/api/webhook/instagram", express_1.default.raw({
         req.rawBody = buf;
     },
 }), instagram_webhook_1.default);
+app.use("/webhook/instagram", express_1.default.raw({
+    type: "application/json",
+    verify: (req, _res, buf) => {
+        req.rawBody = buf;
+    },
+}), instagram_webhook_1.default);
 app.use(express_1.default.json({ limit: "1mb" }));
 const normalizeIncomingMessage = (raw) => {
     const message = String(raw.message || "").trim();

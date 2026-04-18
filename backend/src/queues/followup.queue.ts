@@ -14,13 +14,8 @@ export const followupQueue = new Queue("followupQueue", {
       type: "exponential",
       delay: 5000,
     },
-    removeOnComplete: {
-      age: 3600,
-      count: 500,
-    },
-    removeOnFail: {
-      age: 24 * 3600,
-    },
+    removeOnComplete: true,
+    removeOnFail: true,
   },
 });
 
@@ -63,6 +58,8 @@ export const scheduleFollowups = async (
         delay: item.delayMs,
         jobId,
         removeOnComplete: true,
+        removeOnFail: true,
+        attempts: 3,
       }
     );
   }

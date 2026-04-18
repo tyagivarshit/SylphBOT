@@ -307,6 +307,9 @@ const getClients = async (req, res) => {
             where: {
                 businessId: business.id,
                 isActive: true,
+                platform: {
+                    not: "SYSTEM",
+                },
             },
             orderBy: { createdAt: "desc" },
         });

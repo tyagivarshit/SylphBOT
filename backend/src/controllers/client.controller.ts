@@ -423,6 +423,9 @@ export const getClients = async (req: Request, res: Response) => {
       where: {
         businessId: business.id,
         isActive: true,
+        platform: {
+          not: "SYSTEM",
+        },
       },
       orderBy: { createdAt: "desc" },
     });

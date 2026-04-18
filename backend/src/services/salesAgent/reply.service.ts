@@ -277,6 +277,13 @@ const isDirectInfoQuestion = (message: string) =>
     String(message || "")
   );
 
+const PRICING_MATCHER =
+  /(rs\.?|inr|\$|usd|price|pricing|package|plan|starting|starts|investment|charges)/i;
+const PLAN_MATCHER =
+  /plan|package|starter|growth|pro|elite|premium|recommended|best/i;
+const BUSINESS_MATCHER =
+  /service|services|offer|offers|help|business|company|speciali|work|solution|support|automation|reply|booking/i;
+
 const extractSnippet = (
   value?: string | null,
   matcher?: RegExp,
@@ -286,23 +293,58 @@ const extractSnippet = (
     .split(/\n+/)
     .map((line) => line.replace(/^[-*]\s*/, "").trim())
     .filter(Boolean);
+  const candidates = lines
+    .map((line) => ({
+      original: line,
+      cleaned: line.replace(/^[QA]:\s*/i, "").trim(),
+    }))
+    .filter((item) => item.cleaned);
+  const answerCandidate = candidates.find((item) => {
+    if (!/^A:\s*/i.test(item.original)) {
+      return false;
+    }
 
+    if (!matcher) {
+      return true;
+    }
+
+    return (
+      matcher.test(item.cleaned) ||
+      matcher.test(item.original) ||
+      /\d/.test(item.cleaned)
+    );
+  });
   const preferred =
-    (matcher ? lines.find((line) => matcher.test(line)) : null) || lines[0];
+    (matcher
+      ? answerCandidate ||
+        candidates.find(
+          (item) => matcher.test(item.cleaned) || matcher.test(item.original)
+        )
+      : null) || candidates[0];
 
-  return preferred ? toSentence(preferred, maxLength) : null;
+  return preferred ? toSentence(preferred.cleaned, maxLength) : null;
 };
 
 const extractPricingSnippet = (context: Awaited<ReturnType<typeof buildSalesAgentContext>>) =>
   extractSnippet(
     context.client.pricingInfo,
-    /(rs\.?|inr|\$|usd|price|pricing|package|plan|starting|starts|investment|charges)/i
+    PRICING_MATCHER
+  ) ||
+  extractSnippet(
+    context.knowledge.find((item) => PRICING_MATCHER.test(item)) ||
+      context.client.faqKnowledge,
+    PRICING_MATCHER
   );
 
 const extractPlanSnippet = (context: Awaited<ReturnType<typeof buildSalesAgentContext>>) =>
   extractSnippet(
     context.client.pricingInfo,
-    /plan|package|starter|growth|pro|elite|premium|recommended|best/i
+    PLAN_MATCHER
+  ) ||
+  extractSnippet(
+    context.knowledge.find((item) => PLAN_MATCHER.test(item)) ||
+      context.client.faqKnowledge,
+    PLAN_MATCHER
   );
 
 const extractKnowledgeSnippet = (
@@ -310,14 +352,47 @@ const extractKnowledgeSnippet = (
 ) =>
   extractSnippet(
     context.knowledge.find((item) =>
-      /price|pricing|service|offer|process|result|review|proof|book|call|support|works/i.test(
+      /price|pricing|service|offer|process|result|review|proof|book|call|support|works|business|company/i.test(
         item
       )
     ) ||
       context.client.faqKnowledge ||
       context.client.businessInfo,
-    undefined
+    BUSINESS_MATCHER
   );
+
+const buildMissingInfoReply = (
+  context: Awaited<ReturnType<typeof buildSalesAgentContext>>,
+  kind: "pricing" | "business" | "general"
+): SalesAgentReply => {
+  if (kind === "pricing") {
+    return {
+      message:
+        "I don't have the exact pricing loaded right now, so I won't guess.\nTell me your use case and I'll guide the closest fit fast.",
+      cta: "REPLY_DM",
+      angle: "value",
+      reason: "instant_missing_pricing",
+    };
+  }
+
+  if (kind === "business") {
+    return {
+      message:
+        "I don't have that exact business detail loaded right now.\nIf you want services, pricing, or booking help, tell me which one and I'll help fast.",
+      cta: "REPLY_DM",
+      angle: getFallbackAngle(context),
+      reason: "instant_missing_business",
+    };
+  }
+
+  return {
+    message:
+      "I don't have that specific info loaded right now.\nIf you tell me what you need, I'll guide the closest fit fast.",
+    cta: "REPLY_DM",
+    angle: getFallbackAngle(context),
+    reason: "instant_missing_general",
+  };
+};
 
 const buildInstantSalesReply = (
   context: Awaited<ReturnType<typeof buildSalesAgentContext>> & {
@@ -331,6 +406,10 @@ const buildInstantSalesReply = (
   const pricingSnippet = extractPricingSnippet(context);
   const planSnippet = extractPlanSnippet(context);
   const knowledgeSnippet = extractKnowledgeSnippet(context);
+  const pricingIntentActive =
+    context.profile.intent === "PRICING" ||
+    (context.progression.userSignal === "yes" &&
+      context.progression.previousIntent === "PRICING");
 
   if (!message) {
     return null;
@@ -356,7 +435,11 @@ const buildInstantSalesReply = (
     };
   }
 
-  if (context.profile.intent === "PRICING" && pricingSnippet) {
+  if (pricingIntentActive) {
+    if (!pricingSnippet) {
+      return buildMissingInfoReply(context, "pricing");
+    }
+
     if (action === "SHOW_PRICING") {
       return {
         message: `${pricingSnippet}\nWant the best-fit option for your use case?`,
@@ -437,6 +520,22 @@ const buildInstantSalesReply = (
       angle: getFallbackAngle(context),
       reason: "instant_knowledge",
     };
+  }
+
+  if (
+    isDirectInfoQuestion(message) &&
+    !knowledgeSnippet &&
+    (context.profile.intent === "GENERAL" ||
+      context.profile.intent === "QUALIFICATION" ||
+      context.profile.intent === "ENGAGEMENT")
+  ) {
+    const kind = /business|service|services|offer|about|what do you do|what is your business/i.test(
+      message
+    )
+      ? "business"
+      : "general";
+
+    return buildMissingInfoReply(context, kind);
   }
 
   return null;
@@ -546,5 +645,10 @@ const createAIReply = async (input: ReplyInput): Promise<SalesAgentReply> => {
 export const generateSalesAgentReply = async (input: ReplyInput) =>
   createAIReply(input);
 
-export const buildSalesAgentRecoveryReply = (message?: string | null) =>
-  buildRecoverySalesReply(message);
+export const buildSalesAgentRecoveryReply = (
+  message?: string | null,
+  options?: {
+    previousIntent?: string | null;
+    lastAction?: string | null;
+  }
+) => buildRecoverySalesReply(message, options);

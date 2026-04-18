@@ -133,6 +133,17 @@ const extractPricingSnippet = (value?: string | null) => {
   return toSentence(preferred.slice(0, 140));
 };
 
+const extractPricingSnippetFromContext = (context: SalesAgentContext) =>
+  extractPricingSnippet(context.client.pricingInfo) ||
+  toSentence(
+    context.knowledge.find((line) =>
+      /(₹|rs\.?|inr|\$|usd|price|pricing|package|plan|starting|starts|charges|investment)/i.test(
+        line
+      )
+    )?.slice(0, 140)
+  ) ||
+  extractPricingSnippet(context.client.faqKnowledge);
+
 const extractProofSnippet = (context: SalesAgentContext) => {
   const sources = [
     ...context.knowledge,
@@ -165,6 +176,17 @@ const extractPlanSnippet = (value?: string | null) => {
 
   return hint ? toSentence(hint.slice(0, 140)) : null;
 };
+
+const extractPlanSnippetFromContext = (context: SalesAgentContext) =>
+  extractPlanSnippet(context.client.pricingInfo) ||
+  toSentence(
+    context.knowledge.find((line) =>
+      /plan|package|starter|growth|pro|elite|premium|recommended|best/i.test(
+        line
+      )
+    )?.slice(0, 140)
+  ) ||
+  extractPlanSnippet(context.client.faqKnowledge);
 
 const extractBusinessSnippet = (value?: string | null) => {
   const lines = String(value || "")
@@ -474,6 +496,9 @@ const buildCtaLine = (context: SalesAgentContext, cta: SalesCTA) => {
   const intent = String(context.profile.intent || "").toUpperCase();
   const action = context.decision?.action || context.progression.currentAction;
   const inboundMessage = context.inboundMessage;
+  const hasAnswerContext = Boolean(
+    extractPricingSnippetFromContext(context) || extractKnowledgeSnippet(context)
+  );
 
   if (intent === "GREETING" || isGreetingOnlyMessage(inboundMessage)) {
     return "Tell me if you want pricing, services, or booking first.";
@@ -485,6 +510,10 @@ const buildCtaLine = (context: SalesAgentContext, cta: SalesCTA) => {
     action !== "CLOSE" &&
     action !== "PUSH_CTA"
   ) {
+    if (!hasAnswerContext) {
+      return "Tell me whether you need pricing, services, or booking help.";
+    }
+
     return "Want the best-fit option for your use case next?";
   }
 
@@ -511,6 +540,10 @@ const buildCtaLine = (context: SalesAgentContext, cta: SalesCTA) => {
   }
 
   if (action === "SHOW_PRICING") {
+    if (!extractPricingSnippetFromContext(context)) {
+      return "Tell me your use case and I'll guide the closest fit.";
+    }
+
     return "Reply and I'll break down the most relevant pricing.";
   }
 
@@ -526,7 +559,7 @@ const buildCtaLine = (context: SalesAgentContext, cta: SalesCTA) => {
 };
 
 const buildValueLine = (context: SalesAgentContext, cta: SalesCTA) => {
-  const pricingSnippet = extractPricingSnippet(context.client.pricingInfo);
+  const pricingSnippet = extractPricingSnippetFromContext(context);
   const proofSnippet = extractProofSnippet(context);
   const knowledgeSnippet = extractKnowledgeSnippet(context);
   const intent = context.profile.intent;
@@ -534,7 +567,7 @@ const buildValueLine = (context: SalesAgentContext, cta: SalesCTA) => {
   if (intent === "PRICING") {
     return (
       pricingSnippet ||
-      "I can break down the best-fit package without wasting time."
+      "I don't have the exact pricing loaded right now, so I won't guess."
     );
   }
 
@@ -577,6 +610,10 @@ const buildValueLine = (context: SalesAgentContext, cta: SalesCTA) => {
       return knowledgeSnippet;
     }
 
+    if (isDirectInfoMessage(context.inboundMessage) && !knowledgeSnippet) {
+      return "I don't have that exact detail loaded right now, but I can still guide the closest fit.";
+    }
+
     if (context.profile.intentDirective.qualificationCue === "budget range") {
       return "I can narrow this fast once I know the budget range.";
     }
@@ -604,10 +641,14 @@ const buildValueLine = (context: SalesAgentContext, cta: SalesCTA) => {
 };
 
 const buildSuggestedPlanLine = (context: SalesAgentContext) => {
-  const planSnippet = extractPlanSnippet(context.client.pricingInfo);
+  const planSnippet = extractPlanSnippetFromContext(context);
 
   if (planSnippet) {
     return planSnippet;
+  }
+
+  if (!extractPricingSnippetFromContext(context)) {
+    return "I don't have enough plan detail loaded to recommend a package yet.";
   }
 
   if (context.profile.qualification.budget && context.profile.qualification.timeline) {
@@ -629,13 +670,13 @@ const buildActionDrivenReplyMessage = (
 
   if (action === "SHOW_PRICING") {
     const line1 =
-      extractPricingSnippet(context.client.pricingInfo)
+      extractPricingSnippetFromContext(context)
         ? alternate
-          ? `Quick pricing view: ${extractPricingSnippet(context.client.pricingInfo)}`
-          : extractPricingSnippet(context.client.pricingInfo)
+          ? `Quick pricing view: ${extractPricingSnippetFromContext(context)}`
+          : extractPricingSnippetFromContext(context)
         : alternate
-          ? "Here is the clean pricing view so you can judge fit fast."
-          : "Here is the pricing context so you can see the fit quickly.";
+          ? "I don't have the exact pricing loaded right now, so I won't guess."
+          : "I don't have the exact pricing loaded right now, so I won't guess.";
 
     return normalizeReplyLines([line1, buildCtaLine(context, cta)].join("\n"))
       .slice(0, 2)
@@ -732,7 +773,9 @@ const matchesIntent = (
   const intent = context.profile.intent;
 
   if (intent === "PRICING") {
-    return /price|pricing|package|plan|investment|cost|starting/.test(text);
+    return /price|pricing|package|plan|investment|cost|starting|rs|inr|usd|\$|\b\d[\d,.]*\b/.test(
+      text
+    );
   }
 
   if (intent === "BOOKING") {
@@ -856,9 +899,42 @@ export const finalizeSalesReply = (
 };
 
 export const buildRecoverySalesReply = (
-  message?: string | null
+  message?: string | null,
+  options?: {
+    previousIntent?: string | null;
+    lastAction?: string | null;
+  }
 ): SalesAgentReply => {
   const text = String(message || "").trim().toLowerCase();
+  const previousIntent = String(options?.previousIntent || "")
+    .trim()
+    .toUpperCase();
+
+  if (
+    /^(yes|yeah|yep|yup|ok|okay|sure|send it|go ahead|works|sounds good)$/i.test(
+      text
+    )
+  ) {
+    if (previousIntent === "PRICING") {
+      return {
+        message:
+          "I can continue with pricing, but I won't guess details I don't have.\nDo you want the starting price or package view first?",
+        cta: "REPLY_DM",
+        angle: "value",
+        reason: "recovery",
+      };
+    }
+
+    if (previousIntent === "BOOKING") {
+      return {
+        message:
+          "Perfect, let's move this forward cleanly.\nWant the booking link?",
+        cta: "BOOK_CALL",
+        angle: "urgency",
+        reason: "recovery",
+      };
+    }
+  }
 
   if (isGreetingOnlyMessage(text)) {
     return {
@@ -893,7 +969,21 @@ export const buildRecoverySalesReply = (
   if (/price|pricing|cost|fees|package|plan/.test(text)) {
     return {
       message:
-        "I can break down the most relevant package without wasting time.\nWant the pricing breakdown?",
+        "I can help with pricing, but I don't want to guess details I don't have.\nTell me your use case and I'll guide the closest fit fast.",
+      cta: "REPLY_DM",
+      angle: "value",
+      reason: "recovery",
+    };
+  }
+
+  if (
+    /what do you do|what is your business about|about your business|services|service|offer|what do you offer|business/i.test(
+      text
+    )
+  ) {
+    return {
+      message:
+        "I don't have the exact business summary loaded right now.\nIf you want services, pricing, or booking help, tell me which one and I'll help fast.",
       cta: "REPLY_DM",
       angle: "value",
       reason: "recovery",
@@ -912,7 +1002,7 @@ export const buildRecoverySalesReply = (
 
   return {
     message:
-      "I can help with pricing, services, or the best next step.\nTell me what you want first.",
+      "I don't have that specific info loaded right now.\nIf you tell me what you need, I'll guide the closest fit fast.",
     cta: "REPLY_DM",
     angle: "value",
     reason: "recovery",

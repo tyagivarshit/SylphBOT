@@ -45,18 +45,19 @@ export const buildKnowledgeScopeFilter = ({
   includeShared?: boolean;
 }) => {
   const normalizedClientId = normalizeClientId(clientId);
+  const sharedClientScope = [{ clientId: null }, { clientId: { isSet: false } }];
 
   if (!normalizedClientId) {
     return {
       businessId,
-      clientId: null,
+      OR: sharedClientScope,
     };
   }
 
   if (includeShared) {
     return {
       businessId,
-      OR: [{ clientId: normalizedClientId }, { clientId: null }],
+      OR: [{ clientId: normalizedClientId }, ...sharedClientScope],
     };
   }
 

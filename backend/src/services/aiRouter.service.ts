@@ -2,6 +2,7 @@ import {
   buildSalesAgentRecoveryReply,
   generateSalesAgentReply,
 } from "./salesAgent/reply.service";
+import { getConversationState } from "./conversationState.service";
 import logger from "../utils/logger";
 
 interface RouterInput {
@@ -40,6 +41,20 @@ export const routeAIMessage = async ({
       source: "AI_ROUTER",
     });
   } catch (error) {
+    let previousIntent: string | null = null;
+    let lastAction: string | null = null;
+
+    try {
+      const state = await getConversationState(leadId);
+      const salesState = (state?.context?.salesAgent || {}) as {
+        previousIntent?: string | null;
+        lastAction?: string | null;
+      };
+
+      previousIntent = salesState.previousIntent || null;
+      lastAction = salesState.lastAction || null;
+    } catch {}
+
     logger.error(
       {
         businessId,
@@ -50,7 +65,10 @@ export const routeAIMessage = async ({
     );
 
     return {
-      ...buildSalesAgentRecoveryReply(normalizedMessage),
+      ...buildSalesAgentRecoveryReply(normalizedMessage, {
+        previousIntent,
+        lastAction,
+      }),
       reason: "router_fallback",
     };
   }

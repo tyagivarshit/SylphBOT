@@ -5,6 +5,11 @@ const normalizeNullableString = (value?: unknown) => {
   return normalized || null;
 };
 
+const buildSystemClientPlaceholder = (
+  businessId: string,
+  field: "phone" | "page"
+) => `__system_${field}__:${businessId}`;
+
 const createClientUpsertError = (message: string, code: string) => {
   const error = new Error(message) as Error & { code?: string };
   error.code = code;
@@ -194,26 +199,45 @@ export const upsertSystemClient = async (businessId: string) => {
     throw createClientUpsertError("businessId is required", "BUSINESS_REQUIRED");
   }
 
+  const phoneNumberId = buildSystemClientPlaceholder(
+    normalizedBusinessId,
+    "phone"
+  );
+  const pageId = buildSystemClientPlaceholder(normalizedBusinessId, "page");
+
   console.log("CLIENT UPSERT", {
-    phoneNumberId: null,
-    pageId: null,
+    phoneNumberId,
+    pageId,
   });
 
-  return prisma.client.upsert({
+  const existing = await prisma.client.findUnique({
     where: {
       businessId_platform: {
         businessId: normalizedBusinessId,
         platform: "SYSTEM",
       },
     },
-    update: {
-      accessToken: "AUTO_GENERATED",
-      isActive: true,
-      deletedAt: null,
-    },
-    create: {
+  });
+
+  if (existing) {
+    return prisma.client.update({
+      where: { id: existing.id },
+      data: {
+        accessToken: "AUTO_GENERATED",
+        phoneNumberId: existing.phoneNumberId || phoneNumberId,
+        pageId: existing.pageId || pageId,
+        isActive: true,
+        deletedAt: null,
+      },
+    });
+  }
+
+  return prisma.client.create({
+    data: {
       businessId: normalizedBusinessId,
       platform: "SYSTEM",
+      phoneNumberId,
+      pageId,
       accessToken: "AUTO_GENERATED",
       isActive: true,
     },

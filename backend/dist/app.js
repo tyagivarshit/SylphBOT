@@ -4,7 +4,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const crypto_1 = require("crypto");
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const compression_1 = __importDefault(require("compression"));
@@ -35,18 +34,28 @@ const search_routes_1 = __importDefault(require("./routes/search.routes"));
 const notification_1 = __importDefault(require("./routes/notification"));
 const user_routes_1 = __importDefault(require("./routes/user.routes"));
 const security_routes_1 = __importDefault(require("./routes/security.routes"));
+const audit_routes_1 = __importDefault(require("./routes/audit.routes"));
 const integration_routes_1 = __importDefault(require("./routes/integration.routes"));
 const oauth_routes_1 = __importDefault(require("./routes/oauth.routes"));
 const booking_routes_1 = __importDefault(require("./routes/booking.routes"));
 const availability_routes_1 = __importDefault(require("./routes/availability.routes"));
 const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
+const health_routes_1 = __importDefault(require("./routes/health.routes"));
+const usage_routes_1 = __importDefault(require("./routes/usage.routes"));
 const ai_queue_1 = require("./queues/ai.queue");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
+const requestContext_middleware_1 = require("./middleware/requestContext.middleware");
+const apiKey_middleware_1 = require("./middleware/apiKey.middleware");
+const rbac_service_1 = require("./services/rbac.service");
 const trial_cron_1 = require("./cron/trial.cron");
 const metaTokenRefresh_cron_1 = require("./cron/metaTokenRefresh.cron");
 const resetUsage_cron_1 = require("./cron/resetUsage.cron");
 const AppError_1 = require("./utils/AppError");
+const asyncHandler_1 = require("./utils/asyncHandler");
+const logger_1 = __importDefault(require("./utils/logger"));
+const sentry_1 = require("./observability/sentry");
+(0, sentry_1.initializeSentry)();
 const app = (0, express_1.default)();
 (0, passport_2.configurePassport)();
 app.set("trust proxy", 1);
@@ -108,6 +117,7 @@ const corsOptions = {
     allowedHeaders: [
         "Content-Type",
         "Authorization",
+        "X-Api-Key",
         "Cache-Control",
         "Stripe-Signature",
         "X-Requested-With",
@@ -131,39 +141,19 @@ app.use((0, helmet_1.default)({
         }
         : false,
 }));
+app.use(requestContext_middleware_1.requestContextMiddleware);
 app.use((0, compression_1.default)());
 app.use((0, cors_1.default)(corsOptions));
 app.options(/.*/, (0, cors_1.default)(corsOptions));
 app.use(rateLimit_middleware_1.globalLimiter);
 app.use((0, cookie_parser_1.default)());
 app.use(passport_1.default.initialize());
-app.use((req, res, next) => {
-    const headerValue = req.headers["x-request-id"];
-    const requestId = (Array.isArray(headerValue) ? headerValue[0] : headerValue) ||
-        (0, crypto_1.randomUUID)();
-    req.requestId = requestId;
-    res.setHeader("X-Request-Id", requestId);
-    next();
-});
-app.use((req, res, next) => {
-    const start = Date.now();
-    res.on("finish", () => {
-        console.info(JSON.stringify({
-            requestId: req.requestId,
-            type: "request",
-            method: req.method,
-            url: req.originalUrl,
-            status: res.statusCode,
-            duration: Date.now() - start,
-            ip: req.ip,
-        }));
-    });
-    next();
-});
 app.use(monitoring_middleware_1.monitoringMiddleware);
 app.use((req, res, next) => {
     res.setTimeout(15000, () => {
-        console.error("Request timeout:", req.originalUrl);
+        req.logger?.error({
+            statusCode: 408,
+        }, "Request timeout");
         if (!res.headersSent) {
             res.status(408).json({
                 success: false,
@@ -224,19 +214,36 @@ const extractMessages = (body) => {
     }
     return payload.map(normalizeIncomingMessage);
 };
-app.get("/", (_req, res) => {
+app.get("/", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     res.json({
         success: true,
         message: "API Running",
         environment: env_1.env.NODE_ENV,
         queue: ai_queue_1.AI_QUEUE_NAME,
     });
-});
-app.post("/v1/messages", async (req, res) => {
+}));
+app.post("/v1/messages", apiKey_middleware_1.optionalApiKeyAuth, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     let timeoutHandle;
     try {
         const body = (req.body || {});
         const messages = extractMessages(body);
+        if (req.apiKey) {
+            if (!(0, rbac_service_1.hasPermission)({ permissions: req.apiKey.permissions }, "messages:enqueue")) {
+                return res.status(403).json({
+                    success: false,
+                    requestId: req.requestId,
+                    message: "API key does not have permission to enqueue messages",
+                });
+            }
+            const crossTenantMessage = messages.find((message) => message.businessId !== req.apiKey.businessId);
+            if (crossTenantMessage) {
+                return res.status(403).json({
+                    success: false,
+                    requestId: req.requestId,
+                    message: "Cross-tenant message enqueue is not allowed",
+                });
+            }
+        }
         const enqueue = (0, ai_queue_1.enqueueAIBatch)(messages, {
             source: "api",
             idempotencyKey: typeof body.idempotencyKey === "string"
@@ -271,11 +278,12 @@ app.post("/v1/messages", async (req, res) => {
             clearTimeout(timeoutHandle);
         }
     }
-});
+}));
 app.use("/api/auth", auth_routes_1.default);
 app.use("/api/auth", googleAuth_routes_1.default);
 app.use("/api/dashboard", auth_middleware_1.protect, dashboard_routes_1.default);
 app.use("/api/billing", auth_middleware_1.protect, billing_routes_1.default);
+app.use("/api/usage", auth_middleware_1.protect, usage_routes_1.default);
 app.use("/api/user", auth_middleware_1.protect, user_routes_1.default);
 app.use("/api/notifications", auth_middleware_1.protect, notification_1.default);
 app.use("/api/ai", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, rateLimit_middleware_1.aiLimiter, ai_routes_1.default);
@@ -289,12 +297,14 @@ app.use("/api/knowledge", auth_middleware_1.protect, knowledge_routes_1.default)
 app.use("/api/training", auth_middleware_1.protect, training_routes_1.default);
 app.use("/api/leads", auth_middleware_1.protect, lead_routes_1.default);
 app.use("/api/analytics", auth_middleware_1.protect, analytics_routes_1.default);
+app.use("/api/audit", auth_middleware_1.protect, audit_routes_1.default);
 app.use("/api/search", auth_middleware_1.protect, search_routes_1.default);
 app.use("/api/security", auth_middleware_1.protect, security_routes_1.default);
 app.use("/api/integrations", auth_middleware_1.protect, integration_routes_1.default);
 app.use("/api/oauth", auth_middleware_1.protect, oauth_routes_1.default);
 app.use("/api/booking", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, booking_routes_1.default);
 app.use("/api/availability", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, availability_routes_1.default);
+app.use("/api/health", health_routes_1.default);
 app.get("/health", (req, res) => {
     res.status(200).json({
         success: true,
@@ -311,11 +321,19 @@ app.use((req, res) => {
     });
 });
 app.use((err, req, res, _next) => {
-    console.error("ERROR:", {
-        requestId: req.requestId,
-        message: err.message,
+    req.logger?.error({
+        error: err,
         path: req.originalUrl,
         method: req.method,
+    }, "Unhandled request error");
+    (0, sentry_1.captureExceptionWithContext)(err, {
+        tags: {
+            layer: "express",
+        },
+        extras: {
+            path: req.originalUrl,
+            method: req.method,
+        },
     });
     if ((0, AppError_1.isAppError)(err)) {
         return res.status(err.statusCode).json({
@@ -338,9 +356,21 @@ if (process.env.ENABLE_CRON === "true") {
     (0, resetUsage_cron_1.startUsageResetCron)();
 }
 process.on("uncaughtException", (err) => {
-    console.error("UNCAUGHT EXCEPTION:", err);
+    logger_1.default.error({ error: err }, "Unhandled uncaught exception in app");
+    (0, sentry_1.captureExceptionWithContext)(err, {
+        tags: {
+            layer: "process",
+            event: "uncaughtException",
+        },
+    });
 });
 process.on("unhandledRejection", (err) => {
-    console.error("UNHANDLED REJECTION:", err);
+    logger_1.default.error({ error: err }, "Unhandled rejection in app");
+    (0, sentry_1.captureExceptionWithContext)(err, {
+        tags: {
+            layer: "process",
+            event: "unhandledRejection",
+        },
+    });
 });
 exports.default = app;

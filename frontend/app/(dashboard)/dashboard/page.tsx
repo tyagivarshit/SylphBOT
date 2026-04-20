@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import LeadsChart from "@/components/charts/LeadsCharts";
 import axios from "axios";
 import { buildApiUrl } from "@/lib/url";
+import UsageOverview from "@/components/dashboard/UsageOverview";
+import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 
 type DashboardValue = number | string;
 
@@ -29,9 +31,12 @@ type DashboardStats = {
   plan: DashboardValue;
   usagePercent: number;
   aiCallsUsed: DashboardValue;
+  aiCallsRemaining?: DashboardValue;
   isUnlimited: boolean;
   aiCallsLimit: DashboardValue;
   nearLimit?: boolean;
+  warning?: boolean;
+  warningMessage?: string | null;
   chartData: ChartPoint[];
   recentActivity: ActivityItem[];
 };
@@ -79,45 +84,46 @@ export default function DashboardPage() {
       }
     };
 
-    fetchData();
+    void fetchData();
   }, [user]);
 
-  if (loading || !stats)
+  if (loading || !stats) {
     return (
       <div className="brand-panel overflow-hidden rounded-[26px] p-6 text-sm text-slate-500">
         Loading dashboard...
       </div>
     );
-  if (!user) return null;
+  }
 
-  const usagePercent = Math.min(
-    Math.round(stats.usagePercent * 100),
-    100
-  );
+  if (!user) {
+    return null;
+  }
+
+  const usagePercent = Math.min(Math.round(stats.usagePercent * 100), 100);
 
   return (
     <div className="relative min-w-0 space-y-6">
-
-      {/* 🔒 LIMIT OVERLAY */}
-      {limited && (
+      {limited ? (
         <div className="absolute inset-0 z-50 flex items-center justify-center rounded-[32px] bg-white/80 backdrop-blur">
           <div className="brand-panel-strong rounded-[28px] p-6 text-center">
             <h2 className="text-lg font-semibold text-gray-900">
-              Upgrade Required 🔒
+              Upgrade Required
             </h2>
-            <p className="text-sm text-gray-500 mt-2">
-              You’ve reached your plan limit
+            <p className="mt-2 text-sm text-gray-500">
+              You have reached your plan limit.
             </p>
-            <button className="mt-4 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-xl text-sm font-semibold hover:shadow-lg transition">
+            <button className="mt-4 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:shadow-lg">
               Upgrade Plan
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* ================= MOBILE ================= */}
+      <OnboardingFlow />
+
+      <UsageOverview />
+
       <div className="space-y-3.5 md:hidden">
-
         <div className="grid grid-cols-2 gap-2.5">
           <MiniCard title="Leads" value={stats.totalLeads} />
           <MiniCard title="Today" value={stats.leadsToday} />
@@ -126,36 +132,36 @@ export default function DashboardPage() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 backdrop-blur-xl">
-          <p className="text-xs text-gray-500 font-medium">AI Usage</p>
+          <p className="text-xs font-medium text-gray-500">AI Usage</p>
           <h2 className="break-words text-base font-bold text-gray-900">
-            {stats.aiCallsUsed} /{" "}
-            {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
+            {stats.aiCallsUsed} / {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
           </h2>
+          <p className="mt-2 text-xs text-gray-500">
+            Remaining today: {stats.aiCallsRemaining ?? 0}
+          </p>
 
-          <div className="w-full h-2 bg-blue-50 rounded-full mt-3">
+          <div className="mt-3 h-2 w-full rounded-full bg-blue-50">
             <div
-              className="h-full bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full"
+              className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-500"
               style={{ width: `${usagePercent}%` }}
             />
           </div>
         </div>
 
-        {convo && (
+        {convo ? (
           <div className="grid grid-cols-3 gap-2.5">
             <MiniCard title="Active" value={convo.active} />
             <MiniCard title="Waiting" value={convo.waitingReplies} />
             <MiniCard title="Done" value={convo.resolved} />
           </div>
-        )}
+        ) : null}
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-3 backdrop-blur-xl">
           <LeadsChart data={stats.chartData} />
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 backdrop-blur-xl">
-          <h2 className="text-sm font-semibold text-gray-900 mb-3">
-            Activity
-          </h2>
+          <h2 className="mb-3 text-sm font-semibold text-gray-900">Activity</h2>
 
           {stats.recentActivity.map((item) => (
             <div
@@ -171,13 +177,10 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
-
       </div>
 
-      {/* ================= DESKTOP ================= */}
       <div className="hidden space-y-8 md:block">
-
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
           <Card title="Total Leads" value={stats.totalLeads} />
           <Card title="Today" value={stats.leadsToday} />
           <Card title="This Month" value={stats.leadsThisMonth} />
@@ -186,52 +189,46 @@ export default function DashboardPage() {
           <Card title="Plan" value={stats.plan} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-          <div className="lg:col-span-2 bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
-            <h2 className="font-semibold text-gray-900 mb-4">
-              Leads Growth
-            </h2>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2 rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
+            <h2 className="mb-4 font-semibold text-gray-900">Leads Growth</h2>
             <LeadsChart data={stats.chartData} />
           </div>
 
-          <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
-            <p className="text-sm text-gray-500 font-medium">
-              AI Usage
-            </p>
+          <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
+            <p className="text-sm font-medium text-gray-500">AI Usage</p>
             <h2 className="text-2xl font-bold text-gray-900">
-              {stats.aiCallsUsed} /{" "}
-              {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
+              {stats.aiCallsUsed} / {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
             </h2>
+            <p className="mt-2 text-xs text-gray-500">
+              Remaining today: {stats.aiCallsRemaining ?? 0}
+            </p>
 
-            <div className="w-full h-2 bg-blue-50 rounded-full mt-3">
+            <div className="mt-3 h-2 w-full rounded-full bg-blue-50">
               <div
-                className="h-full bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full"
+                className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-500"
                 style={{ width: `${usagePercent}%` }}
               />
             </div>
 
-            {stats.nearLimit && (
-              <p className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-md inline-block mt-3">
-                Near usage limit ⚠️
+            {stats.warning ? (
+              <p className="mt-3 inline-block rounded-md bg-red-100 px-2 py-1 text-xs text-red-600">
+                {stats.warningMessage || "You have used 80% of your daily AI limit."}
               </p>
-            )}
+            ) : null}
           </div>
-
         </div>
 
-        {convo && (
+        {convo ? (
           <div className="grid grid-cols-3 gap-4">
             <Card title="Active" value={convo.active} />
             <Card title="Waiting Replies" value={convo.waitingReplies} />
             <Card title="Resolved" value={convo.resolved} />
           </div>
-        )}
+        ) : null}
 
-        <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm">
-          <h2 className="font-semibold text-gray-900 mb-4">
-            Recent Activity
-          </h2>
+        <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
+          <h2 className="mb-4 font-semibold text-gray-900">Recent Activity</h2>
 
           {stats.recentActivity.map((item) => (
             <div
@@ -247,18 +244,15 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
-
       </div>
     </div>
   );
 }
 
-/* COMPONENTS */
-
 function Card({ title, value }: { title: string; value: DashboardValue }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-sm transition hover:shadow-md">
-      <p className="text-sm text-gray-500 font-medium">{title}</p>
+      <p className="text-sm font-medium text-gray-500">{title}</p>
       <h2 className="mt-1 break-words text-xl font-semibold text-gray-900">
         {value}
       </h2>
@@ -269,7 +263,7 @@ function Card({ title, value }: { title: string; value: DashboardValue }) {
 function MiniCard({ title, value }: { title: string; value: DashboardValue }) {
   return (
     <div className="overflow-hidden rounded-xl border border-blue-100 bg-white/80 p-3 shadow-sm">
-      <p className="text-[10px] text-gray-500 font-medium">{title}</p>
+      <p className="text-[10px] font-medium text-gray-500">{title}</p>
       <h2 className="break-words text-sm font-semibold text-gray-900">
         {value}
       </h2>

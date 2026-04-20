@@ -87,9 +87,29 @@ const createRedisClient = (label) => {
 };
 exports.redis = globalForRedis.__sylphRedis || createRedisClient("shared");
 globalForRedis.__sylphRedis = exports.redis;
-const getQueueRedisConnection = () => exports.redis;
+const bullConnections = globalForRedis.__sylphBullConnections || new Set();
+if (!globalForRedis.__sylphBullConnections) {
+    globalForRedis.__sylphBullConnections = bullConnections;
+}
+const trackBullConnection = (client) => {
+    bullConnections.add(client);
+    return client;
+};
+const untrackBullConnection = (client) => {
+    if (!client) {
+        return;
+    }
+    bullConnections.delete(client);
+};
+const queueRedis = globalForRedis.__sylphQueueRedis ||
+    trackBullConnection(createRedisClient("queue"));
+if (!globalForRedis.__sylphQueueRedis) {
+    globalForRedis.__sylphQueueRedis = queueRedis;
+}
+let workerConnectionCounter = 0;
+const getQueueRedisConnection = () => queueRedis;
 exports.getQueueRedisConnection = getQueueRedisConnection;
-const getWorkerRedisConnection = () => exports.redis;
+const getWorkerRedisConnection = () => trackBullConnection(createRedisClient(`worker:${++workerConnectionCounter}`));
 exports.getWorkerRedisConnection = getWorkerRedisConnection;
 const closeClient = async (client) => {
     if (!client) {
@@ -111,8 +131,18 @@ const closeClient = async (client) => {
     }
 };
 const closeRedisConnection = async () => {
-    await closeClient(globalForRedis.__sylphRedis);
+    const clients = Array.from(new Set([
+        globalForRedis.__sylphRedis,
+        globalForRedis.__sylphQueueRedis,
+        ...Array.from(bullConnections.values()),
+    ].filter(Boolean)));
+    for (const client of clients) {
+        await closeClient(client);
+        untrackBullConnection(client);
+    }
     globalForRedis.__sylphRedis = undefined;
+    globalForRedis.__sylphQueueRedis = undefined;
+    globalForRedis.__sylphBullConnections = undefined;
 };
 exports.closeRedisConnection = closeRedisConnection;
 exports.default = exports.redis;

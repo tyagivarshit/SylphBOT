@@ -1,29 +1,79 @@
 import prisma from "../config/prisma";
+import { TRIAL_DAYS, TRIAL_PLAN_KEY } from "../config/pricing.config";
 
-/* ======================================
-START TRIAL (SAFE)
-====================================== */
+type TrialStatus = {
+  trialActive: boolean;
+  daysLeft: number;
+  currentPeriodEnd: Date | null;
+};
+
+const normalizeBusinessId = (businessId: string) =>
+  String(businessId || "").trim();
+
+const getTrialPlan = async () =>
+  prisma.plan.findFirst({
+    where: {
+      OR: [{ name: TRIAL_PLAN_KEY }, { type: TRIAL_PLAN_KEY }],
+    },
+  });
+
+export const getTrialStatus = async (
+  businessId: string
+): Promise<TrialStatus> => {
+  const normalizedBusinessId = normalizeBusinessId(businessId);
+
+  if (!normalizedBusinessId) {
+    throw new Error("Invalid business id");
+  }
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { businessId: normalizedBusinessId },
+    select: {
+      isTrial: true,
+      currentPeriodEnd: true,
+    },
+  });
+
+  if (!subscription?.isTrial || !subscription.currentPeriodEnd) {
+    return {
+      trialActive: false,
+      daysLeft: 0,
+      currentPeriodEnd: null,
+    };
+  }
+
+  const now = Date.now();
+  const expiresAt = subscription.currentPeriodEnd.getTime();
+  const active = expiresAt >= now;
+
+  return {
+    trialActive: active,
+    daysLeft: active
+      ? Math.max(Math.ceil((expiresAt - now) / 86400000), 0)
+      : 0,
+    currentPeriodEnd: subscription.currentPeriodEnd,
+  };
+};
 
 export const startTrial = async (businessId: string) => {
+  const normalizedBusinessId = normalizeBusinessId(businessId);
+
+  if (!normalizedBusinessId) {
+    throw new Error("Invalid business id");
+  }
 
   return prisma.$transaction(async (tx) => {
-
     const existing = await tx.subscription.findUnique({
-      where: { businessId },
+      where: { businessId: normalizedBusinessId },
     });
 
-    /* 🔥 PREVENT TRIAL ABUSE */
     if (existing?.trialUsed) {
       throw new Error("Trial already used");
     }
 
-    /* ======================================
-    ✅ FIX: USE BASIC PLAN (NO FREE PLAN)
-    ====================================== */
-
     const selectedPlan = await tx.plan.findFirst({
       where: {
-        OR: [{ name: "BASIC" }, { type: "BASIC" }],
+        OR: [{ name: TRIAL_PLAN_KEY }, { type: TRIAL_PLAN_KEY }],
       },
     });
 
@@ -31,42 +81,42 @@ export const startTrial = async (businessId: string) => {
       throw new Error("Default trial plan not found");
     }
 
-    const trialDays = 7;
-
-    const endDate = new Date();
-    endDate.setDate(endDate.getDate() + trialDays);
+    const currentPeriodEnd = new Date();
+    currentPeriodEnd.setDate(currentPeriodEnd.getDate() + TRIAL_DAYS);
 
     await tx.subscription.upsert({
-      where: { businessId },
-
+      where: { businessId: normalizedBusinessId },
       update: {
+        planId: selectedPlan.id,
         status: "ACTIVE",
         isTrial: true,
         trialUsed: true,
-        currentPeriodEnd: endDate,
-        planId: selectedPlan.id, // ✅ FIX
+        currentPeriodEnd,
+        graceUntil: null,
       },
-
       create: {
-        businessId,
-        planId: selectedPlan.id, // ✅ FIX
+        businessId: normalizedBusinessId,
+        planId: selectedPlan.id,
         status: "ACTIVE",
         isTrial: true,
         trialUsed: true,
-        currentPeriodEnd: endDate,
+        currentPeriodEnd,
       },
     });
-
   });
-
 };
 
-/* ======================================
-EXPIRE TRIAL (BULK + FAST)
-====================================== */
+export const ensureTrialPlanExists = async () => {
+  const plan = await getTrialPlan();
+
+  if (!plan) {
+    throw new Error("Default trial plan not found");
+  }
+
+  return plan;
+};
 
 export const expireTrials = async () => {
-
   const now = new Date();
 
   await prisma.subscription.updateMany({
@@ -77,7 +127,7 @@ export const expireTrials = async () => {
     data: {
       status: "INACTIVE",
       isTrial: false,
+      graceUntil: null,
     },
   });
-
 };

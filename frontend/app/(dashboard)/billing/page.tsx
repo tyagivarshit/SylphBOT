@@ -1,9 +1,10 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createCheckout, upgradePlan } from "@/lib/billing";
 import PaymentHistory from "@/components/billing/PaymentHistory";
+import UsageSummary from "@/components/billing/UsageSummary";
 import { buildApiUrl } from "@/lib/userApi";
 
 type Currency = "INR" | "USD";
@@ -29,93 +30,69 @@ type BillingContext = {
   remainingEarly?: number;
 };
 
-const PLAN_CATALOG: Array<{
-  id: PlanId;
-  name: string;
-  popular: boolean;
-  INR: {
-    monthly: number;
-    yearly: number;
-    earlyMonthly: number;
-    earlyYearly: number;
+type UsageSummaryPayload = {
+  plan: string;
+  planLabel?: string;
+  trialActive: boolean;
+  daysLeft: number;
+  warning?: boolean;
+  warningMessage?: string | null;
+  addonCredits?: number;
+  ai: {
+    usedToday: number;
+    limit: number;
+    remaining: number | null;
   };
-  USD: {
-    monthly: number;
-    yearly: number;
-    earlyMonthly: number;
-    earlyYearly: number;
+  usage: {
+    ai: {
+      used: number;
+      dailyLimit: number;
+      monthlyUsed: number;
+      monthlyLimit: number;
+      warning?: boolean;
+    };
+    contacts: {
+      used: number;
+      limit: number;
+    };
+    messages: {
+      used: number;
+      limit: number;
+    };
+  };
+  addons: {
+    aiCredits: number;
+    contacts?: number;
+  };
+};
+
+type PricingPlan = {
+  id: string;
+  name: string;
+  type: PlanId;
+  description: string;
+  popular?: boolean;
+  monthlyPrice: Record<Currency, number>;
+  yearlyPrice: Record<Currency, number>;
+  limits: {
+    contactsLimit: number;
+    aiDailyLimit: number;
+    aiMonthlyLimit: number;
+    messageLimit: number;
+    automationLimit: number;
   };
   features: string[];
-}> = [
-  {
-    id: "BASIC",
-    name: "Basic",
-    popular: false,
-    INR: {
-      monthly: 999,
-      yearly: 9990,
-      earlyMonthly: 799,
-      earlyYearly: 7990,
-    },
-    USD: {
-      monthly: 19,
-      yearly: 190,
-      earlyMonthly: 15,
-      earlyYearly: 150,
-    },
-    features: [
-      "Instagram DM automation",
-      "Comment to DM automation",
-      "Basic AI responses",
-    ],
-  },
-  {
-    id: "PRO",
-    name: "Pro",
-    popular: true,
-    INR: {
-      monthly: 1999,
-      yearly: 19990,
-      earlyMonthly: 1599,
-      earlyYearly: 15990,
-    },
-    USD: {
-      monthly: 49,
-      yearly: 490,
-      earlyMonthly: 39,
-      earlyYearly: 390,
-    },
-    features: [
-      "WhatsApp automation",
-      "CRM and follow-ups",
-      "Unlimited automation",
-      "Priority support",
-    ],
-  },
-  {
-    id: "ELITE",
-    name: "Elite",
-    popular: false,
-    INR: {
-      monthly: 3999,
-      yearly: 39990,
-      earlyMonthly: 2999,
-      earlyYearly: 29990,
-    },
-    USD: {
-      monthly: 99,
-      yearly: 990,
-      earlyMonthly: 79,
-      earlyYearly: 790,
-    },
-    features: [
-      "AI booking system",
-      "Advanced workflows",
-      "Unlimited usage",
-      "Dedicated support",
-    ],
-  },
-];
+};
+
+type PlansResponse = {
+  plans: PricingPlan[];
+  addons?: Array<{
+    type: string;
+    label: string;
+    description: string;
+  }>;
+  trialDays?: number;
+};
 
 const formatMoney = (amount: number, currency: Currency) =>
   new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
@@ -124,20 +101,41 @@ const formatMoney = (amount: number, currency: Currency) =>
     maximumFractionDigits: 0,
   }).format(amount);
 
+const normalizePlanKey = (value?: string | null) =>
+  String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
 const isCurrentPlan = (
   subscription: Subscription | null,
   planId: PlanId,
   planKey: string
 ) => {
-  if (planKey === "FREE_LOCKED") {
+  if (planKey === "FREE_LOCKED" || planKey === "LOCKED") {
     return false;
   }
 
-  const currentType = subscription?.plan?.type?.toUpperCase();
-  const currentName = subscription?.plan?.name?.toUpperCase();
+  const currentType = normalizePlanKey(subscription?.plan?.type);
+  const currentName = normalizePlanKey(subscription?.plan?.name);
 
   return currentType === planId || currentName === planId;
 };
+
+async function fetchJson<T>(url: string) {
+  const res = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(data?.message || "Request failed");
+  }
+
+  return data as T;
+}
 
 function BillingPageContent() {
   const searchParams = useSearchParams();
@@ -148,34 +146,42 @@ function BillingPageContent() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [billingContext, setBillingContext] = useState<BillingContext | null>(null);
+  const [usageSummary, setUsageSummary] = useState<UsageSummaryPayload | null>(null);
+  const [plansResponse, setPlansResponse] = useState<PlansResponse>({
+    plans: [],
+    addons: [],
+    trialDays: 7,
+  });
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadBilling = async () => {
       try {
-        const res = await fetch(buildApiUrl("/api/billing"), {
-          credentials: "include",
-          cache: "no-store",
+        const [billingData, plansData, usageData] = await Promise.all([
+          fetchJson<any>(buildApiUrl("/api/billing")),
+          fetchJson<any>(buildApiUrl("/api/billing/plans")),
+          fetchJson<UsageSummaryPayload>(buildApiUrl("/api/usage")),
+        ]);
+
+        setSubscription(billingData.subscription || null);
+        setInvoices(billingData.invoices || []);
+        setBillingContext(billingData.billing || null);
+        setUsageSummary(usageData || null);
+        setPlansResponse({
+          plans: plansData.plans || [],
+          addons: plansData.addons || [],
+          trialDays: plansData.trialDays || 7,
         });
 
-        const data = await res.json();
-
-        if (!res.ok || !data?.success) {
-          throw new Error(data?.message || "Failed to load billing");
-        }
-
-        setSubscription(data.subscription || null);
-        setInvoices(data.invoices || []);
-        setBillingContext(data.billing || null);
-
-        const nextCurrency = data.subscription?.currency || data.currency || "INR";
+        const nextCurrency =
+          billingData.subscription?.currency || billingData.currency || "INR";
 
         setCurrency(nextCurrency);
-        setLockedCurrency(data.subscription?.currency || null);
+        setLockedCurrency(billingData.subscription?.currency || null);
 
-        if (data.subscription?.billingCycle) {
-          setBilling(data.subscription.billingCycle);
+        if (billingData.subscription?.billingCycle) {
+          setBilling(billingData.subscription.billingCycle);
         }
       } catch (err: any) {
         console.error(err);
@@ -185,7 +191,7 @@ function BillingPageContent() {
       }
     };
 
-    loadBilling();
+    void loadBilling();
   }, []);
 
   const planKey = billingContext?.planKey || "FREE_LOCKED";
@@ -197,6 +203,14 @@ function BillingPageContent() {
   const currentPeriodEnd = subscription?.currentPeriodEnd
     ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
     : null;
+
+  const plans = useMemo(
+    () => plansResponse.plans.slice().sort((left, right) => {
+      const order: PlanId[] = ["BASIC", "PRO", "ELITE"];
+      return order.indexOf(left.type) - order.indexOf(right.type);
+    }),
+    [plansResponse.plans]
+  );
 
   const handleCheckout = async (plan: PlanId) => {
     if (loading) return;
@@ -211,7 +225,9 @@ function BillingPageContent() {
       }
 
       const action =
-        planKey !== "FREE_LOCKED" && subscription?.stripeSubscriptionId
+        planKey !== "FREE_LOCKED" &&
+        planKey !== "LOCKED" &&
+        subscription?.stripeSubscriptionId
           ? upgradePlan
           : createCheckout;
 
@@ -233,7 +249,7 @@ function BillingPageContent() {
   if (pageLoading) {
     return (
       <div className="flex min-h-[18rem] items-center justify-center">
-        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-500" />
       </div>
     );
   }
@@ -252,28 +268,27 @@ function BillingPageContent() {
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-              Access controls
+              Pricing and billing
             </p>
             <p className="max-w-2xl text-sm leading-6 text-slate-500">
-            Prices are shown in {currency}. Tax is calculated automatically at
-            checkout based on the customer billing address and country.
+              Monthly pricing is shown in {currency}. Taxes are applied automatically at checkout.
             </p>
           </div>
 
           <div className="flex rounded-2xl border border-slate-200/80 bg-white/90 p-1 shadow-sm">
-          {(["monthly", "yearly"] as BillingCycle[]).map((type) => (
-            <button
-              key={type}
-              onClick={() => setBilling(type)}
-              className={`rounded-[14px] px-5 py-2 text-sm font-semibold transition-all ${
-                billing === type
-                  ? "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white shadow"
-                  : "text-slate-600"
-              }`}
-            >
-              {type === "monthly" ? "Monthly" : "Yearly"}
-            </button>
-          ))}
+            {(["monthly", "yearly"] as BillingCycle[]).map((type) => (
+              <button
+                key={type}
+                onClick={() => setBilling(type)}
+                className={`rounded-[14px] px-5 py-2 text-sm font-semibold transition-all ${
+                  billing === type
+                    ? "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white shadow"
+                    : "text-slate-600"
+                }`}
+              >
+                {type === "monthly" ? "Monthly" : "Yearly"}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -299,44 +314,37 @@ function BillingPageContent() {
       <div className="brand-section-shell rounded-[26px] p-5">
         <p className="text-sm font-semibold text-gray-900">
           {billingStatus === "TRIAL"
-            ? "7-day trial is active"
+            ? `${plansResponse.trialDays} day trial is active`
             : billingStatus === "ACTIVE"
-            ? "Paid subscription is active"
-            : hasUsedTrial
-            ? "Trial already used"
-            : "Your first checkout includes a 7-day free trial"}
+              ? "Paid subscription is active"
+              : hasUsedTrial
+                ? "Trial already used"
+                : `Your first checkout includes a ${plansResponse.trialDays} day free trial`}
         </p>
         <p className="mt-1 text-sm text-gray-600">
           {billingStatus === "TRIAL" && currentPeriodEnd
-            ? `Trial access stays active until ${currentPeriodEnd}. After that, service becomes inactive if no paid subscription continues.`
+            ? `Trial access stays active until ${currentPeriodEnd}. After that, service becomes locked if no paid subscription continues.`
             : billingStatus === "ACTIVE"
-            ? "You can switch plans anytime and proration will be handled in Stripe."
-            : hasUsedTrial
-            ? "Service is locked until a paid plan is purchased again."
-            : "The button shows Start Free Trial only once. After trial is used, it automatically switches to Buy Now."}
+              ? "You can switch plans anytime and Stripe will handle billing updates."
+              : hasUsedTrial
+                ? "Your workspace stays locked until a paid plan is active again."
+                : "Start with Pro-level access free for 7 days, then keep momentum going with the plan that fits your growth."}
         </p>
       </div>
 
+      <UsageSummary summary={usageSummary} />
+
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-        {PLAN_CATALOG.map((plan) => {
-          const prices = plan[currency];
+        {plans.map((plan) => {
           const displayPrice =
             billing === "monthly"
-              ? allowEarly
-                ? prices.earlyMonthly
-                : prices.monthly
-              : allowEarly
-              ? prices.earlyYearly
-              : prices.yearly;
-
-          const originalPrice =
-            billing === "monthly" ? prices.monthly : prices.yearly;
-
-          const current = isCurrentPlan(subscription, plan.id, planKey);
+              ? plan.monthlyPrice[currency]
+              : plan.yearlyPrice[currency];
+          const current = isCurrentPlan(subscription, plan.type, planKey);
 
           return (
             <div
-              key={plan.id}
+              key={plan.type}
               className={`relative rounded-2xl border bg-white/85 p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg ${
                 plan.popular ? "border-blue-300" : "border-blue-100"
               }`}
@@ -349,9 +357,15 @@ function BillingPageContent() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    {plan.name}
-                  </h2>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">
+                      {plan.name}
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {plan.description}
+                    </p>
+                  </div>
+
                   {current && (
                     <span className="rounded-md bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">
                       Active
@@ -360,11 +374,6 @@ function BillingPageContent() {
                 </div>
 
                 <div>
-                  {allowEarly && (
-                    <p className="text-sm text-gray-400 line-through">
-                      {formatMoney(originalPrice, currency)}
-                    </p>
-                  )}
                   <div className="flex items-end gap-2">
                     <span className="text-3xl font-bold text-gray-900">
                       {formatMoney(displayPrice, currency)}
@@ -373,6 +382,21 @@ function BillingPageContent() {
                       /{billing}
                     </span>
                   </div>
+                  <p className="mt-2 text-xs font-medium text-blue-600">
+                    Includes {plan.limits.aiDailyLimit} AI calls/day
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-blue-50/70 p-3 text-xs text-slate-600">
+                  <p>{plan.limits.contactsLimit.toLocaleString()} contacts included</p>
+                  <p className="mt-1">
+                    {plan.limits.aiMonthlyLimit.toLocaleString()} AI responses/month
+                  </p>
+                  <p className="mt-1">
+                    {plan.limits.messageLimit === -1
+                      ? "Unlimited monthly messages"
+                      : `${plan.limits.messageLimit.toLocaleString()} messages/month`}
+                  </p>
                 </div>
 
                 <ul className="space-y-2 text-sm text-gray-700">
@@ -386,7 +410,7 @@ function BillingPageContent() {
               </div>
 
               <button
-                onClick={() => handleCheckout(plan.id)}
+                onClick={() => handleCheckout(plan.type)}
                 disabled={Boolean(loading) || current}
                 className={`mt-6 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                   current
@@ -396,24 +420,49 @@ function BillingPageContent() {
               >
                 {current
                   ? "Current Plan"
-                  : loading === plan.id
-                  ? "Processing..."
-                  : planKey === "FREE_LOCKED"
-                  ? hasUsedTrial
-                    ? "Buy Now"
-                    : "Start Free Trial"
-                  : "Upgrade Now"}
+                  : loading === plan.type
+                    ? "Processing..."
+                    : planKey === "FREE_LOCKED" || planKey === "LOCKED"
+                      ? hasUsedTrial
+                        ? "Buy Now"
+                        : "Start Free Trial"
+                      : "Upgrade Now"}
               </button>
 
               <p className="mt-3 text-xs text-gray-500">
-                {planKey === "FREE_LOCKED" && !hasUsedTrial
-                  ? "7-day free trial applies on the first checkout only."
-                  : "Automatic tax and billing-country pricing are applied at checkout."}
+                {planKey === "FREE_LOCKED" || planKey === "LOCKED"
+                    ? hasUsedTrial
+                      ? "Need more? Buy extra AI calls anytime."
+                      : `${plansResponse.trialDays} day free trial applies on the first checkout only.`
+                  : "Need more? Buy extra AI calls anytime."}
               </p>
             </div>
           );
         })}
       </div>
+
+      {plansResponse.addons?.length ? (
+        <div className="brand-section-shell rounded-[26px] p-5">
+          <h3 className="text-base font-semibold text-gray-900">
+            Buy Extra AI Calls
+          </h3>
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            {plansResponse.addons.map((addon) => (
+              <div
+                key={addon.type}
+                className="rounded-[20px] border border-slate-200/80 bg-white/84 p-4 shadow-sm"
+              >
+                <p className="text-sm font-semibold text-slate-950">
+                  {addon.label}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {addon.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <PaymentHistory invoices={invoices} />
     </div>
@@ -423,7 +472,7 @@ function BillingPageContent() {
 function BillingPageFallback() {
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-500" />
     </div>
   );
 }

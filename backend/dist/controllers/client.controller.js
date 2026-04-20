@@ -8,6 +8,9 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const clientUpsert_service_1 = require("../services/clientUpsert.service");
 const encrypt_1 = require("../utils/encrypt");
 const axios_1 = __importDefault(require("axios"));
+const plan_config_1 = require("../config/plan.config");
+const feature_service_1 = require("../services/feature.service");
+const onboarding_service_1 = require("../services/onboarding.service");
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
@@ -24,6 +27,38 @@ const getSubscription = async (businessId) => {
         where: { businessId },
         include: { plan: true },
     });
+};
+const getAllowedPlatforms = async (businessId, subscription) => {
+    if (!subscription?.plan) {
+        return [];
+    }
+    const planContext = await (0, feature_service_1.resolvePlanContext)(businessId).catch(() => null);
+    if (!planContext || planContext.state !== "ACTIVE") {
+        return [];
+    }
+    const planKey = (0, plan_config_1.getPlanKey)(subscription.plan);
+    if (planKey === "PRO" || planKey === "ELITE") {
+        return ["WHATSAPP", "INSTAGRAM"];
+    }
+    if (planKey === "BASIC") {
+        return ["INSTAGRAM"];
+    }
+    return [];
+};
+const queueOnboardingDemoForClient = async (businessId, client) => {
+    try {
+        await (0, onboarding_service_1.triggerOnboardingDemo)({
+            businessId,
+            client: {
+                id: client.id,
+                platform: client.platform,
+                isActive: client.isActive ?? true,
+            },
+        });
+    }
+    catch (error) {
+        console.error("Onboarding demo trigger failed:", error);
+    }
 };
 /*
 ---------------------------------------------------
@@ -55,26 +90,10 @@ const createClient = async (req, res) => {
                 message: "No active subscription found",
             });
         }
-        const planName = subscription.plan.name;
-        const now = new Date();
-        let allowedPlatforms = [];
-        if (planName === "FREE_TRIAL") {
-            if (subscription.currentPeriodEnd &&
-                now < subscription.currentPeriodEnd) {
-                allowedPlatforms = ["WHATSAPP", "INSTAGRAM"];
-            }
-            else {
-                return res.status(403).json({
-                    message: "Your 7-day trial has expired. Please upgrade your plan.",
-                });
-            }
-        }
-        else if (planName === "PRO_1999") {
-            allowedPlatforms = ["WHATSAPP", "INSTAGRAM"];
-        }
-        else {
+        const allowedPlatforms = await getAllowedPlatforms(business.id, subscription);
+        if (!allowedPlatforms.length) {
             return res.status(403).json({
-                message: "Invalid subscription plan",
+                message: "Your current plan does not allow new integrations",
             });
         }
         if (!allowedPlatforms.includes(platform)) {
@@ -95,6 +114,7 @@ const createClient = async (req, res) => {
             faqKnowledge,
             salesInstructions,
         });
+        await queueOnboardingDemoForClient(business.id, client);
         return res.status(201).json({
             message: "Client created successfully",
             client,
@@ -150,6 +170,18 @@ const metaOAuthConnect = async (req, res) => {
                 message: "Business not found",
             });
         }
+        const subscription = await getSubscription(business.id);
+        if (!subscription) {
+            return res.status(403).json({
+                message: "No active subscription found",
+            });
+        }
+        const allowedPlatforms = await getAllowedPlatforms(business.id, subscription);
+        if (!allowedPlatforms.includes("INSTAGRAM")) {
+            return res.status(403).json({
+                message: "Instagram integration not allowed in your plan",
+            });
+        }
         const shortTokenRes = await axios_1.default.get("https://graph.facebook.com/v19.0/oauth/access_token", {
             params: {
                 client_id: process.env.META_APP_ID,
@@ -203,6 +235,7 @@ const metaOAuthConnect = async (req, res) => {
             faqKnowledge,
             salesInstructions,
         });
+        await queueOnboardingDemoForClient(business.id, client);
         return res.json({
             message: "Instagram connected successfully",
             client,

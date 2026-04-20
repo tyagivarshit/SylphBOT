@@ -65,6 +65,7 @@ const createAutomationFlow = async (req, res) => {
         }));
         /* ---------------- PLAN RESTRICTIONS ---------------- */
         const allowedStepTypesByPlan = {
+            LOCKED: [],
             FREE_LOCKED: [],
             BASIC: ["MESSAGE"],
             PRO: ["MESSAGE", "DELAY", "CONDITION"],

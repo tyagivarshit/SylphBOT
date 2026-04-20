@@ -7,6 +7,7 @@ exports.testAI = exports.getSalesBlueprint = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const blueprint_service_1 = require("../services/salesAgent/blueprint.service");
 const reply_service_1 = require("../services/salesAgent/reply.service");
+const usage_service_1 = require("../services/usage.service");
 const normalizeMessage = (message) => message?.trim() || "";
 const getBusinessForUser = async (userId) => {
     if (!userId) {
@@ -33,6 +34,8 @@ const getSalesBlueprint = async (_req, res) => {
 };
 exports.getSalesBlueprint = getSalesBlueprint;
 const testAI = async (req, res) => {
+    let aiReservation = null;
+    let responseLeadId = null;
     try {
         const message = normalizeMessage(req.body.message);
         if (!message) {
@@ -69,14 +72,18 @@ const testAI = async (req, res) => {
                 },
             })
             : null) ||
-            (await prisma_1.default.lead.create({
+            (await (0, usage_service_1.runWithContactUsageLimit)(business.id, (tx) => tx.lead.create({
                 data: {
                     businessId: business.id,
                     clientId: req.body.clientId || null,
                     name: "Test Lead",
                     platform: "TEST",
                 },
-            }));
+            }))).result;
+        responseLeadId = lead.id;
+        aiReservation = await (0, usage_service_1.reserveAIUsageExecution)({
+            businessId: business.id,
+        });
         const reply = await (0, reply_service_1.generateSalesAgentReply)({
             businessId: business.id,
             leadId: lead.id,
@@ -85,14 +92,51 @@ const testAI = async (req, res) => {
             source: "PREVIEW",
             preview: true,
         });
+        if (!reply?.message) {
+            await (0, usage_service_1.releaseAIUsageExecution)(aiReservation);
+            aiReservation = null;
+            return res.json({
+                success: true,
+                aiReply: null,
+                payload: reply,
+                leadId: responseLeadId,
+            });
+        }
+        await (0, usage_service_1.finalizeAIUsageExecution)(aiReservation);
+        aiReservation = null;
         return res.json({
             success: true,
             aiReply: reply?.message || null,
             payload: reply,
-            leadId: lead.id,
+            leadId: responseLeadId,
         });
     }
     catch (error) {
+        if (aiReservation) {
+            await (0, usage_service_1.releaseAIUsageExecution)(aiReservation).catch(() => undefined);
+            aiReservation = null;
+        }
+        if (error?.code === "LIMIT_REACHED") {
+            return res.status(429).json({
+                success: false,
+                message: "Usage limit reached",
+            });
+        }
+        if (error?.code === "HOURLY_LIMIT_REACHED") {
+            const fallback = (0, reply_service_1.buildSalesAgentRecoveryReply)(normalizeMessage(req.body.message));
+            return res.json({
+                success: true,
+                aiReply: fallback.message,
+                payload: fallback,
+                leadId: responseLeadId,
+            });
+        }
+        if (error?.code === "USAGE_CHECK_FAILED") {
+            return res.status(503).json({
+                success: false,
+                message: "AI temporarily unavailable",
+            });
+        }
         console.error("AI Test Error:", error);
         return res.status(500).json({
             success: false,

@@ -12,6 +12,9 @@ const invoice_service_1 = require("../services/invoice.service");
 const billingGeo_service_1 = require("../services/billingGeo.service");
 const subscription_middleware_1 = require("../middleware/subscription.middleware");
 const billingSync_service_1 = require("../services/billingSync.service");
+const pricing_config_1 = require("../config/pricing.config");
+const usage_service_1 = require("../services/usage.service");
+const stripe_price_map_1 = require("../config/stripe.price.map");
 /* ====================================== */
 /* USER CONTEXT */
 /* ====================================== */
@@ -32,12 +35,70 @@ async function getUserContext(req) {
         email: user.email,
     };
 }
-/* ====================================== */
-/* CONTROLLER */
-/* ====================================== */
+let publicPricingCache = null;
+const buildEmptyPriceSnapshot = () => ({
+    BASIC: {
+        monthlyPrice: { INR: 0, USD: 0 },
+        yearlyPrice: { INR: 0, USD: 0 },
+        priceIds: {},
+    },
+    PRO: {
+        monthlyPrice: { INR: 0, USD: 0 },
+        yearlyPrice: { INR: 0, USD: 0 },
+        priceIds: {},
+    },
+    ELITE: {
+        monthlyPrice: { INR: 0, USD: 0 },
+        yearlyPrice: { INR: 0, USD: 0 },
+        priceIds: {},
+    },
+});
+const getStripePublicPricing = async () => {
+    const cached = publicPricingCache;
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+    const catalog = (0, stripe_price_map_1.getStandardStripePriceCatalog)();
+    if (!env_1.env.STRIPE_SECRET_KEY || !catalog.length) {
+        return null;
+    }
+    const prices = await Promise.all(catalog.map(async (entry) => {
+        const price = await stripe_service_1.stripe.prices.retrieve(entry.priceId);
+        return {
+            entry,
+            price,
+        };
+    }));
+    const snapshot = buildEmptyPriceSnapshot();
+    for (const { entry, price } of prices) {
+        const amount = typeof price.unit_amount === "number"
+            ? price.unit_amount / 100
+            : null;
+        if (amount === null) {
+            continue;
+        }
+        snapshot[entry.plan].priceIds[entry.currency] = {
+            ...(snapshot[entry.plan].priceIds[entry.currency] || {}),
+            [entry.billing]: entry.priceId,
+        };
+        if (entry.billing === "monthly") {
+            snapshot[entry.plan].monthlyPrice[entry.currency] = amount;
+            continue;
+        }
+        snapshot[entry.plan].yearlyPrice[entry.currency] = amount;
+    }
+    publicPricingCache = {
+        value: snapshot,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+    };
+    return snapshot;
+};
 class BillingController {
     static async buildBillingResponse(businessId, req) {
-        const { subscription, context } = await (0, subscription_middleware_1.loadBillingContext)(businessId);
+        const [{ subscription, context }, usage] = await Promise.all([
+            (0, subscription_middleware_1.loadBillingContext)(businessId),
+            (0, usage_service_1.getUsageOverview)(businessId),
+        ]);
         let invoices = [];
         if (subscription?.stripeCustomerId) {
             invoices = await (0, invoice_service_1.getInvoices)(subscription.stripeCustomerId);
@@ -46,6 +107,12 @@ class BillingController {
             success: true,
             subscription,
             billing: context,
+            usage: {
+                aiCallsUsed: usage.usage.ai.monthlyUsed,
+                messagesUsed: usage.usage.messages.used,
+                followupsUsed: usage.usage.automation.used,
+                summary: usage,
+            },
             currency: subscription?.currency || (0, billingGeo_service_1.resolveBillingCurrency)(req),
             invoices,
         };
@@ -104,9 +171,44 @@ class BillingController {
                     priceIdUSD: true,
                 },
             });
+            const livePricing = await getStripePublicPricing().catch((error) => {
+                console.warn("Stripe pricing sync failed:", error);
+                return null;
+            });
+            const planMap = new Map(plans.map((plan) => [String(plan.type || plan.name).toUpperCase(), plan]));
             return res.json({
                 success: true,
-                plans,
+                trialDays: pricing_config_1.TRIAL_DAYS,
+                addons: (0, pricing_config_1.getAddonCatalog)(),
+                plans: (0, pricing_config_1.getPublicPricingPlans)().map((plan) => {
+                    const existing = planMap.get(plan.key) || planMap.get(plan.label.toUpperCase());
+                    const livePlanPricing = livePricing?.[plan.key];
+                    const monthlyPrice = {
+                        INR: livePlanPricing?.monthlyPrice?.INR || plan.monthlyPrice.INR,
+                        USD: livePlanPricing?.monthlyPrice?.USD || plan.monthlyPrice.USD,
+                    };
+                    const yearlyPrice = {
+                        INR: livePlanPricing?.yearlyPrice?.INR || plan.yearlyPrice.INR,
+                        USD: livePlanPricing?.yearlyPrice?.USD || plan.yearlyPrice.USD,
+                    };
+                    return {
+                        id: existing?.id || plan.key,
+                        name: plan.label,
+                        type: existing?.type || plan.key,
+                        priceIdINR: livePlanPricing?.priceIds?.INR?.monthly ||
+                            existing?.priceIdINR ||
+                            null,
+                        priceIdUSD: livePlanPricing?.priceIds?.USD?.monthly ||
+                            existing?.priceIdUSD ||
+                            null,
+                        description: plan.description,
+                        popular: Boolean(plan.popular),
+                        monthlyPrice,
+                        yearlyPrice,
+                        limits: plan.limits,
+                        features: plan.features,
+                    };
+                }),
             });
         }
         catch (error) {

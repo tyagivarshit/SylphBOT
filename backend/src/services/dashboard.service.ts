@@ -1,11 +1,9 @@
 import prisma from "../config/prisma";
 import { startOfDay, startOfMonth, subDays, format } from "date-fns";
 import { Prisma } from "@prisma/client";
-import {
-  getPlanLimits,
-  getPlanKey,
-  isNearLimit,
-} from "../config/plan.config";
+import { getPlanKey } from "../config/plan.config";
+import { getPricingPlanLabel } from "../config/pricing.config";
+import { getUsageOverview } from "./usage.service";
 
 export class DashboardService {
 
@@ -27,7 +25,6 @@ export class DashboardService {
       });
 
       const planKey = getPlanKey(subscription?.plan || null);
-      const limits = getPlanLimits(subscription?.plan || null);
 
       /* ======================================
       PARALLEL QUERIES (FAST)
@@ -38,8 +35,8 @@ export class DashboardService {
         leadsToday,
         leadsThisMonth,
         messagesToday,
-        aiCallsUsed,
         qualifiedLeads,
+        usageOverview,
       ] = await Promise.all([
 
         prisma.lead.count({ where: baseFilter }),
@@ -66,19 +63,14 @@ export class DashboardService {
         }),
 
         /* 🔥 AI usage (temporary metric) */
-        prisma.message.count({
-          where: {
-            lead: { businessId },
-            sender: "AI",
-          },
-        }),
-
         prisma.lead.count({
           where: {
             ...baseFilter,
             stage: "QUALIFIED",
           },
         }),
+
+        getUsageOverview(businessId),
       ]);
 
       const [chartData, messagesChart, activity] = await Promise.all([
@@ -91,15 +83,12 @@ export class DashboardService {
       🔥 USAGE ENGINE
       ====================================== */
 
-      const aiLimit = limits.aiCallsUsed;
+      const aiCallsUsed = usageOverview.usage.ai.used;
+      const aiLimit = usageOverview.usage.ai.dailyLimit;
       const isUnlimited = aiLimit === -1;
-
       const usagePercent =
-        isUnlimited || aiLimit === 0
-          ? 0
-          : aiCallsUsed / aiLimit;
-
-      const nearLimit = isNearLimit(aiCallsUsed, aiLimit);
+        isUnlimited || aiLimit <= 0 ? 0 : aiCallsUsed / aiLimit;
+      const nearLimit = usageOverview.warning;
 
       /* ======================================
       FINAL RESPONSE
@@ -119,7 +108,11 @@ export class DashboardService {
         isUnlimited,
 
         /* 🔥 PLAN */
-        plan: planKey,
+        plan: getPricingPlanLabel(planKey),
+        planKey,
+        aiCallsRemaining: usageOverview.ai.remaining ?? 0,
+        warning: usageOverview.warning,
+        warningMessage: usageOverview.warningMessage,
 
         /* 📊 */
         qualifiedLeads: qualifiedLeads || 0,
@@ -143,8 +136,12 @@ export class DashboardService {
         usagePercent: 0,
         nearLimit: false,
         isUnlimited: false,
+        aiCallsRemaining: 0,
+        warning: false,
+        warningMessage: null,
 
         plan: "FREE",
+        planKey: "FREE_LOCKED",
 
         qualifiedLeads: 0,
         chartData: [],

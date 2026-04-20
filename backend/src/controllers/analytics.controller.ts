@@ -4,8 +4,16 @@ import { getAnalyticsDashboard } from "../services/analyticsDashboard.service";
 import prisma from "../config/prisma";
 import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 import { scheduleFollowups } from "../queues/followup.queue";
+import { getRequestBusinessId } from "../services/tenant.service";
 
-const getBusinessId = async (userId: string) => {
+const getBusinessId = async (
+  userId: string,
+  requestBusinessId?: string | null
+) => {
+  if (requestBusinessId) {
+    return requestBusinessId;
+  }
+
   const business = await prisma.business.findFirst({
     where: { ownerId: userId }
   });
@@ -20,7 +28,7 @@ export const getAnalyticsOverview = async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
     const range = (req.query.range as string) || "7d";
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
     const data = await service.getOverview(businessId, range);
 
@@ -36,7 +44,7 @@ export const getAnalyticsCharts = async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
     const range = (req.query.range as string) || "7d";
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
     const data = await service.getCharts(businessId, range);
 
@@ -51,7 +59,7 @@ export const getConversionFunnel = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
     const data = await service.getFunnel(businessId);
 
@@ -66,7 +74,7 @@ export const getTopSources = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
     const data = await service.getSources(businessId);
 

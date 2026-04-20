@@ -33,6 +33,12 @@ type RouterInput = {
   message: string;
   plan?: unknown;
   traceId?: string;
+  beforeAIReply?: () => Promise<AIStageReservation | void>;
+};
+
+type AIStageReservation = {
+  finalize?: () => Promise<void>;
+  release?: () => Promise<void>;
 };
 
 type ReplyCandidate = {
@@ -194,6 +200,9 @@ const finalizeReply = (
   };
 };
 
+const isAiGeneratedReply = (reply: ReplyCandidate | null) =>
+  reply?.meta?.aiGenerated !== false;
+
 const runStage = async <T>(
   stage: string,
   startedAt: number,
@@ -282,6 +291,7 @@ export const resolveAIReply = async ({
   message,
   plan,
   traceId,
+  beforeAIReply,
 }: RouterInput): Promise<AIReplyDecision | null> => {
   const startedAt = Date.now();
   const normalizedMessage = String(message || "").trim();
@@ -390,23 +400,66 @@ export const resolveAIReply = async ({
     );
   }
 
-  const aiStage = await runStage(
-    "ai_router",
-    startedAt,
-    traceId,
-    getRemainingBudget(startedAt),
-    () =>
-      routeAIMessage({
+  let aiReservation: AIStageReservation | null = null;
+  let aiStage: {
+    value: unknown;
+    timedOut: boolean;
+    elapsedMs: number;
+    skipped: boolean;
+  };
+
+  try {
+    aiStage = await runStage(
+      "ai_router",
+      startedAt,
+      traceId,
+      getRemainingBudget(startedAt),
+      async () => {
+        aiReservation = (await beforeAIReply?.()) || null;
+
+        return routeAIMessage({
+          businessId,
+          leadId,
+          message: normalizedMessage,
+          plan,
+        });
+      },
+      null
+    );
+  } catch (error) {
+    await aiReservation?.release?.().catch((releaseError) => {
+      logger.warn(
+        {
+          traceId,
+          businessId,
+          leadId,
+          error: releaseError,
+        },
+        "AI usage release skipped after AI router preflight failure"
+      );
+    });
+
+    logger.warn(
+      {
+        traceId,
         businessId,
         leadId,
-        message: normalizedMessage,
-        plan,
-      }),
-    null
-  );
+        error,
+      },
+      "AI router skipped before execution"
+    );
+
+    return finalizeReply(
+      "SYSTEM",
+      buildSystemReply(normalizedMessage),
+      startedAt,
+      traceId
+    );
+  }
 
   const aiReply = normalizeReplyCandidate(aiStage.value);
-  const aiHit = Boolean(aiReply && !isSystemNoise(aiReply));
+  const aiGenerated = isAiGeneratedReply(aiReply);
+  const aiHit = Boolean(aiReply && !isSystemNoise(aiReply) && aiGenerated);
 
   logStageResult({
     stage: "ai_router",
@@ -419,6 +472,18 @@ export const resolveAIReply = async ({
   });
 
   if (aiHit && aiReply) {
+    await aiReservation?.finalize?.().catch((error) => {
+      logger.warn(
+        {
+          traceId,
+          businessId,
+          leadId,
+          error,
+        },
+        "AI usage finalize skipped after successful AI reply"
+      );
+    });
+
     return finalizeReply(
       "AI_ROUTER",
       attachBookingAssist(
@@ -428,6 +493,24 @@ export const resolveAIReply = async ({
       startedAt,
       traceId
     );
+  }
+
+  if (aiReservation?.release) {
+    await aiReservation.release().catch((error) => {
+      logger.warn(
+        {
+          traceId,
+          businessId,
+          leadId,
+          error,
+        },
+        "AI usage release skipped after non-AI fallback"
+      );
+    });
+  }
+
+  if (aiReply && !aiGenerated) {
+    return finalizeReply("SYSTEM", aiReply, startedAt, traceId);
   }
 
   logger.warn(

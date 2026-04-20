@@ -5,14 +5,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
-const crypto_1 = __importDefault(require("crypto"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const upload_1 = __importDefault(require("../middleware/upload"));
 const cloudinary_1 = __importDefault(require("../config/cloudinary"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const authCookies_1 = require("../utils/authCookies");
 const stripe_service_1 = require("../services/stripe.service");
-const env_1 = require("../config/env");
+const apiKey_service_1 = require("../services/apiKey.service");
+const rbac_middleware_1 = require("../middleware/rbac.middleware");
+const rateLimit_middleware_1 = require("../middleware/rateLimit.middleware");
 const router = express_1.default.Router();
 const safeUserSelect = {
     id: true,
@@ -37,14 +38,6 @@ const getCurrentUser = async (userId) => prisma_1.default.user.findUnique({
     where: { id: userId },
     select: safeUserSelect,
 });
-const buildApiKey = (userId, businessId, tokenVersion) => {
-    const fingerprint = crypto_1.default
-        .createHmac("sha256", env_1.env.JWT_SECRET)
-        .update(`${userId}:${businessId || "workspace"}:${tokenVersion}`)
-        .digest("base64url")
-        .slice(0, 32);
-    return `sylph_${fingerprint}`;
-};
 const buildDeletedEmail = (email) => {
     const [local, domain = "deleted.local"] = email.split("@");
     return `${local}+deleted_${Date.now()}@${domain}`;
@@ -225,7 +218,7 @@ router.post("/change-password", auth_middleware_1.protect, async (req, res) => {
             .json({ error: "Failed to update password" });
     }
 });
-router.get("/api-key", auth_middleware_1.protect, async (req, res) => {
+router.get("/api-key", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("api_keys:manage"), rateLimit_middleware_1.userActionLimiter, async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
@@ -242,8 +235,12 @@ router.get("/api-key", auth_middleware_1.protect, async (req, res) => {
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
+        const apiKey = await (0, apiKey_service_1.ensureWorkspaceApiKey)({
+            businessId: user.businessId,
+            createdByUserId: user.id,
+        });
         return res.json({
-            apiKey: buildApiKey(user.id, user.businessId, user.tokenVersion),
+            apiKey: apiKey.rawKey,
         });
     }
     catch (err) {
@@ -348,6 +345,7 @@ router.delete("/delete-account", auth_middleware_1.protect, async (req, res) => 
                 where: { id: userId },
                 data: {
                     email: buildDeletedEmail(user.email),
+                    archivedEmail: user.email,
                     isActive: false,
                     deletedAt: now,
                     businessId: null,

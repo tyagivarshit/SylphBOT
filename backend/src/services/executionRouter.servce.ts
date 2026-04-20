@@ -3,7 +3,8 @@ import { buildSalesAgentRecoveryReply } from "./salesAgent/reply.service";
 import logger from "../utils/logger";
 
 export const handleIncomingMessage = async (data: any) => {
-  const { businessId, leadId, message, plan, traceId } = data || {};
+  const { businessId, leadId, message, plan, traceId, beforeAIReply } =
+    data || {};
 
   try {
     return await resolveAIReply({
@@ -12,6 +13,7 @@ export const handleIncomingMessage = async (data: any) => {
       message,
       plan: plan || null,
       traceId,
+      beforeAIReply,
     });
   } catch (error) {
     logger.error(

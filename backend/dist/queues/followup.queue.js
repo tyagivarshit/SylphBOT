@@ -3,24 +3,33 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cancelFollowups = exports.scheduleFollowups = exports.followupQueue = void 0;
+exports.cancelFollowups = exports.scheduleFollowups = exports.legacyFollowupQueue = exports.followupQueue = exports.LEGACY_FOLLOWUP_QUEUE_NAME = exports.FOLLOWUP_QUEUE_NAME = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = require("../config/redis");
+const queue_defaults_1 = require("./queue.defaults");
 const followup_service_1 = require("../services/salesAgent/followup.service");
-exports.followupQueue = new bullmq_1.Queue("followupQueue", {
-    connection: (0, redis_1.getQueueRedisConnection)(),
-    prefix: "sylph",
-    defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-            type: "exponential",
-            delay: 5000,
-        },
-        removeOnComplete: true,
-        removeOnFail: true,
+exports.FOLLOWUP_QUEUE_NAME = "ai-low";
+exports.LEGACY_FOLLOWUP_QUEUE_NAME = "followupQueue";
+const queueConnection = (0, redis_1.getQueueRedisConnection)();
+const defaultJobOptions = (0, queue_defaults_1.buildQueueJobOptions)({
+    backoff: {
+        type: "exponential",
+        delay: 5000,
     },
 });
+exports.followupQueue = new bullmq_1.Queue(exports.FOLLOWUP_QUEUE_NAME, {
+    connection: queueConnection,
+    prefix: "sylph",
+    defaultJobOptions,
+});
+exports.legacyFollowupQueue = exports.LEGACY_FOLLOWUP_QUEUE_NAME === exports.FOLLOWUP_QUEUE_NAME
+    ? exports.followupQueue
+    : new bullmq_1.Queue(exports.LEGACY_FOLLOWUP_QUEUE_NAME, {
+        connection: queueConnection,
+        prefix: "sylph",
+        defaultJobOptions,
+    });
 const scheduleFollowups = async (leadId, options) => {
     if (!leadId)
         return;
@@ -35,7 +44,8 @@ const scheduleFollowups = async (leadId, options) => {
     for (const item of schedule) {
         const jobId = `followup:${leadId}:${item.step}`;
         /* 🔥 REMOVE EXISTING (avoid duplicates) */
-        const existingJob = await exports.followupQueue.getJob(jobId);
+        const existingJob = (await exports.followupQueue.getJob(jobId)) ||
+            (await exports.legacyFollowupQueue.getJob(jobId));
         if (existingJob) {
             await existingJob.remove();
         }
@@ -45,11 +55,10 @@ const scheduleFollowups = async (leadId, options) => {
             trigger: item.trigger,
             scheduledFor: new Date(Date.now() + item.delayMs).toISOString(),
         }, {
-            delay: item.delayMs,
             jobId,
-            removeOnComplete: true,
-            removeOnFail: true,
-            attempts: 3,
+            ...(0, queue_defaults_1.buildQueueJobOptions)({
+                delay: item.delayMs,
+            }),
         });
     }
     console.log(`📅 Followups scheduled for lead ${leadId}`);
@@ -73,7 +82,7 @@ const cancelFollowups = async (leadId) => {
     ];
     for (const jobId of jobIds) {
         try {
-            const job = await exports.followupQueue.getJob(jobId);
+            const job = (await exports.followupQueue.getJob(jobId)) || (await exports.legacyFollowupQueue.getJob(jobId));
             if (job) {
                 await job.remove();
             }

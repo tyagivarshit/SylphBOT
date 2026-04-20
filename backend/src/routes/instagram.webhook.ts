@@ -1,5 +1,4 @@
 import { Request, Response, Router } from "express";
-import crypto from "crypto";
 import prisma from "../config/prisma";
 import { enqueueAIBatch } from "../queues/ai.queue";
 import { automationQueue } from "../queues/automation.queue";
@@ -9,6 +8,18 @@ import { fetchInstagramUsername } from "../services/instagramProfile.service";
 import { createNotification } from "../services/notification.service";
 import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 import { processWebhookEvent } from "../services/webhookDedup.service";
+import { captureExceptionWithContext } from "../observability/sentry";
+import {
+  getSubscriptionAccess,
+  logSubscriptionLockedAction,
+} from "../middleware/subscriptionGuard.middleware";
+import { runWithContactUsageLimit } from "../services/usage.service";
+import {
+  extractMetaWebhookTimestamp,
+  guardWebhookReplay,
+  isWebhookTimestampFresh,
+  verifyMetaWebhookSignature,
+} from "../services/webhookSecurity.service";
 
 const router = Router();
 const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
@@ -18,42 +29,11 @@ const log = (...args: any[]) => {
   console.log("[INSTAGRAM WEBHOOK]", ...args);
 };
 
-const verifySignature = (req: any): boolean => {
-  try {
-    const signature = req.headers["x-hub-signature-256"] as string;
-    const appSecret = process.env.META_APP_SECRET;
-    const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : req.body;
-
-    if (!signature || !appSecret || !Buffer.isBuffer(rawBody)) {
-      return false;
-    }
-
-    const expected = Buffer.from(
-      "sha256=" +
-        crypto
-          .createHmac("sha256", appSecret)
-          .update(rawBody)
-          .digest("hex")
-    );
-    const received = Buffer.from(signature);
-
-    if (expected.length !== received.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(received, expected);
-  } catch {
-    return false;
-  }
-};
-
 const parseWebhookBody = (req: any) => {
-  if (Buffer.isBuffer(req.body)) {
-    return JSON.parse(req.body.toString("utf8"));
-  }
+  const rawBody = req.body;
 
-  if (Buffer.isBuffer(req.rawBody)) {
-    return JSON.parse(req.rawBody.toString("utf8"));
+  if (Buffer.isBuffer(rawBody)) {
+    return JSON.parse(rawBody.toString("utf8"));
   }
 
   if (req.body && typeof req.body === "object") {
@@ -61,6 +41,47 @@ const parseWebhookBody = (req: any) => {
   }
 
   throw new Error("Invalid webhook body");
+};
+
+const getSignatureHeader = (req: Request) =>
+  req.headers["x-hub-signature-256"] || req.headers["x-hub-signature"];
+
+const enforceWebhookSecurity = async (req: Request, body: any) => {
+  const rawBody = Buffer.isBuffer((req as any).body)
+    ? ((req as any).body as Buffer)
+    : req.rawBody;
+  const signature = getSignatureHeader(req);
+  const secret = process.env.META_APP_SECRET?.trim() || null;
+
+  if ((isProduction || secret) && (!rawBody || !verifyMetaWebhookSignature({
+    rawBody,
+    signature,
+    secret,
+  }))) {
+    return false;
+  }
+
+  const timestampMs = extractMetaWebhookTimestamp(body);
+
+  if (!isWebhookTimestampFresh(timestampMs)) {
+    return false;
+  }
+
+  const replaySignature = Array.isArray(signature) ? signature[0] : signature;
+
+  if (timestampMs && replaySignature) {
+    const accepted = await guardWebhookReplay({
+      platform: "INSTAGRAM",
+      signature: String(replaySignature),
+      timestampMs,
+    });
+
+    if (!accepted) {
+      return false;
+    }
+  }
+
+  return true;
 };
 
 router.get("/", (req: Request, res: Response) => {
@@ -83,6 +104,13 @@ router.post("/", async (req: any, res: Response) => {
   try {
     body = parseWebhookBody(req);
   } catch (error) {
+    req.logger?.error({ error }, "Instagram webhook body parse failed");
+    captureExceptionWithContext(error, {
+      tags: {
+        webhook: "instagram",
+        stage: "body_parse",
+      },
+    });
     log("Body parse failed", {
       message: (error as { message?: string })?.message || "Unknown error",
     });
@@ -96,12 +124,13 @@ router.post("/", async (req: any, res: Response) => {
       });
     }
 
-    if (isProduction && !verifySignature(req)) {
-      log("Signature verification failed");
+    if (!(await enforceWebhookSecurity(req, body))) {
+      log("Webhook security validation failed");
       return res.sendStatus(403);
     }
 
     const entry = body.entry?.[0];
+
     if (!entry) {
       return res.sendStatus(200);
     }
@@ -115,8 +144,21 @@ router.post("/", async (req: any, res: Response) => {
       const instagramUserId = change.value.from?.id;
       const reelId = change.value.media?.id;
       const pageId = change.value.id;
+      const commentEventId =
+        change.value.comment_id ||
+        change.value.comment?.id ||
+        `${pageId}:${instagramUserId}:${reelId}:${String(commentText || "").trim()}`;
 
-      if (!commentText || !instagramUserId || !reelId) {
+      if (!commentText || !instagramUserId || !reelId || !commentEventId) {
+        continue;
+      }
+
+      const shouldProcessComment = await processWebhookEvent({
+        eventId: String(commentEventId),
+        platform: "INSTAGRAM",
+      });
+
+      if (!shouldProcessComment) {
         continue;
       }
 
@@ -129,6 +171,23 @@ router.post("/", async (req: any, res: Response) => {
       });
 
       if (!client) {
+        continue;
+      }
+
+      const access = await getSubscriptionAccess(client.businessId);
+
+      if (!access.allowed) {
+        logSubscriptionLockedAction(
+          {
+            businessId: client.businessId,
+            requestId: req.requestId,
+            path: req.originalUrl,
+            method: req.method,
+            action: "instagram_comment_webhook",
+            lockReason: access.lockReason,
+          },
+          "Instagram comment webhook ignored because subscription is locked"
+        );
         continue;
       }
 
@@ -173,6 +232,7 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     const lowerText = text.toLowerCase();
+
     if (
       lowerText.includes("please wait") ||
       lowerText.includes("moment before sending")
@@ -217,6 +277,23 @@ router.post("/", async (req: any, res: Response) => {
       return res.sendStatus(200);
     }
 
+    const access = await getSubscriptionAccess(client.businessId);
+
+    if (!access.allowed) {
+      logSubscriptionLockedAction(
+        {
+          businessId: client.businessId,
+          requestId: req.requestId,
+          path: req.originalUrl,
+          method: req.method,
+          action: "instagram_message_webhook",
+          lockReason: access.lockReason,
+        },
+        "Instagram webhook ignored because subscription is locked"
+      );
+      return res.sendStatus(200);
+    }
+
     let lead = await prisma.lead.findFirst({
       where: {
         businessId: client.businessId,
@@ -230,16 +307,32 @@ router.post("/", async (req: any, res: Response) => {
     );
 
     if (!lead) {
-      lead = await prisma.lead.create({
-        data: {
-          businessId: client.businessId,
-          clientId: client.id,
-          name: instagramUsername || null,
-          instagramId: senderId,
-          platform: "INSTAGRAM",
-          stage: "NEW",
-        },
+      const createdLead = await runWithContactUsageLimit(
+        client.businessId,
+        (tx) =>
+          tx.lead.create({
+            data: {
+              businessId: client.businessId,
+              clientId: client.id,
+              name: instagramUsername || null,
+              instagramId: senderId,
+              platform: "INSTAGRAM",
+              stage: "NEW",
+            },
+          })
+      ).catch((error) => {
+        if ((error as { code?: string })?.code === "LIMIT_REACHED") {
+          return null;
+        }
+
+        throw error;
       });
+
+      if (!createdLead) {
+        return res.sendStatus(200);
+      }
+
+      lead = createdLead.result;
 
       await createNotification({
         userId: client.business.ownerId,
@@ -350,6 +443,12 @@ router.post("/", async (req: any, res: Response) => {
 
     return res.sendStatus(200);
   } catch (error) {
+    req.logger?.error({ error }, "Instagram webhook error");
+    captureExceptionWithContext(error, {
+      tags: {
+        webhook: "instagram",
+      },
+    });
     log("Webhook error:", error);
     return res.sendStatus(500);
   }

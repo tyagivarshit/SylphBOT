@@ -1,5 +1,4 @@
 import express from "express";
-import { randomUUID } from "crypto";
 import cors, { type CorsOptions } from "cors";
 import helmet from "helmet";
 import compression from "compression";
@@ -31,11 +30,14 @@ import searchRoutes from "./routes/search.routes";
 import notificationRoutes from "./routes/notification";
 import userRoutes from "./routes/user.routes";
 import securityRoutes from "./routes/security.routes";
+import auditRoutes from "./routes/audit.routes";
 import integrationRoutes from "./routes/integration.routes";
 import oauthRoutes from "./routes/oauth.routes";
 import bookingRoutes from "./routes/booking.routes";
 import availabilityRoutes from "./routes/availability.routes";
 import conversationRoutes from "./routes/conversation.routes";
+import healthRoutes from "./routes/health.routes";
+import usageRoutes from "./routes/usage.routes";
 import {
   AIMessagePayload,
   AI_QUEUE_NAME,
@@ -47,13 +49,23 @@ import {
   globalLimiter,
 } from "./middleware/rateLimit.middleware";
 import { monitoringMiddleware } from "./middleware/monitoring.middleware";
+import { requestContextMiddleware } from "./middleware/requestContext.middleware";
+import { optionalApiKeyAuth } from "./middleware/apiKey.middleware";
+import { hasPermission } from "./services/rbac.service";
 
 import { startTrialExpiryCron } from "./cron/trial.cron";
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "./cron/resetUsage.cron";
 
 import { isAppError } from "./utils/AppError";
+import { asyncHandler } from "./utils/asyncHandler";
+import logger from "./utils/logger";
+import {
+  captureExceptionWithContext,
+  initializeSentry,
+} from "./observability/sentry";
 
+initializeSentry();
 const app = express();
 configurePassport();
 
@@ -129,6 +141,7 @@ const corsOptions: CorsOptions = {
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "X-Api-Key",
     "Cache-Control",
     "Stripe-Signature",
     "X-Requested-With",
@@ -156,6 +169,7 @@ app.use(
   })
 );
 
+app.use(requestContextMiddleware);
 app.use(compression());
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
@@ -163,42 +177,16 @@ app.use(globalLimiter);
 app.use(cookieParser());
 app.use(passport.initialize());
 
-app.use((req: any, res, next) => {
-  const headerValue = req.headers["x-request-id"];
-  const requestId =
-    (Array.isArray(headerValue) ? headerValue[0] : headerValue) ||
-    randomUUID();
-
-  req.requestId = requestId;
-  res.setHeader("X-Request-Id", requestId);
-  next();
-});
-
-app.use((req: any, res, next) => {
-  const start = Date.now();
-
-  res.on("finish", () => {
-    console.info(
-      JSON.stringify({
-        requestId: req.requestId,
-        type: "request",
-        method: req.method,
-        url: req.originalUrl,
-        status: res.statusCode,
-        duration: Date.now() - start,
-        ip: req.ip,
-      })
-    );
-  });
-
-  next();
-});
-
 app.use(monitoringMiddleware);
 
 app.use((req, res, next) => {
   res.setTimeout(15000, () => {
-    console.error("Request timeout:", req.originalUrl);
+    req.logger?.error(
+      {
+        statusCode: 408,
+      },
+      "Request timeout"
+    );
     if (!res.headersSent) {
       res.status(408).json({
         success: false,
@@ -297,21 +285,46 @@ const extractMessages = (body: EnqueueRequestBody) => {
   return payload.map(normalizeIncomingMessage);
 };
 
-app.get("/", (_req, res) => {
-  res.json({
-    success: true,
-    message: "API Running",
-    environment: env.NODE_ENV,
-    queue: AI_QUEUE_NAME,
-  });
-});
+app.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    res.json({
+      success: true,
+      message: "API Running",
+      environment: env.NODE_ENV,
+      queue: AI_QUEUE_NAME,
+    });
+  })
+);
 
-app.post("/v1/messages", async (req: any, res) => {
+app.post("/v1/messages", optionalApiKeyAuth, asyncHandler(async (req: any, res) => {
   let timeoutHandle: NodeJS.Timeout | undefined;
 
   try {
     const body = (req.body || {}) as EnqueueRequestBody;
     const messages = extractMessages(body);
+
+    if (req.apiKey) {
+      if (!hasPermission({ permissions: req.apiKey.permissions }, "messages:enqueue")) {
+        return res.status(403).json({
+          success: false,
+          requestId: req.requestId,
+          message: "API key does not have permission to enqueue messages",
+        });
+      }
+
+      const crossTenantMessage = messages.find(
+        (message) => message.businessId !== req.apiKey.businessId
+      );
+
+      if (crossTenantMessage) {
+        return res.status(403).json({
+          success: false,
+          requestId: req.requestId,
+          message: "Cross-tenant message enqueue is not allowed",
+        });
+      }
+    }
 
     const enqueue = enqueueAIBatch(messages, {
       source: "api",
@@ -352,13 +365,14 @@ app.post("/v1/messages", async (req: any, res) => {
       clearTimeout(timeoutHandle);
     }
   }
-});
+}));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
 
 app.use("/api/dashboard", protect, dashboardRoutes);
 app.use("/api/billing", protect, billingRoutes);
+app.use("/api/usage", protect, usageRoutes);
 app.use("/api/user", protect, userRoutes);
 app.use("/api/notifications", protect, notificationRoutes);
 
@@ -379,6 +393,7 @@ app.use("/api/knowledge", protect, knowledgeRoutes);
 app.use("/api/training", protect, trainingRoutes);
 app.use("/api/leads", protect, leadRoutes);
 app.use("/api/analytics", protect, analyticsRoutes);
+app.use("/api/audit", protect, auditRoutes);
 app.use("/api/search", protect, searchRoutes);
 app.use("/api/security", protect, securityRoutes);
 app.use("/api/integrations", protect, integrationRoutes);
@@ -390,6 +405,7 @@ app.use(
   attachBillingContext,
   availabilityRoutes
 );
+app.use("/api/health", healthRoutes);
 
 app.get("/health", (req: any, res) => {
   res.status(200).json({
@@ -409,11 +425,23 @@ app.use((req: any, res) => {
 });
 
 app.use((err: any, req: any, res: any, _next: any) => {
-  console.error("ERROR:", {
-    requestId: req.requestId,
-    message: err.message,
-    path: req.originalUrl,
-    method: req.method,
+  req.logger?.error(
+    {
+      error: err,
+      path: req.originalUrl,
+      method: req.method,
+    },
+    "Unhandled request error"
+  );
+
+  captureExceptionWithContext(err, {
+    tags: {
+      layer: "express",
+    },
+    extras: {
+      path: req.originalUrl,
+      method: req.method,
+    },
   });
 
   if (isAppError(err)) {
@@ -440,11 +468,23 @@ if (process.env.ENABLE_CRON === "true") {
 }
 
 process.on("uncaughtException", (err) => {
-  console.error("UNCAUGHT EXCEPTION:", err);
+  logger.error({ error: err }, "Unhandled uncaught exception in app");
+  captureExceptionWithContext(err, {
+    tags: {
+      layer: "process",
+      event: "uncaughtException",
+    },
+  });
 });
 
 process.on("unhandledRejection", (err) => {
-  console.error("UNHANDLED REJECTION:", err);
+  logger.error({ error: err }, "Unhandled rejection in app");
+  captureExceptionWithContext(err, {
+    tags: {
+      layer: "process",
+      event: "unhandledRejection",
+    },
+  });
 });
 
 export default app;

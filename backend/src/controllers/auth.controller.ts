@@ -22,6 +22,8 @@ import {
   clearAuthCookies,
   setAuthCookies,
 } from "../utils/authCookies";
+import { createAuditLog } from "../services/audit.service";
+import { recordFailedLoginAttempt } from "../services/securityAlert.service";
 
 /* ======================================
 UTILS
@@ -84,6 +86,25 @@ const setCookies = (
 
 
 };
+
+const writeAuthAuditLog = (
+  req: Request,
+  input: {
+    action: string;
+    userId?: string | null;
+    businessId?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+) =>
+  createAuditLog({
+    action: input.action,
+    userId: input.userId || null,
+    businessId: input.businessId || null,
+    metadata: input.metadata || {},
+    ip: getIP(req),
+    userAgent: String(getUA(req)),
+    requestId: req.requestId || null,
+  });
 
 /* ======================================
 REGISTER
@@ -172,16 +193,51 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     if (
       !user ||
+      user.deletedAt ||
+      !user.isActive ||
       !user.isVerified ||
       !(await verifyPassword(password, user.password))
     ) {
+      void writeAuthAuditLog(req, {
+        action: "auth.login_failed",
+        userId: user?.id || null,
+        businessId: user?.businessId || null,
+        metadata: {
+          email,
+        },
+      });
+      void recordFailedLoginAttempt({
+        businessId: user?.businessId || null,
+        userId: user?.id || null,
+        email,
+        ip: getIP(req),
+      });
       throw unauthorized("Invalid credentials");
     }
 
     let business = await prisma.business.findFirst({
       where: { ownerId: user.id },
-      select: { id: true },
+      select: { id: true, deletedAt: true },
     });
+
+    if (business?.deletedAt) {
+      void writeAuthAuditLog(req, {
+        action: "auth.login_failed",
+        userId: user.id,
+        businessId: business.id,
+        metadata: {
+          email,
+          reason: "workspace_deleted",
+        },
+      });
+      void recordFailedLoginAttempt({
+        businessId: business.id,
+        userId: user.id,
+        email,
+        ip: getIP(req),
+      });
+      throw unauthorized("Invalid credentials");
+    }
 
     /* ✅ SAFETY FALLBACK (ADDED) */
     if (!business) {
@@ -197,7 +253,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         data: { businessId: newBusiness.id },
       });
 
-      business = { id: newBusiness.id };
+      business = { id: newBusiness.id, deletedAt: null };
     }
 
     const accessToken = generateAccessToken(
@@ -233,6 +289,16 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         userAgent: getUA(req),
         ip: getIP(req),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    void writeAuthAuditLog(req, {
+      action: "auth.login",
+      userId: user.id,
+      businessId: business?.id || null,
+      metadata: {
+        email: user.email,
+        role: user.role,
       },
     });
 
@@ -425,6 +491,12 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
       where: { userId: user.id },
     });
 
+    void writeAuthAuditLog(req, {
+      action: "auth.password_reset",
+      userId: user.id,
+      businessId: user.businessId || null,
+    });
+
     res.json({ success: true });
 
   } catch (err) {
@@ -471,6 +543,12 @@ export const logout = async (req: any, res: Response, next: NextFunction) => {
   try {
     await prisma.refreshToken.deleteMany({
       where: { userId: req.user.id },
+    });
+
+    void writeAuthAuditLog(req, {
+      action: "auth.logout",
+      userId: req.user?.id || null,
+      businessId: req.user?.businessId || null,
     });
 
     clearAuthCookies(res, req);

@@ -2,9 +2,9 @@
 PLAN TYPES
 ========================================= */
 
-export type PlanType = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE"
+export type PlanType = "LOCKED" | "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE"
 
-const PLAN_ORDER: PlanType[] = ["FREE_LOCKED", "BASIC", "PRO", "ELITE"]
+const PLAN_ORDER: PlanType[] = ["LOCKED", "FREE_LOCKED", "BASIC", "PRO", "ELITE"]
 
 /* =========================================
 FEATURE TYPES (SYNCED WITH BACKEND)
@@ -26,6 +26,8 @@ PLAN → FEATURES MAP
 ========================================= */
 
 export const PLAN_FEATURES: Record<PlanType, Feature[]> = {
+
+  LOCKED: [],
 
   FREE_LOCKED: [],
 
@@ -74,12 +76,13 @@ export function normalizePlan(plan?: string | null): PlanType {
     .replace(/[\s-]+/g, "_")
 
   if (
+    normalized === "LOCKED" ||
     normalized === "FREE" ||
     normalized === "FREE_LOCKED" ||
     normalized === "FREE_TRIAL" ||
     normalized === "STARTER"
   ) {
-    return "FREE_LOCKED"
+    return normalized === "LOCKED" ? "LOCKED" : "FREE_LOCKED"
   }
 
   if (normalized.includes("ELITE")) return "ELITE"
@@ -196,8 +199,9 @@ PLAN LABELS (UI)
 ========================================= */
 
 export const PLAN_LABELS: Record<PlanType, string> = {
-  FREE_LOCKED: "Starter",
-  BASIC: "Basic",
-  PRO: "Pro",
+  LOCKED: "Locked",
+  FREE_LOCKED: "Locked",
+  BASIC: "Starter",
+  PRO: "Growth",
   ELITE: "Elite"
 }

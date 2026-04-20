@@ -1,27 +1,77 @@
+import type { Queue } from "bullmq";
 import { getAIQueues } from "../queues/ai.queue";
-export const getQueueHealth = async () => {
-  const aiQueues = getAIQueues();
-  const queueStats = await Promise.all(
-    aiQueues.map(async (queue) => ({
-      name: queue.name,
-      waiting: await queue.getWaitingCount(),
-      active: await queue.getActiveCount(),
-      delayed: await queue.getDelayedCount(),
-      failed: await queue.getFailedCount(),
-    }))
-  );
+import { authEmailQueue } from "../queues/authEmail.queue";
+import { automationQueue } from "../queues/automation.queue";
+import { bookingReminderQueue } from "../queues/bookingReminder.queue";
+import { followupQueue } from "../queues/followup.queue";
+import { funnelQueue } from "../queues/funnel.queue";
 
-  const waiting = queueStats.reduce((total, item) => total + item.waiting, 0);
-  const active = queueStats.reduce((total, item) => total + item.active, 0);
-  const delayed = queueStats.reduce((total, item) => total + item.delayed, 0);
-  const failed = queueStats.reduce((total, item) => total + item.failed, 0);
+export type QueueHealthSnapshot = {
+  name: string;
+  waiting: number;
+  active: number;
+  failed: number;
+  delayed: number;
+};
+
+const QUEUE_HEALTH_CACHE_TTL_MS = 5000;
+
+type QueueHealthCacheState = {
+  value?: QueueHealthSnapshot[];
+  expiresAt: number;
+  promise?: Promise<QueueHealthSnapshot[]>;
+};
+
+const queueHealthCache: QueueHealthCacheState = {
+  expiresAt: 0,
+};
+
+const getQueueSnapshot = async (
+  queue: Queue
+): Promise<QueueHealthSnapshot> => {
+  const counts = await queue.getJobCounts("wait", "active", "failed", "delayed");
 
   return {
-    waiting,
-    active,
-    delayed,
-    failed,
-    partitions: queueStats,
+    name: queue.name,
+    waiting: counts.wait ?? 0,
+    active: counts.active ?? 0,
+    failed: counts.failed ?? 0,
+    delayed: counts.delayed ?? 0,
   };
+};
 
+const getAllQueues = () => [
+  ...getAIQueues(),
+  followupQueue,
+  automationQueue,
+  bookingReminderQueue,
+  authEmailQueue,
+  funnelQueue,
+];
+
+const loadQueueHealth = async () =>
+  Promise.all(getAllQueues().map(getQueueSnapshot));
+
+export const getQueueHealth = async () => {
+  const now = Date.now();
+
+  if (queueHealthCache.value && queueHealthCache.expiresAt > now) {
+    return queueHealthCache.value;
+  }
+
+  if (queueHealthCache.promise) {
+    return queueHealthCache.promise;
+  }
+
+  queueHealthCache.promise = loadQueueHealth()
+    .then((snapshot) => {
+      queueHealthCache.value = snapshot;
+      queueHealthCache.expiresAt = Date.now() + QUEUE_HEALTH_CACHE_TTL_MS;
+      return snapshot;
+    })
+    .finally(() => {
+      queueHealthCache.promise = undefined;
+    });
+
+  return queueHealthCache.promise;
 };

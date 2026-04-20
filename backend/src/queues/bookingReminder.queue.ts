@@ -1,6 +1,7 @@
-import { Queue } from "bullmq";
+import { JobsOptions, Queue } from "bullmq";
 import prisma from "../config/prisma";
 import { getQueueRedisConnection } from "../config/redis";
+import { buildQueueJobOptions } from "./queue.defaults";
 
 /*
 =========================================================
@@ -8,27 +9,42 @@ BOOKING REMINDER QUEUE (SAAS LEVEL)
 =========================================================
 */
 
-export const BOOKING_REMINDER_QUEUE_NAME = "booking-reminder-queue";
+export type BookingReminderJobData = {
+  type: "CONFIRMATION" | "MORNING" | "BEFORE_30_MIN";
+  appointmentId: string;
+};
 
-export const bookingReminderQueue = new Queue(
+export const BOOKING_REMINDER_QUEUE_NAME: string = "booking";
+export const LEGACY_BOOKING_REMINDER_QUEUE_NAME: string =
+  "booking-reminder-queue";
+
+const queueConnection = getQueueRedisConnection();
+const defaultJobOptions: JobsOptions = buildQueueJobOptions({
+  backoff: {
+    type: "exponential",
+    delay: 5000,
+  },
+});
+
+export const bookingReminderQueue = new Queue<BookingReminderJobData>(
   BOOKING_REMINDER_QUEUE_NAME,
   {
-    connection: getQueueRedisConnection(),
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: {
-        type: "exponential",
-        delay: 5000,
-      },
-      removeOnComplete: true,
-      removeOnFail: true,
-    },
+    connection: queueConnection,
+    defaultJobOptions,
   }
 );
 
+export const legacyBookingReminderQueue =
+  LEGACY_BOOKING_REMINDER_QUEUE_NAME === BOOKING_REMINDER_QUEUE_NAME
+    ? bookingReminderQueue
+    : new Queue<BookingReminderJobData>(LEGACY_BOOKING_REMINDER_QUEUE_NAME, {
+        connection: queueConnection,
+        defaultJobOptions,
+      });
+
 /*
 =========================================================
-🔥 CORE: SCHEDULE ALL REMINDERS (IMPORTANT)
+CORE: SCHEDULE ALL REMINDERS (IMPORTANT)
 =========================================================
 */
 
@@ -39,60 +55,60 @@ export const scheduleReminderJobs = async (appointmentId: string) => {
     });
 
     if (!appointment) {
-      console.log("❌ No appointment found for reminders");
+      console.log("No appointment found for reminders");
       return;
     }
+
+    const queueReminderJob = async (
+      name: string,
+      type: "CONFIRMATION" | "MORNING" | "BEFORE_30_MIN",
+      delay = 0
+    ) => {
+      const jobId = `booking:${appointmentId}:${type}`;
+      const existing =
+        (await bookingReminderQueue.getJob(jobId)) ||
+        (await legacyBookingReminderQueue.getJob(jobId));
+
+      if (existing) {
+        await existing.remove().catch(() => undefined);
+      }
+
+      await bookingReminderQueue.add(
+        name,
+        {
+          type,
+          appointmentId,
+        },
+        buildQueueJobOptions({
+          jobId,
+          delay,
+        })
+      );
+    };
 
     const now = Date.now();
     const startTime = new Date(appointment.startTime).getTime();
 
-    /* =================================================
-    🔥 1. INSTANT CONFIRMATION
-    ================================================= */
-    await bookingReminderQueue.add("confirmation", {
-      type: "CONFIRMATION",
-      appointmentId,
-    });
+    await queueReminderJob("confirmation", "CONFIRMATION");
 
-    /* =================================================
-    🌅 2. MORNING REMINDER (9 AM SAME DAY)
-    ================================================= */
     const morningTime = new Date(appointment.startTime);
     morningTime.setHours(9, 0, 0, 0);
 
     const morningDelay = morningTime.getTime() - now;
 
     if (morningDelay > 0) {
-      await bookingReminderQueue.add(
-        "morning",
-        {
-          type: "MORNING",
-          appointmentId,
-        },
-        { delay: morningDelay }
-      );
+      await queueReminderJob("morning", "MORNING", morningDelay);
     }
 
-    /* =================================================
-    ⏰ 3. 30 MIN BEFORE REMINDER
-    ================================================= */
     const before30 = startTime - 30 * 60 * 1000;
     const before30Delay = before30 - now;
 
     if (before30Delay > 0) {
-      await bookingReminderQueue.add(
-        "before_30",
-        {
-          type: "BEFORE_30_MIN",
-          appointmentId,
-        },
-        { delay: before30Delay }
-      );
+      await queueReminderJob("before_30", "BEFORE_30_MIN", before30Delay);
     }
 
-    console.log("✅ Reminder jobs scheduled:", appointmentId);
-
+    console.log("Reminder jobs scheduled:", appointmentId);
   } catch (error) {
-    console.error("❌ REMINDER SCHEDULER ERROR:", error);
+    console.error("REMINDER SCHEDULER ERROR:", error);
   }
 };

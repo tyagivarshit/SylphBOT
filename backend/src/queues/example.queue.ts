@@ -3,14 +3,15 @@ import {
   getQueueRedisConnection,
   getWorkerRedisConnection,
 } from "../config/redis";
+import { buildQueueJobOptions } from "./queue.defaults";
+import {
+  getWorkerCount,
+  resolveWorkerConcurrency,
+} from "../workers/workerManager";
 
 export const exampleQueue = new Queue("example-queue", {
   connection: getQueueRedisConnection(),
-  defaultJobOptions: {
-    attempts: 3,
-    removeOnComplete: true,
-    removeOnFail: true,
-  },
+  defaultJobOptions: buildQueueJobOptions(),
 });
 
 export const exampleWorker =
@@ -22,6 +23,10 @@ export const exampleWorker =
         },
         {
           connection: getWorkerRedisConnection(),
+          concurrency: resolveWorkerConcurrency(
+            "EXAMPLE_WORKER_CONCURRENCY",
+            Math.max(1, getWorkerCount())
+          ),
         }
       )
     : null;

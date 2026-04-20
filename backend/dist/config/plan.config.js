@@ -8,12 +8,30 @@ exports.getUpgradePlan = exports.isNearLimit = exports.canSendFollowup = exports
 PLAN CONFIG
 ====================================== */
 const PLAN_CONFIG = {
+    LOCKED: {
+        limits: {
+            aiCallsLimit: 0,
+            messagesLimit: 0,
+            followupsLimit: 0,
+            maxTriggers: 0,
+            contactsLimit: 0,
+        },
+        features: {
+            whatsappEnabled: false,
+            automationEnabled: false,
+            bookingEnabled: false,
+            crmEnabled: false,
+            followupsEnabled: false,
+            prioritySupport: false,
+        },
+    },
     FREE_LOCKED: {
         limits: {
             aiCallsLimit: 0,
             messagesLimit: 0,
             followupsLimit: 0,
             maxTriggers: 0,
+            contactsLimit: 0,
         },
         features: {
             whatsappEnabled: false,
@@ -26,10 +44,11 @@ const PLAN_CONFIG = {
     },
     BASIC: {
         limits: {
-            aiCallsLimit: 500,
-            messagesLimit: 2000,
-            followupsLimit: 0,
+            aiCallsLimit: 4500,
+            messagesLimit: 5000,
+            followupsLimit: 300,
             maxTriggers: 5,
+            contactsLimit: 1000,
         },
         features: {
             whatsappEnabled: false,
@@ -42,10 +61,11 @@ const PLAN_CONFIG = {
     },
     PRO: {
         limits: {
-            aiCallsLimit: 5000,
-            messagesLimit: 15000,
-            followupsLimit: 2000,
+            aiCallsLimit: 9000,
+            messagesLimit: 20000,
+            followupsLimit: 3000,
             maxTriggers: -1,
+            contactsLimit: 5000,
         },
         features: {
             whatsappEnabled: true,
@@ -58,10 +78,11 @@ const PLAN_CONFIG = {
     },
     ELITE: {
         limits: {
-            aiCallsLimit: -1,
+            aiCallsLimit: 24000,
             messagesLimit: -1,
-            followupsLimit: -1,
+            followupsLimit: 10000,
             maxTriggers: -1,
+            contactsLimit: 20000,
         },
         features: {
             whatsappEnabled: true,
@@ -74,12 +95,16 @@ const PLAN_CONFIG = {
     },
 };
 const normalizePlanValue = (value) => {
-    if (!value)
+    if (!value) {
         return null;
+    }
     const normalized = value
         .trim()
         .toUpperCase()
         .replace(/[\s-]+/g, "_");
+    if (normalized === "LOCKED") {
+        return "LOCKED";
+    }
     if (normalized === "FREE" ||
         normalized === "FREE_LOCKED" ||
         normalized === "FREE_TRIAL" ||
@@ -100,7 +125,7 @@ GET PLAN KEY
 const getPlanKey = (plan) => {
     return (normalizePlanValue(plan?.type) ||
         normalizePlanValue(plan?.name) ||
-        "FREE_LOCKED");
+        "LOCKED");
 };
 exports.getPlanKey = getPlanKey;
 /* ======================================
@@ -121,6 +146,9 @@ exports.getPlanFeatures = getPlanFeatures;
 FEATURE CHECK
 ====================================== */
 const hasFeature = (plan, feature) => {
+    if ((0, exports.getPlanKey)(plan) === "LOCKED") {
+        return false;
+    }
     return (0, exports.getPlanFeatures)(plan)[feature] === true;
 };
 exports.hasFeature = hasFeature;
@@ -151,7 +179,7 @@ const isNearLimit = (current, max) => {
 };
 exports.isNearLimit = isNearLimit;
 const getUpgradePlan = (current) => {
-    const order = ["FREE_LOCKED", "BASIC", "PRO", "ELITE"];
+    const order = ["LOCKED", "FREE_LOCKED", "BASIC", "PRO", "ELITE"];
     const index = order.indexOf(current);
     return order[index + 1] || current;
 };

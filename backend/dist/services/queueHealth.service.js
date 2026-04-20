@@ -2,25 +2,51 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getQueueHealth = void 0;
 const ai_queue_1 = require("../queues/ai.queue");
-const getQueueHealth = async () => {
-    const aiQueues = (0, ai_queue_1.getAIQueues)();
-    const queueStats = await Promise.all(aiQueues.map(async (queue) => ({
-        name: queue.name,
-        waiting: await queue.getWaitingCount(),
-        active: await queue.getActiveCount(),
-        delayed: await queue.getDelayedCount(),
-        failed: await queue.getFailedCount(),
-    })));
-    const waiting = queueStats.reduce((total, item) => total + item.waiting, 0);
-    const active = queueStats.reduce((total, item) => total + item.active, 0);
-    const delayed = queueStats.reduce((total, item) => total + item.delayed, 0);
-    const failed = queueStats.reduce((total, item) => total + item.failed, 0);
+const authEmail_queue_1 = require("../queues/authEmail.queue");
+const automation_queue_1 = require("../queues/automation.queue");
+const bookingReminder_queue_1 = require("../queues/bookingReminder.queue");
+const followup_queue_1 = require("../queues/followup.queue");
+const funnel_queue_1 = require("../queues/funnel.queue");
+const QUEUE_HEALTH_CACHE_TTL_MS = 5000;
+const queueHealthCache = {
+    expiresAt: 0,
+};
+const getQueueSnapshot = async (queue) => {
+    const counts = await queue.getJobCounts("wait", "active", "failed", "delayed");
     return {
-        waiting,
-        active,
-        delayed,
-        failed,
-        partitions: queueStats,
+        name: queue.name,
+        waiting: counts.wait ?? 0,
+        active: counts.active ?? 0,
+        failed: counts.failed ?? 0,
+        delayed: counts.delayed ?? 0,
     };
+};
+const getAllQueues = () => [
+    ...(0, ai_queue_1.getAIQueues)(),
+    followup_queue_1.followupQueue,
+    automation_queue_1.automationQueue,
+    bookingReminder_queue_1.bookingReminderQueue,
+    authEmail_queue_1.authEmailQueue,
+    funnel_queue_1.funnelQueue,
+];
+const loadQueueHealth = async () => Promise.all(getAllQueues().map(getQueueSnapshot));
+const getQueueHealth = async () => {
+    const now = Date.now();
+    if (queueHealthCache.value && queueHealthCache.expiresAt > now) {
+        return queueHealthCache.value;
+    }
+    if (queueHealthCache.promise) {
+        return queueHealthCache.promise;
+    }
+    queueHealthCache.promise = loadQueueHealth()
+        .then((snapshot) => {
+        queueHealthCache.value = snapshot;
+        queueHealthCache.expiresAt = Date.now() + QUEUE_HEALTH_CACHE_TTL_MS;
+        return snapshot;
+    })
+        .finally(() => {
+        queueHealthCache.promise = undefined;
+    });
+    return queueHealthCache.promise;
 };
 exports.getQueueHealth = getQueueHealth;

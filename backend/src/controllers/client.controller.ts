@@ -3,6 +3,9 @@ import prisma from "../config/prisma";
 import { upsertClientByUniqueKey } from "../services/clientUpsert.service";
 import { encrypt } from "../utils/encrypt";
 import axios from "axios";
+import { getPlanKey } from "../config/plan.config";
+import { resolvePlanContext } from "../services/feature.service";
+import { triggerOnboardingDemo } from "../services/onboarding.service";
 
 /*
 ---------------------------------------------------
@@ -22,6 +25,51 @@ const getSubscription = async (businessId: string) => {
     where: { businessId },
     include: { plan: true },
   });
+};
+
+const getAllowedPlatforms = async (
+  businessId: string,
+  subscription: Awaited<ReturnType<typeof getSubscription>>
+) => {
+  if (!subscription?.plan) {
+    return [];
+  }
+
+  const planContext = await resolvePlanContext(businessId).catch(() => null);
+
+  if (!planContext || planContext.state !== "ACTIVE") {
+    return [];
+  }
+
+  const planKey = getPlanKey(subscription.plan);
+
+  if (planKey === "PRO" || planKey === "ELITE") {
+    return ["WHATSAPP", "INSTAGRAM"];
+  }
+
+  if (planKey === "BASIC") {
+    return ["INSTAGRAM"];
+  }
+
+  return [];
+};
+
+const queueOnboardingDemoForClient = async (
+  businessId: string,
+  client: { id: string; platform: string; isActive?: boolean | null }
+) => {
+  try {
+    await triggerOnboardingDemo({
+      businessId,
+      client: {
+        id: client.id,
+        platform: client.platform,
+        isActive: client.isActive ?? true,
+      },
+    });
+  } catch (error) {
+    console.error("Onboarding demo trigger failed:", error);
+  }
 };
 
 /*
@@ -76,35 +124,15 @@ export const createClient = async (req: Request, res: Response) => {
       });
     }
 
-    const planName = subscription.plan.name;
-    const now = new Date();
+    const allowedPlatforms = await getAllowedPlatforms(
+      business.id,
+      subscription
+    );
 
-    let allowedPlatforms: string[] = [];
-
-    if (planName === "FREE_TRIAL") {
-
-      if (
-        subscription.currentPeriodEnd &&
-        now < subscription.currentPeriodEnd
-      ) {
-        allowedPlatforms = ["WHATSAPP", "INSTAGRAM"];
-      } else {
-        return res.status(403).json({
-          message:
-            "Your 7-day trial has expired. Please upgrade your plan.",
-        });
-      }
-
-    } else if (planName === "PRO_1999") {
-
-      allowedPlatforms = ["WHATSAPP", "INSTAGRAM"];
-
-    } else {
-
+    if (!allowedPlatforms.length) {
       return res.status(403).json({
-        message: "Invalid subscription plan",
+        message: "Your current plan does not allow new integrations",
       });
-
     }
 
     if (!allowedPlatforms.includes(platform)) {
@@ -127,6 +155,8 @@ export const createClient = async (req: Request, res: Response) => {
       faqKnowledge,
       salesInstructions,
     });
+
+    await queueOnboardingDemoForClient(business.id, client);
 
     return res.status(201).json({
       message: "Client created successfully",
@@ -206,6 +236,25 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
     }
 
+    const subscription = await getSubscription(business.id);
+
+    if (!subscription) {
+      return res.status(403).json({
+        message: "No active subscription found",
+      });
+    }
+
+    const allowedPlatforms = await getAllowedPlatforms(
+      business.id,
+      subscription
+    );
+
+    if (!allowedPlatforms.includes("INSTAGRAM")) {
+      return res.status(403).json({
+        message: "Instagram integration not allowed in your plan",
+      });
+    }
+
     const shortTokenRes = await axios.get(
       "https://graph.facebook.com/v19.0/oauth/access_token",
       {
@@ -282,6 +331,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       faqKnowledge,
       salesInstructions,
     });
+
+    await queueOnboardingDemoForClient(business.id, client);
 
     return res.json({
       message: "Instagram connected successfully",

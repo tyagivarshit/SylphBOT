@@ -11,6 +11,8 @@ type ManagedRedisClient = Redis & {
 
 const globalForRedis = globalThis as typeof globalThis & {
   __sylphRedis?: ManagedRedisClient;
+  __sylphQueueRedis?: ManagedRedisClient;
+  __sylphBullConnections?: Set<ManagedRedisClient>;
 };
 
 const isRetryableRedisError = (error: unknown) => {
@@ -127,9 +129,42 @@ const createRedisClient = (label: string) => {
 export const redis = globalForRedis.__sylphRedis || createRedisClient("shared");
 globalForRedis.__sylphRedis = redis;
 
-export const getQueueRedisConnection = () => redis;
+const bullConnections =
+  globalForRedis.__sylphBullConnections || new Set<ManagedRedisClient>();
 
-export const getWorkerRedisConnection = () => redis;
+if (!globalForRedis.__sylphBullConnections) {
+  globalForRedis.__sylphBullConnections = bullConnections;
+}
+
+const trackBullConnection = (client: ManagedRedisClient) => {
+  bullConnections.add(client);
+  return client;
+};
+
+const untrackBullConnection = (client?: ManagedRedisClient) => {
+  if (!client) {
+    return;
+  }
+
+  bullConnections.delete(client);
+};
+
+const queueRedis =
+  globalForRedis.__sylphQueueRedis ||
+  trackBullConnection(createRedisClient("queue"));
+
+if (!globalForRedis.__sylphQueueRedis) {
+  globalForRedis.__sylphQueueRedis = queueRedis;
+}
+
+let workerConnectionCounter = 0;
+
+export const getQueueRedisConnection = () => queueRedis;
+
+export const getWorkerRedisConnection = () =>
+  trackBullConnection(
+    createRedisClient(`worker:${++workerConnectionCounter}`)
+  );
 
 const closeClient = async (client?: ManagedRedisClient) => {
   if (!client) {
@@ -155,8 +190,22 @@ const closeClient = async (client?: ManagedRedisClient) => {
 };
 
 export const closeRedisConnection = async () => {
-  await closeClient(globalForRedis.__sylphRedis);
+  const clients = Array.from(
+    new Set([
+      globalForRedis.__sylphRedis,
+      globalForRedis.__sylphQueueRedis,
+      ...Array.from(bullConnections.values()),
+    ].filter(Boolean))
+  );
+
+  for (const client of clients) {
+    await closeClient(client);
+    untrackBullConnection(client);
+  }
+
   globalForRedis.__sylphRedis = undefined;
+  globalForRedis.__sylphQueueRedis = undefined;
+  globalForRedis.__sylphBullConnections = undefined;
 };
 
 export default redis;

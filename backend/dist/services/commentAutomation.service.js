@@ -10,28 +10,38 @@ const encrypt_1 = require("../utils/encrypt");
 const ai_service_1 = require("./ai.service");
 const plan_config_1 = require("../config/plan.config");
 const rateLimiter_redis_1 = require("../redis/rateLimiter.redis");
+const usage_service_1 = require("./usage.service");
 const redis_1 = __importDefault(require("../config/redis"));
+const buildCommentAIMessage = (commentText, aiPrompt) => {
+    const sections = [`Lead message:\n${String(commentText || "").trim()}`];
+    const prompt = String(aiPrompt || "").trim();
+    if (prompt) {
+        sections.push(`Reply instruction:\n${prompt}`);
+    }
+    return sections.join("\n\n");
+};
 const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, reelId, commentText, }) => {
+    let executed = false;
+    let messageSent = false;
     try {
         const text = commentText?.toLowerCase()?.trim();
-        if (!text)
-            return;
-        /* RATE LIMIT */
+        if (!text) {
+            return { executed, messageSent };
+        }
         try {
             await (0, rateLimiter_redis_1.incrementRate)(businessId, instagramUserId, "COMMENT", 60);
         }
         catch {
-            return;
+            return { executed, messageSent };
         }
-        /* PLAN CHECK */
         const subscription = await prisma_1.default.subscription.findUnique({
             where: { businessId },
             include: { plan: true },
         });
         const plan = subscription?.plan || null;
-        if (!(0, plan_config_1.hasFeature)(plan, "automationEnabled"))
-            return;
-        /* FETCH TRIGGERS */
+        if (!(0, plan_config_1.hasFeature)(plan, "automationEnabled")) {
+            return { executed, messageSent };
+        }
         const cacheKey = `triggers:${businessId}:${clientId}:${reelId}`;
         let triggers = await redis_1.default.get(cacheKey);
         if (triggers) {
@@ -49,21 +59,21 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             });
             await redis_1.default.set(cacheKey, JSON.stringify(triggers), "EX", 300);
         }
-        if (!triggers.length)
-            return;
-        /* 🔥 MULTI KEYWORD MATCH */
-        const matchedTrigger = triggers.find((t) => {
-            const keywords = t.keyword
+        if (!triggers.length) {
+            return { executed, messageSent };
+        }
+        const matchedTrigger = triggers.find((trigger) => {
+            const keywords = trigger.keyword
                 ?.toLowerCase()
                 ?.split(",")
-                ?.map((k) => k.trim());
+                ?.map((keyword) => keyword.trim());
             if (!keywords?.length)
                 return false;
-            return keywords.some((k) => text.includes(k));
+            return keywords.some((keyword) => text.includes(keyword));
         });
-        if (!matchedTrigger)
-            return;
-        /* LEAD */
+        if (!matchedTrigger) {
+            return { executed, messageSent };
+        }
         let lead = await prisma_1.default.lead.findFirst({
             where: {
                 businessId,
@@ -71,7 +81,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             },
         });
         if (!lead) {
-            lead = await prisma_1.default.lead.create({
+            const createdLead = await (0, usage_service_1.runWithContactUsageLimit)(businessId, (tx) => tx.lead.create({
                 data: {
                     businessId,
                     clientId,
@@ -80,9 +90,17 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
                     stage: "NEW",
                     followupCount: 0,
                 },
+            })).catch((error) => {
+                if (error?.code === "LIMIT_REACHED") {
+                    return null;
+                }
+                throw error;
             });
+            if (!createdLead) {
+                return { executed, messageSent };
+            }
+            lead = createdLead.result;
         }
-        /* DUPLICATE PROTECTION */
         const recentAIMessage = await prisma_1.default.message.findFirst({
             where: {
                 leadId: lead.id,
@@ -92,37 +110,67 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
         });
         if (recentAIMessage) {
             const diff = Date.now() - new Date(recentAIMessage.createdAt).getTime();
-            if (diff < 5 * 60 * 1000)
-                return;
+            if (diff < 5 * 60 * 1000) {
+                return { executed, messageSent };
+            }
         }
-        /* CLIENT TOKEN */
         const client = await prisma_1.default.client.findUnique({
             where: { id: clientId },
         });
-        if (!client?.accessToken)
-            return;
+        if (!client?.accessToken) {
+            return { executed, messageSent };
+        }
         const accessToken = (0, encrypt_1.decrypt)(client.accessToken);
-        /* 🔥 REPLY LOGIC */
         let replyMessage = matchedTrigger.dmText ||
             matchedTrigger.replyText ||
             "Thanks for your comment!";
-        /* 🔥 AI ONLY IF NEEDED */
         if (!matchedTrigger.dmText && matchedTrigger.aiPrompt) {
+            let aiReservation = null;
             try {
+                aiReservation = await (0, usage_service_1.reserveAIUsageExecution)({
+                    businessId,
+                });
                 const aiResponse = await (0, ai_service_1.generateAIReply)({
                     businessId,
                     leadId: lead.id,
-                    message: commentText +
-                        "\n\nContext: " +
-                        matchedTrigger.aiPrompt,
+                    message: buildCommentAIMessage(commentText, matchedTrigger.aiPrompt),
+                    source: "COMMENT_AUTOMATION",
                 });
-                if (aiResponse)
+                if (aiResponse) {
                     replyMessage = aiResponse;
+                    await (0, usage_service_1.finalizeAIUsageExecution)(aiReservation);
+                    aiReservation = null;
+                }
+                else if (aiReservation) {
+                    await (0, usage_service_1.releaseAIUsageExecution)(aiReservation);
+                    aiReservation = null;
+                }
             }
-            catch { }
+            catch (error) {
+                if (aiReservation) {
+                    await (0, usage_service_1.releaseAIUsageExecution)(aiReservation).catch(() => undefined);
+                }
+                if (error?.code !== "LIMIT_REACHED" &&
+                    error?.code !== "HOURLY_LIMIT_REACHED" &&
+                    error?.code !== "USAGE_CHECK_FAILED") {
+                    console.error("Comment automation AI fallback error:", error);
+                }
+            }
         }
-        /* COMMENT REPLY */
-        const commentReply = matchedTrigger.replyText || "Check your DM 👀";
+        try {
+            await (0, usage_service_1.reserveUsage)({
+                businessId,
+                feature: "automation_runs",
+            });
+        }
+        catch (error) {
+            if (error?.code === "LIMIT_REACHED") {
+                return { executed, messageSent };
+            }
+            throw error;
+        }
+        executed = true;
+        const commentReply = matchedTrigger.replyText || "Check your DM";
         try {
             await axios_1.default.post(`https://graph.facebook.com/v19.0/${reelId}/comments`, { message: commentReply }, {
                 headers: {
@@ -132,7 +180,18 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             });
         }
         catch { }
-        /* DM SEND */
+        try {
+            await (0, usage_service_1.reserveUsage)({
+                businessId,
+                feature: "messages_sent",
+            });
+        }
+        catch (error) {
+            if (error?.code === "LIMIT_REACHED") {
+                return { executed, messageSent };
+            }
+            throw error;
+        }
         try {
             await axios_1.default.post("https://graph.facebook.com/v19.0/me/messages", {
                 recipient: { id: instagramUserId },
@@ -144,25 +203,37 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
                 },
                 timeout: 10000,
             });
+            messageSent = true;
         }
-        catch { }
-        /* SAVE */
-        await prisma_1.default.message.create({
-            data: {
-                leadId: lead.id,
-                content: replyMessage,
-                sender: "AI",
-            },
-        });
-        await prisma_1.default.lead.update({
-            where: { id: lead.id },
-            data: {
-                lastMessageAt: new Date(),
-            },
-        });
+        catch {
+            return { executed, messageSent };
+        }
+        if (messageSent) {
+            await prisma_1.default.message.create({
+                data: {
+                    leadId: lead.id,
+                    content: replyMessage,
+                    sender: "AI",
+                },
+            });
+            await prisma_1.default.lead.update({
+                where: { id: lead.id },
+                data: {
+                    lastMessageAt: new Date(),
+                },
+            });
+        }
+        return {
+            executed,
+            messageSent,
+        };
     }
     catch (error) {
-        console.error("🚨 Comment automation error:", error);
+        console.error("Comment automation error:", error);
+        return {
+            executed,
+            messageSent,
+        };
     }
 };
 exports.handleCommentAutomation = handleCommentAutomation;

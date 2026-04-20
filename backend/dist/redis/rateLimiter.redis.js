@@ -3,44 +3,129 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearAllRates = exports.resetRate = exports.getRate = exports.incrementRate = exports.getRateKey = void 0;
+exports.consumeBusinessMessageMinuteRate = exports.consumeBusinessAIHourlyRate = exports.incrementDailyAIUsage = exports.clearAllRates = exports.resetRate = exports.getRate = exports.incrementRate = exports.buildMessageRateKey = exports.buildAIRateKey = exports.buildAIUsageKey = exports.getRateKey = exports.getRedisMinuteKey = exports.getRedisHourKey = exports.getRedisDateKey = void 0;
 const redis_1 = __importDefault(require("../config/redis"));
 /* ======================================
 CONFIG
 ====================================== */
-const PREFIX = "ai_rate_limit";
+const LEGACY_RATE_PREFIX = "ai_rate_limit";
+const AI_USAGE_TTL_SECONDS = 24 * 60 * 60;
+const AI_HOURLY_RATE_TTL_SECONDS = 60 * 60;
+const MESSAGE_MINUTE_RATE_TTL_SECONDS = 60;
 /* ======================================
-KEY BUILDER
+TIME KEYS
 ====================================== */
-const getRateKey = (businessId, leadId, platform) => {
-    return platform
-        ? `${PREFIX}:${platform}:${businessId}:${leadId}`
-        : `${PREFIX}:${businessId}:${leadId}`;
-};
-exports.getRateKey = getRateKey;
+const pad = (value) => String(value).padStart(2, "0");
+const getRedisDateKey = (date = new Date()) => `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+exports.getRedisDateKey = getRedisDateKey;
+const getRedisHourKey = (date = new Date()) => `${(0, exports.getRedisDateKey)(date)}:${pad(date.getUTCHours())}`;
+exports.getRedisHourKey = getRedisHourKey;
+const getRedisMinuteKey = (date = new Date()) => `${(0, exports.getRedisHourKey)(date)}:${pad(date.getUTCMinutes())}`;
+exports.getRedisMinuteKey = getRedisMinuteKey;
 /* ======================================
-INCREMENT (ATOMIC + SAFE)
+KEY BUILDERS
+====================================== */
+const getRateKey = (businessId, leadId, platform) => platform
+    ? `${LEGACY_RATE_PREFIX}:${platform}:${businessId}:${leadId}`
+    : `${LEGACY_RATE_PREFIX}:${businessId}:${leadId}`;
+exports.getRateKey = getRateKey;
+const buildAIUsageKey = (businessId, dateKey = (0, exports.getRedisDateKey)()) => `ai:usage:${businessId}:${dateKey}`;
+exports.buildAIUsageKey = buildAIUsageKey;
+const buildAIRateKey = (businessId, hourKey = (0, exports.getRedisHourKey)()) => `ai:rate:${businessId}:${hourKey}`;
+exports.buildAIRateKey = buildAIRateKey;
+const buildMessageRateKey = (businessId, minuteKey = (0, exports.getRedisMinuteKey)()) => `msg:rate:${businessId}:${minuteKey}`;
+exports.buildMessageRateKey = buildMessageRateKey;
+/* ======================================
+LUA HELPERS
+====================================== */
+const incrementWithTtlScript = `
+local key = KEYS[1]
+local ttl = tonumber(ARGV[1])
+local current = redis.call('INCR', key)
+local keyTtl = redis.call('TTL', key)
+
+if keyTtl < 0 then
+  redis.call('EXPIRE', key, ttl)
+  keyTtl = ttl
+end
+
+return {current, keyTtl}
+`;
+const consumeWindowScript = `
+local key = KEYS[1]
+local ttl = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local current = tonumber(redis.call('GET', key) or '0')
+local keyTtl = redis.call('TTL', key)
+
+if keyTtl < 0 and current > 0 then
+  redis.call('EXPIRE', key, ttl)
+  keyTtl = ttl
+end
+
+if current >= limit then
+  if keyTtl < 0 then
+    keyTtl = ttl
+  end
+
+  return {0, current, keyTtl}
+end
+
+local nextCount = redis.call('INCR', key)
+
+if nextCount == 1 then
+  redis.call('EXPIRE', key, ttl)
+  keyTtl = ttl
+else
+  keyTtl = redis.call('TTL', key)
+  if keyTtl < 0 then
+    redis.call('EXPIRE', key, ttl)
+    keyTtl = ttl
+  end
+end
+
+return {1, nextCount, keyTtl}
+`;
+const toNumber = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+const incrementExpiringCounter = async (key, ttlSeconds) => {
+    const raw = (await redis_1.default.eval(incrementWithTtlScript, 1, key, String(ttlSeconds)));
+    return {
+        count: toNumber(raw?.[0]),
+        ttlSeconds: Math.max(toNumber(raw?.[1]), ttlSeconds),
+    };
+};
+const consumeRateWindow = async (key, limit, ttlSeconds) => {
+    if (limit <= 0) {
+        return {
+            allowed: false,
+            count: 0,
+            ttlSeconds,
+        };
+    }
+    const raw = (await redis_1.default.eval(consumeWindowScript, 1, key, String(ttlSeconds), String(limit)));
+    return {
+        allowed: toNumber(raw?.[0]) === 1,
+        count: toNumber(raw?.[1]),
+        ttlSeconds: Math.max(toNumber(raw?.[2]), ttlSeconds),
+    };
+};
+/* ======================================
+LEGACY API
 ====================================== */
 const incrementRate = async (businessId, leadId, platform, windowSeconds = 60) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
     try {
-        const multi = redis_1.default.multi();
-        multi.incr(key);
-        multi.ttl(key);
-        const [[, count], [, ttl]] = (await multi.exec());
-        if (ttl === -1) {
-            await redis_1.default.expire(key, windowSeconds);
-        }
-        return count;
+        const result = await incrementExpiringCounter(key, windowSeconds);
+        return result.count;
     }
     catch {
         return 0;
     }
 };
 exports.incrementRate = incrementRate;
-/* ======================================
-GET RATE
-====================================== */
 const getRate = async (businessId, leadId, platform) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
     try {
@@ -52,9 +137,6 @@ const getRate = async (businessId, leadId, platform) => {
     }
 };
 exports.getRate = getRate;
-/* ======================================
-RESET RATE
-====================================== */
 const resetRate = async (businessId, leadId, platform) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
     try {
@@ -63,13 +145,10 @@ const resetRate = async (businessId, leadId, platform) => {
     catch { }
 };
 exports.resetRate = resetRate;
-/* ======================================
-CLEAR ALL (SAFE SCAN)
-====================================== */
 const clearAllRates = async () => {
     try {
         const stream = redis_1.default.scanStream({
-            match: `${PREFIX}:*`,
+            match: `${LEGACY_RATE_PREFIX}:*`,
             count: 100,
         });
         const pipeline = redis_1.default.pipeline();
@@ -89,3 +168,12 @@ const clearAllRates = async () => {
     catch { }
 };
 exports.clearAllRates = clearAllRates;
+/* ======================================
+SCALING HELPERS
+====================================== */
+const incrementDailyAIUsage = async (businessId) => incrementExpiringCounter((0, exports.buildAIUsageKey)(businessId), AI_USAGE_TTL_SECONDS);
+exports.incrementDailyAIUsage = incrementDailyAIUsage;
+const consumeBusinessAIHourlyRate = async (businessId, limit) => consumeRateWindow((0, exports.buildAIRateKey)(businessId), limit, AI_HOURLY_RATE_TTL_SECONDS);
+exports.consumeBusinessAIHourlyRate = consumeBusinessAIHourlyRate;
+const consumeBusinessMessageMinuteRate = async (businessId, limit) => consumeRateWindow((0, exports.buildMessageRateKey)(businessId), limit, MESSAGE_MINUTE_RATE_TTL_SECONDS);
+exports.consumeBusinessMessageMinuteRate = consumeBusinessMessageMinuteRate;

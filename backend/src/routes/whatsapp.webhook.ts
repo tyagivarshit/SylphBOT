@@ -1,159 +1,159 @@
 import { Router, Request, Response } from "express";
-import crypto from "crypto";
 import prisma from "../config/prisma";
-
 import { enqueueAIBatch } from "../queues/ai.queue";
-import { scheduleFollowups, cancelFollowups } from "../queues/followup.queue";
-
+import {
+  scheduleFollowups,
+  cancelFollowups,
+} from "../queues/followup.queue";
 import { getIO } from "../sockets/socket.server";
 import { processWebhookEvent } from "../services/webhookDedup.service";
 import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
+import { captureExceptionWithContext } from "../observability/sentry";
+import {
+  getSubscriptionAccess,
+  logSubscriptionLockedAction,
+} from "../middleware/subscriptionGuard.middleware";
+import { runWithContactUsageLimit } from "../services/usage.service";
+import {
+  extractMetaWebhookTimestamp,
+  guardWebhookReplay,
+  isWebhookTimestampFresh,
+  verifyMetaWebhookSignature,
+} from "../services/webhookSecurity.service";
 
 const router = Router();
+const isProduction = process.env.NODE_ENV === "production";
 
-/*
----------------------------------------------------
-SIGNATURE VERIFICATION
----------------------------------------------------
-*/
+const getSignatureHeader = (req: Request) =>
+  req.headers["x-hub-signature-256"] || req.headers["x-hub-signature"];
 
-function verifySignature(req: any): boolean {
+const parseBody = (req: any) => {
+  if (Buffer.isBuffer(req.body)) {
+    return JSON.parse(req.body.toString("utf8"));
+  }
 
-  const signature = req.headers["x-hub-signature-256"] as string;
+  throw new Error("Invalid webhook body");
+};
 
-  const appSecret = process.env.META_APP_SECRET as string;
+const enforceWebhookSecurity = async (req: Request, body: any) => {
+  const rawBody = Buffer.isBuffer((req as any).body)
+    ? ((req as any).body as Buffer)
+    : req.rawBody;
+  const signature = getSignatureHeader(req);
+  const secret = process.env.META_APP_SECRET?.trim() || null;
 
-  if (!signature || !appSecret) return false;
+  if ((isProduction || secret) && (!rawBody || !verifyMetaWebhookSignature({
+    rawBody,
+    signature,
+    secret,
+  }))) {
+    return false;
+  }
 
-  const expected =
-    "sha256=" +
-    crypto
-      .createHmac("sha256", appSecret)
-      .update(req.rawBody)
-      .digest("hex");
+  const timestampMs = extractMetaWebhookTimestamp(body);
 
-  return signature === expected;
+  if (!isWebhookTimestampFresh(timestampMs)) {
+    return false;
+  }
 
-}
+  const replaySignature = Array.isArray(signature) ? signature[0] : signature;
 
-/*
----------------------------------------------------
-WEBHOOK VERIFY
----------------------------------------------------
-*/
+  if (timestampMs && replaySignature) {
+    const accepted = await guardWebhookReplay({
+      platform: "WHATSAPP",
+      signature: String(replaySignature),
+      timestampMs,
+    });
+
+    if (!accepted) {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 router.get("/", (req: Request, res: Response) => {
-
   const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
-
   const mode = req.query["hub.mode"];
-
   const token = req.query["hub.verify_token"];
-
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-
     return res.status(200).send(challenge);
-
   }
 
   return res.sendStatus(403);
-
 });
 
-/*
----------------------------------------------------
-WHATSAPP WEBHOOK
----------------------------------------------------
-*/
-
 router.post("/", async (req: any, res: Response) => {
-
   try {
+    console.log("[WHATSAPP WEBHOOK] hit");
 
-    console.log("🔥 WHATSAPP WEBHOOK HIT");
+    const body = parseBody(req);
 
-    /*
-    SIGNATURE VERIFY
-    */
-
-    if (process.env.NODE_ENV === "production") {
-
-      if (!verifySignature(req)) {
-
-        console.log("❌ Signature verification failed");
-
-        return res.sendStatus(403);
-
-      }
-
+    if (!(await enforceWebhookSecurity(req, body))) {
+      console.log("[WHATSAPP WEBHOOK] security validation failed");
+      return res.sendStatus(403);
     }
 
-    const body = JSON.parse(req.body.toString());
+    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-    const message =
-      body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-
-    if (!message) return res.sendStatus(200);
-
-    /*
-    WEBHOOK DEDUP
-    */
+    if (!message) {
+      return res.sendStatus(200);
+    }
 
     const eventId = message?.id;
-
     const shouldProcess = await processWebhookEvent({
       eventId,
       platform: "WHATSAPP",
     });
 
     if (!shouldProcess) {
-
-      console.log("⚠️ Duplicate webhook ignored");
-
+      console.log("[WHATSAPP WEBHOOK] duplicate webhook ignored");
       return res.sendStatus(200);
-
     }
 
     const from = message.from;
-
     const text = message.text?.body;
-
     const phoneNumberId =
       body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
     if (!from || !text || !phoneNumberId) {
-
       return res.sendStatus(200);
-
     }
 
-    console.log("📩 Incoming:", text);
-
-    /*
-    FIND CLIENT
-    */
+    console.log("[WHATSAPP WEBHOOK] incoming:", text);
 
     const client = await prisma.client.findFirst({
       where: {
         platform: "WHATSAPP",
-        phoneNumberId: phoneNumberId,
+        phoneNumberId,
         isActive: true,
       },
     });
 
     if (!client) {
-
-      console.log("⚠️ Client not found");
-
+      console.log("[WHATSAPP WEBHOOK] client not found");
       return res.sendStatus(200);
-
     }
 
-    /*
-    PLAN CHECK
-    */
+    const access = await getSubscriptionAccess(client.businessId);
+
+    if (!access.allowed) {
+      logSubscriptionLockedAction(
+        {
+          businessId: client.businessId,
+          requestId: req.requestId,
+          path: req.originalUrl,
+          method: req.method,
+          action: "whatsapp_webhook",
+          lockReason: access.lockReason,
+        },
+        "WhatsApp webhook ignored because subscription is locked"
+      );
+      return res.sendStatus(200);
+    }
 
     const subscription = await prisma.subscription.findUnique({
       where: { businessId: client.businessId },
@@ -161,26 +161,16 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     if (!subscription || !subscription.plan) {
-
-      console.log("❌ No subscription");
-
+      console.log("[WHATSAPP WEBHOOK] no subscription");
       return res.sendStatus(200);
-
     }
 
     const planName = subscription.plan.name;
 
     if (planName === "BASIC") {
-
-      console.log("🚫 BASIC plan blocked");
-
+      console.log("[WHATSAPP WEBHOOK] BASIC plan blocked");
       return res.sendStatus(200);
-
     }
-
-    /*
-    FIND OR CREATE LEAD
-    */
 
     let lead = await prisma.lead.findFirst({
       where: {
@@ -190,25 +180,36 @@ router.post("/", async (req: any, res: Response) => {
     });
 
     if (!lead) {
+      const createdLead = await runWithContactUsageLimit(
+        client.businessId,
+        (tx) =>
+          tx.lead.create({
+            data: {
+              businessId: client.businessId,
+              clientId: client.id,
+              phone: from,
+              platform: "WHATSAPP",
+              stage: "NEW",
+              followupCount: 0,
+            },
+          })
+      ).catch((error) => {
+        if ((error as { code?: string })?.code === "LIMIT_REACHED") {
+          console.log("[WHATSAPP WEBHOOK] contact limit reached");
+          return null;
+        }
 
-      lead = await prisma.lead.create({
-        data: {
-          businessId: client.businessId,
-          clientId: client.id,
-          phone: from,
-          platform: "WHATSAPP",
-          stage: "NEW",
-          followupCount: 0,
-        },
+        throw error;
       });
 
-      console.log("👤 Lead created");
+      if (!createdLead) {
+        return res.sendStatus(200);
+      }
 
+      lead = createdLead.result;
+
+      console.log("[WHATSAPP WEBHOOK] lead created");
     }
-
-    /*
-    SAVE USER MESSAGE
-    */
 
     const userMessage = await prisma.message.create({
       data: {
@@ -235,17 +236,8 @@ router.post("/", async (req: any, res: Response) => {
       },
     }).catch(() => {});
 
-    /*
-    REALTIME SOCKET
-    */
-
     const io = getIO();
-
     io.to(`lead_${lead.id}`).emit("new_message", userMessage);
-
-    /*
-    ADD AI JOB
-    */
 
     await enqueueAIBatch(
       [
@@ -276,10 +268,6 @@ router.post("/", async (req: any, res: Response) => {
       phoneNumberId,
     });
 
-    /*
-    UPDATE LEAD
-    */
-
     await prisma.lead.update({
       where: { id: lead.id },
       data: {
@@ -289,24 +277,21 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
-    /*
-    RESET FOLLOWUPS
-    */
-
     await cancelFollowups(lead.id);
-
     await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);
-
   } catch (error) {
+    req.logger?.error({ error }, "WhatsApp webhook error");
+    captureExceptionWithContext(error, {
+      tags: {
+        webhook: "whatsapp",
+      },
+    });
 
-    console.error("🚨 WHATSAPP WEBHOOK ERROR:", error);
-
+    console.error("[WHATSAPP WEBHOOK] error:", error);
     return res.sendStatus(500);
-
   }
-
 });
 
 export default router;

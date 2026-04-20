@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const booking_controller_1 = require("../controllers/booking.controller");
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const router = (0, express_1.Router)();
 /*
@@ -19,25 +20,25 @@ router.get("/slots/:businessId", booking_controller_1.getAvailableSlots);
 CREATE APPOINTMENT
 =====================================================
 */
-router.post("/appointment", auth_middleware_1.protect, booking_controller_1.createAppointment);
+router.post("/appointment", auth_middleware_1.protect, subscriptionGuard_middleware_1.subscriptionGuard, booking_controller_1.createAppointment);
 /*
 =====================================================
 RESCHEDULE APPOINTMENT
 =====================================================
 */
-router.put("/appointment/:appointmentId/reschedule", auth_middleware_1.protect, booking_controller_1.rescheduleAppointmentController);
+router.put("/appointment/:appointmentId/reschedule", auth_middleware_1.protect, subscriptionGuard_middleware_1.subscriptionGuard, booking_controller_1.rescheduleAppointmentController);
 /*
 =====================================================
 CANCEL APPOINTMENT
 =====================================================
 */
-router.delete("/appointment/:appointmentId", auth_middleware_1.protect, booking_controller_1.cancelAppointment);
+router.delete("/appointment/:appointmentId", auth_middleware_1.protect, subscriptionGuard_middleware_1.subscriptionGuard, booking_controller_1.cancelAppointment);
 /*
 =====================================================
 🔥 GET ALL BOOKINGS (FIXED)
 =====================================================
 */
-router.get("/list", auth_middleware_1.protect, async (req, res) => {
+router.get("/list", auth_middleware_1.protect, subscriptionGuard_middleware_1.subscriptionGuard, async (req, res) => {
     try {
         const businessId = req.user?.businessId;
         if (!businessId) {

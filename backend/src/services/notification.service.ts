@@ -1,34 +1,51 @@
+import type { Notification, Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { getIO } from "../sockets/socket.server";
 
 type CreateNotificationInput = {
   userId: string;
+  businessId?: string;
   title?: string;
   message: string;
-  type: string; // ✅ ADD THIS
+  type: string;
+  link?: string;
 };
 
-export const createNotification = async (
+const createNotificationRecord = async (
+  client: Prisma.TransactionClient | typeof prisma,
   data: CreateNotificationInput
 ) => {
+  const { userId, businessId, title, message, type, link } = data;
 
-  const { userId, title, message, type } = data;
-
-  const notification = await prisma.notification.create({
+  return client.notification.create({
     data: {
       userId,
+      businessId,
       title,
       message,
-      type, // ✅ REQUIRED
+      type,
+      link,
     },
   });
 
+};
+
+export const emitNotification = (notification: Notification) => {
   try {
     const io = getIO();
-    io.to(`user_${userId}`).emit("new_notification", notification);
+    io.to(`user_${notification.userId}`).emit("new_notification", notification);
   } catch (err) {
     console.warn("Socket emit failed", err);
   }
+};
 
+export const createNotificationTx = async (
+  tx: Prisma.TransactionClient,
+  data: CreateNotificationInput
+) => createNotificationRecord(tx, data);
+
+export const createNotification = async (data: CreateNotificationInput) => {
+  const notification = await createNotificationRecord(prisma, data);
+  emitNotification(notification);
   return notification;
 };

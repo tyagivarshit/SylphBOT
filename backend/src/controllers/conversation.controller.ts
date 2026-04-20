@@ -1,13 +1,17 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { fetchInstagramUsername } from "../services/instagramProfile.service";
+import {
+  getSubscriptionAccess,
+  logSubscriptionLockedAction,
+} from "../middleware/subscriptionGuard.middleware";
 
 /* ======================================================
 GET CONVERSATIONS
 ====================================================== */
 export const getConversations = async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
+    const user = req.user;
 
     if (!user?.businessId) {
       return res.json({ conversations: [] });
@@ -75,7 +79,6 @@ export const getConversations = async (req: Request, res: Response) => {
     );
 
     return res.json({ conversations });
-
   } catch (error) {
     console.error("Get conversations error:", error);
     return res.status(500).json({
@@ -86,7 +89,7 @@ export const getConversations = async (req: Request, res: Response) => {
 };
 
 /* ======================================================
-GET MESSAGES BY LEAD (🔥 FIXED)
+GET MESSAGES BY LEAD
 ====================================================== */
 export const getMessagesByLead = async (req: Request, res: Response) => {
   try {
@@ -98,7 +101,7 @@ export const getMessagesByLead = async (req: Request, res: Response) => {
 
     const messages = await prisma.message.findMany({
       where: {
-        leadId: leadId, // 🔥 FIX (IMPORTANT)
+        leadId,
       },
       orderBy: {
         createdAt: "asc",
@@ -106,7 +109,6 @@ export const getMessagesByLead = async (req: Request, res: Response) => {
     });
 
     return res.json({ messages });
-
   } catch (error) {
     console.error("Get messages error:", error);
     return res.status(500).json({
@@ -122,7 +124,8 @@ SEND MESSAGE
 export const sendMessage = async (req: Request, res: Response) => {
   try {
     const leadId = req.params.leadId as string;
-    const { content, sender = "USER" } = req.body; // 🔥 default fixed
+    const { content, sender = "USER" } = req.body;
+    const businessId = req.user?.businessId;
 
     if (!leadId) {
       return res.status(400).json({ message: "leadId required" });
@@ -130,6 +133,28 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     if (!content) {
       return res.status(400).json({ message: "Content required" });
+    }
+
+    const access = await getSubscriptionAccess(businessId || "");
+
+    if (!access.allowed) {
+      logSubscriptionLockedAction(
+        {
+          businessId,
+          requestId: req.requestId,
+          path: req.originalUrl,
+          method: req.method,
+          action: "conversation_message_send",
+          lockReason: access.lockReason,
+        },
+        "Conversation message blocked because subscription is locked"
+      );
+
+      return res.status(403).json({
+        success: false,
+        message: "Subscription required",
+        requestId: req.requestId,
+      });
     }
 
     const message = await prisma.message.create({
@@ -157,7 +182,6 @@ export const sendMessage = async (req: Request, res: Response) => {
     });
 
     return res.json({ message });
-
   } catch (error) {
     console.error("Send message error:", error);
     return res.status(500).json({
@@ -188,7 +212,6 @@ export const markAsRead = async (req: Request, res: Response) => {
     });
 
     return res.json({ success: true });
-
   } catch (error) {
     console.error("Mark as read error:", error);
     return res.status(500).json({
@@ -197,3 +220,4 @@ export const markAsRead = async (req: Request, res: Response) => {
     });
   }
 };
+

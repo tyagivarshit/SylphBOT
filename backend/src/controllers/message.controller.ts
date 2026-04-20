@@ -4,6 +4,10 @@ import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { getIO } from "../sockets/socket.server";
 import { cancelFollowups } from "../queues/followup.queue";
+import {
+  getSubscriptionAccess,
+  logSubscriptionLockedAction,
+} from "../middleware/subscriptionGuard.middleware";
 
 /* ======================================
 GET MESSAGES
@@ -46,13 +50,35 @@ SEND MESSAGE
 
 export const sendManualMessage = async (req: Request, res: Response) => {
   try {
-
     const { leadId, content } = req.body;
+    const businessId = req.user?.businessId;
 
     if (!leadId || !content) {
       return res.status(400).json({
         success: false,
         message: "leadId and content required",
+      });
+    }
+
+    const access = await getSubscriptionAccess(businessId || "");
+
+    if (!access.allowed) {
+      logSubscriptionLockedAction(
+        {
+          businessId,
+          requestId: req.requestId,
+          path: req.originalUrl,
+          method: req.method,
+          action: "manual_message_send",
+          lockReason: access.lockReason,
+        },
+        "Manual message blocked because subscription is locked"
+      );
+
+      return res.status(403).json({
+        success: false,
+        message: "Subscription required",
+        requestId: req.requestId,
       });
     }
 

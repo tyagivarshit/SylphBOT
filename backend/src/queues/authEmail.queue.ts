@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Queue } from "bullmq";
 import { getQueueRedisConnection } from "../config/redis";
+import { buildQueueJobOptions } from "./queue.defaults";
 import {
   queuePasswordResetEmail,
   queueVerificationEmail,
@@ -23,15 +24,12 @@ export const authEmailQueue = new Queue<AuthEmailJobData>(
   {
     connection: getQueueRedisConnection(),
     prefix: "sylph",
-    defaultJobOptions: {
-      attempts: 3,
+    defaultJobOptions: buildQueueJobOptions({
       backoff: {
         type: "exponential",
         delay: 15000,
       },
-      removeOnComplete: true,
-      removeOnFail: true,
-    },
+    }),
   }
 );
 

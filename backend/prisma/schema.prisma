@@ -43,6 +43,7 @@ model User {
   id                String   @id @default(auto()) @map("_id") @db.ObjectId
   name              String
   email             String   @unique
+  archivedEmail     String?
   password          String
   role              String   @default("OWNER")
 
@@ -70,6 +71,8 @@ model User {
   ownedBusinesses Business[] @relation("BusinessOwner")
 
   refreshTokens     RefreshToken[]
+  apiKeys           ApiKey[]
+  auditLogs         AuditLog[]
 
   deletedAt DateTime?
 
@@ -95,6 +98,8 @@ model Business {
   subscription  Subscription?
   leads         Lead[]
   usage         Usage[]
+  usageDaily    UsageDaily[]
+  addonBalances AddonBalance[]
   invoices      Invoice[]
 
   commentTriggers CommentTrigger[]
@@ -105,12 +110,19 @@ model Business {
   teamSize  String?
   type      String?
   timezone  String?
+  onboardingCompleted Boolean @default(false)
+  onboardingStep      Int     @default(1)
+  demoCompleted       Boolean @default(false)
+  onboardingDemoLeadId String? @db.ObjectId
 
   notifications Notification[]
 
   calendarConnections CalendarConnection[]
   bookingSlots        BookingSlot[]
   appointments        Appointment[]
+  apiKeys             ApiKey[]
+  auditLogs           AuditLog[]
+  securityAlerts      SecurityAlert[]
 
   knowledgeBases KnowledgeBase[]
   salesMessageTrackings SalesMessageTracking[]
@@ -646,6 +658,39 @@ model Usage {
   @@index([businessId])
 }
 
+model UsageDaily {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId String   @db.ObjectId
+  business   Business @relation(fields: [businessId], references: [id])
+
+  feature    String
+  dateKey    String
+  count      Int      @default(0)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([businessId, feature, dateKey])
+  @@index([businessId, dateKey])
+}
+
+model AddonBalance {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId String   @db.ObjectId
+  business   Business @relation(fields: [businessId], references: [id])
+
+  type       String
+  balance    Int      @default(0)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([businessId, type])
+  @@index([businessId])
+}
+
 /* =====================================================
 REFRESH TOKENS
 ===================================================== */
@@ -664,6 +709,65 @@ model RefreshToken {
   createdAt  DateTime @default(now())
 
   @@index([userId])
+}
+
+model ApiKey {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  key             String   @unique
+  encryptedKey    String
+  prefix          String
+  name            String?
+  permissions     String[]
+  scopes          Json?
+
+  businessId      String   @db.ObjectId
+  business        Business @relation(fields: [businessId], references: [id])
+
+  createdByUserId String?  @db.ObjectId
+  createdByUser   User?    @relation(fields: [createdByUserId], references: [id])
+
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([businessId, revokedAt])
+  @@index([createdByUserId])
+}
+
+model AuditLog {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+
+  userId     String?   @db.ObjectId
+  user       User?     @relation(fields: [userId], references: [id])
+
+  businessId String?   @db.ObjectId
+  business   Business? @relation(fields: [businessId], references: [id])
+
+  action     String
+  metadata   Json?
+  ip         String?
+  userAgent  String?
+  requestId  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+model SecurityAlert {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId String   @db.ObjectId
+  business   Business @relation(fields: [businessId], references: [id])
+
+  type       String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([businessId, type, createdAt])
 }
 
 /* =====================================================

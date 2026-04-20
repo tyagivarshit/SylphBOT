@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import prisma from "../config/prisma";
 import redis from "../config/redis";
 import { stripe } from "./stripe.service";
+import { getPlanFromPrice } from "../config/stripe.price.map";
 
 type BillingCycle = "monthly" | "yearly" | null;
 type Currency = "INR" | "USD";
@@ -91,15 +92,22 @@ const incrementEarlyUsage = async (planType: string) => {
   });
 };
 
+const getSubscriptionPriceId = (subscription: Stripe.Subscription) =>
+  subscription.items.data[0]?.price?.id || null;
+
+const resolvePlanType = (
+  metadataPlan: string | undefined,
+  subscription: Stripe.Subscription
+) => metadataPlan || getPlanFromPrice(getSubscriptionPriceId(subscription));
+
 export const syncCheckoutSession = async (
   session: Stripe.Checkout.Session,
   options: BillingSyncOptions = {}
 ) => {
   const businessId = session.metadata?.businessId;
-  const planType = session.metadata?.plan;
   const subscriptionId = getSubscriptionId(session.subscription);
 
-  if (!businessId || !planType || !subscriptionId) {
+  if (!businessId || !subscriptionId) {
     throw new Error("Checkout session is missing billing metadata");
   }
 
@@ -114,15 +122,20 @@ export const syncCheckoutSession = async (
     where: { businessId },
   });
 
+  const stripeSub = await stripe.subscriptions.retrieve(
+    subscriptionId
+  );
+  const planType = resolvePlanType(session.metadata?.plan, stripeSub);
+
+  if (!planType) {
+    throw new Error("Unable to resolve plan from checkout session");
+  }
+
   const plan = await findPlan(planType);
 
   if (!plan) {
     throw new Error("Plan not found for checkout session");
   }
-
-  const stripeSub = await stripe.subscriptions.retrieve(
-    subscriptionId
-  );
 
   if (
     session.metadata?.usedEarly === "true" &&
@@ -213,12 +226,23 @@ export const syncStripeSubscriptionState = async (
   }
 
   const status = mapStripeSubscriptionStatus(subscription.status);
+  const syncedPlanType = getPlanFromPrice(getSubscriptionPriceId(subscription));
+  const syncedPlan = syncedPlanType ? await findPlan(syncedPlanType) : null;
 
   await prisma.subscription.update({
     where: {
       stripeSubscriptionId: subscription.id,
     },
     data: {
+      ...(syncedPlan
+        ? {
+            plan: {
+              connect: {
+                id: syncedPlan.id,
+              },
+            },
+          }
+        : {}),
       status,
       currentPeriodEnd: getPeriodEnd(subscription),
       isTrial: subscription.status === "trialing",

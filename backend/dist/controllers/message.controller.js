@@ -7,6 +7,7 @@ exports.markConversationRead = exports.deleteMessage = exports.sendManualMessage
 const prisma_1 = __importDefault(require("../config/prisma"));
 const socket_server_1 = require("../sockets/socket.server");
 const followup_queue_1 = require("../queues/followup.queue");
+const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 /* ======================================
 GET MESSAGES
 ====================================== */
@@ -43,10 +44,27 @@ SEND MESSAGE
 const sendManualMessage = async (req, res) => {
     try {
         const { leadId, content } = req.body;
+        const businessId = req.user?.businessId;
         if (!leadId || !content) {
             return res.status(400).json({
                 success: false,
                 message: "leadId and content required",
+            });
+        }
+        const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(businessId || "");
+        if (!access.allowed) {
+            (0, subscriptionGuard_middleware_1.logSubscriptionLockedAction)({
+                businessId,
+                requestId: req.requestId,
+                path: req.originalUrl,
+                method: req.method,
+                action: "manual_message_send",
+                lockReason: access.lockReason,
+            }, "Manual message blocked because subscription is locked");
+            return res.status(403).json({
+                success: false,
+                message: "Subscription required",
+                requestId: req.requestId,
             });
         }
         const lead = await prisma_1.default.lead.findUnique({

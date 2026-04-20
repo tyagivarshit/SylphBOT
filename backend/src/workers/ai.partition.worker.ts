@@ -1,6 +1,5 @@
 import { Job, Worker } from "bullmq";
 import axios from "axios";
-import * as Sentry from "@sentry/node";
 import { env } from "../config/env";
 import prisma from "../config/prisma";
 import {
@@ -11,9 +10,9 @@ import {
   AIJobPayload,
   AIMessagePayload,
   AI_QUEUE_PARTITIONS,
+  enqueueAIBatch,
   getAIQueueNames,
 } from "../queues/ai.queue";
-import { checkAIRateLimit } from "../services/aiRateLimiter.service";
 import {
   acquireLeadProcessingLock,
   getReplyDeliveryState,
@@ -29,10 +28,43 @@ import { getIO } from "../sockets/socket.server";
 import { decrypt } from "../utils/encrypt";
 import logger from "../utils/logger";
 import { retryAsync } from "../utils/retry.utils";
+import {
+  captureExceptionWithContext,
+  initializeSentry,
+} from "../observability/sentry";
+import { runWithRequestContext } from "../observability/requestContext";
+import {
+  getSubscriptionAccess,
+  logSubscriptionLockedAction,
+} from "../middleware/subscriptionGuard.middleware";
+import {
+  finalizeAIUsageExecution,
+  releaseAIUsageExecution,
+  reserveAIUsageExecution,
+  reserveUsage,
+} from "../services/usage.service";
+import {
+  consumeBusinessAIHourlyRate,
+  consumeBusinessMessageMinuteRate,
+  incrementDailyAIUsage,
+} from "../redis/rateLimiter.redis";
+import { buildSalesAgentRecoveryReply } from "../services/salesAgent/reply.service";
+import { resolvePlanContext } from "../services/feature.service";
+import { getPlanKey } from "../config/plan.config";
+import {
+  getThroughputLimits,
+  getWorkerCount,
+  resolveWorkerConcurrency,
+} from "./workerManager";
+
+initializeSentry();
 
 const AI_WORKER_CONCURRENCY = Math.max(
   1,
-  Number(process.env.AI_WORKER_CONCURRENCY || env.AI_WORKER_CONCURRENCY || 1)
+  resolveWorkerConcurrency(
+    "AI_WORKER_CONCURRENCY",
+    Number(process.env.AI_WORKER_CONCURRENCY || env.AI_WORKER_CONCURRENCY || Math.max(getWorkerCount(), 4))
+  )
 );
 const INSTAGRAM_SEND_DELAY_MS = Math.max(
   0,
@@ -43,6 +75,22 @@ class LeadQueueBusyError extends Error {
   constructor(leadId: string) {
     super(`Lead queue busy: ${leadId}`);
     this.name = "LeadQueueBusyError";
+  }
+}
+
+class BusinessRateLimitError extends Error {
+  retryAfterMs: number;
+  scope: "messages" | "ai";
+
+  constructor(
+    scope: "messages" | "ai",
+    retryAfterMs: number,
+    message?: string
+  ) {
+    super(message || `Business ${scope} rate limit reached`);
+    this.name = "BusinessRateLimitError";
+    this.scope = scope;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -67,6 +115,11 @@ type NormalizedReply = {
   source?: string | null;
   latencyMs?: number | null;
   traceId?: string | null;
+};
+
+type ThroughputBudget = {
+  messagesPerMinute: number;
+  aiPerHour: number;
 };
 
 const delay = (ms: number) =>
@@ -212,6 +265,74 @@ const emitRealtimeMessage = (
   }
 };
 
+const isLocalPreviewTask = (task: AIWorkerTask) => {
+  const metadata = (task.message.metadata || {}) as Record<string, unknown>;
+
+  return (
+    metadata.onboardingDemo === true || metadata.internalSimulation === true
+  );
+};
+
+const getTaskPlanThroughput = async (
+  task: AIWorkerTask
+): Promise<ThroughputBudget> => {
+  const planFromPayload =
+    task.message.plan && typeof task.message.plan === "object"
+      ? task.message.plan
+      : null;
+
+  if (planFromPayload) {
+    return getThroughputLimits(
+      getPlanKey(planFromPayload as { type?: string | null; name?: string | null })
+    );
+  }
+
+  const planContext = await resolvePlanContext(task.message.businessId).catch(
+    () => null
+  );
+
+  return getThroughputLimits(planContext?.planKey || "LOCKED");
+};
+
+const scheduleRateLimitedRetry = async (
+  task: AIWorkerTask,
+  retryAfterMs: number,
+  reason: "messages" | "ai"
+) => {
+  const delayMs = Math.max(1000, retryAfterMs);
+
+  await enqueueAIBatch(
+    [
+      {
+        ...task.message,
+        retryCount: (task.message.retryCount || 0) + 1,
+        metadata: {
+          ...(task.message.metadata || {}),
+          throttledBy: reason,
+          throttledAt: new Date().toISOString(),
+        },
+      },
+    ],
+    {
+      source: "retry",
+      delayMs,
+      forceUniqueJobId: true,
+    }
+  );
+
+  logger.warn(
+    {
+      leadId: task.message.leadId,
+      businessId: task.message.businessId,
+      jobKey: task.jobKey,
+      retryAfterMs: delayMs,
+      retryCount: (task.message.retryCount || 0) + 1,
+      reason,
+    },
+    "AI reply rescheduled because business throughput limit was reached"
+  );
+};
+
 const saveReplyMessage = async (
   task: AIWorkerTask,
   replyText: string,
@@ -268,6 +389,25 @@ const sendPlatformReply = async (
   task: AIWorkerTask,
   replyText: string
 ) => {
+  const subscriptionAccess = await getSubscriptionAccess(
+    task.message.businessId
+  ).catch(() => null);
+
+  if (!subscriptionAccess?.allowed) {
+    logSubscriptionLockedAction(
+      {
+        businessId: task.message.businessId,
+        queueName: task.job.queueName,
+        jobId: task.job.id,
+        leadId: task.message.leadId,
+        action: "ai_platform_delivery",
+        lockReason: subscriptionAccess?.lockReason,
+      },
+      "AI reply delivery skipped because subscription is locked"
+    );
+    return false;
+  }
+
   const { platform, senderId, phoneNumberId, accessTokenEncrypted } =
     task.message;
 
@@ -279,7 +419,7 @@ const sendPlatformReply = async (
       },
       "AI reply kept local because no platform delivery was requested"
     );
-    return;
+    return true;
   }
 
   if (!accessTokenEncrypted) {
@@ -325,7 +465,7 @@ const sendPlatformReply = async (
       }
     );
 
-    return;
+    return true;
   }
 
   if (normalizedPlatform === "INSTAGRAM") {
@@ -351,7 +491,7 @@ const sendPlatformReply = async (
       }
     );
 
-    return;
+    return true;
   }
 
   logger.warn(
@@ -362,6 +502,8 @@ const sendPlatformReply = async (
     },
     "Unsupported AI delivery platform"
   );
+
+  return true;
 };
 
 const processAndSendReply = async (
@@ -369,6 +511,7 @@ const processAndSendReply = async (
   aiReply: unknown
 ) => {
   const normalizedReply = normalizeReply(aiReply);
+  const localPreviewOnly = isLocalPreviewTask(task);
 
   if (!normalizedReply) {
     logger.warn(
@@ -387,64 +530,44 @@ const processAndSendReply = async (
       ? normalizedReply.text.slice(0, 1000)
       : normalizedReply.text;
 
-  if (!existingState.savedMessageId) {
-    const rate = await checkAIRateLimit({
-      businessId: task.message.businessId,
-      leadId: task.message.leadId,
-      platform: task.message.platform || "UNKNOWN",
-    });
-
-    if (rate.blocked) {
-      logger.warn(
-        {
-          businessId: task.message.businessId,
-          leadId: task.message.leadId,
-          platform: task.message.platform,
-          jobKey: task.jobKey,
-          reason: rate.reason,
-        },
-        "AI reply blocked by rate limit"
-      );
-      return;
-    }
-  }
-
   const { message, created } = await saveReplyMessage(
     task,
     replyText,
     normalizedReply
   );
 
-  await trackAIMessage({
-    messageId: message.id,
-    businessId: task.message.businessId,
-    leadId: task.message.leadId,
-    variantId: normalizedReply.variantId || null,
-    source: normalizedReply.source || task.kind || "AI_ROUTER",
-    cta: normalizedReply.cta || null,
-    angle: normalizedReply.angle || null,
-    leadState: normalizedReply.leadState || null,
-    messageType: normalizedReply.messageType || "AI_REPLY",
-    traceId: normalizedReply.traceId || task.jobKey,
-    metadata: {
-      ...(normalizedReply.meta || {}),
-      platform: task.message.platform || null,
-      externalEventId: task.message.externalEventId || null,
-      deliveryJobKey: task.jobKey,
-      sourceKind: task.kind,
-    },
-  }).catch((error) => {
-    logger.warn(
-      {
-        businessId: task.message.businessId,
-        leadId: task.message.leadId,
-        messageId: message.id,
-        jobKey: task.jobKey,
-        error,
+  if (!localPreviewOnly) {
+    await trackAIMessage({
+      messageId: message.id,
+      businessId: task.message.businessId,
+      leadId: task.message.leadId,
+      variantId: normalizedReply.variantId || null,
+      source: normalizedReply.source || task.kind || "AI_ROUTER",
+      cta: normalizedReply.cta || null,
+      angle: normalizedReply.angle || null,
+      leadState: normalizedReply.leadState || null,
+      messageType: normalizedReply.messageType || "AI_REPLY",
+      traceId: normalizedReply.traceId || task.jobKey,
+      metadata: {
+        ...(normalizedReply.meta || {}),
+        platform: task.message.platform || null,
+        externalEventId: task.message.externalEventId || null,
+        deliveryJobKey: task.jobKey,
+        sourceKind: task.kind,
       },
-      "AI reply attribution failed"
-    );
-  });
+    }).catch((error) => {
+      logger.warn(
+        {
+          businessId: task.message.businessId,
+          leadId: task.message.leadId,
+          messageId: message.id,
+          jobKey: task.jobKey,
+          error,
+        },
+        "AI reply attribution failed"
+      );
+    });
+  }
 
   if (created) {
     emitRealtimeMessage(task.message.leadId, message, normalizedReply.cta);
@@ -481,7 +604,86 @@ const processAndSendReply = async (
     return;
   }
 
-  await retryAsync(() => sendPlatformReply(task, replyText), 3, 800);
+  if (localPreviewOnly) {
+    await markReplySent(task.jobKey);
+    await clearSalesReplyState(task.message.leadId).catch((error) => {
+      logger.warn(
+        {
+          leadId: task.message.leadId,
+          jobKey: task.jobKey,
+          error,
+        },
+        "Sales reply cache cleanup skipped after local preview"
+      );
+    });
+
+    logger.info(
+      {
+        leadId: task.message.leadId,
+        jobKey: task.jobKey,
+      },
+      "AI reply kept local for onboarding preview"
+    );
+    return;
+  }
+
+  const normalizedPlatform = String(task.message.platform || "").toUpperCase();
+  const requiresMessageReservation =
+    normalizedPlatform === "WHATSAPP" || normalizedPlatform === "INSTAGRAM";
+
+  if (requiresMessageReservation) {
+    const throughput = await getTaskPlanThroughput(task);
+    const rateWindow = await consumeBusinessMessageMinuteRate(
+      task.message.businessId,
+      throughput.messagesPerMinute
+    );
+
+    if (!rateWindow.allowed) {
+      if ((task.message.retryCount || 0) < 3) {
+        await scheduleRateLimitedRetry(
+          task,
+          rateWindow.ttlSeconds * 1000,
+          "messages"
+        );
+        return;
+      }
+
+      throw new BusinessRateLimitError(
+        "messages",
+        rateWindow.ttlSeconds * 1000,
+        "Business message throughput limit reached"
+      );
+    }
+  }
+
+  if (requiresMessageReservation) {
+    try {
+      await reserveUsage({
+        businessId: task.message.businessId,
+        feature: "messages_sent",
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === "LIMIT_REACHED") {
+        logger.warn(
+          {
+            leadId: task.message.leadId,
+            jobKey: task.jobKey,
+            businessId: task.message.businessId,
+          },
+          "AI reply delivery skipped because message usage limit exceeded"
+        );
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  const delivered = await retryAsync(() => sendPlatformReply(task, replyText), 3, 800);
+
+  if (!delivered) {
+    return;
+  }
 
   await markReplySent(task.jobKey);
   await clearSalesReplyState(task.message.leadId).catch((error) => {
@@ -520,10 +722,41 @@ const processAndSendReply = async (
 };
 
 const executeRouterFlow = async (task: AIWorkerTask) => {
+  const throughput = await getTaskPlanThroughput(task);
+  const aiWindow = await consumeBusinessAIHourlyRate(
+    task.message.businessId,
+    throughput.aiPerHour
+  );
+
+  if (!aiWindow.allowed) {
+    if ((task.message.retryCount || 0) < 3) {
+      await scheduleRateLimitedRetry(task, aiWindow.ttlSeconds * 1000, "ai");
+      return;
+    }
+
+    await processAndSendReply(
+      task,
+      buildSalesAgentRecoveryReply(task.message.message)
+    );
+    return;
+  }
+
+  await incrementDailyAIUsage(task.message.businessId).catch(() => undefined);
+
   const reply = await handleIncomingMessage({
     ...task.message,
     plan: task.message.plan || null,
     traceId: task.jobKey,
+    beforeAIReply: async () => {
+      const reservation = await reserveAIUsageExecution({
+        businessId: task.message.businessId,
+      });
+
+      return {
+        finalize: () => finalizeAIUsageExecution(reservation),
+        release: () => releaseAIUsageExecution(reservation),
+      };
+    },
   });
 
   if (!reply) {
@@ -537,62 +770,123 @@ const executeRouterFlow = async (task: AIWorkerTask) => {
     return;
   }
 
-  return processAndSendReply(task, reply);
+  await processAndSendReply(task, reply);
 };
 
 const executeLegacyFlow = async (task: AIWorkerTask) =>
   executeRouterFlow(task);
 
 const processAIMessage = async (task: AIWorkerTask) => {
-  logger.info(
+  const metadata = (task.message.metadata || {}) as Record<string, unknown>;
+  const metadataRequestId =
+    typeof metadata.requestId === "string" ? metadata.requestId.trim() : "";
+  const requestId =
+    metadataRequestId || `worker-${String(task.job.id ?? "unknown")}`;
+
+  return runWithRequestContext(
     {
+      requestId,
+      source: "worker",
+      route: `queue:${task.job.queueName}`,
+      queueName: task.job.queueName,
+      jobId: String(task.job.id || task.jobKey),
       leadId: task.message.leadId,
       businessId: task.message.businessId,
-      jobKey: task.jobKey,
-      source: task.kind,
-      platform: task.message.platform || null,
-      externalEventId: task.message.externalEventId || null,
+      userId:
+        typeof metadata.userId === "string" ? metadata.userId : undefined,
     },
-    "AI reply task started"
-  );
+    async () => {
+      const subscriptionAccess = await getSubscriptionAccess(
+        task.message.businessId
+      ).catch(() => null);
 
-  const lockAcquired = await acquireLeadProcessingLock(
-    task.message.leadId,
-    task.jobKey,
-    {
-      waitMs: 1200,
-      pollMs: 50,
-    }
-  );
+      if (!subscriptionAccess?.allowed) {
+        logSubscriptionLockedAction(
+          {
+            businessId: task.message.businessId,
+            queueName: task.job.queueName,
+            jobId: task.job.id,
+            leadId: task.message.leadId,
+            action: "ai_worker_job",
+            lockReason: subscriptionAccess?.lockReason,
+          },
+          "AI worker skipped job because subscription is locked"
+        );
+        return;
+      }
 
-  if (!lockAcquired) {
-    throw new LeadQueueBusyError(task.message.leadId);
-  }
-
-  try {
-    if (task.kind === "router") {
-      return await executeRouterFlow(task);
-    }
-
-    return await executeLegacyFlow(task);
-  } catch (error) {
-    if (!(error instanceof LeadQueueBusyError)) {
-      logger.error(
+      logger.info(
         {
           jobId: task.job.id,
           queueName: task.job.queueName,
           leadId: task.message.leadId,
-          error,
+          businessId: task.message.businessId,
+          jobKey: task.jobKey,
+          source: task.kind,
+          platform: task.message.platform || null,
+          externalEventId: task.message.externalEventId || null,
         },
-        "AI worker job failed"
+        "AI reply task started"
       );
-      Sentry.captureException(error);
-    }
 
-    throw error;
-  } finally {
-    await releaseLeadProcessingLock(task.message.leadId, task.jobKey);
-  }
+      const lockAcquired = await acquireLeadProcessingLock(
+        task.message.leadId,
+        task.jobKey,
+        {
+          waitMs: 1200,
+          pollMs: 50,
+        }
+      );
+
+      if (!lockAcquired) {
+        throw new LeadQueueBusyError(task.message.leadId);
+      }
+
+      try {
+        if (task.kind === "router") {
+          return await executeRouterFlow(task);
+        }
+
+        return await executeLegacyFlow(task);
+      } catch (error) {
+        if (error instanceof BusinessRateLimitError) {
+          logger.warn(
+            {
+              jobId: task.job.id,
+              queueName: task.job.queueName,
+              leadId: task.message.leadId,
+              businessId: task.message.businessId,
+              retryAfterMs: error.retryAfterMs,
+              scope: error.scope,
+            },
+            "AI worker throttled job because business throughput limit was reached"
+          );
+          throw error;
+        }
+
+        if (!(error instanceof LeadQueueBusyError)) {
+          logger.error(
+            {
+              jobId: task.job.id,
+              queueName: task.job.queueName,
+              leadId: task.message.leadId,
+              businessId: task.message.businessId,
+              error,
+            },
+            "AI worker job failed"
+          );
+          captureExceptionWithContext(error, {
+            tags: {
+              worker: "ai.partition",
+            },
+          });
+        }
+        throw error;
+      } finally {
+        await releaseLeadProcessingLock(task.message.leadId, task.jobKey);
+      }
+    }
+  );
 };
 
 const processAIJob = async (job: AIWorkerJob) => {
@@ -674,6 +968,20 @@ const workers =
             return;
           }
 
+          if (error instanceof BusinessRateLimitError) {
+            logger.warn(
+              {
+                jobId: job?.id,
+                queueName,
+                leadId: getJobLeadId(job),
+                retryAfterMs: error.retryAfterMs,
+                scope: error.scope,
+              },
+              "AI worker moved throttled job to failed set after retry budget was exhausted"
+            );
+            return;
+          }
+
           logger.error(
             {
               jobId: job?.id,
@@ -683,6 +991,16 @@ const workers =
             },
             "AI partition worker failed"
           );
+          captureExceptionWithContext(error, {
+            tags: {
+              worker: "ai.partition",
+              queueName,
+            },
+            extras: {
+              jobId: job?.id,
+              leadId: getJobLeadId(job),
+            },
+          });
         });
 
         worker.on("error", (error) => {
@@ -693,6 +1011,12 @@ const workers =
             },
             "AI partition worker error"
           );
+          captureExceptionWithContext(error, {
+            tags: {
+              worker: "ai.partition",
+              queueName,
+            },
+          });
         });
 
         return worker;
@@ -735,9 +1059,21 @@ process.on("SIGTERM", () => {
 
 process.on("uncaughtException", (error) => {
   logger.error({ error }, "AI worker uncaught exception");
+  captureExceptionWithContext(error, {
+    tags: {
+      worker: "ai.partition",
+      event: "uncaughtException",
+    },
+  });
   void shutdown("uncaughtException");
 });
 
 process.on("unhandledRejection", (error) => {
   logger.error({ error }, "AI worker unhandled rejection");
+  captureExceptionWithContext(error, {
+    tags: {
+      worker: "ai.partition",
+      event: "unhandledRejection",
+    },
+  });
 });

@@ -7,6 +7,8 @@ exports.DashboardService = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const date_fns_1 = require("date-fns");
 const plan_config_1 = require("../config/plan.config");
+const pricing_config_1 = require("../config/pricing.config");
+const usage_service_1 = require("./usage.service");
 class DashboardService {
     /* ======================================
        📊 DASHBOARD STATS (SaaS PRO)
@@ -23,11 +25,10 @@ class DashboardService {
                 include: { plan: true },
             });
             const planKey = (0, plan_config_1.getPlanKey)(subscription?.plan || null);
-            const limits = (0, plan_config_1.getPlanLimits)(subscription?.plan || null);
             /* ======================================
             PARALLEL QUERIES (FAST)
             ====================================== */
-            const [totalLeads, leadsToday, leadsThisMonth, messagesToday, aiCallsUsed, qualifiedLeads,] = await Promise.all([
+            const [totalLeads, leadsToday, leadsThisMonth, messagesToday, qualifiedLeads, usageOverview,] = await Promise.all([
                 prisma_1.default.lead.count({ where: baseFilter }),
                 prisma_1.default.lead.count({
                     where: {
@@ -48,18 +49,13 @@ class DashboardService {
                     },
                 }),
                 /* 🔥 AI usage (temporary metric) */
-                prisma_1.default.message.count({
-                    where: {
-                        lead: { businessId },
-                        sender: "AI",
-                    },
-                }),
                 prisma_1.default.lead.count({
                     where: {
                         ...baseFilter,
                         stage: "QUALIFIED",
                     },
                 }),
+                (0, usage_service_1.getUsageOverview)(businessId),
             ]);
             const [chartData, messagesChart, activity] = await Promise.all([
                 this.getLeadsGrowth(businessId),
@@ -69,12 +65,11 @@ class DashboardService {
             /* ======================================
             🔥 USAGE ENGINE
             ====================================== */
-            const aiLimit = limits.aiCallsUsed;
+            const aiCallsUsed = usageOverview.usage.ai.used;
+            const aiLimit = usageOverview.usage.ai.dailyLimit;
             const isUnlimited = aiLimit === -1;
-            const usagePercent = isUnlimited || aiLimit === 0
-                ? 0
-                : aiCallsUsed / aiLimit;
-            const nearLimit = (0, plan_config_1.isNearLimit)(aiCallsUsed, aiLimit);
+            const usagePercent = isUnlimited || aiLimit <= 0 ? 0 : aiCallsUsed / aiLimit;
+            const nearLimit = usageOverview.warning;
             /* ======================================
             FINAL RESPONSE
             ====================================== */
@@ -90,7 +85,11 @@ class DashboardService {
                 nearLimit,
                 isUnlimited,
                 /* 🔥 PLAN */
-                plan: planKey,
+                plan: (0, pricing_config_1.getPricingPlanLabel)(planKey),
+                planKey,
+                aiCallsRemaining: usageOverview.ai.remaining ?? 0,
+                warning: usageOverview.warning,
+                warningMessage: usageOverview.warningMessage,
                 /* 📊 */
                 qualifiedLeads: qualifiedLeads || 0,
                 chartData: chartData || [],
@@ -111,7 +110,11 @@ class DashboardService {
                 usagePercent: 0,
                 nearLimit: false,
                 isUnlimited: false,
+                aiCallsRemaining: 0,
+                warning: false,
+                warningMessage: null,
                 plan: "FREE",
+                planKey: "FREE_LOCKED",
                 qualifiedLeads: 0,
                 chartData: [],
                 messagesChart: [],

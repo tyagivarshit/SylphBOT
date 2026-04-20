@@ -1,42 +1,82 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
 import prisma from "../config/prisma";
-import { env } from "../config/env";
 import { unauthorized } from "../utils/AppError";
 import crypto from "crypto";
-import { generateAccessToken } from "../utils/generateToken";
+import {
+  generateAccessToken,
+  verifyAccessToken,
+  verifyRefreshToken,
+} from "../utils/generateToken";
 import {
   clearAuthCookies,
   getAuthCookieOptions,
 } from "../utils/authCookies";
-
-/* ======================================
-UTILS
-====================================== */
+import { updateRequestContext } from "../observability/requestContext";
 
 const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
-/* ======================================
-GET USER
-====================================== */
-
-const getUserWithBusiness = async (userId: string) => {
-  return prisma.user.findUnique({
+const getUserWithBusiness = async (userId: string) =>
+  prisma.user.findUnique({
     where: { id: userId },
     select: {
       id: true,
       role: true,
       isActive: true,
+      deletedAt: true,
       tokenVersion: true,
       businessId: true,
+      email: true,
+      business: {
+        select: {
+          id: true,
+          deletedAt: true,
+        },
+      },
     },
   });
+
+const resolveActiveBusinessId = (user: {
+  businessId: string | null;
+  business?: {
+    id: string;
+    deletedAt: Date | null;
+  } | null;
+}) => {
+  if (!user.businessId) {
+    return null;
+  }
+
+  if (!user.business) {
+    return null;
+  }
+
+  if (user.business?.deletedAt) {
+    return null;
+  }
+
+  return user.businessId;
 };
 
-/* ======================================
-PROTECT MIDDLEWARE (FINAL FIXED)
-====================================== */
+const bindAuthenticatedContext = (
+  req: Request,
+  user: {
+    id: string;
+    role: string;
+    businessId: string | null;
+    email?: string;
+  }
+) => {
+  req.user = user;
+  req.tenant = {
+    businessId: user.businessId,
+  };
+
+  updateRequestContext({
+    userId: user.id,
+    businessId: user.businessId,
+  });
+};
 
 export const protect = async (
   req: Request,
@@ -51,75 +91,42 @@ export const protect = async (
       throw unauthorized("Not authorized");
     }
 
-    /* =============================
-    ACCESS TOKEN (FAST PATH)
-    ============================= */
-
     if (accessToken) {
-      try {
-        const decoded = jwt.verify(
-          accessToken,
-          env.JWT_SECRET
-        ) as any;
+      const decoded = verifyAccessToken(accessToken);
 
-        // 🔥 token type check (bonus security)
-        if (decoded.type !== "access") {
-          throw unauthorized("Invalid token type");
-        }
-
+      if (decoded?.id && typeof decoded.tokenVersion === "number") {
         const user = await getUserWithBusiness(decoded.id);
 
         if (
-          !user ||
-          !user.isActive ||
-          user.tokenVersion !== decoded.tokenVersion
+          user &&
+          user.isActive &&
+          !user.deletedAt &&
+          user.tokenVersion === decoded.tokenVersion
         ) {
-          throw unauthorized("Invalid session");
+          bindAuthenticatedContext(req, {
+            id: user.id,
+            role: user.role,
+            email: user.email,
+            businessId: resolveActiveBusinessId(user),
+          });
+
+          return next();
         }
-
-        (req as any).user = {
-          id: user.id,
-          role: user.role,
-          businessId: user.businessId || null,
-        };
-
-        return next();
-
-      } catch (err: any) {
-        if (err.name !== "TokenExpiredError") {
-          throw unauthorized("Invalid access token");
-        }
-        // expired → go to refresh flow
       }
     }
-
-    /* =============================
-    REFRESH TOKEN FLOW
-    ============================= */
 
     if (!refreshToken) {
       throw unauthorized("Session expired");
     }
 
-    let decoded: any;
+    const decoded = verifyRefreshToken(refreshToken);
 
-    try {
-      decoded = jwt.verify(
-        refreshToken,
-        env.JWT_REFRESH_SECRET
-      ) as any;
-
-      if (decoded.type !== "refresh") {
-        throw unauthorized("Invalid token type");
-      }
-
-    } catch {
+    if (!decoded?.id || typeof decoded.tokenVersion !== "number") {
       clearAuthCookies(res, req);
       throw unauthorized("Invalid refresh token");
     }
 
     const hashed = hashToken(refreshToken);
-
     const dbToken = await prisma.refreshToken.findFirst({
       where: {
         token: hashed,
@@ -138,20 +145,17 @@ export const protect = async (
     if (
       !user ||
       !user.isActive ||
+      user.deletedAt ||
       user.tokenVersion !== decoded.tokenVersion
     ) {
       clearAuthCookies(res, req);
       throw unauthorized("Invalid session");
     }
 
-    /* =============================
-    NEW ACCESS TOKEN
-    ============================= */
-
     const newAccessToken = generateAccessToken(
       user.id,
       user.role,
-      user.businessId || null,
+      resolveActiveBusinessId(user),
       user.tokenVersion
     );
 
@@ -160,14 +164,14 @@ export const protect = async (
       maxAge: 15 * 60 * 1000,
     });
 
-    (req as any).user = {
+    bindAuthenticatedContext(req, {
       id: user.id,
       role: user.role,
-      businessId: user.businessId || null,
-    };
+      email: user.email,
+      businessId: resolveActiveBusinessId(user),
+    });
 
     return next();
-
   } catch (err) {
     return next(err);
   }

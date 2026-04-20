@@ -3,8 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const message_controller_1 = require("../controllers/message.controller");
+const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.protect);
+router.use(subscriptionGuard_middleware_1.subscriptionGuard);
 /* ======================================
 GET MESSAGES (LOAD CHAT)
 ====================================== */

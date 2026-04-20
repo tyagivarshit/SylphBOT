@@ -1,16 +1,14 @@
-import { getQueueHealth } from "../services/queueHealth.service"
-import { checkRedisHealth } from "../services/redisHealth.service";
+import { getQueueHealth } from "../services/queueHealth.service";
+import { getSystemHealth } from "../services/systemHealth.service";
 
-export const getSystemHealth = async () => {
-
-  const queueHealth = await getQueueHealth();
-
-  const redisHealth = await checkRedisHealth();
+export const getSystemHealthSnapshot = async () => {
+  const [system, queues] = await Promise.all([
+    getSystemHealth(),
+    getQueueHealth(),
+  ]);
 
   return {
-    redis: redisHealth,
-    queues: queueHealth,
-    uptime: process.uptime(),
+    ...system,
+    queues,
   };
-
 };

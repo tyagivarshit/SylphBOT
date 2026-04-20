@@ -13,13 +13,24 @@ const routeAIMessage = async ({ businessId, leadId, message, plan, }) => {
         return (0, reply_service_1.buildSalesAgentRecoveryReply)(normalizedMessage);
     }
     try {
-        return await (0, reply_service_1.generateSalesAgentReply)({
+        const reply = await (0, reply_service_1.generateSalesAgentReply)({
             businessId,
             leadId,
             message: normalizedMessage,
             plan,
             source: "AI_ROUTER",
         });
+        if (!reply) {
+            return null;
+        }
+        return {
+            ...reply,
+            meta: {
+                ...(reply.meta || {}),
+                aiGenerated: true,
+                source: "AI_ROUTER",
+            },
+        };
     }
     catch (error) {
         let previousIntent = null;
@@ -36,11 +47,16 @@ const routeAIMessage = async ({ businessId, leadId, message, plan, }) => {
             leadId,
             error,
         }, "AI router failed");
+        const recovery = (0, reply_service_1.buildSalesAgentRecoveryReply)(normalizedMessage, {
+            previousIntent,
+            lastAction,
+        });
         return {
-            ...(0, reply_service_1.buildSalesAgentRecoveryReply)(normalizedMessage, {
-                previousIntent,
-                lastAction,
-            }),
+            ...recovery,
+            meta: {
+                aiGenerated: false,
+                source: "SYSTEM",
+            },
             reason: "router_fallback",
         };
     }

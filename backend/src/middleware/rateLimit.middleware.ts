@@ -2,25 +2,13 @@ import rateLimit from "express-rate-limit";
 import RedisStore from "rate-limit-redis";
 import redis from "../config/redis";
 
-/* ======================================
-CONFIG
-====================================== */
-
 const isProd = process.env.NODE_ENV === "production";
-
-/* ======================================
-🔥 CREATE SEPARATE STORE (FIX)
-====================================== */
 
 const createStore = (prefix: string) =>
   new RedisStore({
     sendCommand: (...args: any[]) => (redis as any).call(...args),
-    prefix, // 🔥 IMPORTANT (unique per limiter)
+    prefix,
   });
-
-/* ======================================
-KEY GENERATOR
-====================================== */
 
 const getIP = (req: any) =>
   (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
@@ -29,27 +17,26 @@ const getIP = (req: any) =>
   "unknown";
 
 const keyGenerator = (req: any) => {
+  if (req.user?.id) {
+    return `user_${req.user.id}`;
+  }
+
   if (req.user?.businessId) {
     return `biz_${req.user.businessId}`;
   }
+
   return `ip_${getIP(req)}`;
 };
 
-/* ======================================
-HANDLER
-====================================== */
+const securityKeyGenerator = (req: any) =>
+  req.user?.id ? `security_user_${req.user.id}` : `security_ip_${getIP(req)}`;
 
-const handler = (_req: any, res: any) => {
-  return res.status(429).json({
+const handler = (_req: any, res: any) =>
+  res.status(429).json({
     success: false,
     code: "RATE_LIMIT",
     message: "Too many requests. Please try again later.",
   });
-};
-
-/* ======================================
-AUTH LIMITER
-====================================== */
 
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -57,14 +44,10 @@ export const authLimiter = rateLimit({
   keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore("auth"), // 🔥 FIX
+  store: createStore("auth"),
   skipSuccessfulRequests: true,
   handler,
 });
-
-/* ======================================
-AI LIMITER
-====================================== */
 
 export const aiLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -72,13 +55,9 @@ export const aiLimiter = rateLimit({
   keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore("ai"), // 🔥 FIX
+  store: createStore("ai"),
   handler,
 });
-
-/* ======================================
-GLOBAL LIMITER
-====================================== */
 
 export const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -86,6 +65,26 @@ export const globalLimiter = rateLimit({
   keyGenerator,
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore("global"), // 🔥 FIX
+  store: createStore("global"),
+  handler,
+});
+
+export const securityLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? 60 : 180,
+  keyGenerator: securityKeyGenerator,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: createStore("security"),
+  handler,
+});
+
+export const userActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? 30 : 90,
+  keyGenerator: securityKeyGenerator,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: createStore("user-actions"),
   handler,
 });

@@ -13,6 +13,8 @@ const generateToken_1 = require("../utils/generateToken");
 const authEmail_queue_1 = require("../queues/authEmail.queue");
 const AppError_1 = require("../utils/AppError");
 const authCookies_1 = require("../utils/authCookies");
+const audit_service_1 = require("../services/audit.service");
+const securityAlert_service_1 = require("../services/securityAlert.service");
 /* ======================================
 UTILS
 ====================================== */
@@ -51,6 +53,15 @@ SET COOKIES
 const setCookies = (req, res, access, refresh) => {
     (0, authCookies_1.setAuthCookies)(res, req, access, refresh);
 };
+const writeAuthAuditLog = (req, input) => (0, audit_service_1.createAuditLog)({
+    action: input.action,
+    userId: input.userId || null,
+    businessId: input.businessId || null,
+    metadata: input.metadata || {},
+    ip: getIP(req),
+    userAgent: String(getUA(req)),
+    requestId: req.requestId || null,
+});
 /* ======================================
 REGISTER
 ====================================== */
@@ -121,14 +132,48 @@ const login = async (req, res, next) => {
         const password = String(req.body.password || "");
         const user = await prisma_1.default.user.findUnique({ where: { email } });
         if (!user ||
+            user.deletedAt ||
+            !user.isActive ||
             !user.isVerified ||
             !(await verifyPassword(password, user.password))) {
+            void writeAuthAuditLog(req, {
+                action: "auth.login_failed",
+                userId: user?.id || null,
+                businessId: user?.businessId || null,
+                metadata: {
+                    email,
+                },
+            });
+            void (0, securityAlert_service_1.recordFailedLoginAttempt)({
+                businessId: user?.businessId || null,
+                userId: user?.id || null,
+                email,
+                ip: getIP(req),
+            });
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
         let business = await prisma_1.default.business.findFirst({
             where: { ownerId: user.id },
-            select: { id: true },
+            select: { id: true, deletedAt: true },
         });
+        if (business?.deletedAt) {
+            void writeAuthAuditLog(req, {
+                action: "auth.login_failed",
+                userId: user.id,
+                businessId: business.id,
+                metadata: {
+                    email,
+                    reason: "workspace_deleted",
+                },
+            });
+            void (0, securityAlert_service_1.recordFailedLoginAttempt)({
+                businessId: business.id,
+                userId: user.id,
+                email,
+                ip: getIP(req),
+            });
+            throw (0, AppError_1.unauthorized)("Invalid credentials");
+        }
         /* ✅ SAFETY FALLBACK (ADDED) */
         if (!business) {
             const newBusiness = await prisma_1.default.business.create({
@@ -141,7 +186,7 @@ const login = async (req, res, next) => {
                 where: { id: user.id },
                 data: { businessId: newBusiness.id },
             });
-            business = { id: newBusiness.id };
+            business = { id: newBusiness.id, deletedAt: null };
         }
         const accessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business?.id || null, user.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(user.id, user.tokenVersion);
@@ -166,6 +211,15 @@ const login = async (req, res, next) => {
                 userAgent: getUA(req),
                 ip: getIP(req),
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            },
+        });
+        void writeAuthAuditLog(req, {
+            action: "auth.login",
+            userId: user.id,
+            businessId: business?.id || null,
+            metadata: {
+                email: user.email,
+                role: user.role,
             },
         });
         setCookies(req, res, accessToken, refreshRaw);
@@ -319,6 +373,11 @@ const resetPassword = async (req, res, next) => {
         await prisma_1.default.refreshToken.deleteMany({
             where: { userId: user.id },
         });
+        void writeAuthAuditLog(req, {
+            action: "auth.password_reset",
+            userId: user.id,
+            businessId: user.businessId || null,
+        });
         res.json({ success: true });
     }
     catch (err) {
@@ -361,6 +420,11 @@ const logout = async (req, res, next) => {
     try {
         await prisma_1.default.refreshToken.deleteMany({
             where: { userId: req.user.id },
+        });
+        void writeAuthAuditLog(req, {
+            action: "auth.logout",
+            userId: req.user?.id || null,
+            businessId: req.user?.businessId || null,
         });
         (0, authCookies_1.clearAuthCookies)(res, req);
         res.json({ success: true });

@@ -5,26 +5,15 @@ import {
   sendMessage,
   markAsRead,
 } from "../controllers/conversation.controller";
-
-/* ✅ CORRECT AUTH MIDDLEWARE */
 import { protect } from "../middleware/auth.middleware";
+import { subscriptionGuard } from "../middleware/subscriptionGuard.middleware";
 
 const router = Router();
 
-/* ======================================================
-CONVERSATION ROUTES (WHATSAPP STYLE)
-====================================================== */
-
-/* 🔥 GET ALL CHATS */
-router.get("/", protect, getConversations);
-
-/* 🔥 GET MESSAGES OF A CHAT */
-router.get("/:leadId/messages", protect, getMessagesByLead);
-
-/* 🔥 SEND MESSAGE (🔥 FIXED ROUTE) */
-router.post("/:leadId/messages", protect, sendMessage);
-
-/* 🔥 MARK CHAT AS READ (🔥 FIXED ROUTE) */
-router.post("/:leadId/read", protect, markAsRead);
+router.get("/", protect, subscriptionGuard, getConversations);
+router.get("/:leadId/messages", protect, subscriptionGuard, getMessagesByLead);
+router.post("/:leadId/messages", protect, subscriptionGuard, sendMessage);
+router.post("/:leadId/read", protect, subscriptionGuard, markAsRead);
 
 export default router;
+

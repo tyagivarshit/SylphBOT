@@ -2,9 +2,12 @@ import crypto from "crypto";
 import { Job, JobsOptions, Queue } from "bullmq";
 import { env } from "../config/env";
 import { getQueueRedisConnection } from "../config/redis";
+import { buildQueueJobOptions } from "./queue.defaults";
 import logger from "../utils/logger";
+import { getRequestContext } from "../observability/requestContext";
 
-export const AI_QUEUE_NAME = env.AI_QUEUE_NAME;
+export const AI_QUEUE_NAME: string = "ai-high";
+export const LEGACY_AI_QUEUE_NAME: string = env.AI_QUEUE_NAME;
 export const AI_QUEUE_PARTITIONS = 1;
 
 export type AIMessageKind = "router" | "message";
@@ -42,23 +45,24 @@ type EnqueueOptions = {
 };
 
 const defaultJobOptions: JobsOptions = {
-  attempts: 3,
-  backoff: {
-    type: "exponential",
-    delay: env.AI_JOB_BACKOFF_MS,
-  },
-  removeOnComplete: true,
-  removeOnFail: true,
+  ...buildQueueJobOptions({
+    backoff: {
+      type: "exponential",
+      delay: env.AI_JOB_BACKOFF_MS,
+    },
+  }),
 };
+const queueConnection = getQueueRedisConnection();
 
 const globalForAIQueue = globalThis as typeof globalThis & {
-  __sylphAIQueue?: Queue<AIJobPayload>;
+  __sylphAIHighQueue?: Queue<AIJobPayload>;
+  __sylphAILegacyQueue?: Queue<AIJobPayload>;
 };
 
 export const aiQueue =
-  globalForAIQueue.__sylphAIQueue ||
+  globalForAIQueue.__sylphAIHighQueue ||
   new Queue<AIJobPayload>(AI_QUEUE_NAME, {
-    connection: getQueueRedisConnection(),
+    connection: queueConnection,
     prefix: env.AI_QUEUE_PREFIX,
     defaultJobOptions,
     streams: {
@@ -68,11 +72,69 @@ export const aiQueue =
     },
   });
 
-if (!globalForAIQueue.__sylphAIQueue) {
-  globalForAIQueue.__sylphAIQueue = aiQueue;
+if (!globalForAIQueue.__sylphAIHighQueue) {
+  globalForAIQueue.__sylphAIHighQueue = aiQueue;
 }
 
-const normalizeMessage = (message: AIMessagePayload): AIMessagePayload => ({
+export const legacyAIQueue =
+  LEGACY_AI_QUEUE_NAME === AI_QUEUE_NAME
+    ? aiQueue
+    : globalForAIQueue.__sylphAILegacyQueue ||
+      new Queue<AIJobPayload>(LEGACY_AI_QUEUE_NAME, {
+        connection: queueConnection,
+        prefix: env.AI_QUEUE_PREFIX,
+        defaultJobOptions,
+        streams: {
+          events: {
+            maxLen: 1000,
+          },
+        },
+      });
+
+if (
+  LEGACY_AI_QUEUE_NAME !== AI_QUEUE_NAME &&
+  !globalForAIQueue.__sylphAILegacyQueue
+) {
+  globalForAIQueue.__sylphAILegacyQueue = legacyAIQueue;
+}
+
+const setMetadataFieldIfMissing = (
+  metadata: Record<string, unknown>,
+  key: "requestId" | "userId" | "businessId",
+  value: unknown
+) => {
+  if (metadata[key] !== undefined || value === undefined) {
+    return;
+  }
+
+  metadata[key] = value;
+};
+
+const buildMessageMetadata = (
+  message: AIMessagePayload,
+  context = getRequestContext()
+) => {
+  const metadata = {
+    ...(message.metadata || {}),
+  } as Record<string, unknown>;
+
+  setMetadataFieldIfMissing(metadata, "requestId", context?.requestId);
+  setMetadataFieldIfMissing(metadata, "userId", context?.userId);
+  setMetadataFieldIfMissing(metadata, "businessId", context?.businessId);
+
+  const entries = Object.entries(metadata).filter(
+    ([, value]) => value !== undefined
+  );
+
+  return entries.length
+    ? (Object.fromEntries(entries) as Record<string, unknown>)
+    : undefined;
+};
+
+const normalizeMessage = (
+  message: AIMessagePayload,
+  context = getRequestContext()
+): AIMessagePayload => ({
   ...message,
   businessId: String(message.businessId || "").trim(),
   leadId: String(message.leadId || "").trim(),
@@ -82,6 +144,7 @@ const normalizeMessage = (message: AIMessagePayload): AIMessagePayload => ({
   idempotencyKey: message.idempotencyKey?.trim(),
   skipInboundPersist: Boolean(message.skipInboundPersist),
   retryCount: message.retryCount || 0,
+  metadata: buildMessageMetadata(message, context),
 });
 
 const chunkMessages = <T>(messages: T[], chunkSize: number) => {
@@ -139,8 +202,9 @@ export const enqueueAIBatch = async (
   messages: AIMessagePayload[],
   options?: EnqueueOptions
 ) => {
+  const requestContext = getRequestContext();
   const normalizedMessages = messages
-    .map(normalizeMessage)
+    .map((message) => normalizeMessage(message, requestContext))
     .filter((message) => message.businessId && message.leadId && message.message);
 
   if (!normalizedMessages.length) {
@@ -223,15 +287,21 @@ export const addRouterJob = async (data: AIMessagePayload) =>
     }
   );
 
-export const getAIQueues = () => [aiQueue];
+export const getAIQueues = () =>
+  LEGACY_AI_QUEUE_NAME === AI_QUEUE_NAME
+    ? [aiQueue]
+    : [aiQueue, legacyAIQueue];
 
-export const getAIQueueNames = () => [aiQueue.name];
+export const getAIQueueNames = () => getAIQueues().map((queue) => queue.name);
 
 export const getAIQueueForLead = (_leadId: string) => aiQueue;
 
 export const closeAIQueue = async () => {
-  await aiQueue.close();
-  globalForAIQueue.__sylphAIQueue = undefined;
+  await Promise.allSettled(
+    getAIQueues().map((queue) => queue.close())
+  );
+  globalForAIQueue.__sylphAIHighQueue = undefined;
+  globalForAIQueue.__sylphAILegacyQueue = undefined;
 };
 
 export type AIQueueJob = Job<AIJobPayload>;

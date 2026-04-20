@@ -1,51 +1,81 @@
 import { Worker } from "bullmq";
-import { routeAIMessage } from "../services/aiRouter.service";
-import { handleIncomingMessage } from "../services/message.service";
 import * as Sentry from "@sentry/node";
 import { getWorkerRedisConnection } from "../config/redis";
+import { enqueueAIBatch } from "./ai.queue";
+import logger from "../utils/logger";
 
 const worker =
   process.env.RUN_WORKER === "true"
     ? new Worker(
-  "inboxQueue",
-  async (job) => {
-    const { businessId, leadId, message, plan } = job.data;
+        "inboxQueue",
+        async (job) => {
+          const {
+            businessId,
+            leadId,
+            message,
+            plan,
+            platform,
+            senderId,
+            pageId,
+            phoneNumberId,
+            accessTokenEncrypted,
+            externalEventId,
+            idempotencyKey,
+            metadata,
+            skipInboundPersist,
+            retryCount,
+          } = job.data;
 
-    try {
-      const aiResponse = await routeAIMessage({
-        businessId,
-        leadId,
-        message,
-        plan,
-      });
+          try {
+            await enqueueAIBatch(
+              [
+                {
+                  businessId,
+                  leadId,
+                  message,
+                  plan,
+                  kind: "router",
+                  platform,
+                  senderId,
+                  pageId,
+                  phoneNumberId,
+                  accessTokenEncrypted,
+                  externalEventId,
+                  idempotencyKey,
+                  metadata,
+                  skipInboundPersist: skipInboundPersist ?? true,
+                  retryCount: retryCount || 0,
+                },
+              ],
+              {
+                source: "router",
+                idempotencyKey: idempotencyKey || externalEventId,
+                forceUniqueJobId: true,
+              }
+            );
 
-      const aiReply =
-        typeof aiResponse === "string"
-          ? aiResponse
-          : aiResponse?.message;
-
-      if (!aiReply) return;
-
-      await handleIncomingMessage({
-        leadId,
-        content: aiReply,
-        sender: "AI",
-      });
-
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        console.error("❌ Worker failed:", error.message);
-        Sentry.captureException(error);
-      } else {
-        console.error("❌ Worker failed:", error);
-      }
-      throw error;
-    }
-  },
-  {
-    connection: getWorkerRedisConnection(),
-  }
-)
+            logger.info(
+              {
+                legacyQueueJobId: job.id,
+                businessId,
+                leadId,
+              },
+              "Legacy inbox queue forwarded message to AI reply pipeline"
+            );
+          } catch (error: unknown) {
+            if (error instanceof Error) {
+              console.error("Worker failed:", error.message);
+              Sentry.captureException(error);
+            } else {
+              console.error("Worker failed:", error);
+            }
+            throw error;
+          }
+        },
+        {
+          connection: getWorkerRedisConnection(),
+        }
+      )
     : null;
 
 export default worker;

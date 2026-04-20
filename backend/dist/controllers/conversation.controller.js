@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.markAsRead = exports.sendMessage = exports.getMessagesByLead = exports.getConversations = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const instagramProfile_service_1 = require("../services/instagramProfile.service");
+const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 /* ======================================================
 GET CONVERSATIONS
 ====================================================== */
@@ -75,7 +76,7 @@ const getConversations = async (req, res) => {
 };
 exports.getConversations = getConversations;
 /* ======================================================
-GET MESSAGES BY LEAD (🔥 FIXED)
+GET MESSAGES BY LEAD
 ====================================================== */
 const getMessagesByLead = async (req, res) => {
     try {
@@ -85,7 +86,7 @@ const getMessagesByLead = async (req, res) => {
         }
         const messages = await prisma_1.default.message.findMany({
             where: {
-                leadId: leadId, // 🔥 FIX (IMPORTANT)
+                leadId,
             },
             orderBy: {
                 createdAt: "asc",
@@ -108,12 +109,29 @@ SEND MESSAGE
 const sendMessage = async (req, res) => {
     try {
         const leadId = req.params.leadId;
-        const { content, sender = "USER" } = req.body; // 🔥 default fixed
+        const { content, sender = "USER" } = req.body;
+        const businessId = req.user?.businessId;
         if (!leadId) {
             return res.status(400).json({ message: "leadId required" });
         }
         if (!content) {
             return res.status(400).json({ message: "Content required" });
+        }
+        const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(businessId || "");
+        if (!access.allowed) {
+            (0, subscriptionGuard_middleware_1.logSubscriptionLockedAction)({
+                businessId,
+                requestId: req.requestId,
+                path: req.originalUrl,
+                method: req.method,
+                action: "conversation_message_send",
+                lockReason: access.lockReason,
+            }, "Conversation message blocked because subscription is locked");
+            return res.status(403).json({
+                success: false,
+                message: "Subscription required",
+                requestId: req.requestId,
+            });
         }
         const message = await prisma_1.default.message.create({
             data: {

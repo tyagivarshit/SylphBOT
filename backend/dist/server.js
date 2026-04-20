@@ -10,6 +10,8 @@ const env_1 = require("./config/env");
 const redis_1 = require("./config/redis");
 const ai_queue_1 = require("./queues/ai.queue");
 const socket_server_1 = require("./sockets/socket.server");
+const logger_1 = __importDefault(require("./utils/logger"));
+const sentry_1 = require("./observability/sentry");
 const server = http_1.default.createServer(app_1.default);
 (0, socket_server_1.initSocket)(server);
 server.keepAliveTimeout = 65000;
@@ -41,12 +43,26 @@ process.on("SIGTERM", () => {
     void shutdown("SIGTERM");
 });
 process.on("uncaughtException", (error) => {
-    console.error(`[server] ${String(error.message || error)}`);
+    logger_1.default.error({ error }, "Server uncaught exception");
+    (0, sentry_1.captureExceptionWithContext)(error, {
+        tags: {
+            layer: "server",
+            event: "uncaughtException",
+        },
+    });
     void shutdown("uncaughtException");
 });
 process.on("unhandledRejection", (error) => {
-    console.error(`[server] ${String(error?.message || error)}`);
+    logger_1.default.error({
+        error,
+    }, "Server unhandled rejection");
+    (0, sentry_1.captureExceptionWithContext)(error, {
+        tags: {
+            layer: "server",
+            event: "unhandledRejection",
+        },
+    });
 });
 server.listen(env_1.env.PORT, () => {
-    console.log(`[server] listening on ${env_1.env.PORT}`);
+    logger_1.default.info({ port: env_1.env.PORT }, "Server listening");
 });

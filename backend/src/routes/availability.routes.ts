@@ -6,6 +6,7 @@ import {
   deleteAvailabilityController,
 } from "../controllers/availabilty.controller";
 import { protect } from "../middleware/auth.middleware";
+import { subscriptionGuard } from "../middleware/subscriptionGuard.middleware";
 
 const router = Router();
 
@@ -14,7 +15,7 @@ const router = Router();
 CREATE AVAILABILITY
 =====================================================
 */
-router.post("/", protect, createAvailabilityController);
+router.post("/", protect, subscriptionGuard, createAvailabilityController);
 
 /*
 =====================================================
@@ -28,21 +29,21 @@ router.get("/:businessId", getAvailabilityController);
 UPDATE AVAILABILITY
 =====================================================
 */
-router.put("/:id", protect, updateAvailabilityController);
+router.put("/:id", protect, subscriptionGuard, updateAvailabilityController);
 
 /*
 =====================================================
 DELETE AVAILABILITY
 =====================================================
 */
-router.delete("/:id", protect, deleteAvailabilityController);
+router.delete("/:id", protect, subscriptionGuard, deleteAvailabilityController);
 
 /*
 =====================================================
 TOGGLE ACTIVE / INACTIVE
 =====================================================
 */
-router.patch("/:id/toggle", protect, updateAvailabilityController);
+router.patch("/:id/toggle", protect, subscriptionGuard, updateAvailabilityController);
 
 /*
 =====================================================

@@ -1,13 +1,14 @@
 import express from "express";
 import bcrypt from "bcryptjs";
-import crypto from "crypto";
 import prisma from "../config/prisma";
 import upload from "../middleware/upload";
 import cloudinary from "../config/cloudinary";
 import { protect } from "../middleware/auth.middleware";
 import { clearAuthCookies } from "../utils/authCookies";
 import { stripe } from "../services/stripe.service";
-import { env } from "../config/env";
+import { ensureWorkspaceApiKey } from "../services/apiKey.service";
+import { requirePermission } from "../middleware/rbac.middleware";
+import { userActionLimiter } from "../middleware/rateLimit.middleware";
 
 const router = express.Router();
 
@@ -36,20 +37,6 @@ const getCurrentUser = async (userId: string) =>
     where: { id: userId },
     select: safeUserSelect,
   });
-
-const buildApiKey = (
-  userId: string,
-  businessId: string | null | undefined,
-  tokenVersion: number
-) => {
-  const fingerprint = crypto
-    .createHmac("sha256", env.JWT_SECRET)
-    .update(`${userId}:${businessId || "workspace"}:${tokenVersion}`)
-    .digest("base64url")
-    .slice(0, 32);
-
-  return `sylph_${fingerprint}`;
-};
 
 const buildDeletedEmail = (email: string) => {
   const [local, domain = "deleted.local"] = email.split("@");
@@ -289,7 +276,7 @@ router.post("/change-password", protect, async (req: any, res) => {
   }
 });
 
-router.get("/api-key", protect, async (req: any, res) => {
+router.get("/api-key", protect, requirePermission("api_keys:manage"), userActionLimiter, async (req: any, res) => {
   try {
     const userId = req.user?.id;
 
@@ -310,12 +297,13 @@ router.get("/api-key", protect, async (req: any, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+    const apiKey = await ensureWorkspaceApiKey({
+      businessId: user.businessId,
+      createdByUserId: user.id,
+    });
+
     return res.json({
-      apiKey: buildApiKey(
-        user.id,
-        user.businessId,
-        user.tokenVersion
-      ),
+      apiKey: apiKey.rawKey,
     });
   } catch (err) {
     console.error("API KEY FETCH ERROR:", err);
@@ -434,6 +422,7 @@ router.delete("/delete-account", protect, async (req: any, res) => {
         where: { id: userId },
         data: {
           email: buildDeletedEmail(user.email),
+          archivedEmail: user.email,
           isActive: false,
           deletedAt: now,
           businessId: null,

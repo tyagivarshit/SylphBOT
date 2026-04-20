@@ -86,6 +86,7 @@ export const createAutomationFlow = async (
     /* ---------------- PLAN RESTRICTIONS ---------------- */
 
     const allowedStepTypesByPlan: Record<PlanType, string[]> = {
+      LOCKED: [],
       FREE_LOCKED: [],
       BASIC: ["MESSAGE"],
       PRO: ["MESSAGE", "DELAY", "CONDITION"],

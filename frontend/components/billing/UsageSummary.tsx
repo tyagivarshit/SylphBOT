@@ -1,164 +1,226 @@
 "use client";
 
-import { ReactNode } from "react";
-import { Zap, MessageSquare } from "lucide-react";
+import type { ReactNode } from "react";
+import { AlertTriangle, BarChart3, Bot, MessageSquare, Users } from "lucide-react";
 
-/* ================= TYPES ================= */
+type UsageSummaryData = {
+  plan: string;
+  planLabel?: string;
+  trialActive: boolean;
+  daysLeft: number;
+  warning?: boolean;
+  warningMessage?: string | null;
+  addonCredits?: number;
+  ai: {
+    usedToday: number;
+    limit: number;
+    remaining: number | null;
+  };
+  usage: {
+    ai: {
+      used: number;
+      dailyLimit: number;
+      monthlyUsed: number;
+      monthlyLimit: number;
+      warning?: boolean;
+    };
+    contacts: {
+      used: number;
+      limit: number;
+    };
+    messages: {
+      used: number;
+      limit: number;
+    };
+  };
+  addons: {
+    aiCredits: number;
+    contacts?: number;
+  };
+};
 
-type Item = {
+type MeterItem = {
   label: string;
+  helper: string;
   icon: ReactNode;
   used: number;
-  limit: number | null;
+  limit: number;
+  value?: string;
 };
 
-type Props = {
-  aiUsed?: number;
-  aiLimit?: number | null;
-  msgUsed?: number;
-  msgLimit?: number | null;
-  planKey?: string;
+const toPercent = (used: number, limit: number) => {
+  if (limit <= 0 || limit === -1) {
+    return 0;
+  }
+
+  return Math.min(Math.round((used / limit) * 100), 100);
 };
 
-/* ================= HELPERS ================= */
+const getAccent = (percent: number) => {
+  if (percent >= 90) {
+    return "from-amber-500 to-orange-500";
+  }
 
-const getColor = (percent: number) => {
-  if (percent < 60) return "from-green-400 to-green-600";
-  if (percent < 85) return "from-yellow-400 to-yellow-600";
-  return "from-red-400 to-red-600";
+  if (percent >= 75) {
+    return "from-blue-500 to-cyan-500";
+  }
+
+  return "from-emerald-500 to-teal-500";
 };
 
-/* ================= COMPONENT ================= */
+const getMessage = (percent: number) => {
+  if (percent >= 85) {
+    return "Daily AI usage is close to the plan limit.";
+  }
+
+  if (percent >= 50) {
+    return "Smart AI usage included for steady growth.";
+  }
+
+  return "Plenty of room to keep momentum high.";
+};
 
 export default function UsageSummary({
-  aiUsed = 0,
-  aiLimit = null,
-  msgUsed = 0,
-  msgLimit = null,
-  planKey = "FREE_LOCKED",
-}: Props) {
-  const items: Item[] = [
+  summary,
+  ctaHref = "/billing",
+}: {
+  summary?: UsageSummaryData | null;
+  ctaHref?: string;
+}) {
+  if (!summary) {
+    return null;
+  }
+
+  const meters: MeterItem[] = [
     {
-      label: "AI Usage",
-      icon: <Zap size={16} />,
-      used: aiUsed,
-      limit: aiLimit,
+      label: "Remaining AI today",
+      helper: `${summary.ai.usedToday} / ${summary.ai.limit} used`,
+      icon: <Bot size={16} />,
+      used: summary.ai.usedToday,
+      limit: summary.ai.limit,
+      value: `${summary.ai.remaining ?? 0}`,
+    },
+    {
+      label: "AI this month",
+      helper: "Monthly AI runway",
+      icon: <BarChart3 size={16} />,
+      used: summary.usage.ai.monthlyUsed,
+      limit: summary.usage.ai.monthlyLimit,
+    },
+    {
+      label: "Contacts",
+      helper: "Audience capacity included",
+      icon: <Users size={16} />,
+      used: summary.usage.contacts.used,
+      limit: summary.usage.contacts.limit,
     },
     {
       label: "Messages",
+      helper: "Conversation delivery included",
       icon: <MessageSquare size={16} />,
-      used: msgUsed,
-      limit: msgLimit,
+      used: summary.usage.messages.used,
+      limit: summary.usage.messages.limit,
     },
   ];
 
-  const isFreeLocked = planKey === "FREE_LOCKED";
+  const aiDailyPercent = toPercent(summary.ai.usedToday, summary.ai.limit);
+  const showWarning = Boolean(summary.warning || summary.usage.ai.warning);
+  const planLabel = summary.planLabel || summary.plan;
 
   return (
-    <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 md:p-6 shadow-sm space-y-6">
+    <div className="brand-section-shell space-y-6 rounded-[28px] p-5 md:p-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold text-gray-900">
+            Usage overview
+          </h3>
+          <p className="text-sm text-gray-500">
+            Remaining AI calls today: {summary.ai.remaining ?? 0}. Add-on credits are used once the daily plan limit is exhausted.
+          </p>
+        </div>
 
-      {/* 🔥 HEADER */}
-      <div>
-        <h3 className="text-base font-semibold text-gray-800">
-          Usage Overview
-        </h3>
-        <p className="text-xs text-gray-500 mt-1">
-          Monitor your usage based on your current plan
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
+            Plan: {planLabel}
+          </span>
+          {summary.trialActive && (
+            <span className="rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700">
+              Trial: {summary.daysLeft} day{summary.daysLeft === 1 ? "" : "s"} left
+            </span>
+          )}
+          <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
+            AI add-ons: {summary.addonCredits ?? summary.addons.aiCredits}
+          </span>
+        </div>
       </div>
 
-      {/* 🔥 ITEMS */}
-      <div className="space-y-6">
+      {showWarning ? (
+        <div className="flex items-start gap-3 rounded-[22px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {summary.warningMessage || "You have used 80% of your daily AI limit."}
+          </span>
+        </div>
+      ) : null}
 
-        {items.map((item) => {
-          const percent = item.limit
-            ? Math.min((item.used / item.limit) * 100, 100)
-            : 0;
-
-          const nearLimit = percent >= 80;
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {meters.map((item) => {
+          const unlimited = item.limit === -1;
+          const percent = unlimited ? 0 : toPercent(item.used, item.limit);
 
           return (
             <div
               key={item.label}
-              className="space-y-3 p-4 rounded-xl bg-white/80 backdrop-blur border border-blue-100 shadow-sm"
+              className="rounded-[22px] border border-slate-200/80 bg-white/84 p-4 shadow-sm"
             >
-
-              {/* 🔥 TOP */}
-              <div className="flex items-center justify-between">
-
-                <div className="flex items-center gap-2 text-gray-800 font-medium text-sm">
-                  <span className="text-blue-500">{item.icon}</span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  <span className="text-blue-600">{item.icon}</span>
                   {item.label}
                 </div>
-
-                <span className="text-xs text-gray-600 font-medium">
-                  {isFreeLocked
-                    ? "Locked"
-                    : item.limit
-                    ? `${item.used}/${item.limit}`
-                    : "Unlimited"}
+                <span className="text-xs font-semibold text-gray-500">
+                  {item.value || (unlimited ? "Unlimited" : `${item.used} / ${item.limit}`)}
                 </span>
-
               </div>
 
-              {/* 🔥 PROGRESS */}
-              <div className="h-2.5 bg-blue-50 rounded-full overflow-hidden">
+              <p className="mt-2 text-xs text-gray-500">{item.helper}</p>
+
+              <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className={`h-full bg-gradient-to-r ${getColor(
-                    percent
-                  )} transition-all duration-700 ${
-                    isFreeLocked ? "opacity-40" : ""
-                  }`}
-                  style={{ width: `${isFreeLocked ? 0 : percent}%` }}
+                  className={`h-full rounded-full bg-gradient-to-r ${getAccent(percent)} transition-all duration-500`}
+                  style={{ width: unlimited ? "100%" : `${percent}%` }}
                 />
               </div>
 
-              {/* 🔥 FOOT */}
-              <div className="flex justify-between items-center text-[11px] text-gray-500">
-
-                <span>
-                  {isFreeLocked
-                    ? "Upgrade to unlock usage"
-                    : item.limit
-                    ? `${Math.round(percent)}% used`
-                    : "No limits"}
-                </span>
-
-                {item.limit && nearLimit && !isFreeLocked && (
-                  <span className="text-red-500 font-medium">
-                    ⚠ Near limit
-                  </span>
-                )}
-
-                {!item.limit && !isFreeLocked && (
-                  <span className="text-green-600 font-medium">
-                    Unlimited
-                  </span>
-                )}
-
-              </div>
-
+              <p className="mt-3 text-xs font-medium text-slate-600">
+                {unlimited ? "High-volume plan active." : getMessage(percent)}
+              </p>
             </div>
           );
         })}
-
       </div>
 
-      {/* 🔥 UPSELL */}
-      <div className="bg-gradient-to-r from-blue-600/10 to-cyan-500/10 border border-blue-200 rounded-xl p-4 text-xs text-gray-700 flex items-center justify-between">
+      <div className="rounded-[22px] border border-blue-200 bg-[linear-gradient(135deg,rgba(8,18,35,0.92),rgba(30,94,255,0.9),rgba(77,163,255,0.88))] p-5 text-white shadow-lg">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold">
+              {summary.trialActive
+                ? `${summary.daysLeft} day${summary.daysLeft === 1 ? "" : "s"} left in your trial`
+                : "Need more? Buy AI credits anytime"}
+            </p>
+            <p className="mt-1 text-sm text-blue-50/90">
+              AI usage today: {summary.ai.usedToday} / {summary.ai.limit}
+            </p>
+          </div>
 
-        <span>
-          {isFreeLocked
-            ? "Unlock full access by choosing a plan 🚀"
-            : "Need higher limits? Upgrade your plan 🚀"}
-        </span>
-
-        <span className="font-semibold text-blue-600 cursor-pointer hover:underline">
-          {isFreeLocked ? "View Plans →" : "Upgrade →"}
-        </span>
-
+          <a
+            href={ctaHref}
+            className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:shadow-lg"
+          >
+            {aiDailyPercent >= 80 || !summary.trialActive ? "Buy extra AI calls" : "See billing"}
+          </a>
+        </div>
       </div>
-
     </div>
   );
 }

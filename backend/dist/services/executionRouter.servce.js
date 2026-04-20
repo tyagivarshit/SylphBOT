@@ -8,7 +8,7 @@ const aiReplyOrchestrator_service_1 = require("./aiReplyOrchestrator.service");
 const reply_service_1 = require("./salesAgent/reply.service");
 const logger_1 = __importDefault(require("../utils/logger"));
 const handleIncomingMessage = async (data) => {
-    const { businessId, leadId, message, plan, traceId } = data || {};
+    const { businessId, leadId, message, plan, traceId, beforeAIReply } = data || {};
     try {
         return await (0, aiReplyOrchestrator_service_1.resolveAIReply)({
             businessId,
@@ -16,6 +16,7 @@ const handleIncomingMessage = async (data) => {
             message,
             plan: plan || null,
             traceId,
+            beforeAIReply,
         });
     }
     catch (error) {

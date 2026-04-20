@@ -9,6 +9,7 @@ import { applyCoupon } from "./coupon.service";
 import { getTaxConfig } from "./tax.service";
 import { resolveBillingCurrency } from "./billingGeo.service";
 import { mapStripeSubscriptionStatus } from "./billingSync.service";
+import { getStripePriceId } from "../config/stripe.price.map";
 
 type Currency = "INR" | "USD";
 type Billing = "monthly" | "yearly";
@@ -38,30 +39,25 @@ const validateBilling = (billing: string): Billing => {
   return billing;
 };
 
-const buildPriceKey = (
-  plan: Plan,
-  billing: Billing,
-  currency: Currency,
-  allowEarly: boolean
-) =>
-  `STRIPE_${plan}_${currency}_${billing.toUpperCase()}${
-    allowEarly ? "_EARLY" : ""
-  }`;
-
 const getPriceId = (
   plan: Plan,
   billing: Billing,
   currency: Currency,
   allowEarly: boolean
 ) => {
-  const key = buildPriceKey(plan, billing, currency, allowEarly);
-  const priceId = (env as unknown as Record<
-    string,
-    string | undefined
-  >)[key];
+  const priceId = getStripePriceId({
+    plan,
+    billing,
+    currency,
+    early: allowEarly,
+  });
 
   if (!priceId) {
-    throw new Error(`Missing Stripe price for ${key}`);
+    throw new Error(
+      `Missing Stripe price for ${plan} ${currency} ${billing}${
+        allowEarly ? " early" : ""
+      }`
+    );
   }
 
   return priceId;

@@ -6,6 +6,7 @@ import {
   rescheduleAppointmentController,
 } from "../controllers/booking.controller";
 import { protect } from "../middleware/auth.middleware";
+import { subscriptionGuard } from "../middleware/subscriptionGuard.middleware";
 import prisma from "../config/prisma";
 
 const router = Router();
@@ -22,7 +23,7 @@ router.get("/slots/:businessId", getAvailableSlots);
 CREATE APPOINTMENT
 =====================================================
 */
-router.post("/appointment", protect, createAppointment);
+router.post("/appointment", protect, subscriptionGuard, createAppointment);
 
 /*
 =====================================================
@@ -32,6 +33,7 @@ RESCHEDULE APPOINTMENT
 router.put(
   "/appointment/:appointmentId/reschedule",
   protect,
+  subscriptionGuard,
   rescheduleAppointmentController
 );
 
@@ -40,14 +42,19 @@ router.put(
 CANCEL APPOINTMENT
 =====================================================
 */
-router.delete("/appointment/:appointmentId", protect, cancelAppointment);
+router.delete(
+  "/appointment/:appointmentId",
+  protect,
+  subscriptionGuard,
+  cancelAppointment
+);
 
 /*
 =====================================================
 🔥 GET ALL BOOKINGS (FIXED)
 =====================================================
 */
-router.get("/list", protect, async (req: any, res) => {
+router.get("/list", protect, subscriptionGuard, async (req: any, res) => {
   try {
     const businessId = req.user?.businessId;
 

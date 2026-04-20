@@ -6,10 +6,12 @@ import {
   getMessages,
   deleteMessage
 } from "../controllers/message.controller";
+import { subscriptionGuard } from "../middleware/subscriptionGuard.middleware";
 
 const router = Router();
 
 router.use(protect);
+router.use(subscriptionGuard);
 
 /* ======================================
 GET MESSAGES (LOAD CHAT)

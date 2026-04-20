@@ -42,7 +42,11 @@ const analyticsDashboard_service_1 = require("../services/analyticsDashboard.ser
 const prisma_1 = __importDefault(require("../config/prisma"));
 const conversionTracker_service_1 = require("../services/salesAgent/conversionTracker.service");
 const followup_queue_1 = require("../queues/followup.queue");
-const getBusinessId = async (userId) => {
+const tenant_service_1 = require("../services/tenant.service");
+const getBusinessId = async (userId, requestBusinessId) => {
+    if (requestBusinessId) {
+        return requestBusinessId;
+    }
     const business = await prisma_1.default.business.findFirst({
         where: { ownerId: userId }
     });
@@ -54,7 +58,7 @@ const getAnalyticsOverview = async (req, res) => {
     try {
         const userId = req.user.id;
         const range = req.query.range || "7d";
-        const businessId = await getBusinessId(userId);
+        const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
         const data = await service.getOverview(businessId, range);
         res.json({ success: true, data });
     }
@@ -68,7 +72,7 @@ const getAnalyticsCharts = async (req, res) => {
     try {
         const userId = req.user.id;
         const range = req.query.range || "7d";
-        const businessId = await getBusinessId(userId);
+        const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
         const data = await service.getCharts(businessId, range);
         res.json({ success: true, data });
     }
@@ -81,7 +85,7 @@ exports.getAnalyticsCharts = getAnalyticsCharts;
 const getConversionFunnel = async (req, res) => {
     try {
         const userId = req.user.id;
-        const businessId = await getBusinessId(userId);
+        const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
         const data = await service.getFunnel(businessId);
         res.json({ success: true, data });
     }
@@ -94,7 +98,7 @@ exports.getConversionFunnel = getConversionFunnel;
 const getTopSources = async (req, res) => {
     try {
         const userId = req.user.id;
-        const businessId = await getBusinessId(userId);
+        const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
         const data = await service.getSources(businessId);
         res.json({ success: true, data });
     }

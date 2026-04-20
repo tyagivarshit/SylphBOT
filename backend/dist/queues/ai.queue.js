@@ -3,27 +3,30 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeAIQueue = exports.getAIQueueForLead = exports.getAIQueueNames = exports.getAIQueues = exports.addRouterJob = exports.addAIJob = exports.enqueueAIMessage = exports.enqueueAIBatch = exports.aiQueue = exports.AI_QUEUE_PARTITIONS = exports.AI_QUEUE_NAME = void 0;
+exports.closeAIQueue = exports.getAIQueueForLead = exports.getAIQueueNames = exports.getAIQueues = exports.addRouterJob = exports.addAIJob = exports.enqueueAIMessage = exports.enqueueAIBatch = exports.legacyAIQueue = exports.aiQueue = exports.AI_QUEUE_PARTITIONS = exports.LEGACY_AI_QUEUE_NAME = exports.AI_QUEUE_NAME = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const bullmq_1 = require("bullmq");
 const env_1 = require("../config/env");
 const redis_1 = require("../config/redis");
+const queue_defaults_1 = require("./queue.defaults");
 const logger_1 = __importDefault(require("../utils/logger"));
-exports.AI_QUEUE_NAME = env_1.env.AI_QUEUE_NAME;
+const requestContext_1 = require("../observability/requestContext");
+exports.AI_QUEUE_NAME = "ai-high";
+exports.LEGACY_AI_QUEUE_NAME = env_1.env.AI_QUEUE_NAME;
 exports.AI_QUEUE_PARTITIONS = 1;
 const defaultJobOptions = {
-    attempts: 3,
-    backoff: {
-        type: "exponential",
-        delay: env_1.env.AI_JOB_BACKOFF_MS,
-    },
-    removeOnComplete: true,
-    removeOnFail: true,
+    ...(0, queue_defaults_1.buildQueueJobOptions)({
+        backoff: {
+            type: "exponential",
+            delay: env_1.env.AI_JOB_BACKOFF_MS,
+        },
+    }),
 };
+const queueConnection = (0, redis_1.getQueueRedisConnection)();
 const globalForAIQueue = globalThis;
-exports.aiQueue = globalForAIQueue.__sylphAIQueue ||
+exports.aiQueue = globalForAIQueue.__sylphAIHighQueue ||
     new bullmq_1.Queue(exports.AI_QUEUE_NAME, {
-        connection: (0, redis_1.getQueueRedisConnection)(),
+        connection: queueConnection,
         prefix: env_1.env.AI_QUEUE_PREFIX,
         defaultJobOptions,
         streams: {
@@ -32,10 +35,45 @@ exports.aiQueue = globalForAIQueue.__sylphAIQueue ||
             },
         },
     });
-if (!globalForAIQueue.__sylphAIQueue) {
-    globalForAIQueue.__sylphAIQueue = exports.aiQueue;
+if (!globalForAIQueue.__sylphAIHighQueue) {
+    globalForAIQueue.__sylphAIHighQueue = exports.aiQueue;
 }
-const normalizeMessage = (message) => ({
+exports.legacyAIQueue = exports.LEGACY_AI_QUEUE_NAME === exports.AI_QUEUE_NAME
+    ? exports.aiQueue
+    : globalForAIQueue.__sylphAILegacyQueue ||
+        new bullmq_1.Queue(exports.LEGACY_AI_QUEUE_NAME, {
+            connection: queueConnection,
+            prefix: env_1.env.AI_QUEUE_PREFIX,
+            defaultJobOptions,
+            streams: {
+                events: {
+                    maxLen: 1000,
+                },
+            },
+        });
+if (exports.LEGACY_AI_QUEUE_NAME !== exports.AI_QUEUE_NAME &&
+    !globalForAIQueue.__sylphAILegacyQueue) {
+    globalForAIQueue.__sylphAILegacyQueue = exports.legacyAIQueue;
+}
+const setMetadataFieldIfMissing = (metadata, key, value) => {
+    if (metadata[key] !== undefined || value === undefined) {
+        return;
+    }
+    metadata[key] = value;
+};
+const buildMessageMetadata = (message, context = (0, requestContext_1.getRequestContext)()) => {
+    const metadata = {
+        ...(message.metadata || {}),
+    };
+    setMetadataFieldIfMissing(metadata, "requestId", context?.requestId);
+    setMetadataFieldIfMissing(metadata, "userId", context?.userId);
+    setMetadataFieldIfMissing(metadata, "businessId", context?.businessId);
+    const entries = Object.entries(metadata).filter(([, value]) => value !== undefined);
+    return entries.length
+        ? Object.fromEntries(entries)
+        : undefined;
+};
+const normalizeMessage = (message, context = (0, requestContext_1.getRequestContext)()) => ({
     ...message,
     businessId: String(message.businessId || "").trim(),
     leadId: String(message.leadId || "").trim(),
@@ -45,6 +83,7 @@ const normalizeMessage = (message) => ({
     idempotencyKey: message.idempotencyKey?.trim(),
     skipInboundPersist: Boolean(message.skipInboundPersist),
     retryCount: message.retryCount || 0,
+    metadata: buildMessageMetadata(message, context),
 });
 const chunkMessages = (messages, chunkSize) => {
     const chunks = [];
@@ -79,8 +118,9 @@ const buildJobId = (messages, chunkIndex, options) => {
     return `ai_${crypto_1.default.randomUUID()}`;
 };
 const enqueueAIBatch = async (messages, options) => {
+    const requestContext = (0, requestContext_1.getRequestContext)();
     const normalizedMessages = messages
-        .map(normalizeMessage)
+        .map((message) => normalizeMessage(message, requestContext))
         .filter((message) => message.businessId && message.leadId && message.message);
     if (!normalizedMessages.length) {
         throw new Error("At least one valid message is required");
@@ -140,14 +180,17 @@ const addRouterJob = async (data) => (0, exports.enqueueAIMessage)({
     idempotencyKey: data.idempotencyKey || data.externalEventId,
 });
 exports.addRouterJob = addRouterJob;
-const getAIQueues = () => [exports.aiQueue];
+const getAIQueues = () => exports.LEGACY_AI_QUEUE_NAME === exports.AI_QUEUE_NAME
+    ? [exports.aiQueue]
+    : [exports.aiQueue, exports.legacyAIQueue];
 exports.getAIQueues = getAIQueues;
-const getAIQueueNames = () => [exports.aiQueue.name];
+const getAIQueueNames = () => (0, exports.getAIQueues)().map((queue) => queue.name);
 exports.getAIQueueNames = getAIQueueNames;
 const getAIQueueForLead = (_leadId) => exports.aiQueue;
 exports.getAIQueueForLead = getAIQueueForLead;
 const closeAIQueue = async () => {
-    await exports.aiQueue.close();
-    globalForAIQueue.__sylphAIQueue = undefined;
+    await Promise.allSettled((0, exports.getAIQueues)().map((queue) => queue.close()));
+    globalForAIQueue.__sylphAIHighQueue = undefined;
+    globalForAIQueue.__sylphAILegacyQueue = undefined;
 };
 exports.closeAIQueue = closeAIQueue;

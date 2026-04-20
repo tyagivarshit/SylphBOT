@@ -2,6 +2,20 @@ import { getPlanKey } from "../../config/plan.config";
 import type { SalesCapabilityProfile, SalesPlanKey } from "./types";
 
 const CAPABILITY_MAP: Record<SalesPlanKey, SalesCapabilityProfile> = {
+  LOCKED: {
+    planKey: "LOCKED",
+    label: "Locked",
+    intelligenceTier: 0,
+    maxQualificationQuestions: 0,
+    supportBooking: false,
+    supportPaymentLinks: false,
+    enableFollowups: false,
+    enableCRM: false,
+    responseStyle: "engage",
+    primaryCtas: ["NONE"],
+    systemDirective: "Keep replies minimal and avoid premium flows.",
+    qualificationTargets: [],
+  },
   FREE_LOCKED: {
     planKey: "FREE_LOCKED",
     label: "Locked",
@@ -70,4 +84,5 @@ export const getSalesCapabilityProfile = (plan: unknown) =>
   CAPABILITY_MAP[resolveSalesPlanKey(plan)];
 
 export const isPaidSalesPlan = (plan: unknown) =>
-  resolveSalesPlanKey(plan) !== "FREE_LOCKED";
+  resolveSalesPlanKey(plan) !== "FREE_LOCKED" &&
+  resolveSalesPlanKey(plan) !== "LOCKED";

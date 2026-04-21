@@ -387,11 +387,11 @@ export default function OnboardingFlow() {
                 )}
 
                 <div className="flex flex-col gap-3 sm:flex-row">
-                  <Link href={stepCopy.primaryHref} className="brand-button-primary">
+                  <Link href={stepCopy.primaryHref as any} className="brand-button-primary">
                     {stepCopy.primaryLabel}
                   </Link>
                   <Link
-                    href={stepCopy.secondaryHref}
+                    href={stepCopy.secondaryHref as any}
                     className="brand-button-secondary"
                   >
                     {stepCopy.secondaryLabel}

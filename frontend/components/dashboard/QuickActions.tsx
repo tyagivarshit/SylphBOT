@@ -72,7 +72,7 @@ function QuickActionsComponent() {
           return (
             <Link
               key={action.title}
-              href={action.href}
+              href={action.href as any}
               prefetch
               aria-label={action.title}
               className="group flex items-start gap-3 border border-blue-100 rounded-2xl p-4 bg-white/70 backdrop-blur transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400"

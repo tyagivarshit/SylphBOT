@@ -43,7 +43,7 @@ export function EmptyState({
   const action = actionLabel
     ? actionHref
       ? (
-          <Link href={actionHref} className="brand-button-primary mt-5">
+          <Link href={actionHref as any} className="brand-button-primary mt-5">
             {actionLabel}
           </Link>
         )

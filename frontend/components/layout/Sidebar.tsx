@@ -184,7 +184,7 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
                   return (
                     <Link
                       key={item.name}
-                      href={item.href}
+                      href={item.href as any}
                       onMouseEnter={() => router.prefetch(item.href)}
                       onClick={() => setOpen(false)}
                       className={`

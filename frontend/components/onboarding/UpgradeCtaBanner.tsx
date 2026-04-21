@@ -61,7 +61,7 @@ export default function UpgradeCtaBanner({
         </div>
 
         <Link
-          href={href}
+          href={href as any}
           className="inline-flex items-center justify-center rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:shadow-lg"
         >
           Upgrade plan

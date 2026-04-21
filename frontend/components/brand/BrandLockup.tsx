@@ -29,7 +29,7 @@ export default function BrandLockup({
   const imageScaleClass = compact ? "scale-[1.5]" : "scale-[1.42]";
 
   return (
-    <Link href={href} className={`flex min-w-0 items-center gap-3 ${className}`}>
+    <Link href={href as any} className={`flex min-w-0 items-center gap-3 ${className}`}>
       <div
         className={`flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[20px] border ${shellClass}`}
       >

@@ -1,7 +1,10 @@
 import { JobsOptions, Queue } from "bullmq";
 import prisma from "../config/prisma";
 import { getQueueRedisConnection } from "../config/redis";
-import { buildQueueJobOptions } from "./queue.defaults";
+import {
+  buildQueueJobOptions,
+  createResilientQueue,
+} from "./queue.defaults";
 
 /*
 =========================================================
@@ -26,21 +29,27 @@ const defaultJobOptions: JobsOptions = buildQueueJobOptions({
   },
 });
 
-export const bookingReminderQueue = new Queue<BookingReminderJobData>(
-  BOOKING_REMINDER_QUEUE_NAME,
-  {
-    connection: queueConnection,
-    defaultJobOptions,
-  }
+export const bookingReminderQueue = createResilientQueue(
+  new Queue<BookingReminderJobData>(
+    BOOKING_REMINDER_QUEUE_NAME,
+    {
+      connection: queueConnection,
+      defaultJobOptions,
+    }
+  ),
+  BOOKING_REMINDER_QUEUE_NAME
 );
 
 export const legacyBookingReminderQueue =
   LEGACY_BOOKING_REMINDER_QUEUE_NAME === BOOKING_REMINDER_QUEUE_NAME
     ? bookingReminderQueue
-    : new Queue<BookingReminderJobData>(LEGACY_BOOKING_REMINDER_QUEUE_NAME, {
-        connection: queueConnection,
-        defaultJobOptions,
-      });
+    : createResilientQueue(
+        new Queue<BookingReminderJobData>(LEGACY_BOOKING_REMINDER_QUEUE_NAME, {
+          connection: queueConnection,
+          defaultJobOptions,
+        }),
+        LEGACY_BOOKING_REMINDER_QUEUE_NAME
+      );
 
 /*
 =========================================================

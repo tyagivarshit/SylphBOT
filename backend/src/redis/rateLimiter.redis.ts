@@ -1,4 +1,5 @@
 import redis from "../config/redis";
+import { safeRedisCall } from "./redisSafety";
 
 /* ======================================
 CONFIG
@@ -126,17 +127,28 @@ const incrementExpiringCounter = async (
   key: string,
   ttlSeconds: number
 ): Promise<CounterWindowResult> => {
-  const raw = (await redis.eval(
-    incrementWithTtlScript,
-    1,
-    key,
-    String(ttlSeconds)
-  )) as [unknown, unknown];
+  return safeRedisCall(
+    async () => {
+      const raw = (await redis.eval(
+        incrementWithTtlScript,
+        1,
+        key,
+        String(ttlSeconds)
+      )) as [unknown, unknown];
 
-  return {
-    count: toNumber(raw?.[0]),
-    ttlSeconds: Math.max(toNumber(raw?.[1]), ttlSeconds),
-  };
+      return {
+        count: toNumber(raw?.[0]),
+        ttlSeconds: Math.max(toNumber(raw?.[1]), ttlSeconds),
+      };
+    },
+    () => ({
+      count: 0,
+      ttlSeconds,
+    }),
+    {
+      operation: "redis.rateLimiter.incrementExpiringCounter",
+    }
+  );
 };
 
 const consumeRateWindow = async (
@@ -152,19 +164,31 @@ const consumeRateWindow = async (
     };
   }
 
-  const raw = (await redis.eval(
-    consumeWindowScript,
-    1,
-    key,
-    String(ttlSeconds),
-    String(limit)
-  )) as [unknown, unknown, unknown];
+  return safeRedisCall(
+    async () => {
+      const raw = (await redis.eval(
+        consumeWindowScript,
+        1,
+        key,
+        String(ttlSeconds),
+        String(limit)
+      )) as [unknown, unknown, unknown];
 
-  return {
-    allowed: toNumber(raw?.[0]) === 1,
-    count: toNumber(raw?.[1]),
-    ttlSeconds: Math.max(toNumber(raw?.[2]), ttlSeconds),
-  };
+      return {
+        allowed: toNumber(raw?.[0]) === 1,
+        count: toNumber(raw?.[1]),
+        ttlSeconds: Math.max(toNumber(raw?.[2]), ttlSeconds),
+      };
+    },
+    () => ({
+      allowed: true,
+      count: 0,
+      ttlSeconds,
+    }),
+    {
+      operation: "redis.rateLimiter.consumeRateWindow",
+    }
+  );
 };
 
 /* ======================================
@@ -194,12 +218,15 @@ export const getRate = async (
 ) => {
   const key = getRateKey(businessId, leadId, platform);
 
-  try {
-    const value = await redis.get(key);
-    return Number(value || 0);
-  } catch {
-    return 0;
-  }
+  const value = await safeRedisCall(
+    () => redis.get(key),
+    null as string | null,
+    {
+      operation: "redis.rateLimiter.getRate",
+    }
+  );
+
+  return Number(value || 0);
 };
 
 export const resetRate = async (
@@ -209,35 +236,45 @@ export const resetRate = async (
 ) => {
   const key = getRateKey(businessId, leadId, platform);
 
-  try {
-    await redis.del(key);
-  } catch {}
+  await safeRedisCall(
+    () => redis.del(key),
+    0,
+    {
+      operation: "redis.rateLimiter.resetRate",
+    }
+  );
 };
 
 export const clearAllRates = async () => {
-  try {
-    const stream = redis.scanStream({
-      match: `${LEGACY_RATE_PREFIX}:*`,
-      count: 100,
-    });
-
-    const pipeline = redis.pipeline();
-
-    stream.on("data", (keys: string[]) => {
-      if (keys.length) {
-        keys.forEach((key) => pipeline.del(key));
-      }
-    });
-
-    return new Promise<void>((resolve, reject) => {
-      stream.on("end", async () => {
-        await pipeline.exec();
-        resolve();
+  await safeRedisCall(
+    async () => {
+      const stream = redis.scanStream({
+        match: `${LEGACY_RATE_PREFIX}:*`,
+        count: 100,
       });
 
-      stream.on("error", reject);
-    });
-  } catch {}
+      const pipeline = redis.pipeline();
+
+      stream.on("data", (keys: string[]) => {
+        if (keys.length) {
+          keys.forEach((key) => pipeline.del(key));
+        }
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        stream.on("end", async () => {
+          await pipeline.exec();
+          resolve();
+        });
+
+        stream.on("error", reject);
+      });
+    },
+    undefined,
+    {
+      operation: "redis.rateLimiter.clearAllRates",
+    }
+  );
 };
 
 /* ======================================

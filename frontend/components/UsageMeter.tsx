@@ -1,38 +1,43 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { buildApiUrl } from "@/lib/url"
+import { useEffect, useState } from "react";
+import { getUsageOverview, type UsageOverviewData } from "@/lib/usage.service";
 
-export default function UsageMeter(){
+export default function UsageMeter() {
+  const [usage, setUsage] = useState<UsageOverviewData | null>(null);
 
-  const [usage,setUsage] = useState<any>(null)
+  useEffect(() => {
+    void getUsageOverview()
+      .then((payload) => {
+        if (payload) {
+          setUsage(payload);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
-  useEffect(()=>{
-    fetch(buildApiUrl("/api/usage"), { credentials: "include", cache: "no-store" })
-      .then(res=>res.json())
-      .then(setUsage)
-  },[])
+  if (!usage) {
+    return null;
+  }
 
-  if(!usage) return null
-
-  const used = usage?.usage?.ai?.used || 0
-  const limit = usage?.usage?.ai?.dailyLimit || 0
-  const percent = limit > 0 ? (used / limit) * 100 : 0
+  const used = usage.ai.usedToday || 0;
+  const limit = usage.ai.limit || 0;
+  const remaining = usage.ai.remaining ?? 0;
+  const extraCredits = usage.addonCredits ?? usage.addons.aiCredits ?? 0;
+  const percent = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
 
   return (
-    <div className="bg-gray-50 border rounded-lg p-3 text-xs">
+    <div className="rounded-lg border bg-gray-50 p-3 text-xs">
+      <p className="font-medium">AI Used Today: {used} / {limit}</p>
+      <p className="mt-1 text-gray-500">AI Remaining: {remaining}</p>
+      <p className="mt-1 text-gray-500">Extra Credits: {extraCredits}</p>
 
-      <p className="font-medium">
-        AI Usage: {used} / {limit}
-      </p>
-
-      <div className="w-full h-2 bg-gray-200 rounded mt-2">
+      <div className="mt-2 h-2 w-full rounded bg-gray-200">
         <div
-          className="h-2 bg-blue-500 rounded"
+          className="h-2 rounded bg-blue-500"
           style={{ width: `${percent}%` }}
         />
       </div>
-
     </div>
-  )
+  );
 }

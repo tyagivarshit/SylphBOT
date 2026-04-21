@@ -7,6 +7,18 @@ exports.markAsRead = exports.sendMessage = exports.getMessagesByLead = exports.g
 const prisma_1 = __importDefault(require("../config/prisma"));
 const instagramProfile_service_1 = require("../services/instagramProfile.service");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
+const sendMessage_service_1 = require("../services/sendMessage.service");
+const normalizeSender = (value) => {
+    const normalizedSender = String(value || "USER")
+        .trim()
+        .toUpperCase();
+    if (normalizedSender === "USER" ||
+        normalizedSender === "AI" ||
+        normalizedSender === "AGENT") {
+        return normalizedSender;
+    }
+    return "USER";
+};
 /* ======================================================
 GET CONVERSATIONS
 ====================================================== */
@@ -92,7 +104,9 @@ const getMessagesByLead = async (req, res) => {
                 createdAt: "asc",
             },
         });
-        return res.json({ messages });
+        return res.json({
+            messages: messages.map((message) => (0, sendMessage_service_1.formatConversationMessage)(message)),
+        });
     }
     catch (error) {
         console.error("Get messages error:", error);
@@ -109,8 +123,13 @@ SEND MESSAGE
 const sendMessage = async (req, res) => {
     try {
         const leadId = req.params.leadId;
-        const { content, sender = "USER" } = req.body;
+        const sender = normalizeSender(req.body?.sender);
+        const clientMessageId = typeof req.body?.clientMessageId === "string" &&
+            req.body.clientMessageId.trim()
+            ? req.body.clientMessageId.trim()
+            : null;
         const businessId = req.user?.businessId;
+        const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";
         if (!leadId) {
             return res.status(400).json({ message: "leadId required" });
         }
@@ -133,29 +152,38 @@ const sendMessage = async (req, res) => {
                 requestId: req.requestId,
             });
         }
-        const message = await prisma_1.default.message.create({
-            data: {
-                content,
-                sender,
-                lead: {
-                    connect: {
-                        id: leadId,
+        const lead = await prisma_1.default.lead.findFirst({
+            where: {
+                id: leadId,
+                ...(businessId ? { businessId } : {}),
+            },
+            include: {
+                client: {
+                    select: {
+                        accessToken: true,
+                        phoneNumberId: true,
+                        platform: true,
                     },
                 },
             },
         });
-        await prisma_1.default.lead.update({
-            where: {
-                id: leadId,
-            },
-            data: {
-                lastMessageAt: new Date(),
-                ...(sender === "USER"
-                    ? { unreadCount: { increment: 1 } }
-                    : {}),
-            },
+        if (!lead) {
+            return res.status(404).json({
+                success: false,
+                message: "Lead not found",
+            });
+        }
+        const result = await (0, sendMessage_service_1.persistAndDispatchLeadMessage)({
+            lead,
+            content,
+            sender,
+            clientMessageId,
         });
-        return res.json({ message });
+        return res.json({
+            success: result.delivery?.delivered ?? true,
+            message: result.message,
+            delivery: result.delivery,
+        });
     }
     catch (error) {
         console.error("Send message error:", error);

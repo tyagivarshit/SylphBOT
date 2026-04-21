@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import prisma from "../config/prisma";
 import { getWorkerRedisConnection } from "../config/redis";
+import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 
 /* SENTRY MONITORING */
 import * as Sentry from "@sentry/node";
@@ -9,7 +10,7 @@ const worker =
   process.env.RUN_WORKER === "true"
     ? new Worker(
   "funnelQueue",
-  async (job) => {
+  withRedisWorkerFailSafe("funnelQueue", async (job: any) => {
 
     const { executionId } = job.data;
 
@@ -32,7 +33,7 @@ const worker =
 
     }
 
-  },
+  }),
   {
     connection: getWorkerRedisConnection(),
     concurrency: 3,

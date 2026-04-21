@@ -1,12 +1,17 @@
 import rateLimit from "express-rate-limit";
 import RedisStore from "rate-limit-redis";
-import redis from "../config/redis";
+import {
+  getSharedRedisConnection,
+  isRedisHealthy,
+} from "../config/redis";
+import { isRedisCircuitOpen } from "../redis/redisSafety";
 
 const isProd = process.env.NODE_ENV === "production";
 
 const createStore = (prefix: string) =>
   new RedisStore({
-    sendCommand: (...args: any[]) => (redis as any).call(...args),
+    sendCommand: (...args: any[]) =>
+      (getSharedRedisConnection() as any).call(...args),
     prefix,
   });
 
@@ -38,6 +43,9 @@ const handler = (_req: any, res: any) =>
     message: "Too many requests. Please try again later.",
   });
 
+const shouldSkipRedisRateLimit = () =>
+  isRedisCircuitOpen() || !isRedisHealthy();
+
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -46,6 +54,8 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   store: createStore("auth"),
   skipSuccessfulRequests: true,
+  skip: shouldSkipRedisRateLimit,
+  passOnStoreError: true,
   handler,
 });
 
@@ -56,6 +66,8 @@ export const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: createStore("ai"),
+  skip: shouldSkipRedisRateLimit,
+  passOnStoreError: true,
   handler,
 });
 
@@ -66,6 +78,8 @@ export const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: createStore("global"),
+  skip: shouldSkipRedisRateLimit,
+  passOnStoreError: true,
   handler,
 });
 
@@ -76,6 +90,8 @@ export const securityLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: createStore("security"),
+  skip: shouldSkipRedisRateLimit,
+  passOnStoreError: true,
   handler,
 });
 
@@ -86,5 +102,7 @@ export const userActionLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: createStore("user-actions"),
+  skip: shouldSkipRedisRateLimit,
+  passOnStoreError: true,
   handler,
 });

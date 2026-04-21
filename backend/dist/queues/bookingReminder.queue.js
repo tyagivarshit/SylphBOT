@@ -17,16 +17,16 @@ const defaultJobOptions = (0, queue_defaults_1.buildQueueJobOptions)({
         delay: 5000,
     },
 });
-exports.bookingReminderQueue = new bullmq_1.Queue(exports.BOOKING_REMINDER_QUEUE_NAME, {
+exports.bookingReminderQueue = (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.BOOKING_REMINDER_QUEUE_NAME, {
     connection: queueConnection,
     defaultJobOptions,
-});
+}), exports.BOOKING_REMINDER_QUEUE_NAME);
 exports.legacyBookingReminderQueue = exports.LEGACY_BOOKING_REMINDER_QUEUE_NAME === exports.BOOKING_REMINDER_QUEUE_NAME
     ? exports.bookingReminderQueue
-    : new bullmq_1.Queue(exports.LEGACY_BOOKING_REMINDER_QUEUE_NAME, {
+    : (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.LEGACY_BOOKING_REMINDER_QUEUE_NAME, {
         connection: queueConnection,
         defaultJobOptions,
-    });
+    }), exports.LEGACY_BOOKING_REMINDER_QUEUE_NAME);
 /*
 =========================================================
 CORE: SCHEDULE ALL REMINDERS (IMPORTANT)

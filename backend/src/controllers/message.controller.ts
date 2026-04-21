@@ -1,13 +1,14 @@
 import { Request, Response } from "express";
-import axios from "axios";
 import prisma from "../config/prisma";
-import { decrypt } from "../utils/encrypt";
-import { getIO } from "../sockets/socket.server";
-import { cancelFollowups } from "../queues/followup.queue";
 import {
   getSubscriptionAccess,
   logSubscriptionLockedAction,
 } from "../middleware/subscriptionGuard.middleware";
+import { getIO } from "../sockets/socket.server";
+import {
+  formatConversationMessage,
+  persistAndDispatchLeadMessage,
+} from "../services/sendMessage.service";
 
 /* ======================================
 GET MESSAGES
@@ -32,7 +33,7 @@ export const getMessages = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      messages,
+      messages: messages.map((message) => formatConversationMessage(message)),
     });
 
   } catch (error) {
@@ -50,7 +51,14 @@ SEND MESSAGE
 
 export const sendManualMessage = async (req: Request, res: Response) => {
   try {
-    const { leadId, content } = req.body;
+    const leadId = typeof req.body?.leadId === "string" ? req.body.leadId : "";
+    const content =
+      typeof req.body?.content === "string" ? req.body.content.trim() : "";
+    const clientMessageId =
+      typeof req.body?.clientMessageId === "string" &&
+      req.body.clientMessageId.trim()
+        ? req.body.clientMessageId.trim()
+        : null;
     const businessId = req.user?.businessId;
 
     if (!leadId || !content) {
@@ -82,40 +90,41 @@ export const sendManualMessage = async (req: Request, res: Response) => {
       });
     }
 
-    const lead = await prisma.lead.findUnique({
-      where: { id: leadId },
-      include: { client: true },
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        ...(businessId ? { businessId } : {}),
+      },
+      include: {
+        client: {
+          select: {
+            accessToken: true,
+            phoneNumberId: true,
+            platform: true,
+          },
+        },
+      },
     });
 
-    if (!lead || !lead.client) {
+    if (!lead) {
       return res.status(404).json({
         success: false,
         message: "Lead not found",
       });
     }
 
-    const message = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        content,
-        sender: "AGENT",
-      },
+    const result = await persistAndDispatchLeadMessage({
+      lead,
+      content,
+      sender: "AGENT",
+      clientMessageId,
     });
 
-    const io = getIO();
-    io.to(`lead_${lead.id}`).emit("new_message", message);
-
-    await prisma.lead.update({
-      where: { id: lead.id },
-      data: {
-        lastMessageAt: new Date(),
-        unreadCount: 0,
-      },
+    return res.json({
+      success: result.delivery?.delivered ?? true,
+      message: result.message,
+      delivery: result.delivery,
     });
-
-    await cancelFollowups(lead.id);
-
-    return res.json({ success: true, message });
 
   } catch (error) {
     console.error("Send message error:", error);

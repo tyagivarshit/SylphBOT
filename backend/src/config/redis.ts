@@ -1,12 +1,18 @@
-import Redis, { type RedisOptions } from "ioredis";
+import Redis, { type ChainableCommander, type RedisOptions } from "ioredis";
 import { env } from "./env";
+import {
+  createEmptyRedisStream,
+  isRedisHealthy,
+  markRedisFailure,
+  markRedisHealthy,
+  safeRedisCall,
+} from "../redis/redisSafety";
 
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
-const RECONNECT_TIMEOUT_SYMBOL = Symbol.for("sylph.redis.reconnectTimeout");
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 type ManagedRedisClient = Redis & {
   [MANUAL_CLOSE_SYMBOL]?: boolean;
-  [RECONNECT_TIMEOUT_SYMBOL]?: NodeJS.Timeout | null;
 };
 
 const globalForRedis = globalThis as typeof globalThis & {
@@ -18,50 +24,9 @@ const globalForRedis = globalThis as typeof globalThis & {
 const isRetryableRedisError = (error: unknown) => {
   const message = String((error as { message?: unknown })?.message || error || "");
 
-  return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly/i.test(
+  return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly|Connection is in closed state/i.test(
     message
   );
-};
-
-const scheduleReconnect = (client: ManagedRedisClient, label: string) => {
-  if (client[MANUAL_CLOSE_SYMBOL]) {
-    return;
-  }
-
-  if (
-    client.status === "ready" ||
-    client.status === "connect" ||
-    client.status === "connecting" ||
-    client.status === "reconnecting"
-  ) {
-    return;
-  }
-
-  if (client[RECONNECT_TIMEOUT_SYMBOL]) {
-    return;
-  }
-
-  client[RECONNECT_TIMEOUT_SYMBOL] = setTimeout(() => {
-    client[RECONNECT_TIMEOUT_SYMBOL] = null;
-
-    if (
-      client[MANUAL_CLOSE_SYMBOL] ||
-      (client.status !== "wait" && client.status !== "end")
-    ) {
-      return;
-    }
-
-    void client.connect().catch((error) => {
-      console.error(
-        `[redis:${label}] reconnect failed: ${String(
-          (error as { message?: unknown })?.message || error
-        )}`
-      );
-      scheduleReconnect(client, label);
-    });
-  }, env.REDIS_RETRY_DELAY_MS);
-
-  client[RECONNECT_TIMEOUT_SYMBOL]?.unref?.();
 };
 
 const buildRedisOptions = (connectionName: string): RedisOptions => {
@@ -73,17 +38,21 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     connectionName,
     enableReadyCheck: false,
     enableAutoPipelining: true,
-    enableOfflineQueue: true,
+    enableOfflineQueue: false,
     autoResubscribe: true,
-    autoResendUnfulfilledCommands: true,
+    autoResendUnfulfilledCommands: false,
     lazyConnect: true,
     keepAlive: 30000,
     noDelay: true,
     maxRetriesPerRequest: null,
     connectTimeout: env.REDIS_CONNECT_TIMEOUT_MS,
     retryStrategy(attempts) {
+      if (attempts > MAX_RECONNECT_ATTEMPTS) {
+        return null;
+      }
+
       return Math.min(
-        attempts * env.REDIS_RETRY_DELAY_MS,
+        env.REDIS_RETRY_DELAY_MS * 2 ** Math.max(attempts - 1, 0),
         env.REDIS_MAX_RETRY_DELAY_MS
       );
     },
@@ -95,24 +64,28 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
 };
 
 const attachRedisListeners = (client: ManagedRedisClient, label: string) => {
+  client.on("ready", () => {
+    markRedisHealthy();
+  });
+
   client.on("error", (error) => {
-    console.error(`[redis:${label}] ${error.message}`);
+    markRedisFailure(error, `redis:${label}:error`);
   });
 
   client.on("close", () => {
-    console.warn(`[redis:${label}] connection closed`);
-    scheduleReconnect(client, label);
-  });
+    if (client[MANUAL_CLOSE_SYMBOL]) {
+      return;
+    }
 
-  client.on("reconnecting", (delay?: number) => {
-    console.warn(
-      `[redis:${label}] reconnecting in ${delay ?? env.REDIS_RETRY_DELAY_MS}ms`
-    );
+    markRedisFailure(new Error("Redis connection closed"), `redis:${label}:close`);
   });
 
   client.on("end", () => {
-    console.warn(`[redis:${label}] connection ended`);
-    scheduleReconnect(client, label);
+    if (client[MANUAL_CLOSE_SYMBOL]) {
+      return;
+    }
+
+    markRedisFailure(new Error("Redis connection ended"), `redis:${label}:end`);
   });
 };
 
@@ -126,8 +99,136 @@ const createRedisClient = (label: string) => {
   return client;
 };
 
-export const redis = globalForRedis.__sylphRedis || createRedisClient("shared");
-globalForRedis.__sylphRedis = redis;
+const getMethodFallback = (methodName: string) => {
+  switch (methodName) {
+    case "get":
+    case "set":
+    case "ping":
+    case "call":
+    case "eval":
+      return null;
+    case "ttl":
+      return -1;
+    case "del":
+    case "expire":
+    case "incr":
+    case "zadd":
+    case "zremrangebyscore":
+    case "zcard":
+      return 0;
+    case "mget":
+      return [];
+    default:
+      return null;
+  }
+};
+
+const buildChainFallback = (
+  commands: Array<{ name: string }>
+) => commands.map((command) => [null, getMethodFallback(command.name)]);
+
+const createSafeCommandChainProxy = <T extends ChainableCommander>(
+  chain: T,
+  label: string
+): T => {
+  const commands: Array<{ name: string }> = [];
+  let proxy: T;
+
+  proxy = new Proxy(chain, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      if (property === "exec" || property === "execBuffer") {
+        return (...args: unknown[]) =>
+          safeRedisCall(
+            () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
+            () => buildChainFallback(commands),
+            {
+              operation: `${label}.${String(property)}`,
+            }
+          );
+      }
+
+      return (...args: unknown[]) => {
+        const result = (value as (...methodArgs: unknown[]) => unknown).apply(
+          target,
+          args
+        );
+
+        commands.push({
+          name: String(property),
+        });
+
+        return result === target ? proxy : result;
+      };
+    },
+  }) as T;
+
+  return proxy;
+};
+
+const createSafeRedisProxy = (
+  client: ManagedRedisClient,
+  label: string
+) =>
+  new Proxy(client, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      if (property === "multi" || property === "pipeline") {
+        return (...args: unknown[]) =>
+          createSafeCommandChainProxy(
+            (value as (...methodArgs: unknown[]) => ChainableCommander).apply(
+              target,
+              args
+            ),
+            `${label}.${String(property)}`
+          );
+      }
+
+      if (property === "scanStream") {
+        return (...args: unknown[]) => {
+          if (!isRedisHealthy()) {
+            return createEmptyRedisStream();
+          }
+
+          try {
+            return (value as (...methodArgs: unknown[]) => unknown).apply(
+              target,
+              args
+            );
+          } catch (error) {
+            markRedisFailure(error, `${label}.scanStream`);
+            return createEmptyRedisStream();
+          }
+        };
+      }
+
+      return (...args: unknown[]) =>
+        safeRedisCall(
+          () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
+          getMethodFallback(String(property)),
+          {
+            operation: `${label}.${String(property)}`,
+          }
+        );
+    },
+  }) as ManagedRedisClient;
+
+const sharedRedisClient =
+  globalForRedis.__sylphRedis || createRedisClient("shared");
+
+if (!globalForRedis.__sylphRedis) {
+  globalForRedis.__sylphRedis = sharedRedisClient;
+}
 
 const bullConnections =
   globalForRedis.__sylphBullConnections || new Set<ManagedRedisClient>();
@@ -149,17 +250,21 @@ const untrackBullConnection = (client?: ManagedRedisClient) => {
   bullConnections.delete(client);
 };
 
-const queueRedis =
+const queueRedisClient =
   globalForRedis.__sylphQueueRedis ||
   trackBullConnection(createRedisClient("queue"));
 
 if (!globalForRedis.__sylphQueueRedis) {
-  globalForRedis.__sylphQueueRedis = queueRedis;
+  globalForRedis.__sylphQueueRedis = queueRedisClient;
 }
 
 let workerConnectionCounter = 0;
 
-export const getQueueRedisConnection = () => queueRedis;
+export const redis = createSafeRedisProxy(sharedRedisClient, "redis");
+
+export const getSharedRedisConnection = () => sharedRedisClient;
+
+export const getQueueRedisConnection = () => queueRedisClient;
 
 export const getWorkerRedisConnection = () =>
   trackBullConnection(
@@ -172,11 +277,6 @@ const closeClient = async (client?: ManagedRedisClient) => {
   }
 
   client[MANUAL_CLOSE_SYMBOL] = true;
-
-  if (client[RECONNECT_TIMEOUT_SYMBOL]) {
-    clearTimeout(client[RECONNECT_TIMEOUT_SYMBOL]);
-    client[RECONNECT_TIMEOUT_SYMBOL] = null;
-  }
 
   try {
     if (client.status === "end") {
@@ -207,5 +307,7 @@ export const closeRedisConnection = async () => {
   globalForRedis.__sylphQueueRedis = undefined;
   globalForRedis.__sylphBullConnections = undefined;
 };
+
+export { isRedisHealthy } from "../redis/redisSafety";
 
 export default redis;

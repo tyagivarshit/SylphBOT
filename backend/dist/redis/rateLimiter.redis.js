@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.consumeBusinessMessageMinuteRate = exports.consumeBusinessAIHourlyRate = exports.incrementDailyAIUsage = exports.clearAllRates = exports.resetRate = exports.getRate = exports.incrementRate = exports.buildMessageRateKey = exports.buildAIRateKey = exports.buildAIUsageKey = exports.getRateKey = exports.getRedisMinuteKey = exports.getRedisHourKey = exports.getRedisDateKey = void 0;
 const redis_1 = __importDefault(require("../config/redis"));
+const redisSafety_1 = require("./redisSafety");
 /* ======================================
 CONFIG
 ====================================== */
@@ -91,11 +92,18 @@ const toNumber = (value) => {
     return Number.isFinite(parsed) ? parsed : 0;
 };
 const incrementExpiringCounter = async (key, ttlSeconds) => {
-    const raw = (await redis_1.default.eval(incrementWithTtlScript, 1, key, String(ttlSeconds)));
-    return {
-        count: toNumber(raw?.[0]),
-        ttlSeconds: Math.max(toNumber(raw?.[1]), ttlSeconds),
-    };
+    return (0, redisSafety_1.safeRedisCall)(async () => {
+        const raw = (await redis_1.default.eval(incrementWithTtlScript, 1, key, String(ttlSeconds)));
+        return {
+            count: toNumber(raw?.[0]),
+            ttlSeconds: Math.max(toNumber(raw?.[1]), ttlSeconds),
+        };
+    }, () => ({
+        count: 0,
+        ttlSeconds,
+    }), {
+        operation: "redis.rateLimiter.incrementExpiringCounter",
+    });
 };
 const consumeRateWindow = async (key, limit, ttlSeconds) => {
     if (limit <= 0) {
@@ -105,12 +113,20 @@ const consumeRateWindow = async (key, limit, ttlSeconds) => {
             ttlSeconds,
         };
     }
-    const raw = (await redis_1.default.eval(consumeWindowScript, 1, key, String(ttlSeconds), String(limit)));
-    return {
-        allowed: toNumber(raw?.[0]) === 1,
-        count: toNumber(raw?.[1]),
-        ttlSeconds: Math.max(toNumber(raw?.[2]), ttlSeconds),
-    };
+    return (0, redisSafety_1.safeRedisCall)(async () => {
+        const raw = (await redis_1.default.eval(consumeWindowScript, 1, key, String(ttlSeconds), String(limit)));
+        return {
+            allowed: toNumber(raw?.[0]) === 1,
+            count: toNumber(raw?.[1]),
+            ttlSeconds: Math.max(toNumber(raw?.[2]), ttlSeconds),
+        };
+    }, () => ({
+        allowed: true,
+        count: 0,
+        ttlSeconds,
+    }), {
+        operation: "redis.rateLimiter.consumeRateWindow",
+    });
 };
 /* ======================================
 LEGACY API
@@ -128,25 +144,21 @@ const incrementRate = async (businessId, leadId, platform, windowSeconds = 60) =
 exports.incrementRate = incrementRate;
 const getRate = async (businessId, leadId, platform) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
-    try {
-        const value = await redis_1.default.get(key);
-        return Number(value || 0);
-    }
-    catch {
-        return 0;
-    }
+    const value = await (0, redisSafety_1.safeRedisCall)(() => redis_1.default.get(key), null, {
+        operation: "redis.rateLimiter.getRate",
+    });
+    return Number(value || 0);
 };
 exports.getRate = getRate;
 const resetRate = async (businessId, leadId, platform) => {
     const key = (0, exports.getRateKey)(businessId, leadId, platform);
-    try {
-        await redis_1.default.del(key);
-    }
-    catch { }
+    await (0, redisSafety_1.safeRedisCall)(() => redis_1.default.del(key), 0, {
+        operation: "redis.rateLimiter.resetRate",
+    });
 };
 exports.resetRate = resetRate;
 const clearAllRates = async () => {
-    try {
+    await (0, redisSafety_1.safeRedisCall)(async () => {
         const stream = redis_1.default.scanStream({
             match: `${LEGACY_RATE_PREFIX}:*`,
             count: 100,
@@ -157,15 +169,16 @@ const clearAllRates = async () => {
                 keys.forEach((key) => pipeline.del(key));
             }
         });
-        return new Promise((resolve, reject) => {
+        await new Promise((resolve, reject) => {
             stream.on("end", async () => {
                 await pipeline.exec();
                 resolve();
             });
             stream.on("error", reject);
         });
-    }
-    catch { }
+    }, undefined, {
+        operation: "redis.rateLimiter.clearAllRates",
+    });
 };
 exports.clearAllRates = clearAllRates;
 /* ======================================

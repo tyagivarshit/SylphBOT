@@ -1,24 +1,33 @@
 "use client";
 
+import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
-import { ShieldCheck, Sparkles } from "lucide-react";
-
+import { Coins, ShieldCheck, Sparkles } from "lucide-react";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
+import { TrustSignals } from "@/components/ui/feedback";
 
-/* =========================
-   🔥 UPGRADE CONTEXT (STABLE)
-========================= */
+type UpgradeModalVariant = "feature" | "usage_limit";
+
+type OpenUpgradeOptions = {
+  variant?: UpgradeModalVariant;
+  title?: string;
+  description?: string;
+  remainingCredits?: number;
+  addonCredits?: number;
+};
+
 type UpgradeContextValue = {
-  openUpgrade: () => void;
+  openUpgrade: (options?: OpenUpgradeOptions) => void;
   closeUpgrade: () => void;
 };
 
@@ -47,6 +56,122 @@ function AuthStateCard({ message }: { message: string }) {
   );
 }
 
+function UpgradeModal({
+  state,
+  onClose,
+}: {
+  state: OpenUpgradeOptions | null;
+  onClose: () => void;
+}) {
+  const variant = state?.variant ?? "feature";
+  const isUsageLimit = variant === "usage_limit";
+  const remainingCredits = state?.remainingCredits ?? 0;
+  const addonCredits = state?.addonCredits ?? 0;
+
+  const content = isUsageLimit
+    ? {
+        eyebrow: "Usage limit",
+        title:
+          state?.title || "You've used all your AI replies for today",
+        description:
+          state?.description ||
+          "Buy extra credits to keep replying now, or upgrade for a larger daily allowance.",
+        primaryLabel: "Buy Credits",
+        secondaryLabel: "Upgrade Plan",
+        icon: <Coins size={14} />,
+        chipClassName:
+          "inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800",
+      }
+    : {
+        eyebrow: "Premium access",
+        title: state?.title || "Unlock this feature on a higher plan",
+        description:
+          state?.description ||
+          "Upgrade to unlock advanced automation, CRM visibility, and AI growth features as your workspace scales.",
+        primaryLabel: "Upgrade Plan",
+        secondaryLabel: "Maybe later",
+        icon: <ShieldCheck size={14} />,
+        chipClassName:
+          "inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800",
+      };
+
+  if (!state) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <div className="brand-panel-strong w-full max-w-xl rounded-[32px] p-6 sm:p-7">
+        <span className={content.chipClassName}>
+          {content.icon}
+          {content.eyebrow}
+        </span>
+
+        <h2 className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">
+          {content.title}
+        </h2>
+
+        <p className="mt-3 text-sm leading-6 text-slate-500">
+          {content.description}
+        </p>
+
+        {isUsageLimit ? (
+          <div className="mt-5 grid gap-3 rounded-[24px] border border-slate-200/80 bg-white/88 p-4 sm:grid-cols-2">
+            <div className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Remaining credits
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {remainingCredits}
+              </p>
+            </div>
+
+            <div className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Extra credits available
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {addonCredits}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        <TrustSignals className="mt-5" />
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
+          {isUsageLimit ? (
+            <button onClick={onClose} className="brand-button-secondary flex-1">
+              Not now
+            </button>
+          ) : (
+            <button onClick={onClose} className="brand-button-secondary flex-1">
+              {content.secondaryLabel}
+            </button>
+          )}
+
+          {isUsageLimit ? (
+            <>
+              <Link href="/billing" onClick={onClose} className="brand-button-secondary flex-1">
+                {content.primaryLabel}
+              </Link>
+              <Link href="/billing#plans" onClick={onClose} className="brand-button-primary flex-1">
+                <Sparkles size={15} />
+                {content.secondaryLabel}
+              </Link>
+            </>
+          ) : (
+            <Link href="/billing#plans" onClick={onClose} className="brand-button-primary flex-1">
+              <Sparkles size={15} />
+              {content.primaryLabel}
+            </Link>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -56,9 +181,8 @@ export default function DashboardLayout({
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeState, setUpgradeState] = useState<OpenUpgradeOptions | null>(null);
 
-  /* 🔥 AUTH REDIRECT FIX */
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/auth/login");
@@ -69,6 +193,7 @@ export default function DashboardLayout({
     const handleEsc = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpen(false);
+        setUpgradeState(null);
       }
     };
 
@@ -78,14 +203,26 @@ export default function DashboardLayout({
   }, []);
 
   useEffect(() => {
-    document.body.style.overflow = open ? "hidden" : "";
+    document.body.style.overflow = open || Boolean(upgradeState) ? "hidden" : "";
 
     return () => {
       document.body.style.overflow = "";
     };
-  }, [open]);
+  }, [open, upgradeState]);
 
-  /* 🔥 STABLE CONTEXT */
+  const upgradeContextValue = useMemo<UpgradeContextValue>(
+    () => ({
+      openUpgrade: (options = {}) => {
+        setUpgradeState({
+          variant: options.variant ?? "feature",
+          ...options,
+        });
+      },
+      closeUpgrade: () => setUpgradeState(null),
+    }),
+    []
+  );
+
   if (loading) {
     return <AuthStateCard message="Loading your Automexia workspace..." />;
   }
@@ -95,24 +232,12 @@ export default function DashboardLayout({
   }
 
   return (
-    <UpgradeContext.Provider
-      value={{
-        openUpgrade: () => setUpgradeOpen(true),
-        closeUpgrade: () => setUpgradeOpen(false),
-      }}
-    >
+    <UpgradeContext.Provider value={upgradeContextValue}>
       <div className="brand-app brand-shell">
-
-        {/* 🔥 TOPBAR */}
         <div className="brand-layout-frame lg:h-[100dvh] lg:max-h-[100dvh] lg:overflow-hidden">
-
-        {/* 🔥 BODY */}
           <Sidebar open={open} setOpen={setOpen} />
 
-          {/* ✅ SIDEBAR (NO WRAPPER, DIRECT) */}
           <div className="brand-page brand-main-column">
-
-          {/* 🔥 MAIN CONTENT */}
             <Topbar setOpen={setOpen} />
 
             <main className="brand-content-scroll brand-scrollbar">
@@ -120,60 +245,14 @@ export default function DashboardLayout({
                 {children}
               </div>
             </main>
-
-        </div>
-      </div>
-      </div>
-
-      {/* =========================
-         🔥 UPGRADE MODAL
-      ========================= */}
-      {upgradeOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
-
-          <div className="brand-panel-strong w-full max-w-md rounded-[32px] p-6 sm:p-7">
-
-            <span className="brand-chip brand-chip-success">
-              <ShieldCheck size={14} />
-              Premium access control
-            </span>
-
-            <h2 className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">
-              Upgrade Required 🚀
-            </h2>
-
-            <p className="mt-3 text-sm leading-6 text-slate-500">
-              This feature is available on a higher plan. Upgrade to unlock
-              CRM, automation, and AI growth features with the full Automexia
-              product experience.
-            </p>
-
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
-
-              <button
-                onClick={() => setUpgradeOpen(false)}
-                className="brand-button-secondary flex-1"
-              >
-                Maybe later
-              </button>
-
-              <button
-                onClick={() => {
-                  setUpgradeOpen(false);
-                  router.push("/billing");
-                }}
-                className="brand-button-primary flex-1"
-              >
-                <Sparkles size={15} />
-                View plans
-              </button>
-
-            </div>
-
           </div>
-
         </div>
-      )}
+      </div>
+
+      <UpgradeModal
+        state={upgradeState}
+        onClose={() => setUpgradeState(null)}
+      />
     </UpgradeContext.Provider>
   );
 }

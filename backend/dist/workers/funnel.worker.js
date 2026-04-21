@@ -39,10 +39,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = require("../config/redis");
+const queue_defaults_1 = require("../queues/queue.defaults");
 /* SENTRY MONITORING */
 const Sentry = __importStar(require("@sentry/node"));
 const worker = process.env.RUN_WORKER === "true"
-    ? new bullmq_1.Worker("funnelQueue", async (job) => {
+    ? new bullmq_1.Worker("funnelQueue", (0, queue_defaults_1.withRedisWorkerFailSafe)("funnelQueue", async (job) => {
         const { executionId } = job.data;
         try {
             const execution = await prisma_1.default.automationExecution.findUnique({
@@ -57,7 +58,7 @@ const worker = process.env.RUN_WORKER === "true"
             Sentry.captureException(error);
             throw error;
         }
-    }, {
+    }), {
         connection: (0, redis_1.getWorkerRedisConnection)(),
         concurrency: 3,
     })

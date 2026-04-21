@@ -1,7 +1,10 @@
 import { JobsOptions, Queue } from "bullmq";
 import prisma from "../config/prisma";
 import { getQueueRedisConnection } from "../config/redis";
-import { buildQueueJobOptions } from "./queue.defaults";
+import {
+  buildQueueJobOptions,
+  createResilientQueue,
+} from "./queue.defaults";
 import { getSalesFollowupSchedule } from "../services/salesAgent/followup.service";
 import type { SalesFollowupTrigger } from "../services/salesAgent/types";
 
@@ -23,20 +26,26 @@ const defaultJobOptions: JobsOptions = buildQueueJobOptions({
   },
 });
 
-export const followupQueue = new Queue<FollowupJobData>(FOLLOWUP_QUEUE_NAME, {
-  connection: queueConnection,
-  prefix: "sylph",
-  defaultJobOptions,
-});
+export const followupQueue = createResilientQueue(
+  new Queue<FollowupJobData>(FOLLOWUP_QUEUE_NAME, {
+    connection: queueConnection,
+    prefix: "sylph",
+    defaultJobOptions,
+  }),
+  FOLLOWUP_QUEUE_NAME
+);
 
 export const legacyFollowupQueue =
   LEGACY_FOLLOWUP_QUEUE_NAME === FOLLOWUP_QUEUE_NAME
     ? followupQueue
-    : new Queue<FollowupJobData>(LEGACY_FOLLOWUP_QUEUE_NAME, {
-        connection: queueConnection,
-        prefix: "sylph",
-        defaultJobOptions,
-      });
+    : createResilientQueue(
+        new Queue<FollowupJobData>(LEGACY_FOLLOWUP_QUEUE_NAME, {
+          connection: queueConnection,
+          prefix: "sylph",
+          defaultJobOptions,
+        }),
+        LEGACY_FOLLOWUP_QUEUE_NAME
+      );
 
 export const scheduleFollowups = async (
   leadId: string,
@@ -65,7 +74,7 @@ export const scheduleFollowups = async (
       (await legacyFollowupQueue.getJob(jobId));
 
     if (existingJob) {
-      await existingJob.remove();
+      await existingJob.remove().catch(() => undefined);
     }
 
     await followupQueue.add(
@@ -110,7 +119,7 @@ export const cancelFollowups = async (leadId: string) => {
       const job = (await followupQueue.getJob(jobId)) || (await legacyFollowupQueue.getJob(jobId));
 
       if (job) {
-        await job.remove();
+        await job.remove().catch(() => undefined);
       }
     } catch (err) {
       console.log("Followup removal error", err);

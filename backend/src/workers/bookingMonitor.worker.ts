@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import prisma from "../config/prisma";
 import { getWorkerRedisConnection } from "../config/redis";
+import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
 import { sendAIFollowup } from "../services/aiFollowup.service";
 /*
@@ -13,7 +14,7 @@ export const bookingMonitorWorker =
   process.env.RUN_WORKER === "true"
     ? new Worker(
   "booking-monitor",
-  async () => {
+  withRedisWorkerFailSafe("booking-monitor", async () => {
     try {
       const now = new Date();
 
@@ -126,7 +127,7 @@ Reply YES and we’ll set it up again 👍`,
     } catch (error) {
       console.error("❌ BOOKING MONITOR ERROR:", error);
     }
-  },
+  }),
   {
     connection: getWorkerRedisConnection(),
     concurrency: 1, // 🔥 IMPORTANT (avoid race condition)

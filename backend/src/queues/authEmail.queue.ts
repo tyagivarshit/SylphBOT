@@ -1,7 +1,10 @@
 import crypto from "crypto";
 import { Queue } from "bullmq";
 import { getQueueRedisConnection } from "../config/redis";
-import { buildQueueJobOptions } from "./queue.defaults";
+import {
+  buildQueueJobOptions,
+  createResilientQueue,
+} from "./queue.defaults";
 import {
   queuePasswordResetEmail,
   queueVerificationEmail,
@@ -19,18 +22,21 @@ export type AuthEmailJobData =
       link: string;
     };
 
-export const authEmailQueue = new Queue<AuthEmailJobData>(
-  "authEmail",
-  {
-    connection: getQueueRedisConnection(),
-    prefix: "sylph",
-    defaultJobOptions: buildQueueJobOptions({
-      backoff: {
-        type: "exponential",
-        delay: 15000,
-      },
-    }),
-  }
+export const authEmailQueue = createResilientQueue(
+  new Queue<AuthEmailJobData>(
+    "authEmail",
+    {
+      connection: getQueueRedisConnection(),
+      prefix: "sylph",
+      defaultJobOptions: buildQueueJobOptions({
+        backoff: {
+          type: "exponential",
+          delay: 15000,
+        },
+      }),
+    }
+  ),
+  "authEmail"
 );
 
 const createJobId = (
@@ -84,15 +90,20 @@ export const scheduleVerificationEmail = async (
   link: string
 ) => {
   try {
-    await enqueueVerificationEmail(to, link);
+    const job = await enqueueVerificationEmail(to, link);
+
+    if (job) {
+      return;
+    }
   } catch (error) {
     console.error("[EMAIL_QUEUE] enqueue failed, using direct fallback", {
       type: "verify",
       to,
       error: error instanceof Error ? error.message : "Unknown queue error",
     });
-    queueVerificationEmail(to, link);
   }
+
+  queueVerificationEmail(to, link);
 };
 
 export const schedulePasswordResetEmail = async (
@@ -100,13 +111,18 @@ export const schedulePasswordResetEmail = async (
   link: string
 ) => {
   try {
-    await enqueuePasswordResetEmail(to, link);
+    const job = await enqueuePasswordResetEmail(to, link);
+
+    if (job) {
+      return;
+    }
   } catch (error) {
     console.error("[EMAIL_QUEUE] enqueue failed, using direct fallback", {
       type: "reset",
       to,
       error: error instanceof Error ? error.message : "Unknown queue error",
     });
-    queuePasswordResetEmail(to, link);
   }
+
+  queuePasswordResetEmail(to, link);
 };

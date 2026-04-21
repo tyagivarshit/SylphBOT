@@ -12,6 +12,7 @@ const socket_server_1 = require("../sockets/socket.server");
 const followup_service_1 = require("../services/salesAgent/followup.service");
 const conversionTracker_service_1 = require("../services/salesAgent/conversionTracker.service");
 const followup_queue_1 = require("../queues/followup.queue");
+const queue_defaults_1 = require("../queues/queue.defaults");
 const aiPipelineState_service_1 = require("../services/aiPipelineState.service");
 const logger_1 = __importDefault(require("../utils/logger"));
 const sentry_1 = require("../observability/sentry");
@@ -209,7 +210,7 @@ const sendFollowupMessage = async (request) => {
 };
 const followupQueueNames = Array.from(new Set([followup_queue_1.FOLLOWUP_QUEUE_NAME, followup_queue_1.LEGACY_FOLLOWUP_QUEUE_NAME]));
 if (process.env.RUN_WORKER === "true") {
-    const workers = followupQueueNames.map((queueName) => new bullmq_1.Worker(queueName, async (job) => (0, requestContext_1.runWithRequestContext)({
+    const workers = followupQueueNames.map((queueName) => new bullmq_1.Worker(queueName, (0, queue_defaults_1.withRedisWorkerFailSafe)(queueName, async (job) => (0, requestContext_1.runWithRequestContext)({
         requestId: String(job.id || buildFollowupJobKey(job)),
         source: "worker",
         route: `queue:${job.queueName}`,
@@ -382,7 +383,7 @@ if (process.env.RUN_WORKER === "true") {
             }
             throw error;
         }
-    }), {
+    })), {
         connection: (0, redis_1.getWorkerRedisConnection)(),
         concurrency: FOLLOWUP_WORKER_CONCURRENCY,
     }));

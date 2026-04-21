@@ -18,18 +18,18 @@ const defaultJobOptions = (0, queue_defaults_1.buildQueueJobOptions)({
         delay: 5000,
     },
 });
-exports.followupQueue = new bullmq_1.Queue(exports.FOLLOWUP_QUEUE_NAME, {
+exports.followupQueue = (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.FOLLOWUP_QUEUE_NAME, {
     connection: queueConnection,
     prefix: "sylph",
     defaultJobOptions,
-});
+}), exports.FOLLOWUP_QUEUE_NAME);
 exports.legacyFollowupQueue = exports.LEGACY_FOLLOWUP_QUEUE_NAME === exports.FOLLOWUP_QUEUE_NAME
     ? exports.followupQueue
-    : new bullmq_1.Queue(exports.LEGACY_FOLLOWUP_QUEUE_NAME, {
+    : (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.LEGACY_FOLLOWUP_QUEUE_NAME, {
         connection: queueConnection,
         prefix: "sylph",
         defaultJobOptions,
-    });
+    }), exports.LEGACY_FOLLOWUP_QUEUE_NAME);
 const scheduleFollowups = async (leadId, options) => {
     if (!leadId)
         return;
@@ -47,7 +47,7 @@ const scheduleFollowups = async (leadId, options) => {
         const existingJob = (await exports.followupQueue.getJob(jobId)) ||
             (await exports.legacyFollowupQueue.getJob(jobId));
         if (existingJob) {
-            await existingJob.remove();
+            await existingJob.remove().catch(() => undefined);
         }
         await exports.followupQueue.add("sendFollowup", {
             leadId,
@@ -84,7 +84,7 @@ const cancelFollowups = async (leadId) => {
         try {
             const job = (await exports.followupQueue.getJob(jobId)) || (await exports.legacyFollowupQueue.getJob(jobId));
             if (job) {
-                await job.remove();
+                await job.remove().catch(() => undefined);
             }
         }
         catch (err) {

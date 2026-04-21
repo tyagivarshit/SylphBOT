@@ -40,6 +40,7 @@ exports.bookingMonitorWorker = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = require("../config/redis");
+const queue_defaults_1 = require("../queues/queue.defaults");
 const whatsapp_service_1 = require("../services/whatsapp.service");
 const aiFollowup_service_1 = require("../services/aiFollowup.service");
 /*
@@ -48,7 +49,7 @@ MISSED BOOKING MONITOR (PRODUCTION SAFE)
 =========================================================
 */
 exports.bookingMonitorWorker = process.env.RUN_WORKER === "true"
-    ? new bullmq_1.Worker("booking-monitor", async () => {
+    ? new bullmq_1.Worker("booking-monitor", (0, queue_defaults_1.withRedisWorkerFailSafe)("booking-monitor", async () => {
         try {
             const now = new Date();
             console.log("🧠 Running booking monitor...");
@@ -148,7 +149,7 @@ Reply YES and we’ll set it up again 👍`,
         catch (error) {
             console.error("❌ BOOKING MONITOR ERROR:", error);
         }
-    }, {
+    }), {
         connection: (0, redis_1.getWorkerRedisConnection)(),
         concurrency: 1, // 🔥 IMPORTANT (avoid race condition)
     })

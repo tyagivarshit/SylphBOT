@@ -1,13 +1,14 @@
 import { Worker } from "bullmq";
 import { getWorkerRedisConnection } from "../config/redis";
+import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 
 const worker =
   process.env.RUN_WORKER === "true"
     ? new Worker(
   "example-queue",
-  async (job) => {
+  withRedisWorkerFailSafe("example-queue", async (job: any) => {
     console.log("Processing job:", job.data);
-  },
+  }),
   {
     connection: getWorkerRedisConnection(),
   }

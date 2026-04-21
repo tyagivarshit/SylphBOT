@@ -1,34 +1,96 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import AutomationBuilder from "./AutomationBuilder";
+import { useEffect, useMemo, useState } from "react";
+import AutomationBuilder, {
+  type AutomationBuilderStepInput,
+  type AutomationPayloadStep,
+} from "./AutomationBuilder";
+import LoadingButton from "@/components/ui/LoadingButton";
+import { notify } from "@/lib/toast";
 
-type AutomationStepType = "MESSAGE" | "DELAY" | "CONDITION" | "BOOKING";
-type AutomationPayloadStep = {
-  type: AutomationStepType;
-  config: {
-    message?: string;
-    condition?: string;
-    delay?: number;
-  };
+type AutomationDraft = {
+  id: string;
+  name?: string | null;
+  triggerValue?: string | null;
+  triggerType?: string | null;
+  channel?: string | null;
+  status?: string | null;
+  steps?: AutomationBuilderStepInput[];
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  lastTriggeredAt?: string | null;
 };
 
 type CreateAutomationModalProps = {
   open: boolean;
   onClose: () => void;
+  onSaved?: (automation: AutomationDraft) => void;
+  initialData?: AutomationDraft | null;
   plan?: "BASIC" | "PRO" | "ELITE";
 };
+
+const mapPayloadStepsToFlowSteps = (steps: AutomationPayloadStep[]) =>
+  steps.map((step, index) => ({
+    stepKey: `STEP_${index + 1}`,
+    stepType: step.type,
+    message: step.config.message || null,
+    condition: step.config.condition || null,
+    nextStep: index < steps.length - 1 ? `STEP_${index + 2}` : null,
+    metadata: step.config,
+  }));
 
 export default function CreateAutomationModal({
   open,
   onClose,
+  onSaved,
+  initialData,
   plan = "BASIC",
 }: CreateAutomationModalProps) {
+  const isEdit = Boolean(initialData?.id);
+
   const [name, setName] = useState("");
   const [trigger, setTrigger] = useState("");
   const [steps, setSteps] = useState<AutomationPayloadStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const modalTitle = isEdit ? "Edit Automation" : "Create Automation";
+
+  const stepChecklist = useMemo(
+    () => [
+      {
+        id: "01",
+        title: "Name the automation",
+        description: "Give the flow a clear internal name for your team.",
+      },
+      {
+        id: "02",
+        title: "Choose the trigger",
+        description: "Set the keyword that starts this flow.",
+      },
+      {
+        id: "03",
+        title: "Build the reply path",
+        description: "Arrange message, delay, condition, and booking steps in order.",
+      },
+    ],
+    []
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setName("");
+      setTrigger("");
+      setSteps([]);
+      setError("");
+      setLoading(false);
+      return;
+    }
+
+    setName(initialData?.name || "");
+    setTrigger(initialData?.triggerValue || "");
+    setError("");
+  }, [initialData, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -43,16 +105,43 @@ export default function CreateAutomationModal({
 
   if (!open) return null;
 
-  /* ---------------- CREATE ---------------- */
-
-  const handleCreate = async () => {
+  const handleSubmit = async () => {
     if (!name.trim() || !trigger.trim()) {
-      setError("All fields are required");
+      const message = "Automation name and trigger keyword are required.";
+      setError(message);
       return;
     }
 
     if (!steps.length) {
-      setError("Add at least 1 step");
+      const message = "Add at least one step before saving.";
+      setError(message);
+      return;
+    }
+
+    const invalidTemplateStep = steps.find(
+      (step) =>
+        step.type === "MESSAGE" &&
+        step.config.replyMode !== "AI" &&
+        !step.config.message?.trim()
+    );
+
+    if (invalidTemplateStep) {
+      const message = "Add a template reply to every template message step.";
+      setError(message);
+      return;
+    }
+
+    const invalidAIStep = steps.find(
+      (step) =>
+        step.type === "MESSAGE" &&
+        step.config.replyMode === "AI" &&
+        !step.config.aiPrompt?.trim() &&
+        !step.config.message?.trim()
+    );
+
+    if (invalidAIStep) {
+      const message = "Add an AI instruction or fallback reply to every AI step.";
+      setError(message);
       return;
     }
 
@@ -60,166 +149,215 @@ export default function CreateAutomationModal({
       setLoading(true);
       setError("");
 
-      const res = await fetch("/api/automation/flows", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          triggerValue: trigger.toLowerCase().trim(),
-          steps,
-        }),
-      });
+      const payload = {
+        name: name.trim(),
+        triggerValue: trigger.toLowerCase().trim(),
+        triggerType: initialData?.triggerType || "KEYWORD",
+        channel: initialData?.channel || "INSTAGRAM",
+        status: initialData?.status || "ACTIVE",
+        steps,
+      };
 
-      const data = await res.json();
+      const response = await fetch(
+        isEdit ? `/api/automation/flows/${initialData?.id}` : "/api/automation/flows",
+        {
+          method: isEdit ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
 
-      if (!res.ok) {
-        throw new Error(data?.message || "Failed to create");
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message ||
+            (isEdit ? "Failed to update automation" : "Failed to create automation")
+        );
       }
 
-      setName("");
-      setTrigger("");
-      setSteps([]);
+      const savedAutomation: AutomationDraft =
+        data?.flow ||
+        ({
+          id: initialData?.id || data?.id || crypto.randomUUID(),
+          ...payload,
+          createdAt: initialData?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          lastTriggeredAt: initialData?.lastTriggeredAt || null,
+          steps: mapPayloadStepsToFlowSteps(steps),
+        } satisfies AutomationDraft);
 
+      onSaved?.(savedAutomation);
+      notify.success(isEdit ? "Automation updated" : "Automation created");
       onClose();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create automation"
-      );
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : isEdit
+            ? "Failed to update automation"
+            : "Failed to create automation";
+
+      setError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  /* ---------------- UI ---------------- */
-
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm">
-      
-      {/* 🔥 MODAL */}
       <div className="flex h-[100dvh] items-center justify-center p-2 sm:p-4">
-        <div className="flex h-[min(92dvh,760px)] w-full max-w-5xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.26)] sm:h-[min(90dvh,800px)]">
-        
-        {/* HEADER */}
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-600">
-              Automation Builder
-            </p>
-            <h2 className="mt-1 text-[0px] font-semibold text-slate-900 before:text-xl before:content-['Create_Automation'] sm:before:text-2xl">
-          Create Automation 🚀
-            </h2>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-              Build a clean flow that stays inside the screen on desktop and mobile.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-            aria-label="Close create automation modal"
-          >
-            X
-          </button>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-3 bg-slate-50 p-3 lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-4 lg:p-4">
-        <div className="grid shrink-0 gap-2.5 sm:grid-cols-2 lg:max-h-full lg:grid-cols-1 lg:gap-3 lg:overflow-y-auto lg:pr-1">
-
-        {/* ERROR */}
-        {error && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 sm:col-span-2 lg:col-span-1">
-            {error}
-          </div>
-        )}
-
-        {/* NAME */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
-          <label className="text-sm font-semibold text-slate-700">
-            Automation Name
-          </label>
-
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Enter automation name"
-            className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
-          />
-        </div>
-
-        {/* TRIGGER */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
-          <label className="text-sm font-semibold text-slate-700">
-            Trigger Keyword
-          </label>
-
-          <input
-            value={trigger}
-            onChange={(e) => setTrigger(e.target.value)}
-            placeholder="Example: hi / price / start"
-            className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
-          />
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 px-4 py-3 text-white shadow-sm sm:col-span-2 lg:col-span-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
-            Plan
-          </p>
-          <p className="mt-2 text-base font-semibold">{plan}</p>
-          <p className="mt-1 text-xs leading-5 text-slate-300">
-            Keep the keyword short and let the first message do the heavy lifting.
-          </p>
-        </div>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
-          <div className="shrink-0 border-b border-slate-200 px-4 py-2.5 sm:px-5">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
-                Flow Editor
+        <div className="flex h-[min(92dvh,820px)] w-full max-w-6xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.26)] sm:h-[min(90dvh,840px)]">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-600">
+                Automation Builder
               </p>
-              <p className="mt-1 text-lg font-semibold text-slate-900">
-                Automation Flow
+              <h2 className="mt-1 text-xl font-semibold text-slate-900 sm:text-2xl">
+                {modalTitle}
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                Create a flow your team can understand at a glance, with clear AI
+                credit visibility and full control over each step.
               </p>
             </div>
 
-            <p className="text-sm text-slate-500">
-              Arrange each step in the order users should experience it.
-            </p>
-          </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+              aria-label={isEdit ? "Close edit automation modal" : "Close create automation modal"}
+            >
+              X
+            </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2.5 sm:px-4 sm:py-3">
-            <AutomationBuilder
-              plan={plan}
-              onChange={(data) => setSteps(data)}
-            />
+          <div className="flex min-h-0 flex-1 flex-col gap-3 bg-slate-50 p-3 xl:grid xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-4 xl:p-4">
+            <div className="grid shrink-0 gap-3 sm:grid-cols-2 xl:max-h-full xl:grid-cols-1 xl:overflow-y-auto xl:pr-1">
+              {error ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 sm:col-span-2 xl:col-span-1">
+                  {error}
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2 xl:col-span-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Workflow
+                </p>
+                <div className="mt-3 space-y-3">
+                  {stepChecklist.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-[18px] border border-slate-200 bg-slate-50 px-3 py-3"
+                    >
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-700">
+                        {item.id}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">
+                        {item.title}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        {item.description}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
+                <label className="text-sm font-semibold text-slate-700">
+                  1. Automation Name
+                </label>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Example: Instagram pricing follow-up"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
+                <label className="text-sm font-semibold text-slate-700">
+                  2. Trigger Keyword
+                </label>
+                <input
+                  value={trigger}
+                  onChange={(event) => setTrigger(event.target.value)}
+                  placeholder="Example: hi / price / start"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                />
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  Keep the keyword short and specific so customers can trigger the
+                  right flow naturally.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 px-4 py-3 text-white shadow-sm sm:col-span-2 xl:col-span-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                  Plan
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <p className="text-base font-semibold">{plan}</p>
+                  {isEdit ? (
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                      Editing existing flow
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-300">
+                  Message steps are available on every plan. Delay, condition, and
+                  booking unlock as the plan expands.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+              <div className="shrink-0 border-b border-slate-200 px-4 py-3 sm:px-5">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                      Step 3
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">
+                      Flow Editor
+                    </p>
+                  </div>
+
+                  <p className="text-sm text-slate-500">
+                    Arrange each step in the order your user should experience it.
+                  </p>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2.5 sm:px-4 sm:py-3">
+                <AutomationBuilder
+                  key={initialData?.id || "create-automation-builder"}
+                  plan={plan}
+                  initialSteps={initialData?.steps}
+                  onChange={(data) => setSteps(data)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-4">
+            <button
+              onClick={onClose}
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            >
+              Cancel
+            </button>
+
+            <LoadingButton
+              onClick={handleSubmit}
+              loading={loading}
+              loadingLabel="Saving..."
+              className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isEdit ? "Save Changes" : "Create Automation"}
+            </LoadingButton>
           </div>
         </div>
-
-        {/* ACTIONS */}
-        </div>
-
-        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-4">
-          
-          <button
-            onClick={onClose}
-            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-          >
-            Cancel
-          </button>
-
-          <button
-            onClick={handleCreate}
-            disabled={loading}
-            className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? "Creating..." : "Create Automation"}
-          </button>
-
-        </div>
-      </div>
       </div>
     </div>
   );

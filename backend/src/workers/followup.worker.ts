@@ -13,6 +13,7 @@ import {
   FOLLOWUP_QUEUE_NAME,
   LEGACY_FOLLOWUP_QUEUE_NAME,
 } from "../queues/followup.queue";
+import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import {
   getReplyDeliveryState,
   markReplySaved,
@@ -357,7 +358,7 @@ if (process.env.RUN_WORKER === "true") {
   const workers = followupQueueNames.map((queueName) =>
     new Worker<FollowupJobData>(
       queueName,
-      async (job) =>
+      withRedisWorkerFailSafe(queueName, async (job) =>
         runWithRequestContext(
           {
             requestId: String(job.id || buildFollowupJobKey(job)),
@@ -593,7 +594,7 @@ if (process.env.RUN_WORKER === "true") {
               throw error;
             }
           }
-        ),
+        )),
       {
         connection: getWorkerRedisConnection(),
         concurrency: FOLLOWUP_WORKER_CONCURRENCY,

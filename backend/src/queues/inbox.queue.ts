@@ -3,12 +3,13 @@ import * as Sentry from "@sentry/node";
 import { getWorkerRedisConnection } from "../config/redis";
 import { enqueueAIBatch } from "./ai.queue";
 import logger from "../utils/logger";
+import { withRedisWorkerFailSafe } from "./queue.defaults";
 
 const worker =
   process.env.RUN_WORKER === "true"
     ? new Worker(
         "inboxQueue",
-        async (job) => {
+        withRedisWorkerFailSafe("inboxQueue", async (job: any) => {
           const {
             businessId,
             leadId,
@@ -71,7 +72,7 @@ const worker =
             }
             throw error;
           }
-        },
+        }),
         {
           connection: getWorkerRedisConnection(),
         }

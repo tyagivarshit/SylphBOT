@@ -1,5 +1,6 @@
 import { Worker } from "bullmq";
 import { getWorkerRedisConnection } from "../config/redis";
+import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import {
   sendPasswordResetEmail,
   sendVerificationEmail,
@@ -9,22 +10,23 @@ import type { AuthEmailJobData } from "../queues/authEmail.queue";
 const authEmailWorker =
   process.env.RUN_WORKER === "true"
     ? new Worker<AuthEmailJobData>(
-  "authEmail",
-  async (job) => {
-    console.log("📥 JOB RECEIVED", job.name, job.data);
-    if (job.data.type === "verify") {
-      await sendVerificationEmail(job.data.to, job.data.link);
-      return;
-    }
+        "authEmail",
+        withRedisWorkerFailSafe("authEmail", async (job) => {
+          console.log("[EMAIL_QUEUE] received", job.name, job.data);
 
-    await sendPasswordResetEmail(job.data.to, job.data.link);
-  },
-  {
-    connection: getWorkerRedisConnection(),
-    prefix: "sylph",
-    concurrency: 2,
-  }
-)
+          if (job.data.type === "verify") {
+            await sendVerificationEmail(job.data.to, job.data.link);
+            return;
+          }
+
+          await sendPasswordResetEmail(job.data.to, job.data.link);
+        }),
+        {
+          connection: getWorkerRedisConnection(),
+          prefix: "sylph",
+          concurrency: 2,
+        }
+      )
     : null;
 
 if (authEmailWorker) {

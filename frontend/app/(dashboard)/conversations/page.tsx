@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import ChatSidebar from "@/components/conversations/ChatSidebar";
 import ChatWindow from "@/components/conversations/ChatWindow";
 import { buildApiUrl, getAbsoluteApiOrigin } from "@/lib/url";
+import { SkeletonCard } from "@/components/ui/feedback";
 
 export interface Lead {
   id: string;
@@ -22,8 +23,14 @@ export interface Lead {
 export interface Message {
   id: string;
   content: string;
-  sender: "USER" | "AI";
+  sender: "USER" | "AI" | "AGENT";
   createdAt: string;
+  cta?: string | null;
+  metadata?: {
+    cta?: string | null;
+    clientMessageId?: string | null;
+    [key: string]: unknown;
+  } | null;
 }
 
 type SeenConversationState = Record<
@@ -94,6 +101,79 @@ function getLatestTimestamp(currentValue?: string, nextValue?: string) {
   return nextTime > currentTime ? nextValue : currentValue;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeMessage(message: unknown): Message {
+  const safeMessage = isRecord(message) ? message : {};
+  const metadata = isRecord(safeMessage.metadata)
+    ? (safeMessage.metadata as Message["metadata"])
+    : null;
+  const senderValue = String(safeMessage.sender || "USER")
+    .trim()
+    .toUpperCase();
+  const sender =
+    senderValue === "AI" || senderValue === "AGENT" ? senderValue : "USER";
+  const cta =
+    typeof safeMessage.cta === "string"
+      ? safeMessage.cta
+      : typeof metadata?.cta === "string"
+        ? metadata.cta
+        : null;
+
+  return {
+    id: String(safeMessage.id || ""),
+    content: typeof safeMessage.content === "string" ? safeMessage.content : "",
+    sender,
+    createdAt:
+      typeof safeMessage.createdAt === "string"
+        ? safeMessage.createdAt
+        : new Date().toISOString(),
+    metadata,
+    cta,
+  };
+}
+
+function getClientMessageId(message?: Pick<Message, "metadata"> | null) {
+  return typeof message?.metadata?.clientMessageId === "string" &&
+    message.metadata.clientMessageId.trim()
+    ? message.metadata.clientMessageId
+    : null;
+}
+
+function upsertMessage(messages: Message[], nextMessage: unknown) {
+  const normalizedMessage = normalizeMessage(nextMessage);
+  const nextClientMessageId = getClientMessageId(normalizedMessage);
+
+  const existingIndex = messages.findIndex((message) => {
+    const currentClientMessageId = getClientMessageId(message);
+
+    return (
+      message.id === normalizedMessage.id ||
+      Boolean(
+        nextClientMessageId &&
+          currentClientMessageId &&
+          nextClientMessageId === currentClientMessageId
+      )
+    );
+  });
+
+  if (existingIndex === -1) {
+    return [...messages, normalizedMessage];
+  }
+
+  const nextMessages = [...messages];
+  nextMessages[existingIndex] = {
+    ...nextMessages[existingIndex],
+    ...normalizedMessage,
+    metadata: normalizedMessage.metadata || nextMessages[existingIndex].metadata,
+    cta: normalizedMessage.cta ?? nextMessages[existingIndex].cta,
+  };
+
+  return nextMessages;
+}
+
 function applySeenState(
   nextLeads: Lead[],
   seenState: SeenConversationState
@@ -138,7 +218,11 @@ function ConversationsPageContent() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isMobileView, setIsMobileView] = useState(false);
+  const [isMobileView, setIsMobileView] = useState<boolean | null>(null);
+  const [leadsLoading, setLeadsLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
   const leadIdFromQuery = searchParams.get("leadId");
   const seenStateRef = useRef<SeenConversationState>({});
   const selectedLeadRef = useRef<Lead | null>(null);
@@ -223,7 +307,6 @@ function ConversationsPageContent() {
     selectedLeadRef.current = selectedLead;
   }, [selectedLead]);
 
-  /* ================= MOBILE DETECT ================= */
   useEffect(() => {
     const check = () => {
       setIsMobileView(window.innerWidth < 768);
@@ -235,54 +318,71 @@ function ConversationsPageContent() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  /* ================= FETCH CONVERSATIONS ================= */
-  useEffect(() => {
-    const fetchLeads = async () => {
-      try {
-        const res = await fetch(buildApiUrl("/conversations"), {
-          credentials: "include",
-        });
+  const fetchLeads = useCallback(async () => {
+    try {
+      setLeadsLoading(true);
+      setLeadsError(null);
 
-        const data = await res.json();
+      const res = await fetch(buildApiUrl("/conversations"), {
+        credentials: "include",
+      });
 
-        console.log("🔥 conversations API:", data);
+      const data = await res.json().catch(() => null);
 
-        const persistedSeenState = readSeenConversationState();
-        const nextLeads = applySeenState(
-          data.conversations || [],
-          persistedSeenState
+      if (!res.ok) {
+        throw new Error("We couldn't load your conversations.");
+      }
+
+      const persistedSeenState = readSeenConversationState();
+      const nextLeads = applySeenState(
+        data?.conversations || [],
+        persistedSeenState
+      );
+
+      seenStateRef.current = persistedSeenState;
+      setLeads(nextLeads);
+
+      if (leadIdFromQuery) {
+        const matchedLead = nextLeads.find(
+          (lead: Lead) => lead.id === leadIdFromQuery
         );
 
-        seenStateRef.current = persistedSeenState;
-        setLeads(nextLeads);
-
-        if (leadIdFromQuery) {
-          const matchedLead = nextLeads.find(
-            (lead: Lead) => lead.id === leadIdFromQuery
-          );
-
-          if (matchedLead) {
-            setSelectedLead(matchedLead);
-          }
+        if (matchedLead) {
+          setSelectedLead(matchedLead);
+          return;
         }
-      } catch (err) {
-        console.error(err);
-        setLeads([]);
       }
-    };
 
-    fetchLeads();
-  }, [leadIdFromQuery]);
+      if (isMobileView === false && !selectedLeadRef.current && nextLeads.length > 0) {
+        setSelectedLead(nextLeads[0]);
+      }
+    } catch (fetchError) {
+      console.error(fetchError);
+      setLeads([]);
+      setLeadsError(
+        fetchError instanceof Error
+          ? fetchError.message
+          : "We couldn't load your conversations."
+      );
+    } finally {
+      setLeadsLoading(false);
+    }
+  }, [isMobileView, leadIdFromQuery]);
 
-  /* ================= FETCH MESSAGES ================= */
   useEffect(() => {
-    const activeLeadId = selectedLead?.id;
-    const activeRawUnreadCount = selectedLead?.rawUnreadCount || 0;
-    const activeLastMessageTime = selectedLead?.lastMessageTime;
-    if (!activeLeadId) return;
+    void fetchLeads();
+  }, [fetchLeads]);
 
-    const fetchMessages = async () => {
+  const fetchMessages = useCallback(
+    async (lead: Lead) => {
       try {
+        setMessagesLoading(true);
+        setMessagesError(null);
+
+        const activeLeadId = lead.id;
+        const activeRawUnreadCount = lead.rawUnreadCount || 0;
+        const activeLastMessageTime = lead.lastMessageTime;
+
         const res = await fetch(
           buildApiUrl(`/conversations/${activeLeadId}/messages`),
           {
@@ -290,11 +390,15 @@ function ConversationsPageContent() {
           }
         );
 
-        const data = await res.json();
+        const data = await res.json().catch(() => null);
 
-        console.log("🔥 messages API:", data);
+        if (!res.ok) {
+          throw new Error("We couldn't load this conversation yet.");
+        }
 
-        const fetchedMessages = data.messages || [];
+        const fetchedMessages = (data?.messages || []).map((message: unknown) =>
+          normalizeMessage(message)
+        );
         const latestSeenAt =
           fetchedMessages[fetchedMessages.length - 1]?.createdAt ||
           activeLastMessageTime;
@@ -304,24 +408,38 @@ function ConversationsPageContent() {
           latestSeenAt,
           seenUnreadCount: activeRawUnreadCount,
         });
-      } catch (err) {
-        console.error(err);
+      } catch (fetchError) {
+        console.error(fetchError);
         setMessages([]);
+        setMessagesError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "We couldn't load this conversation yet."
+        );
+      } finally {
+        setMessagesLoading(false);
       }
-    };
+    },
+    [markLeadAsSeen]
+  );
 
-    fetchMessages();
-  }, [
-    markLeadAsSeen,
-    selectedLead?.id,
-    selectedLead?.lastMessageTime,
-    selectedLead?.rawUnreadCount,
-  ]);
+  useEffect(() => {
+    if (!selectedLead?.id) {
+      setMessages([]);
+      setMessagesError(null);
+      setMessagesLoading(false);
+      return;
+    }
 
-  /* ================= SOCKET ================= */
+    void fetchMessages(selectedLead);
+  }, [fetchMessages, selectedLead]);
+
   useEffect(() => {
     const activeLeadId = selectedLead?.id;
-    if (!activeLeadId) return;
+
+    if (!activeLeadId) {
+      return;
+    }
 
     const socket = io(getAbsoluteApiOrigin(), {
       transports: ["websocket"],
@@ -330,7 +448,8 @@ function ConversationsPageContent() {
 
     socket.emit("join_conversation", activeLeadId);
 
-    socket.on("new_message", (msg: Message) => {
+    socket.on("new_message", (rawMessage: Message) => {
+      const msg = normalizeMessage(rawMessage);
       const unreadDelta = msg.sender === "USER" ? 1 : 0;
       const currentLead = selectedLeadRef.current;
       const nextRawUnreadCount =
@@ -338,7 +457,7 @@ function ConversationsPageContent() {
           ? (currentLead.rawUnreadCount || 0) + unreadDelta
           : unreadDelta;
 
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => upsertMessage(prev, msg));
 
       setLeads((prev) =>
         prev.map((lead) =>
@@ -378,7 +497,6 @@ function ConversationsPageContent() {
     };
   }, [persistSeenState, selectedLead?.id]);
 
-  /* ================= MOBILE BACK ================= */
   const handleBack = () => {
     setSelectedLead(null);
   };
@@ -386,11 +504,13 @@ function ConversationsPageContent() {
   return (
     <div className="min-h-[32rem] min-w-0 lg:h-[calc(100dvh-10.5rem)]">
       <div className="brand-section-shell flex h-full min-h-[32rem] w-full overflow-hidden rounded-[30px] p-0">
-
         <ChatSidebar
           leads={leads}
           selectedLead={selectedLead}
           setSelectedLead={setSelectedLead}
+          loading={leadsLoading}
+          error={leadsError}
+          onRetry={() => void fetchLeads()}
         />
 
         <ChatWindow
@@ -398,8 +518,14 @@ function ConversationsPageContent() {
           messages={messages}
           setMessages={setMessages}
           onBack={isMobileView ? handleBack : undefined}
+          loading={messagesLoading}
+          error={messagesError}
+          onRetry={
+            selectedLead
+              ? () => void fetchMessages(selectedLead)
+              : undefined
+          }
         />
-
       </div>
     </div>
   );
@@ -407,8 +533,12 @@ function ConversationsPageContent() {
 
 function ConversationsPageFallback() {
   return (
-    <div className="flex min-h-[32rem] items-center justify-center">
-      <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+    <div className="space-y-4">
+      <SkeletonCard className="h-24" />
+      <div className="grid gap-4 md:grid-cols-[340px_minmax(0,1fr)]">
+        <SkeletonCard className="h-[36rem]" />
+        <SkeletonCard className="h-[36rem]" />
+      </div>
     </div>
   );
 }

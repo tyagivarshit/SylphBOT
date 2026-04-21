@@ -11,7 +11,8 @@ export default function CommentAutomationPage() {
         </p>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
           Convert public comments into structured private follow-ups without
-          cluttering the customer journey.
+          cluttering the customer journey. AI DM replies use credits and
+          template DM replies are free.
         </p>
       </div>
 

@@ -2,12 +2,20 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import LeadsChart from "@/components/charts/LeadsCharts";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowRight, Sparkles } from "lucide-react";
 import axios from "axios";
-import { buildApiUrl } from "@/lib/url";
+import LeadsChart from "@/components/charts/LeadsCharts";
 import UsageOverview from "@/components/dashboard/UsageOverview";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
+import { buildApiUrl } from "@/lib/url";
+import { useUpgrade } from "@/app/(dashboard)/layout";
+import {
+  EmptyState,
+  RetryState,
+  SkeletonCard,
+  TrustSignals,
+} from "@/components/ui/feedback";
 
 type DashboardValue = number | string;
 
@@ -49,53 +57,69 @@ type ConversationStats = {
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
+  const { openUpgrade } = useUpgrade();
   const router = useRouter();
 
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [convo, setConvo] = useState<ConversationStats | null>(null);
   const [limited, setLimited] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!loading && !user) router.replace("/auth/login");
+    if (!loading && !user) {
+      router.replace("/auth/login");
+    }
   }, [loading, user, router]);
 
-  useEffect(() => {
-    if (!user) return;
+  const loadDashboard = useCallback(async () => {
+    if (!user) {
+      return;
+    }
 
-    const fetchData = async () => {
-      try {
-        const [statsRes, convoRes] = await Promise.all([
-          axios.get(buildApiUrl("/dashboard/stats"), {
-            withCredentials: true,
-          }),
-          axios.get(buildApiUrl("/dashboard/active-conversations"), {
-            withCredentials: true,
-          }),
-        ]);
+    try {
+      setPageLoading(true);
+      setError("");
 
-        setStats(statsRes.data.data);
-        setConvo(convoRes.data.data);
+      const [statsRes, convoRes] = await Promise.all([
+        axios.get(buildApiUrl("/dashboard/stats"), {
+          withCredentials: true,
+        }),
+        axios.get(buildApiUrl("/dashboard/active-conversations"), {
+          withCredentials: true,
+        }),
+      ]);
 
-        if (statsRes.data.limited || convoRes.data.limited) {
-          setLimited(true);
-        }
-      } catch (err) {
-        console.error("Dashboard error", err);
-      }
-    };
-
-    void fetchData();
+      setStats(statsRes.data.data);
+      setConvo(convoRes.data.data);
+      setLimited(Boolean(statsRes.data.limited || convoRes.data.limited));
+    } catch (dashboardError) {
+      console.error("Dashboard error", dashboardError);
+      setError("We couldn't load your dashboard right now.");
+    } finally {
+      setPageLoading(false);
+    }
   }, [user]);
 
-  if (loading || !stats) {
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  if (loading || pageLoading) {
+    return <DashboardSkeleton />;
+  }
+
+  if (error) {
     return (
-      <div className="brand-panel overflow-hidden rounded-[26px] p-6 text-sm text-slate-500">
-        Loading dashboard...
-      </div>
+      <RetryState
+        title="Dashboard unavailable"
+        description={error}
+        onRetry={() => void loadDashboard()}
+      />
     );
   }
 
-  if (!user) {
+  if (!user || !stats) {
     return null;
   }
 
@@ -104,22 +128,83 @@ export default function DashboardPage() {
   return (
     <div className="relative min-w-0 space-y-6">
       {limited ? (
-        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-[32px] bg-white/80 backdrop-blur">
-          <div className="brand-panel-strong rounded-[28px] p-6 text-center">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Upgrade Required
-            </h2>
-            <p className="mt-2 text-sm text-gray-500">
-              You have reached your plan limit.
-            </p>
-            <button className="mt-4 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:shadow-lg">
-              Upgrade Plan
-            </button>
+        <div className="brand-section-shell rounded-[28px] p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">
+                Usage limit reached
+              </p>
+              <h2 className="mt-2 text-xl font-semibold text-slate-950">
+                You've used all your AI replies for today
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Buy extra credits to keep responding now, or upgrade for a larger allowance before the next wave of conversations lands.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() =>
+                  openUpgrade({
+                    variant: "usage_limit",
+                    remainingCredits: 0,
+                    title: "You've used all your AI replies for today",
+                    description:
+                      "Buy extra credits to keep responding now, or upgrade for a larger allowance before the next wave of conversations lands.",
+                  })
+                }
+                className="brand-button-primary"
+              >
+                <Sparkles size={15} />
+                Upgrade Options
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push("/billing")}
+                className="brand-button-secondary"
+              >
+                Buy Credits
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
 
       <OnboardingFlow />
+
+      <div className="brand-section-shell rounded-[28px] p-5 md:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+              Growth workflow
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold text-slate-950">
+              Smooth, visible, and ready to convert
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              Connect Instagram, launch automation, and keep AI replies running without guessing where usage or conversations stand.
+            </p>
+          </div>
+
+          <TrustSignals />
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <span className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
+            Connect Instagram
+          </span>
+          <ArrowRight size={14} className="text-slate-400" />
+          <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
+            Create automation
+          </span>
+          <ArrowRight size={14} className="text-slate-400" />
+          <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+            Start replies
+          </span>
+        </div>
+      </div>
 
       <UsageOverview />
 
@@ -128,13 +213,13 @@ export default function DashboardPage() {
           <MiniCard title="Leads" value={stats.totalLeads} />
           <MiniCard title="Today" value={stats.leadsToday} />
           <MiniCard title="Month" value={stats.leadsThisMonth} />
-          <MiniCard title="Msgs" value={stats.messagesToday} />
+          <MiniCard title="Messages" value={stats.messagesToday} />
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 backdrop-blur-xl">
-          <p className="text-xs font-medium text-gray-500">AI Usage</p>
+          <p className="text-xs font-medium text-gray-500">AI reply usage</p>
           <h2 className="break-words text-base font-bold text-gray-900">
-            {stats.aiCallsUsed} / {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
+            {stats.aiCallsUsed} / {stats.isUnlimited ? "Unlimited" : stats.aiCallsLimit}
           </h2>
           <p className="mt-2 text-xs text-gray-500">
             Remaining today: {stats.aiCallsRemaining ?? 0}
@@ -152,7 +237,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-3 gap-2.5">
             <MiniCard title="Active" value={convo.active} />
             <MiniCard title="Waiting" value={convo.waitingReplies} />
-            <MiniCard title="Done" value={convo.resolved} />
+            <MiniCard title="Resolved" value={convo.resolved} />
           </div>
         ) : null}
 
@@ -163,19 +248,26 @@ export default function DashboardPage() {
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 backdrop-blur-xl">
           <h2 className="mb-3 text-sm font-semibold text-gray-900">Activity</h2>
 
-          {stats.recentActivity.map((item) => (
-            <div
-              key={item.id}
-              className="min-w-0 border-b border-blue-100 py-2 last:border-none"
-            >
-              <p className="break-words text-xs leading-5 text-gray-900">
-                {item.text}
-              </p>
-              <span className="text-[10px] text-gray-500">
-                {new Date(item.time).toLocaleTimeString()}
-              </span>
-            </div>
-          ))}
+          {stats.recentActivity.length ? (
+            stats.recentActivity.map((item) => (
+              <div
+                key={item.id}
+                className="min-w-0 border-b border-blue-100 py-2 last:border-none"
+              >
+                <p className="break-words text-xs leading-5 text-gray-900">
+                  {item.text}
+                </p>
+                <span className="text-[10px] text-gray-500">
+                  {new Date(item.time).toLocaleTimeString()}
+                </span>
+              </div>
+            ))
+          ) : (
+            <EmptyState
+              title="No recent activity yet"
+              description="Live replies, automation triggers, and new leads will appear here as your workspace starts converting."
+            />
+          )}
         </div>
       </div>
 
@@ -191,14 +283,14 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2 rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
-            <h2 className="mb-4 font-semibold text-gray-900">Leads Growth</h2>
+            <h2 className="mb-4 font-semibold text-gray-900">Leads growth</h2>
             <LeadsChart data={stats.chartData} />
           </div>
 
           <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
-            <p className="text-sm font-medium text-gray-500">AI Usage</p>
+            <p className="text-sm font-medium text-gray-500">AI reply usage</p>
             <h2 className="text-2xl font-bold text-gray-900">
-              {stats.aiCallsUsed} / {stats.isUnlimited ? "∞" : stats.aiCallsLimit}
+              {stats.aiCallsUsed} / {stats.isUnlimited ? "Unlimited" : stats.aiCallsLimit}
             </h2>
             <p className="mt-2 text-xs text-gray-500">
               Remaining today: {stats.aiCallsRemaining ?? 0}
@@ -212,8 +304,8 @@ export default function DashboardPage() {
             </div>
 
             {stats.warning ? (
-              <p className="mt-3 inline-block rounded-md bg-red-100 px-2 py-1 text-xs text-red-600">
-                {stats.warningMessage || "You have used 80% of your daily AI limit."}
+              <p className="mt-3 inline-block rounded-md bg-amber-100 px-2 py-1 text-xs text-amber-700">
+                {stats.warningMessage || "You're close to today's AI reply limit"}
               </p>
             ) : null}
           </div>
@@ -228,21 +320,28 @@ export default function DashboardPage() {
         ) : null}
 
         <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
-          <h2 className="mb-4 font-semibold text-gray-900">Recent Activity</h2>
+          <h2 className="mb-4 font-semibold text-gray-900">Recent activity</h2>
 
-          {stats.recentActivity.map((item) => (
-            <div
-              key={item.id}
-              className="flex min-w-0 justify-between gap-4 border-b border-blue-100 py-3 last:border-none"
-            >
-              <p className="min-w-0 break-words text-sm text-gray-900">
-                {item.text}
-              </p>
-              <span className="shrink-0 text-sm text-gray-500">
-                {new Date(item.time).toLocaleTimeString()}
-              </span>
-            </div>
-          ))}
+          {stats.recentActivity.length ? (
+            stats.recentActivity.map((item) => (
+              <div
+                key={item.id}
+                className="flex min-w-0 justify-between gap-4 border-b border-blue-100 py-3 last:border-none"
+              >
+                <p className="min-w-0 break-words text-sm text-gray-900">
+                  {item.text}
+                </p>
+                <span className="shrink-0 text-sm text-gray-500">
+                  {new Date(item.time).toLocaleTimeString()}
+                </span>
+              </div>
+            ))
+          ) : (
+            <EmptyState
+              title="No recent activity yet"
+              description="Replies, lead captures, and automation wins will start showing here as soon as your workspace goes live."
+            />
+          )}
         </div>
       </div>
     </div>
@@ -267,6 +366,25 @@ function MiniCard({ title, value }: { title: string; value: DashboardValue }) {
       <h2 className="break-words text-sm font-semibold text-gray-900">
         {value}
       </h2>
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      <SkeletonCard className="h-32" />
+      <SkeletonCard className="h-48" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <SkeletonCard key={index} className="h-32" />
+        ))}
+      </div>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <SkeletonCard className="h-80 lg:col-span-2" />
+        <SkeletonCard className="h-80" />
+      </div>
+      <SkeletonCard className="h-72" />
     </div>
   );
 }

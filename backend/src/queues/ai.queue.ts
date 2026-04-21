@@ -2,7 +2,10 @@ import crypto from "crypto";
 import { Job, JobsOptions, Queue } from "bullmq";
 import { env } from "../config/env";
 import { getQueueRedisConnection } from "../config/redis";
-import { buildQueueJobOptions } from "./queue.defaults";
+import {
+  buildQueueJobOptions,
+  createResilientQueue,
+} from "./queue.defaults";
 import logger from "../utils/logger";
 import { getRequestContext } from "../observability/requestContext";
 
@@ -61,16 +64,19 @@ const globalForAIQueue = globalThis as typeof globalThis & {
 
 export const aiQueue =
   globalForAIQueue.__sylphAIHighQueue ||
-  new Queue<AIJobPayload>(AI_QUEUE_NAME, {
-    connection: queueConnection,
-    prefix: env.AI_QUEUE_PREFIX,
-    defaultJobOptions,
-    streams: {
-      events: {
-        maxLen: 1000,
+  createResilientQueue(
+    new Queue<AIJobPayload>(AI_QUEUE_NAME, {
+      connection: queueConnection,
+      prefix: env.AI_QUEUE_PREFIX,
+      defaultJobOptions,
+      streams: {
+        events: {
+          maxLen: 1000,
+        },
       },
-    },
-  });
+    }),
+    AI_QUEUE_NAME
+  );
 
 if (!globalForAIQueue.__sylphAIHighQueue) {
   globalForAIQueue.__sylphAIHighQueue = aiQueue;
@@ -80,16 +86,19 @@ export const legacyAIQueue =
   LEGACY_AI_QUEUE_NAME === AI_QUEUE_NAME
     ? aiQueue
     : globalForAIQueue.__sylphAILegacyQueue ||
-      new Queue<AIJobPayload>(LEGACY_AI_QUEUE_NAME, {
-        connection: queueConnection,
-        prefix: env.AI_QUEUE_PREFIX,
-        defaultJobOptions,
-        streams: {
-          events: {
-            maxLen: 1000,
+      createResilientQueue(
+        new Queue<AIJobPayload>(LEGACY_AI_QUEUE_NAME, {
+          connection: queueConnection,
+          prefix: env.AI_QUEUE_PREFIX,
+          defaultJobOptions,
+          streams: {
+            events: {
+              maxLen: 1000,
+            },
           },
-        },
-      });
+        }),
+        LEGACY_AI_QUEUE_NAME
+      );
 
 if (
   LEGACY_AI_QUEUE_NAME !== AI_QUEUE_NAME &&

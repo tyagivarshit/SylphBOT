@@ -5,9 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markConversationRead = exports.deleteMessage = exports.sendManualMessage = exports.getMessages = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const socket_server_1 = require("../sockets/socket.server");
-const followup_queue_1 = require("../queues/followup.queue");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
+const socket_server_1 = require("../sockets/socket.server");
+const sendMessage_service_1 = require("../services/sendMessage.service");
 /* ======================================
 GET MESSAGES
 ====================================== */
@@ -26,7 +26,7 @@ const getMessages = async (req, res) => {
         });
         return res.json({
             success: true,
-            messages,
+            messages: messages.map((message) => (0, sendMessage_service_1.formatConversationMessage)(message)),
         });
     }
     catch (error) {
@@ -43,7 +43,12 @@ SEND MESSAGE
 ====================================== */
 const sendManualMessage = async (req, res) => {
     try {
-        const { leadId, content } = req.body;
+        const leadId = typeof req.body?.leadId === "string" ? req.body.leadId : "";
+        const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";
+        const clientMessageId = typeof req.body?.clientMessageId === "string" &&
+            req.body.clientMessageId.trim()
+            ? req.body.clientMessageId.trim()
+            : null;
         const businessId = req.user?.businessId;
         if (!leadId || !content) {
             return res.status(400).json({
@@ -67,34 +72,38 @@ const sendManualMessage = async (req, res) => {
                 requestId: req.requestId,
             });
         }
-        const lead = await prisma_1.default.lead.findUnique({
-            where: { id: leadId },
-            include: { client: true },
+        const lead = await prisma_1.default.lead.findFirst({
+            where: {
+                id: leadId,
+                ...(businessId ? { businessId } : {}),
+            },
+            include: {
+                client: {
+                    select: {
+                        accessToken: true,
+                        phoneNumberId: true,
+                        platform: true,
+                    },
+                },
+            },
         });
-        if (!lead || !lead.client) {
+        if (!lead) {
             return res.status(404).json({
                 success: false,
                 message: "Lead not found",
             });
         }
-        const message = await prisma_1.default.message.create({
-            data: {
-                leadId: lead.id,
-                content,
-                sender: "AGENT",
-            },
+        const result = await (0, sendMessage_service_1.persistAndDispatchLeadMessage)({
+            lead,
+            content,
+            sender: "AGENT",
+            clientMessageId,
         });
-        const io = (0, socket_server_1.getIO)();
-        io.to(`lead_${lead.id}`).emit("new_message", message);
-        await prisma_1.default.lead.update({
-            where: { id: lead.id },
-            data: {
-                lastMessageAt: new Date(),
-                unreadCount: 0,
-            },
+        return res.json({
+            success: result.delivery?.delivered ?? true,
+            message: result.message,
+            delivery: result.delivery,
         });
-        await (0, followup_queue_1.cancelFollowups)(lead.id);
-        return res.json({ success: true, message });
     }
     catch (error) {
         console.error("Send message error:", error);

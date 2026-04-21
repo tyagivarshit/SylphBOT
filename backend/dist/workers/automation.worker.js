@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const bullmq_1 = require("bullmq");
 const redis_1 = require("../config/redis");
+const queue_defaults_1 = require("../queues/queue.defaults");
 const commentAutomation_service_1 = require("../services/commentAutomation.service");
 const logger_1 = __importDefault(require("../utils/logger"));
 const sentry_1 = require("../observability/sentry");
@@ -12,7 +13,7 @@ const requestContext_1 = require("../observability/requestContext");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 (0, sentry_1.initializeSentry)();
 if (process.env.RUN_WORKER === "true") {
-    const worker = new bullmq_1.Worker("automation", async (job) => (0, requestContext_1.runWithRequestContext)({
+    const worker = new bullmq_1.Worker("automation", (0, queue_defaults_1.withRedisWorkerFailSafe)("automation", async (job) => (0, requestContext_1.runWithRequestContext)({
         requestId: String(job.id || `${job.queueName}:${job.name}`),
         source: "worker",
         route: `queue:${job.queueName}`,
@@ -50,7 +51,7 @@ if (process.env.RUN_WORKER === "true") {
             businessId: job.data?.businessId || null,
             jobName: job.name,
         }, "Automation worker job completed");
-    }), {
+    })), {
         connection: (0, redis_1.getWorkerRedisConnection)(),
         concurrency: 20,
     });

@@ -25,7 +25,7 @@ const defaultJobOptions = {
 const queueConnection = (0, redis_1.getQueueRedisConnection)();
 const globalForAIQueue = globalThis;
 exports.aiQueue = globalForAIQueue.__sylphAIHighQueue ||
-    new bullmq_1.Queue(exports.AI_QUEUE_NAME, {
+    (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.AI_QUEUE_NAME, {
         connection: queueConnection,
         prefix: env_1.env.AI_QUEUE_PREFIX,
         defaultJobOptions,
@@ -34,14 +34,14 @@ exports.aiQueue = globalForAIQueue.__sylphAIHighQueue ||
                 maxLen: 1000,
             },
         },
-    });
+    }), exports.AI_QUEUE_NAME);
 if (!globalForAIQueue.__sylphAIHighQueue) {
     globalForAIQueue.__sylphAIHighQueue = exports.aiQueue;
 }
 exports.legacyAIQueue = exports.LEGACY_AI_QUEUE_NAME === exports.AI_QUEUE_NAME
     ? exports.aiQueue
     : globalForAIQueue.__sylphAILegacyQueue ||
-        new bullmq_1.Queue(exports.LEGACY_AI_QUEUE_NAME, {
+        (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.LEGACY_AI_QUEUE_NAME, {
             connection: queueConnection,
             prefix: env_1.env.AI_QUEUE_PREFIX,
             defaultJobOptions,
@@ -50,7 +50,7 @@ exports.legacyAIQueue = exports.LEGACY_AI_QUEUE_NAME === exports.AI_QUEUE_NAME
                     maxLen: 1000,
                 },
             },
-        });
+        }), exports.LEGACY_AI_QUEUE_NAME);
 if (exports.LEGACY_AI_QUEUE_NAME !== exports.AI_QUEUE_NAME &&
     !globalForAIQueue.__sylphAILegacyQueue) {
     globalForAIQueue.__sylphAILegacyQueue = exports.legacyAIQueue;

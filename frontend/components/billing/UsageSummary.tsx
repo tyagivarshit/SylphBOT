@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
-import { AlertTriangle, BarChart3, Bot, MessageSquare, Users } from "lucide-react";
+import { Bot, MessageSquare, Sparkles, Users } from "lucide-react";
+import { getUsagePresentation } from "@/lib/usagePresentation";
+import { TrustSignals } from "@/components/ui/feedback";
 
 type UsageSummaryData = {
   plan: string;
@@ -58,26 +61,34 @@ const toPercent = (used: number, limit: number) => {
 
 const getAccent = (percent: number) => {
   if (percent >= 90) {
+    return "from-rose-500 to-orange-500";
+  }
+
+  if (percent >= 80) {
     return "from-amber-500 to-orange-500";
   }
 
-  if (percent >= 75) {
+  if (percent >= 50) {
     return "from-blue-500 to-cyan-500";
   }
 
   return "from-emerald-500 to-teal-500";
 };
 
-const getMessage = (percent: number) => {
-  if (percent >= 85) {
-    return "Daily AI usage is close to the plan limit.";
+const getMessage = (percent: number, label: string) => {
+  if (label === "AI replies remaining today") {
+    return "Available before extra credits are needed.";
+  }
+
+  if (percent >= 90) {
+    return "You are very close to the limit.";
   }
 
   if (percent >= 50) {
-    return "Smart AI usage included for steady growth.";
+    return "Usage is healthy and visible.";
   }
 
-  return "Plenty of room to keep momentum high.";
+  return "You still have room to grow.";
 };
 
 export default function UsageSummary({
@@ -91,21 +102,24 @@ export default function UsageSummary({
     return null;
   }
 
+  const usageState = getUsagePresentation(summary);
+
   const meters: MeterItem[] = [
     {
-      label: "Remaining AI today",
-      helper: `${summary.ai.usedToday} / ${summary.ai.limit} used`,
+      label: "AI replies used today",
+      helper: "Credits consumed from today's AI allowance",
       icon: <Bot size={16} />,
-      used: summary.ai.usedToday,
-      limit: summary.ai.limit,
-      value: `${summary.ai.remaining ?? 0}`,
+      used: usageState.aiUsedToday,
+      limit: usageState.aiLimit,
+      value: `${usageState.aiUsedToday} / ${usageState.aiLimit}`,
     },
     {
-      label: "AI this month",
-      helper: "Monthly AI runway",
-      icon: <BarChart3 size={16} />,
-      used: summary.usage.ai.monthlyUsed,
-      limit: summary.usage.ai.monthlyLimit,
+      label: "AI replies remaining today",
+      helper: "Available before extra credits are needed",
+      icon: <Sparkles size={16} />,
+      used: usageState.aiUsedToday,
+      limit: usageState.aiLimit,
+      value: `${usageState.aiRemaining}`,
     },
     {
       label: "Contacts",
@@ -123,43 +137,53 @@ export default function UsageSummary({
     },
   ];
 
-  const aiDailyPercent = toPercent(summary.ai.usedToday, summary.ai.limit);
-  const showWarning = Boolean(summary.warning || summary.usage.ai.warning);
-  const planLabel = summary.planLabel || summary.plan;
-
   return (
     <div className="brand-section-shell space-y-6 rounded-[28px] p-5 md:p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-1">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
           <h3 className="text-base font-semibold text-gray-900">
             Usage overview
           </h3>
           <p className="text-sm text-gray-500">
-            Remaining AI calls today: {summary.ai.remaining ?? 0}. Add-on credits are used once the daily plan limit is exhausted.
+            AI replies use credits. Template replies stay free.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
-            Plan: {planLabel}
-          </span>
-          {summary.trialActive && (
-            <span className="rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700">
-              Trial: {summary.daysLeft} day{summary.daysLeft === 1 ? "" : "s"} left
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
+              AI used today: {usageState.aiUsedToday}
             </span>
-          )}
-          <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
-            AI add-ons: {summary.addonCredits ?? summary.addons.aiCredits}
-          </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-700">
+              Remaining: {usageState.aiRemaining}
+            </span>
+            <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
+              Extra credits: {usageState.addonCredits}
+            </span>
+            <span className="rounded-full bg-indigo-50 px-3 py-1.5 font-semibold text-indigo-700">
+              Plan: {usageState.planLabel}
+            </span>
+            {summary.trialActive ? (
+              <span className="rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700">
+                Trial: {summary.daysLeft} day{summary.daysLeft === 1 ? "" : "s"} left
+              </span>
+            ) : null}
+          </div>
+
+          <TrustSignals />
         </div>
       </div>
 
-      {showWarning ? (
-        <div className="flex items-start gap-3 rounded-[22px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            {summary.warningMessage || "You have used 80% of your daily AI limit."}
-          </span>
+      {usageState.notice ? (
+        <div
+          className={`rounded-[22px] border px-4 py-4 ${
+            usageState.notice.tone === "danger"
+              ? "border-rose-200 bg-rose-50 text-rose-900"
+              : "border-amber-200 bg-amber-50 text-amber-900"
+          }`}
+        >
+          <p className="text-sm font-semibold">{usageState.notice.title}</p>
+          <p className="mt-1 text-sm leading-6">{usageState.notice.message}</p>
         </div>
       ) : null}
 
@@ -193,7 +217,7 @@ export default function UsageSummary({
               </div>
 
               <p className="mt-3 text-xs font-medium text-slate-600">
-                {unlimited ? "High-volume plan active." : getMessage(percent)}
+                {unlimited ? "High-volume plan active." : getMessage(percent, item.label)}
               </p>
             </div>
           );
@@ -203,22 +227,26 @@ export default function UsageSummary({
       <div className="rounded-[22px] border border-blue-200 bg-[linear-gradient(135deg,rgba(8,18,35,0.92),rgba(30,94,255,0.9),rgba(77,163,255,0.88))] p-5 text-white shadow-lg">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-semibold">
-              {summary.trialActive
-                ? `${summary.daysLeft} day${summary.daysLeft === 1 ? "" : "s"} left in your trial`
-                : "Need more? Buy AI credits anytime"}
-            </p>
+            <p className="text-sm font-semibold">Stay ready for the next wave of replies</p>
             <p className="mt-1 text-sm text-blue-50/90">
-              AI usage today: {summary.ai.usedToday} / {summary.ai.limit}
+              Top up credits for immediate capacity, or jump to a higher plan for more included AI replies.
             </p>
           </div>
 
-          <a
-            href={ctaHref}
-            className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:shadow-lg"
-          >
-            {aiDailyPercent >= 80 || !summary.trialActive ? "Buy extra AI calls" : "See billing"}
-          </a>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Link
+              href={ctaHref}
+              className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:shadow-lg"
+            >
+              Buy Credits
+            </Link>
+            <Link
+              href="/billing#plans"
+              className="inline-flex items-center justify-center rounded-xl border border-white/30 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15"
+            >
+              Upgrade Plan
+            </Link>
+          </div>
         </div>
       </div>
     </div>

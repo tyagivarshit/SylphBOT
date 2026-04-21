@@ -11,7 +11,8 @@ export default function AutomationPage() {
         </p>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
           Launch lead-capture flows, monitor live status, and keep your
-          Instagram automation stack organized in one workspace.
+          Instagram automation stack organized in one workspace. AI reply steps
+          use credits, while template replies stay free.
         </p>
       </div>
 

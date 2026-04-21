@@ -56,6 +56,7 @@ import {
   getWorkerCount,
   resolveWorkerConcurrency,
 } from "./workerManager";
+import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 
 initializeSentry();
 
@@ -925,7 +926,7 @@ const workers =
     ? getAIQueueNames().map((queueName) => {
         const worker = new Worker<AIJobPayload>(
           queueName,
-          async (job) => processAIJob(job),
+          withRedisWorkerFailSafe(queueName, async (job) => processAIJob(job)),
           {
             connection: getWorkerRedisConnection(),
             prefix: env.AI_QUEUE_PREFIX,

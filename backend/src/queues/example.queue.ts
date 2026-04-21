@@ -3,24 +3,31 @@ import {
   getQueueRedisConnection,
   getWorkerRedisConnection,
 } from "../config/redis";
-import { buildQueueJobOptions } from "./queue.defaults";
+import {
+  buildQueueJobOptions,
+  createResilientQueue,
+  withRedisWorkerFailSafe,
+} from "./queue.defaults";
 import {
   getWorkerCount,
   resolveWorkerConcurrency,
 } from "../workers/workerManager";
 
-export const exampleQueue = new Queue("example-queue", {
-  connection: getQueueRedisConnection(),
-  defaultJobOptions: buildQueueJobOptions(),
-});
+export const exampleQueue = createResilientQueue(
+  new Queue("example-queue", {
+    connection: getQueueRedisConnection(),
+    defaultJobOptions: buildQueueJobOptions(),
+  }),
+  "example-queue"
+);
 
 export const exampleWorker =
   process.env.RUN_WORKER === "true"
     ? new Worker(
         "example-queue",
-        async (job) => {
+        withRedisWorkerFailSafe("example-queue", async (job: any) => {
           console.log("Processing job:", job.data);
-        },
+        }),
         {
           connection: getWorkerRedisConnection(),
           concurrency: resolveWorkerConcurrency(

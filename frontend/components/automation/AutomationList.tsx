@@ -1,26 +1,111 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import AutomationFlowCard from "./AutomationFlowCard";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import AutomationFlowCard, {
+  type AutomationFlowCardData,
+  type AutomationFlowCardStep,
+} from "./AutomationFlowCard";
+import ConfirmationModal from "./ConfirmationModal";
 import CreateAutomationModal from "./CreateAutomationModal";
 import { usePlan } from "@/hooks/usePlan";
+import { useDebounce } from "@/hooks/useDebounce";
+import { notify } from "@/lib/toast";
+import {
+  EmptyState,
+  RetryState,
+  SkeletonCard,
+  TrustSignals,
+} from "@/components/ui/feedback";
 
-type AutomationStep = {
-  stepKey?: string;
-  stepType?: string;
+type AutomationStepType = "MESSAGE" | "DELAY" | "CONDITION" | "BOOKING";
+
+type StepMetadata = {
   message?: string | null;
   condition?: string | null;
+  delay?: number;
+  replyMode?: "AI" | "TEMPLATE";
+  aiPrompt?: string | null;
+  [key: string]: unknown;
 };
 
-type AutomationFlow = {
-  id: string;
-  name?: string | null;
-  triggerValue?: string | null;
-  triggerType?: string | null;
-  channel?: string | null;
-  status?: string | null;
+type AutomationUpdateStep = {
+  type: AutomationStepType;
+  config: {
+    message?: string;
+    condition?: string;
+    delay?: number;
+    replyMode?: "AI" | "TEMPLATE";
+    aiPrompt?: string;
+  };
+};
+
+type AutomationStep = AutomationFlowCardStep & {
+  nextStep?: string | null;
+  metadata?: StepMetadata | null;
+};
+
+type AutomationFlow = AutomationFlowCardData & {
   steps?: AutomationStep[];
 };
+
+const sanitizeText = (value?: string | null) =>
+  value?.replace("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹", "").trim() || "";
+
+const normalizeStepType = (
+  value?: string | null
+): AutomationStepType | null => {
+  switch ((value || "").toUpperCase()) {
+    case "MESSAGE":
+    case "DELAY":
+    case "CONDITION":
+    case "BOOKING":
+      return value!.toUpperCase() as AutomationStepType;
+    default:
+      return null;
+  }
+};
+
+const mapStepToPayload = (step: AutomationStep): AutomationUpdateStep | null => {
+  const type = normalizeStepType(step.stepType);
+
+  if (!type) {
+    return null;
+  }
+
+  const metadata = step.metadata || {};
+  const replyMode =
+    metadata.replyMode === "AI" || Boolean(sanitizeText(metadata.aiPrompt))
+      ? "AI"
+      : "TEMPLATE";
+
+  return {
+    type,
+    config: {
+      ...(sanitizeText(metadata.message ?? step.message)
+        ? { message: sanitizeText(metadata.message ?? step.message) }
+        : {}),
+      ...(sanitizeText(metadata.condition ?? step.condition)
+        ? { condition: sanitizeText(metadata.condition ?? step.condition) }
+        : {}),
+      ...(typeof metadata.delay === "number" && metadata.delay > 0
+        ? { delay: metadata.delay }
+        : {}),
+      ...(type === "MESSAGE" ? { replyMode } : {}),
+      ...(sanitizeText(metadata.aiPrompt)
+        ? { aiPrompt: sanitizeText(metadata.aiPrompt) }
+        : {}),
+    },
+  };
+};
+
+const sortAutomations = (items: AutomationFlow[]) =>
+  [...items].sort((left, right) => {
+    const leftTime = new Date(left.updatedAt || left.createdAt || 0).getTime();
+    const rightTime = new Date(right.updatedAt || right.createdAt || 0).getTime();
+
+    return rightTime - leftTime;
+  });
 
 export default function AutomationList() {
   const { plan } = usePlan();
@@ -28,122 +113,351 @@ export default function AutomationList() {
   const [automations, setAutomations] = useState<AutomationFlow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [activeAutomation, setActiveAutomation] = useState<AutomationFlow | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<AutomationFlow | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const modalPlan =
     plan === "ELITE" ? "ELITE" : plan === "PRO" ? "PRO" : "BASIC";
+  const debouncedSearch = useDebounce(search, 180);
 
-  /* ---------------- FETCH ---------------- */
+  const flowStats = useMemo(() => {
+    const activeCount = automations.filter(
+      (flow) => (flow.status || "ACTIVE").toUpperCase() === "ACTIVE"
+    ).length;
+
+    return {
+      total: automations.length,
+      active: activeCount,
+      paused: automations.length - activeCount,
+    };
+  }, [automations]);
+
+  const filteredAutomations = useMemo(() => {
+    const query = debouncedSearch.trim().toLowerCase();
+
+    if (!query) {
+      return automations;
+    }
+
+    return automations.filter((automation) => {
+      const stepSummary = (automation.steps || [])
+        .map((step) => `${step.stepType || ""} ${step.message || ""} ${step.condition || ""}`)
+        .join(" ")
+        .toLowerCase();
+
+      return [
+        automation.name,
+        automation.triggerValue,
+        automation.channel,
+        automation.status,
+        stepSummary,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [automations, debouncedSearch]);
 
   const fetchAutomations = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
-      const res = await fetch("/api/automation/flows");
+      const response = await fetch("/api/automation/flows", {
+        cache: "no-store",
+      });
 
-      if (!res.ok) throw new Error();
+      const data = await response.json().catch(() => null);
 
-      const data = await res.json();
+      if (!response.ok) {
+        throw new Error(data?.message || "We couldn't load your automations.");
+      }
 
-      setAutomations(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-      setError("Failed to load automations");
+      const items = Array.isArray(data)
+        ? (data as AutomationFlow[])
+        : Array.isArray(data?.flows)
+          ? (data.flows as AutomationFlow[])
+          : [];
+
+      setAutomations(sortAutomations(items));
+    } catch (fetchError) {
+      console.error(fetchError);
+      setError(
+        fetchError instanceof Error
+          ? fetchError.message
+          : "We couldn't load your automations."
+      );
     } finally {
       setLoading(false);
     }
   }, []);
 
-  /* ---------------- INIT ---------------- */
-
   useEffect(() => {
-    fetchAutomations();
+    void fetchAutomations();
   }, [fetchAutomations]);
 
-  /* ---------------- UI ---------------- */
+  const handleSaved = (savedAutomation: AutomationFlow) => {
+    setAutomations((current) => {
+      const exists = current.some((automation) => automation.id === savedAutomation.id);
+
+      if (!exists) {
+        return sortAutomations([savedAutomation, ...current]);
+      }
+
+      return sortAutomations(
+        current.map((automation) =>
+          automation.id === savedAutomation.id
+            ? {
+                ...automation,
+                ...savedAutomation,
+                steps: savedAutomation.steps || automation.steps,
+              }
+            : automation
+        )
+      );
+    });
+  };
+
+  const buildUpdatePayload = (automation: AutomationFlow, status?: string) => {
+    const steps = (automation.steps || [])
+      .map(mapStepToPayload)
+      .filter((step): step is AutomationUpdateStep => step !== null);
+
+    if (!automation.name?.trim() || !automation.triggerValue?.trim() || !steps.length) {
+      return null;
+    }
+
+    return {
+      name: automation.name.trim(),
+      triggerValue: automation.triggerValue.trim().toLowerCase(),
+      triggerType: automation.triggerType || "KEYWORD",
+      channel: automation.channel || "INSTAGRAM",
+      status: status || automation.status || "ACTIVE",
+      steps,
+    };
+  };
+
+  const handleToggle = async (automation: AutomationFlow) => {
+    const nextStatus =
+      (automation.status || "ACTIVE").toUpperCase() === "ACTIVE"
+        ? "INACTIVE"
+        : "ACTIVE";
+    const payload = buildUpdatePayload(automation, nextStatus);
+
+    if (!payload) {
+      notify.error("This automation is missing data required to update it.");
+      return;
+    }
+
+    try {
+      setTogglingId(automation.id);
+
+      const response = await fetch(`/api/automation/flows/${automation.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message ||
+            (nextStatus === "ACTIVE"
+              ? "We couldn't activate this automation."
+              : "We couldn't pause this automation.")
+        );
+      }
+
+      handleSaved(
+        (data?.flow as AutomationFlow | undefined) || {
+          ...automation,
+          status: nextStatus,
+          updatedAt: new Date().toISOString(),
+        }
+      );
+
+      notify.success(
+        nextStatus === "ACTIVE" ? "Automation activated" : "Automation paused"
+      );
+    } catch (toggleError) {
+      notify.error(
+        toggleError instanceof Error
+          ? toggleError.message
+          : "We couldn't update this automation."
+      );
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) {
+      return;
+    }
+
+    try {
+      setDeletingId(pendingDelete.id);
+
+      const response = await fetch(`/api/automation/flows/${pendingDelete.id}`, {
+        method: "DELETE",
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.message || "We couldn't delete this automation.");
+      }
+
+      setAutomations((current) =>
+        current.filter((automation) => automation.id !== pendingDelete.id)
+      );
+      notify.success("Automation deleted");
+      setPendingDelete(null);
+    } catch (deleteError) {
+      notify.error(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "We couldn't delete this automation."
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200/70 pb-4">
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold text-gray-800">Automation flows</h2>
+          <p className="max-w-2xl text-sm text-slate-500">
+            Build reply paths your team can trust, with visible AI usage, cleaner handoffs, and conversion-focused follow-up.
+          </p>
+          <TrustSignals />
+        </div>
 
-      {/* 🔥 HEADER */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/70 pb-4">
-        <h2 className="text-lg font-semibold text-gray-800">
-          Active flows
-        </h2>
-
-        <button
-          onClick={() => setOpen(true)}
-          className="brand-button-primary"
-        >
-          Create Automation 🚀
-        </button>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full bg-slate-900 px-3 py-1.5 font-semibold text-white">
+            {flowStats.total} total
+          </span>
+          <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
+            {flowStats.active} active
+          </span>
+          <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-600">
+            {flowStats.paused} paused
+          </span>
+          <button
+            onClick={() => {
+              setActiveAutomation(null);
+              setOpen(true);
+            }}
+            className="brand-button-primary"
+          >
+            Create automation
+          </button>
+        </div>
       </div>
 
-      {/* 🔥 LOADING SKELETON */}
-      {loading && (
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-28 rounded-[24px] border border-slate-200 bg-white/80 animate-pulse shadow-sm"
+      <div className="rounded-[22px] border border-slate-200/80 bg-white/84 p-4 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-950">
+              Quick launch path
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              Connect Instagram -> create automation -> start replies.
+            </p>
+          </div>
+
+          <div className="relative w-full max-w-sm">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search automations"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-400"
             />
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <SkeletonCard key={index} className="h-56" />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* 🔥 ERROR STATE */}
-      {error && (
-        <div className="flex items-center justify-between rounded-[22px] border border-red-200 bg-red-50 p-3 text-sm text-red-500">
-          <span>{error}</span>
-          <button
-            onClick={fetchAutomations}
-            className="text-xs font-medium underline"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {!loading && error ? (
+        <RetryState
+          title="Automation list unavailable"
+          description={error}
+          onRetry={() => void fetchAutomations()}
+        />
+      ) : null}
 
-      {/* 🔥 EMPTY STATE */}
-      {!loading && automations.length === 0 && (
-        <div className="brand-empty-state rounded-[24px] p-10 text-center">
-          
-          <p className="text-sm font-semibold text-gray-900">
-            No automations yet 🚀
-          </p>
+      {!loading && !error && automations.length === 0 ? (
+        <EmptyState
+          eyebrow="Automation"
+          title="No automations yet"
+          description="Create your first automation to turn keywords into guided conversations automatically."
+          actionLabel="Create your first automation"
+          onAction={() => {
+            setActiveAutomation(null);
+            setOpen(true);
+          }}
+        />
+      ) : null}
 
-          <p className="text-xs text-gray-500 mt-1">
-            Turn messages into leads automatically
-          </p>
+      {!loading && !error && automations.length > 0 && filteredAutomations.length === 0 ? (
+        <EmptyState
+          title="No automations match this search"
+          description="Try a trigger keyword, channel, or automation name to find the flow you want faster."
+        />
+      ) : null}
 
-          <button
-            onClick={() => setOpen(true)}
-            className="brand-button-primary mt-4"
-          >
-            Create your first automation
-          </button>
-        </div>
-      )}
-
-      {/* 🔥 GRID */}
-      {!loading && automations.length > 0 && (
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {automations.map((a) => (
+      {!loading && !error && filteredAutomations.length > 0 ? (
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {filteredAutomations.map((automation) => (
             <AutomationFlowCard
-              key={a.id}
-              automation={a}
+              key={automation.id}
+              automation={automation}
+              isToggling={togglingId === automation.id}
+              isDeleting={deletingId === automation.id}
+              onEdit={(selected) => {
+                setActiveAutomation(selected);
+                setOpen(true);
+              }}
+              onToggle={(selected) => void handleToggle(selected)}
+              onDelete={(selected) => setPendingDelete(selected)}
             />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* 🔥 MODAL */}
       <CreateAutomationModal
         open={open}
         plan={modalPlan}
+        initialData={activeAutomation}
+        onSaved={handleSaved}
         onClose={() => {
           setOpen(false);
-          fetchAutomations();
+          setActiveAutomation(null);
         }}
+      />
+
+      <ConfirmationModal
+        open={Boolean(pendingDelete)}
+        title="Delete automation?"
+        description="This will permanently remove the automation from your workspace and stop future replies from this flow."
+        confirmLabel="Delete automation"
+        confirmTone="danger"
+        loading={deletingId === pendingDelete?.id}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => void handleConfirmDelete()}
       />
     </div>
   );

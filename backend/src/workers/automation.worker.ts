@@ -1,5 +1,6 @@
 import { Worker } from "bullmq";
 import { getWorkerRedisConnection } from "../config/redis";
+import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import { handleCommentAutomation } from "../services/commentAutomation.service";
 import logger from "../utils/logger";
 import {
@@ -17,7 +18,7 @@ initializeSentry();
 if (process.env.RUN_WORKER === "true") {
   const worker = new Worker(
     "automation",
-    async (job) =>
+    withRedisWorkerFailSafe("automation", async (job: any) =>
       runWithRequestContext(
         {
           requestId: String(job.id || `${job.queueName}:${job.name}`),
@@ -74,7 +75,7 @@ if (process.env.RUN_WORKER === "true") {
             "Automation worker job completed"
           );
         }
-      ),
+      )),
     {
       connection: getWorkerRedisConnection(),
       concurrency: 20,

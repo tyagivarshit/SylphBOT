@@ -45,7 +45,7 @@ export default function RootLayout({
           <Toaster
             position="top-right"
             toastOptions={{
-              duration: 3000,
+              duration: 3600,
               style: {
                 background: "rgba(255,255,255,0.94)",
                 color: "#0f1d34",
@@ -57,14 +57,24 @@ export default function RootLayout({
                 backdropFilter: "blur(16px)",
               },
               success: {
+                style: {
+                  background: "rgba(236,253,245,0.96)",
+                  color: "#166534",
+                  border: "1px solid rgba(110,231,183,0.9)",
+                },
                 iconTheme: {
-                  primary: "#1E5EFF",
-                  secondary: "#fff",
+                  primary: "#16a34a",
+                  secondary: "#f0fdf4",
                 },
               },
               error: {
+                style: {
+                  background: "rgba(254,242,242,0.96)",
+                  color: "#991b1b",
+                  border: "1px solid rgba(252,165,165,0.92)",
+                },
                 iconTheme: {
-                  primary: "#ef4444",
+                  primary: "#dc2626",
                   secondary: "#fff",
                 },
               },

@@ -9,6 +9,7 @@ import { useSearchParams } from "next/navigation";
 import DemoChatPreview from "./DemoChatPreview";
 import TrialBanner from "./TrialBanner";
 import UpgradeCtaBanner from "./UpgradeCtaBanner";
+import { TrustSignals } from "@/components/ui/feedback";
 import {
   getOnboardingSnapshot,
   type OnboardingSnapshot,
@@ -208,14 +209,30 @@ export default function OnboardingFlow() {
               <p className="mt-2 max-w-2xl text-sm text-slate-600">
                 {stepCopy.body}
               </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
+                  Connect Instagram
+                </span>
+                <span className="text-slate-400">→</span>
+                <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
+                  Create automation
+                </span>
+                <span className="text-slate-400">→</span>
+                <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                  Start replies
+                </span>
+              </div>
             </div>
 
-            <button
-              onClick={() => setIsOpen(true)}
-              className="brand-button-primary shrink-0"
-            >
-              Open onboarding
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={() => setIsOpen(true)}
+                className="brand-button-primary shrink-0"
+              >
+                Open onboarding
+              </button>
+              <TrustSignals />
+            </div>
           </div>
 
           <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-100">

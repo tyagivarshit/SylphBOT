@@ -6,10 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.userActionLimiter = exports.securityLimiter = exports.globalLimiter = exports.aiLimiter = exports.authLimiter = void 0;
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const rate_limit_redis_1 = __importDefault(require("rate-limit-redis"));
-const redis_1 = __importDefault(require("../config/redis"));
+const redis_1 = require("../config/redis");
+const redisSafety_1 = require("../redis/redisSafety");
 const isProd = process.env.NODE_ENV === "production";
 const createStore = (prefix) => new rate_limit_redis_1.default({
-    sendCommand: (...args) => redis_1.default.call(...args),
+    sendCommand: (...args) => (0, redis_1.getSharedRedisConnection)().call(...args),
     prefix,
 });
 const getIP = (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
@@ -31,6 +32,7 @@ const handler = (_req, res) => res.status(429).json({
     code: "RATE_LIMIT",
     message: "Too many requests. Please try again later.",
 });
+const shouldSkipRedisRateLimit = () => (0, redisSafety_1.isRedisCircuitOpen)() || !(0, redis_1.isRedisHealthy)();
 exports.authLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
     max: 5,
@@ -39,6 +41,8 @@ exports.authLimiter = (0, express_rate_limit_1.default)({
     legacyHeaders: false,
     store: createStore("auth"),
     skipSuccessfulRequests: true,
+    skip: shouldSkipRedisRateLimit,
+    passOnStoreError: true,
     handler,
 });
 exports.aiLimiter = (0, express_rate_limit_1.default)({
@@ -48,6 +52,8 @@ exports.aiLimiter = (0, express_rate_limit_1.default)({
     standardHeaders: true,
     legacyHeaders: false,
     store: createStore("ai"),
+    skip: shouldSkipRedisRateLimit,
+    passOnStoreError: true,
     handler,
 });
 exports.globalLimiter = (0, express_rate_limit_1.default)({
@@ -57,6 +63,8 @@ exports.globalLimiter = (0, express_rate_limit_1.default)({
     standardHeaders: true,
     legacyHeaders: false,
     store: createStore("global"),
+    skip: shouldSkipRedisRateLimit,
+    passOnStoreError: true,
     handler,
 });
 exports.securityLimiter = (0, express_rate_limit_1.default)({
@@ -66,6 +74,8 @@ exports.securityLimiter = (0, express_rate_limit_1.default)({
     standardHeaders: true,
     legacyHeaders: false,
     store: createStore("security"),
+    skip: shouldSkipRedisRateLimit,
+    passOnStoreError: true,
     handler,
 });
 exports.userActionLimiter = (0, express_rate_limit_1.default)({
@@ -75,5 +85,7 @@ exports.userActionLimiter = (0, express_rate_limit_1.default)({
     standardHeaders: true,
     legacyHeaders: false,
     store: createStore("user-actions"),
+    skip: shouldSkipRedisRateLimit,
+    passOnStoreError: true,
     handler,
 });

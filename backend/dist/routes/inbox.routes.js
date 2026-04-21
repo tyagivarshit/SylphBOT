@@ -34,16 +34,14 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const bullmq_1 = require("bullmq");
-const ai_queue_1 = require("../queues/ai.queue");
 const Sentry = __importStar(require("@sentry/node"));
 const redis_1 = require("../config/redis");
+const ai_queue_1 = require("../queues/ai.queue");
+const queue_defaults_1 = require("../queues/queue.defaults");
 const worker = process.env.RUN_WORKER === "true"
-    ? new bullmq_1.Worker("inboxQueue", async (job) => {
+    ? new bullmq_1.Worker("inboxQueue", (0, queue_defaults_1.withRedisWorkerFailSafe)("inboxQueue", async (job) => {
         const { businessId, leadId, message, plan } = job.data;
         try {
-            /*
-            🤖 AI
-            ================================================= */
             await (0, ai_queue_1.enqueueAIBatch)([
                 {
                     businessId,
@@ -52,22 +50,19 @@ const worker = process.env.RUN_WORKER === "true"
                     plan,
                 },
             ]);
-            /* =================================================
-            💬 SAVE + REALTIME (USING YOUR SERVICE 🔥)
-            ================================================= */
         }
         catch (error) {
             if (error instanceof Error) {
-                console.error("❌ Worker failed:", error.message);
+                console.error("Worker failed:", error.message);
                 Sentry.captureException(error);
             }
             else {
-                console.error("❌ Worker failed:", error);
+                console.error("Worker failed:", error);
             }
             throw error;
         }
-    }, {
-        connection: (0, redis_1.getWorkerRedisConnection)()
+    }), {
+        connection: (0, redis_1.getWorkerRedisConnection)(),
     })
     : null;
 exports.default = worker;

@@ -1,5 +1,13 @@
-import { buildApiUrl } from "@/lib/url";
+import axios, {
+  AxiosHeaders,
+  type AxiosError,
+  type AxiosRequestConfig,
+  type AxiosResponse,
+  type RawAxiosRequestHeaders,
+} from "axios";
+import { getApiBaseUrl } from "@/lib/url";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ApiResponse<T = any> = {
   success: boolean;
   data: T | null;
@@ -11,48 +19,273 @@ export type ApiResponse<T = any> = {
   networkError?: boolean;
 };
 
-async function coreFetch<T>(
-  url: string,
+const REQUEST_TIMEOUT_MS = 10000;
+const SERVER_ERROR_TOAST_MESSAGE = "Something went wrong. Please try again.";
+let lastServerErrorToastAt = 0;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const normalizeApiPath = (path: string) => {
+  const cleanPath = path.startsWith("/api") ? path.replace(/^\/api/, "") : path;
+  return cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`;
+};
+
+const getPayloadMessage = (payload: unknown) =>
+  isRecord(payload) && typeof payload.message === "string"
+    ? payload.message
+    : undefined;
+
+const getPayloadCode = (payload: unknown) =>
+  isRecord(payload) && typeof payload.code === "string" ? payload.code : undefined;
+
+const getPayloadBoolean = (payload: unknown, key: string, fallback = false) =>
+  isRecord(payload) && typeof payload[key] === "boolean"
+    ? (payload[key] as boolean)
+    : fallback;
+
+const unwrapPayloadData = <T>(payload: unknown): T | null => {
+  if (isRecord(payload) && "data" in payload) {
+    return (payload.data as T | null | undefined) ?? null;
+  }
+
+  return (payload as T | null | undefined) ?? null;
+};
+
+const maybeToastServerError = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const now = Date.now();
+
+  if (now - lastServerErrorToastAt < 2000) {
+    return;
+  }
+
+  lastServerErrorToastAt = now;
+
+  void import("@/lib/toast")
+    .then(({ showErrorToast }) => {
+      showErrorToast(SERVER_ERROR_TOAST_MESSAGE);
+    })
+    .catch(() => undefined);
+};
+
+const logServerError = (status: number, url: string | undefined, data: unknown) => {
+  console.error("API SERVER ERROR:", {
+    url,
+    status,
+    data,
+  });
+};
+
+const handleServerErrorResponse = (
+  response: Pick<AxiosResponse, "status" | "config" | "data">
+) => {
+  if (response.status < 500) {
+    return;
+  }
+
+  logServerError(response.status, response.config?.url, response.data);
+  maybeToastServerError();
+};
+
+const getAccessToken = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.localStorage.getItem("accessToken");
+  } catch {
+    return null;
+  }
+};
+
+const setAuthHeader = (
+  headers: AxiosRequestConfig["headers"],
+  token: string
+): AxiosHeaders => {
+  const nextHeaders = headers instanceof AxiosHeaders ? headers : new AxiosHeaders();
+
+  if (headers && !(headers instanceof AxiosHeaders)) {
+    Object.entries(headers as RawAxiosRequestHeaders).forEach(([key, value]) => {
+      nextHeaders.set(key, value);
+    });
+  }
+
+  nextHeaders.set("Authorization", `Bearer ${token}`);
+
+  return nextHeaders;
+};
+
+export const apiClient = axios.create({
+  baseURL: getApiBaseUrl(),
+  withCredentials: true,
+  timeout: REQUEST_TIMEOUT_MS,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+apiClient.interceptors.request.use((config) => {
+  const token = getAccessToken();
+
+  if (token) {
+    config.headers = setAuthHeader(config.headers, token);
+  }
+
+  return config;
+});
+
+apiClient.interceptors.response.use(
+  (response) => {
+    handleServerErrorResponse(response);
+    return response;
+  },
+  (error: AxiosError) => {
+    if (error.response) {
+      handleServerErrorResponse(error.response);
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+const headersToObject = (headers?: HeadersInit) => {
+  if (!headers) {
+    return {} as Record<string, string>;
+  }
+
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return Object.entries(headers).reduce<Record<string, string>>(
+    (accumulator, [key, value]) => {
+      accumulator[key] = String(value);
+      return accumulator;
+    },
+    {}
+  );
+};
+
+const getHeader = (headers: Record<string, string>, target: string) => {
+  const normalizedTarget = target.toLowerCase();
+
+  return Object.entries(headers).find(
+    ([key]) => key.toLowerCase() === normalizedTarget
+  )?.[1];
+};
+
+const removeHeader = (headers: Record<string, string>, target: string) => {
+  Object.keys(headers).forEach((key) => {
+    if (key.toLowerCase() === target.toLowerCase()) {
+      delete headers[key];
+    }
+  });
+};
+
+const resolveRequestBody = (
+  body: BodyInit | null | undefined,
+  headers: Record<string, string>
+) => {
+  if (body == null) {
+    return undefined;
+  }
+
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    removeHeader(headers, "Content-Type");
+    return body;
+  }
+
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+    return body;
+  }
+
+  if (typeof body === "string") {
+    const contentType = getHeader(headers, "Content-Type");
+
+    if (contentType?.includes("application/json")) {
+      try {
+        return JSON.parse(body);
+      } catch {
+        return body;
+      }
+    }
+
+    return body;
+  }
+
+  return body;
+};
+
+const buildAxiosConfig = (
+  path: string,
+  options: RequestInit
+): AxiosRequestConfig => {
+  const headers = headersToObject(options.headers);
+  const rawBody = options.body as BodyInit | null | undefined;
+
+  return {
+    url: normalizeApiPath(path),
+    method: options.method || "GET",
+    headers,
+    data: resolveRequestBody(rawBody, headers),
+    signal: options.signal ?? undefined,
+    validateStatus: () => true,
+  };
+};
+
+export const getApiErrorStatus = (error: unknown) =>
+  axios.isAxiosError(error) ? error.response?.status ?? null : null;
+
+export const getApiErrorData = <T = unknown>(error: unknown): T | null => {
+  if (!axios.isAxiosError(error)) {
+    return null;
+  }
+
+  return (error.response?.data as T | null | undefined) ?? null;
+};
+
+export const getApiErrorMessage = (
+  error: unknown,
+  fallback = "Request failed"
+) => {
+  const payload = getApiErrorData(error);
+
+  if (getPayloadMessage(payload)) {
+    return getPayloadMessage(payload) as string;
+  }
+
+  if (axios.isAxiosError(error) && error.message) {
+    return error.message;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+};
+
+async function coreRequest<T>(
+  path: string,
   options: RequestInit,
   retry = false
 ): Promise<ApiResponse<T>> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
   try {
-    const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem("accessToken")
-        : null;
+    const response = await apiClient.request(buildAxiosConfig(path, options));
+    const payload = response.data;
 
-    const res = await fetch(url, {
-      ...options,
-      credentials: "include",
-      mode: "cors",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token
-          ? {
-              Authorization: `Bearer ${token}`,
-            }
-          : {}),
-        ...(options.headers || {}),
-      },
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    let data: any = null;
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
-
-    if (res.status === 401) {
+    if (response.status === 401) {
       if (!retry) {
-        return coreFetch<T>(url, options, true);
+        return coreRequest<T>(path, options, true);
       }
 
       return {
@@ -61,51 +294,47 @@ async function coreFetch<T>(
         unauthorized: true,
         limited: false,
         upgradeRequired: false,
-        message: data?.message || "Unauthorized",
+        message: getPayloadMessage(payload) || "Unauthorized",
+        code: getPayloadCode(payload),
       };
     }
 
-    if (res.status === 403) {
+    if (response.status === 403) {
       return {
         success: true,
-        data: data?.data ?? null,
+        data: unwrapPayloadData<T>(payload),
         limited: true,
-        upgradeRequired: data?.upgradeRequired ?? true,
+        upgradeRequired: getPayloadBoolean(payload, "upgradeRequired", true),
         unauthorized: false,
-        message: data?.message,
-        code: data?.code,
+        message: getPayloadMessage(payload),
+        code: getPayloadCode(payload),
       };
     }
 
-    if (!res.ok) {
-      console.error("API ERROR:", {
-        url,
-        status: res.status,
-        data,
-      });
-
+    if (response.status < 200 || response.status >= 300) {
       return {
         success: false,
         data: null,
         limited: false,
         upgradeRequired: false,
         unauthorized: false,
-        message: data?.message || "Request failed",
-        code: data?.code,
+        message: getPayloadMessage(payload) || "Request failed",
+        code: getPayloadCode(payload),
       };
     }
 
     return {
       success: true,
-      data: data?.data ?? data,
-      limited: data?.limited ?? false,
-      upgradeRequired: data?.upgradeRequired ?? false,
+      data: unwrapPayloadData<T>(payload),
+      limited: getPayloadBoolean(payload, "limited", false),
+      upgradeRequired: getPayloadBoolean(payload, "upgradeRequired", false),
       unauthorized: false,
+      message: getPayloadMessage(payload),
+      code: getPayloadCode(payload),
     };
-  } catch (error: any) {
-    clearTimeout(timeout);
-
-    const isAbort = error?.name === "AbortError";
+  } catch (error: unknown) {
+    const isTimeout =
+      axios.isAxiosError(error) && error.code === "ECONNABORTED";
 
     console.error("FETCH FAILED:", error);
 
@@ -116,22 +345,17 @@ async function coreFetch<T>(
       upgradeRequired: false,
       unauthorized: false,
       networkError: true,
-      message: isAbort
+      message: isTimeout
         ? "Request timeout"
-        : error?.message || "Network error",
+        : getApiErrorMessage(error, "Network error"),
     };
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function apiFetch<T = any>(
   path: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
-  const cleanPath = path.startsWith("/api")
-    ? path.replace(/^\/api/, "")
-    : path;
-
-  const url = buildApiUrl(cleanPath);
-
-  return coreFetch<T>(url, options);
+  return coreRequest<T>(path, options);
 }

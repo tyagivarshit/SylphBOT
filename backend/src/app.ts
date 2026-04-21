@@ -38,6 +38,7 @@ import availabilityRoutes from "./routes/availability.routes";
 import conversationRoutes from "./routes/conversation.routes";
 import healthRoutes from "./routes/health.routes";
 import usageRoutes from "./routes/usage.routes";
+import helpAiRoutes from "./routes/helpAi.routes";
 import {
   AIMessagePayload,
   AI_QUEUE_NAME,
@@ -373,6 +374,7 @@ app.use("/api/auth", googleAuthRoutes);
 app.use("/api/dashboard", protect, dashboardRoutes);
 app.use("/api/billing", protect, billingRoutes);
 app.use("/api/usage", protect, usageRoutes);
+app.use("/api/help-ai", protect, helpAiRoutes);
 app.use("/api/user", protect, userRoutes);
 app.use("/api/notifications", protect, notificationRoutes);
 

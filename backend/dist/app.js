@@ -42,6 +42,7 @@ const availability_routes_1 = __importDefault(require("./routes/availability.rou
 const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
 const health_routes_1 = __importDefault(require("./routes/health.routes"));
 const usage_routes_1 = __importDefault(require("./routes/usage.routes"));
+const helpAi_routes_1 = __importDefault(require("./routes/helpAi.routes"));
 const ai_queue_1 = require("./queues/ai.queue");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
@@ -284,6 +285,7 @@ app.use("/api/auth", googleAuth_routes_1.default);
 app.use("/api/dashboard", auth_middleware_1.protect, dashboard_routes_1.default);
 app.use("/api/billing", auth_middleware_1.protect, billing_routes_1.default);
 app.use("/api/usage", auth_middleware_1.protect, usage_routes_1.default);
+app.use("/api/help-ai", auth_middleware_1.protect, helpAi_routes_1.default);
 app.use("/api/user", auth_middleware_1.protect, user_routes_1.default);
 app.use("/api/notifications", auth_middleware_1.protect, notification_1.default);
 app.use("/api/ai", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, rateLimit_middleware_1.aiLimiter, ai_routes_1.default);

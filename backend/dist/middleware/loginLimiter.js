@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loginLimiter = void 0;
 const redis_1 = __importDefault(require("../config/redis"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;
 const MAX_IP_ATTEMPTS = 20;
@@ -31,7 +32,7 @@ const checkLimit = async (key, limit) => {
     return attempts > limit;
 };
 /* ======================================
-🔥 LOGIN LIMITER (PRODUCTION GRADE)
+LOGIN LIMITER (PRODUCTION GRADE)
 ====================================== */
 const loginLimiter = async (req, res, next) => {
     try {
@@ -48,22 +49,28 @@ const loginLimiter = async (req, res, next) => {
         ]);
         if (isEmailBlocked || isIPBlocked) {
             const ttl = await redis_1.default.ttl(emailIPKey);
-            console.warn("🚨 LOGIN RATE LIMITED", {
+            const retryAfter = ttl > 0 ? ttl : WINDOW;
+            logger_1.default.warn({
                 email,
                 ip,
                 isEmailBlocked,
                 isIPBlocked,
-            });
+                retryAfter,
+            }, "Login rate limited");
             return res.status(429).json({
                 success: false,
                 message: "Too many attempts. Please try again later.",
-                retryAfter: ttl > 0 ? ttl : WINDOW,
+                retryAfter,
             });
         }
         next();
     }
     catch (err) {
-        console.error("❌ LOGIN LIMITER ERROR", err);
+        logger_1.default.error({
+            err,
+            email: getEmail(req),
+            ip: getIP(req),
+        }, "Login limiter failed open");
         next(); // fail open
     }
 };

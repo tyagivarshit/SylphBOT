@@ -170,9 +170,11 @@ const clearAllRates = async () => {
             }
         });
         await new Promise((resolve, reject) => {
-            stream.on("end", async () => {
-                await pipeline.exec();
-                resolve();
+            stream.on("end", () => {
+                void pipeline
+                    .exec()
+                    .then(() => resolve())
+                    .catch(reject);
             });
             stream.on("error", reject);
         });

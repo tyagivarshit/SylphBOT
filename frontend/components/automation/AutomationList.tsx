@@ -50,7 +50,22 @@ type AutomationFlow = AutomationFlowCardData & {
 };
 
 const sanitizeText = (value?: string | null) =>
-  value?.replace("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹", "").trim() || "";
+  value?.replace("ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¹Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹", "").trim() || "";
+
+const normalizeAutomationSteps = (steps?: AutomationStep[] | null) =>
+  Array.isArray(steps) ? steps.filter(Boolean) : [];
+
+const normalizeAutomationFlow = (flow: AutomationFlow): AutomationFlow => ({
+  ...flow,
+  steps: normalizeAutomationSteps(flow?.steps),
+});
+
+const normalizeAutomationFlows = (items?: AutomationFlow[] | null) =>
+  Array.isArray(items)
+    ? items
+        .filter((item): item is AutomationFlow => Boolean(item?.id))
+        .map(normalizeAutomationFlow)
+    : [];
 
 const normalizeStepType = (
   value?: string | null
@@ -100,7 +115,7 @@ const mapStepToPayload = (step: AutomationStep): AutomationUpdateStep | null => 
 };
 
 const sortAutomations = (items: AutomationFlow[]) =>
-  [...items].sort((left, right) => {
+  [...normalizeAutomationFlows(items)].sort((left, right) => {
     const leftTime = new Date(left.updatedAt || left.createdAt || 0).getTime();
     const rightTime = new Date(right.updatedAt || right.createdAt || 0).getTime();
 
@@ -123,28 +138,36 @@ export default function AutomationList() {
     plan === "ELITE" ? "ELITE" : plan === "PRO" ? "PRO" : "BASIC";
   const debouncedSearch = useDebounce(search, 180);
 
+  const safeAutomations = useMemo(
+    () => normalizeAutomationFlows(automations),
+    [automations]
+  );
+
   const flowStats = useMemo(() => {
-    const activeCount = automations.filter(
+    const activeCount = safeAutomations.filter(
       (flow) => (flow.status || "ACTIVE").toUpperCase() === "ACTIVE"
     ).length;
 
     return {
-      total: automations.length,
+      total: safeAutomations.length,
       active: activeCount,
-      paused: automations.length - activeCount,
+      paused: safeAutomations.length - activeCount,
     };
-  }, [automations]);
+  }, [safeAutomations]);
 
   const filteredAutomations = useMemo(() => {
     const query = debouncedSearch.trim().toLowerCase();
 
     if (!query) {
-      return automations;
+      return safeAutomations;
     }
 
-    return automations.filter((automation) => {
-      const stepSummary = (automation.steps || [])
-        .map((step) => `${step.stepType || ""} ${step.message || ""} ${step.condition || ""}`)
+    return safeAutomations.filter((automation) => {
+      const stepSummary = normalizeAutomationSteps(automation?.steps)
+        .map(
+          (step) =>
+            `${step.stepType || ""} ${step.message || ""} ${step.condition || ""}`
+        )
         .join(" ")
         .toLowerCase();
 
@@ -158,7 +181,7 @@ export default function AutomationList() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query));
     });
-  }, [automations, debouncedSearch]);
+  }, [safeAutomations, debouncedSearch]);
 
   const fetchAutomations = useCallback(async () => {
     try {
@@ -183,12 +206,13 @@ export default function AutomationList() {
 
       setAutomations(sortAutomations(items));
     } catch (fetchError) {
-      console.error(fetchError);
+      console.error("Automation list fetch failed", fetchError);
       setError(
         fetchError instanceof Error
           ? fetchError.message
           : "We couldn't load your automations."
       );
+      setAutomations([]);
     } finally {
       setLoading(false);
     }
@@ -199,20 +223,24 @@ export default function AutomationList() {
   }, [fetchAutomations]);
 
   const handleSaved = (savedAutomation: AutomationFlow) => {
+    const normalizedAutomation = normalizeAutomationFlow(savedAutomation);
+
     setAutomations((current) => {
-      const exists = current.some((automation) => automation.id === savedAutomation.id);
+      const exists = current.some(
+        (automation) => automation.id === normalizedAutomation.id
+      );
 
       if (!exists) {
-        return sortAutomations([savedAutomation, ...current]);
+        return sortAutomations([normalizedAutomation, ...current]);
       }
 
       return sortAutomations(
         current.map((automation) =>
-          automation.id === savedAutomation.id
+          automation.id === normalizedAutomation.id
             ? {
                 ...automation,
-                ...savedAutomation,
-                steps: savedAutomation.steps || automation.steps,
+                ...normalizedAutomation,
+                steps: normalizedAutomation.steps || automation.steps,
               }
             : automation
         )
@@ -221,7 +249,7 @@ export default function AutomationList() {
   };
 
   const buildUpdatePayload = (automation: AutomationFlow, status?: string) => {
-    const steps = (automation.steps || [])
+    const steps = normalizeAutomationSteps(automation?.steps)
       .map(mapStepToPayload)
       .filter((step): step is AutomationUpdateStep => step !== null);
 
@@ -240,6 +268,11 @@ export default function AutomationList() {
   };
 
   const handleToggle = async (automation: AutomationFlow) => {
+    if (!automation?.id) {
+      notify.error("This automation is missing data required to update it.");
+      return;
+    }
+
     const nextStatus =
       (automation.status || "ACTIVE").toUpperCase() === "ACTIVE"
         ? "INACTIVE"
@@ -294,7 +327,7 @@ export default function AutomationList() {
   };
 
   const handleConfirmDelete = async () => {
-    if (!pendingDelete) {
+    if (!pendingDelete?.id) {
       return;
     }
 
@@ -367,12 +400,15 @@ export default function AutomationList() {
               Quick launch path
             </p>
             <p className="mt-1 text-sm text-slate-500">
-              Connect Instagram -> create automation -> start replies.
+              Connect Instagram {"->"} create automation {"->"} start replies.
             </p>
           </div>
 
           <div className="relative w-full max-w-sm">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -399,7 +435,7 @@ export default function AutomationList() {
         />
       ) : null}
 
-      {!loading && !error && automations.length === 0 ? (
+      {!loading && !error && safeAutomations.length === 0 ? (
         <EmptyState
           eyebrow="Automation"
           title="No automations yet"
@@ -412,7 +448,7 @@ export default function AutomationList() {
         />
       ) : null}
 
-      {!loading && !error && automations.length > 0 && filteredAutomations.length === 0 ? (
+      {!loading && !error && safeAutomations.length > 0 && filteredAutomations.length === 0 ? (
         <EmptyState
           title="No automations match this search"
           description="Try a trigger keyword, channel, or automation name to find the flow you want faster."

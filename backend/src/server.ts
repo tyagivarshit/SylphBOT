@@ -23,15 +23,56 @@ const shutdown = async (signal: string) => {
 
   isShuttingDown = true;
 
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  });
+  logger.info({ signal }, "Server shutdown started");
 
-  await Promise.allSettled([
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+  } catch (error) {
+    logger.error(
+      {
+        err: error,
+        signal,
+      },
+      "Server close failed during shutdown"
+    );
+  }
+
+  const cleanupResults = await Promise.allSettled([
     prisma.$disconnect(),
     closeAIQueue(),
     closeRedisConnection(),
   ]);
+
+  const cleanupErrors = cleanupResults
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) =>
+      result.reason instanceof Error
+        ? {
+            name: result.reason.name,
+            message: result.reason.message,
+            stack: result.reason.stack,
+          }
+        : result.reason
+    );
+
+  if (cleanupErrors.length) {
+    logger.error(
+      {
+        signal,
+        cleanupErrors,
+      },
+      "Server shutdown completed with cleanup errors"
+    );
+  }
 
   if (signal === "uncaughtException") {
     process.exit(1);
@@ -49,7 +90,7 @@ process.on("SIGTERM", () => {
 });
 
 process.on("uncaughtException", (error) => {
-  logger.error({ error }, "Server uncaught exception");
+  logger.error({ err: error }, "Server uncaught exception");
   captureExceptionWithContext(error, {
     tags: {
       layer: "server",
@@ -62,7 +103,7 @@ process.on("uncaughtException", (error) => {
 process.on("unhandledRejection", (error) => {
   logger.error(
     {
-      error,
+      err: error,
     },
     "Server unhandled rejection"
   );

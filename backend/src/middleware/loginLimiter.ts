@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import  redis  from "../config/redis";
+import redis from "../config/redis";
+import logger from "../utils/logger";
 
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;
@@ -39,7 +40,7 @@ const checkLimit = async (key: string, limit: number) => {
 };
 
 /* ======================================
-🔥 LOGIN LIMITER (PRODUCTION GRADE)
+LOGIN LIMITER (PRODUCTION GRADE)
 ====================================== */
 
 export const loginLimiter = async (
@@ -65,24 +66,36 @@ export const loginLimiter = async (
 
     if (isEmailBlocked || isIPBlocked) {
       const ttl = await redis.ttl(emailIPKey);
+      const retryAfter = ttl > 0 ? ttl : WINDOW;
 
-      console.warn("🚨 LOGIN RATE LIMITED", {
-        email,
-        ip,
-        isEmailBlocked,
-        isIPBlocked,
-      });
+      logger.warn(
+        {
+          email,
+          ip,
+          isEmailBlocked,
+          isIPBlocked,
+          retryAfter,
+        },
+        "Login rate limited"
+      );
 
       return res.status(429).json({
         success: false,
         message: "Too many attempts. Please try again later.",
-        retryAfter: ttl > 0 ? ttl : WINDOW,
+        retryAfter,
       });
     }
 
     next();
   } catch (err) {
-    console.error("❌ LOGIN LIMITER ERROR", err);
+    logger.error(
+      {
+        err,
+        email: getEmail(req),
+        ip: getIP(req),
+      },
+      "Login limiter failed open"
+    );
     next(); // fail open
   }
 };

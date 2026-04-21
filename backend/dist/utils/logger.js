@@ -53,10 +53,41 @@ const isPlainObject = (value) => Boolean(value) &&
     !Array.isArray(value) &&
     !(value instanceof Error);
 const sanitizeObject = (value) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+const serializeErrorLike = (value) => {
+    if (value instanceof Error) {
+        return value;
+    }
+    if (isPlainObject(value)) {
+        const normalized = sanitizeObject(value);
+        return Object.keys(normalized).length
+            ? normalized
+            : {
+                message: "Unknown error object",
+            };
+    }
+    if (value === undefined) {
+        return undefined;
+    }
+    return {
+        message: String(value),
+    };
+};
+const normalizeLogObject = (value) => {
+    const normalized = sanitizeObject(Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+        key,
+        entry instanceof Error ? pino_1.default.stdSerializers.err(entry) : entry,
+    ])));
+    const errCandidate = value.err ?? value.error;
+    const err = serializeErrorLike(errCandidate);
+    if (err !== undefined) {
+        normalized.err = err;
+    }
+    return normalized;
+};
 const writeLog = (level, bindings) => (...args) => {
     const logMethod = baseLogger[level].bind(baseLogger);
-    const contextBindings = sanitizeObject((0, requestContext_1.buildContextBindings)());
-    const mergedBindings = sanitizeObject({
+    const contextBindings = normalizeLogObject((0, requestContext_1.buildContextBindings)());
+    const mergedBindings = normalizeLogObject({
         ...contextBindings,
         ...bindings,
     });
@@ -68,7 +99,7 @@ const writeLog = (level, bindings) => (...args) => {
     if (isPlainObject(firstArg)) {
         logMethod({
             ...mergedBindings,
-            ...sanitizeObject(firstArg),
+            ...normalizeLogObject(firstArg),
         }, ...restArgs);
         return;
     }
@@ -94,7 +125,7 @@ const createLogger = (bindings = {}) => ({
     fatal: writeLog("fatal", bindings),
     child: (childBindings) => createLogger({
         ...bindings,
-        ...sanitizeObject(childBindings),
+        ...normalizeLogObject(childBindings),
     }),
     raw: baseLogger,
 });

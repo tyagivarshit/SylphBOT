@@ -73,12 +73,55 @@ const sanitizeObject = (value: Record<string, unknown>) =>
     Object.entries(value).filter(([, entry]) => entry !== undefined)
   );
 
+const serializeErrorLike = (value: unknown) => {
+  if (value instanceof Error) {
+    return value;
+  }
+
+  if (isPlainObject(value)) {
+    const normalized = sanitizeObject(value);
+
+    return Object.keys(normalized).length
+      ? normalized
+      : {
+          message: "Unknown error object",
+        };
+  }
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return {
+    message: String(value),
+  };
+};
+
+const normalizeLogObject = (value: Record<string, unknown>) => {
+  const normalized = sanitizeObject(
+    Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        entry instanceof Error ? pino.stdSerializers.err(entry) : entry,
+      ])
+    )
+  );
+  const errCandidate = value.err ?? value.error;
+  const err = serializeErrorLike(errCandidate);
+
+  if (err !== undefined) {
+    normalized.err = err;
+  }
+
+  return normalized;
+};
+
 const writeLog =
   (level: keyof Pick<PinoLogger, "trace" | "debug" | "info" | "warn" | "error" | "fatal">, bindings: Record<string, unknown>): LogMethod =>
   (...args: unknown[]) => {
     const logMethod = (baseLogger[level] as (...methodArgs: any[]) => void).bind(baseLogger);
-    const contextBindings = sanitizeObject(buildContextBindings());
-    const mergedBindings = sanitizeObject({
+    const contextBindings = normalizeLogObject(buildContextBindings());
+    const mergedBindings = normalizeLogObject({
       ...contextBindings,
       ...bindings,
     });
@@ -94,7 +137,7 @@ const writeLog =
       logMethod(
         {
           ...mergedBindings,
-          ...sanitizeObject(firstArg),
+          ...normalizeLogObject(firstArg),
         },
         ...restArgs
       );
@@ -130,7 +173,7 @@ const createLogger = (bindings: Record<string, unknown> = {}): AppLogger => ({
   child: (childBindings) =>
     createLogger({
       ...bindings,
-      ...sanitizeObject(childBindings),
+      ...normalizeLogObject(childBindings),
     }),
   raw: baseLogger,
 });

@@ -1,4 +1,5 @@
 import redis from "../config/redis";
+import logger from "../utils/logger";
 
 export const SALES_DECISION_TTL_SECONDS = 5 * 60;
 export const SALES_LAST_REPLY_TTL_SECONDS = 2 * 60;
@@ -21,14 +22,27 @@ export const writeRedisValueIfChanged = async (
   value: string,
   ttlSeconds: number
 ) => {
-  const existing = await redis.get(key);
+  try {
+    const existing = await redis.get(key);
 
-  if (existing === value) {
+    if (existing === value) {
+      return false;
+    }
+
+    const result = await redis.set(key, value, "EX", ttlSeconds);
+    return result === "OK";
+  } catch (error) {
+    logger.debug(
+      {
+        key,
+        ttlSeconds,
+        error,
+      },
+      "Redis value write skipped"
+    );
+
     return false;
   }
-
-  await redis.set(key, value, "EX", ttlSeconds);
-  return true;
 };
 
 export const writeRedisJsonIfChanged = async <T>(
@@ -50,5 +64,17 @@ export const deleteRedisKeys = async (keys: string[]) => {
     return 0;
   }
 
-  return redis.del(...uniqueKeys);
+  try {
+    return await redis.del(...uniqueKeys);
+  } catch (error) {
+    logger.debug(
+      {
+        keys: uniqueKeys,
+        error,
+      },
+      "Redis key delete skipped"
+    );
+
+    return 0;
+  }
 };

@@ -28,7 +28,10 @@ export type AutomationFlowCardData = {
 };
 
 const sanitizeText = (value?: string | null) =>
-  value?.replace("ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â¹", "").trim() || "";
+  value?.replace("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹", "").trim() || "";
+
+const normalizeSteps = (steps?: AutomationFlowCardStep[] | null) =>
+  Array.isArray(steps) ? steps.filter(Boolean) : [];
 
 const titleCase = (value?: string | null, fallback = "Not set") => {
   if (!value) {
@@ -63,7 +66,9 @@ const formatTimestamp = (value?: string | null) => {
 };
 
 const getReplySummary = (steps: AutomationFlowCardStep[]) => {
-  const messageSteps = steps.filter((step) => (step.stepType || "").toUpperCase() === "MESSAGE");
+  const messageSteps = steps.filter(
+    (step) => (step.stepType || "").toUpperCase() === "MESSAGE"
+  );
 
   if (!messageSteps.length) {
     return {
@@ -106,18 +111,18 @@ export default function AutomationFlowCard({
   onToggle?: (automation: AutomationFlowCardData) => void;
   onDelete?: (automation: AutomationFlowCardData) => void;
 }) {
-  const steps = automation.steps || [];
-  const normalizedStatus = (automation.status || "ACTIVE").toUpperCase();
+  const steps = normalizeSteps(automation?.steps);
+  const normalizedStatus = (automation?.status || "ACTIVE").toUpperCase();
   const isActive = normalizedStatus === "ACTIVE";
   const replySummary = getReplySummary(steps);
   const firstPreview =
     sanitizeText(steps.find((step) => sanitizeText(step.message))?.message) ||
     sanitizeText(steps.find((step) => sanitizeText(step.condition))?.condition) ||
     "Flow is ready to capture and route new conversations.";
-  const triggerLabel = titleCase(automation.triggerType || "KEYWORD", "Keyword");
-  const platformLabel = titleCase(automation.channel || "INSTAGRAM", "Instagram");
+  const triggerLabel = titleCase(automation?.triggerType || "KEYWORD", "Keyword");
+  const platformLabel = titleCase(automation?.channel || "INSTAGRAM", "Instagram");
   const lastTriggeredLabel = formatTimestamp(
-    automation.lastTriggeredAt || automation.lastTriggeredTime
+    automation?.lastTriggeredAt || automation?.lastTriggeredTime
   );
   const stepSummary = steps
     .map((step) => titleCase(step.stepType, "Step"))
@@ -154,10 +159,10 @@ export default function AutomationFlowCard({
             </div>
 
             <h3 className="mt-3 truncate text-base font-semibold text-slate-950">
-              {automation.name || "Untitled automation"}
+              {automation?.name || "Untitled automation"}
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              Trigger: {automation.triggerValue || "Not configured"}
+              Trigger: {automation?.triggerValue || "Not configured"}
             </p>
           </div>
 

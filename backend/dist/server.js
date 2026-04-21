@@ -23,14 +23,44 @@ const shutdown = async (signal) => {
         return;
     }
     isShuttingDown = true;
-    await new Promise((resolve) => {
-        server.close(() => resolve());
-    });
-    await Promise.allSettled([
+    logger_1.default.info({ signal }, "Server shutdown started");
+    try {
+        await new Promise((resolve, reject) => {
+            server.close((error) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve();
+            });
+        });
+    }
+    catch (error) {
+        logger_1.default.error({
+            err: error,
+            signal,
+        }, "Server close failed during shutdown");
+    }
+    const cleanupResults = await Promise.allSettled([
         prisma_1.default.$disconnect(),
         (0, ai_queue_1.closeAIQueue)(),
         (0, redis_1.closeRedisConnection)(),
     ]);
+    const cleanupErrors = cleanupResults
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason instanceof Error
+        ? {
+            name: result.reason.name,
+            message: result.reason.message,
+            stack: result.reason.stack,
+        }
+        : result.reason);
+    if (cleanupErrors.length) {
+        logger_1.default.error({
+            signal,
+            cleanupErrors,
+        }, "Server shutdown completed with cleanup errors");
+    }
     if (signal === "uncaughtException") {
         process.exit(1);
     }
@@ -43,7 +73,7 @@ process.on("SIGTERM", () => {
     void shutdown("SIGTERM");
 });
 process.on("uncaughtException", (error) => {
-    logger_1.default.error({ error }, "Server uncaught exception");
+    logger_1.default.error({ err: error }, "Server uncaught exception");
     (0, sentry_1.captureExceptionWithContext)(error, {
         tags: {
             layer: "server",
@@ -54,7 +84,7 @@ process.on("uncaughtException", (error) => {
 });
 process.on("unhandledRejection", (error) => {
     logger_1.default.error({
-        error,
+        err: error,
     }, "Server unhandled rejection");
     (0, sentry_1.captureExceptionWithContext)(error, {
         tags: {

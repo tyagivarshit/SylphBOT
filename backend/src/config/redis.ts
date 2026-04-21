@@ -7,6 +7,7 @@ import {
   markRedisHealthy,
   safeRedisCall,
 } from "../redis/redisSafety";
+import logger from "../utils/logger";
 
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -38,13 +39,13 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     connectionName,
     enableReadyCheck: false,
     enableAutoPipelining: true,
-    enableOfflineQueue: false,
+    enableOfflineQueue: true,
     autoResubscribe: true,
     autoResendUnfulfilledCommands: false,
     lazyConnect: true,
     keepAlive: 30000,
     noDelay: true,
-    maxRetriesPerRequest: null,
+    maxRetriesPerRequest: 3,
     connectTimeout: env.REDIS_CONNECT_TIMEOUT_MS,
     retryStrategy(attempts) {
       if (attempts > MAX_RECONNECT_ATTEMPTS) {
@@ -64,11 +65,17 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
 };
 
 const attachRedisListeners = (client: ManagedRedisClient, label: string) => {
+  client.on("connect", () => {
+    markRedisHealthy();
+    logger.info({ label }, "Redis client connected");
+  });
+
   client.on("ready", () => {
     markRedisHealthy();
   });
 
   client.on("error", (error) => {
+    logger.error({ err: error, label }, "Redis client error");
     markRedisFailure(error, `redis:${label}:error`);
   });
 
@@ -115,8 +122,10 @@ const getMethodFallback = (methodName: string) => {
     case "zadd":
     case "zremrangebyscore":
     case "zcard":
+    case "exists":
       return 0;
     case "mget":
+    case "keys":
       return [];
     default:
       return null;

@@ -468,7 +468,7 @@ if (process.env.ENABLE_CRON === "true") {
 }
 
 process.on("uncaughtException", (err) => {
-  logger.error({ error: err }, "Unhandled uncaught exception in app");
+  logger.error({ err }, "Unhandled uncaught exception in app");
   captureExceptionWithContext(err, {
     tags: {
       layer: "process",
@@ -478,7 +478,7 @@ process.on("uncaughtException", (err) => {
 });
 
 process.on("unhandledRejection", (err) => {
-  logger.error({ error: err }, "Unhandled rejection in app");
+  logger.error({ err }, "Unhandled rejection in app");
   captureExceptionWithContext(err, {
     tags: {
       layer: "process",

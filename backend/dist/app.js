@@ -356,7 +356,7 @@ if (process.env.ENABLE_CRON === "true") {
     (0, resetUsage_cron_1.startUsageResetCron)();
 }
 process.on("uncaughtException", (err) => {
-    logger_1.default.error({ error: err }, "Unhandled uncaught exception in app");
+    logger_1.default.error({ err }, "Unhandled uncaught exception in app");
     (0, sentry_1.captureExceptionWithContext)(err, {
         tags: {
             layer: "process",
@@ -365,7 +365,7 @@ process.on("uncaughtException", (err) => {
     });
 });
 process.on("unhandledRejection", (err) => {
-    logger_1.default.error({ error: err }, "Unhandled rejection in app");
+    logger_1.default.error({ err }, "Unhandled rejection in app");
     (0, sentry_1.captureExceptionWithContext)(err, {
         tags: {
             layer: "process",

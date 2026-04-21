@@ -50,7 +50,12 @@ const enableFallbackMode = () => {
   }
 
   redisSafetyState.fallbackModeEnabled = true;
-  logger.warn("Redis fallback mode enabled");
+  logger.warn(
+    {
+      failures: redisSafetyState.failures,
+    },
+    "Redis fallback mode enabled"
+  );
 };
 
 const openRedisCircuit = () => {
@@ -60,7 +65,12 @@ const openRedisCircuit = () => {
 
   redisSafetyState.isOpen = true;
   redisSafetyState.circuitEpoch += 1;
-  logger.warn("Redis circuit OPEN");
+  logger.warn(
+    {
+      failures: redisSafetyState.failures,
+    },
+    "Redis circuit OPEN"
+  );
 };
 
 const closeRedisCircuit = () => {
@@ -153,6 +163,17 @@ export const safeRedisCall = async <T>(
   const decision = getRedisCircuitDecision();
 
   if (!decision.allow) {
+    const operation = options?.operation || "redis";
+
+    if (shouldLogRedisSkip(operation)) {
+      logger.warn(
+        {
+          operation,
+        },
+        "Redis operation skipped while circuit is open"
+      );
+    }
+
     return resolveFallback(fallback);
   }
 

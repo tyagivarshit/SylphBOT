@@ -7,6 +7,7 @@ exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisCo
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
 const redisSafety_1 = require("../redis/redisSafety");
+const logger_1 = __importDefault(require("../utils/logger"));
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
 const MAX_RECONNECT_ATTEMPTS = 5;
 const globalForRedis = globalThis;
@@ -22,13 +23,13 @@ const buildRedisOptions = (connectionName) => {
         connectionName,
         enableReadyCheck: false,
         enableAutoPipelining: true,
-        enableOfflineQueue: false,
+        enableOfflineQueue: true,
         autoResubscribe: true,
         autoResendUnfulfilledCommands: false,
         lazyConnect: true,
         keepAlive: 30000,
         noDelay: true,
-        maxRetriesPerRequest: null,
+        maxRetriesPerRequest: 3,
         connectTimeout: env_1.env.REDIS_CONNECT_TIMEOUT_MS,
         retryStrategy(attempts) {
             if (attempts > MAX_RECONNECT_ATTEMPTS) {
@@ -43,10 +44,15 @@ const buildRedisOptions = (connectionName) => {
     };
 };
 const attachRedisListeners = (client, label) => {
+    client.on("connect", () => {
+        (0, redisSafety_1.markRedisHealthy)();
+        logger_1.default.info({ label }, "Redis client connected");
+    });
     client.on("ready", () => {
         (0, redisSafety_1.markRedisHealthy)();
     });
     client.on("error", (error) => {
+        logger_1.default.error({ err: error, label }, "Redis client error");
         (0, redisSafety_1.markRedisFailure)(error, `redis:${label}:error`);
     });
     client.on("close", () => {
@@ -83,8 +89,10 @@ const getMethodFallback = (methodName) => {
         case "zadd":
         case "zremrangebyscore":
         case "zcard":
+        case "exists":
             return 0;
         case "mget":
+        case "keys":
             return [];
         default:
             return null;

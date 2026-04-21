@@ -48,7 +48,7 @@ return null
 ========================= */
 return ( <div
    className="relative group cursor-pointer"
-   onClick={openUpgrade}
+   onClick={() => openUpgrade()}
  >
 
   {/* 🔥 UPGRADE BADGE */}

@@ -234,19 +234,20 @@ export default function UsageSummary({
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">
-            <Link
-              href={ctaHref}
-              className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:shadow-lg"
-            >
-              Buy Credits
-            </Link>
-            <Link
-              href="/billing#plans"
-              className="inline-flex items-center justify-center rounded-xl border border-white/30 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15"
-            >
-              Upgrade Plan
-            </Link>
-          </div>
+  <Link
+    href={ctaHref as any}
+    className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:shadow-lg"
+  >
+    Buy Credits
+  </Link>
+
+  <Link
+    href="/billing#plans"
+    className="inline-flex items-center justify-center rounded-xl border border-white/30 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15"
+  >
+    Upgrade Plan
+  </Link>
+</div>
         </div>
       </div>
     </div>

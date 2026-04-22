@@ -189,11 +189,6 @@ export default function AutomationFlowCard({
             <p className="mt-1 text-sm font-medium text-slate-900">
               {replySummary.label}
             </p>
-            <p className="mt-1 text-xs text-slate-500">
-              {replySummary.usesAI
-                ? "Contains AI steps that can consume credits."
-                : "All reply steps are free templates."}
-            </p>
           </div>
 
           <div className="rounded-[20px] border border-slate-200/80 bg-slate-50/80 px-4 py-3">
@@ -202,9 +197,6 @@ export default function AutomationFlowCard({
             </p>
             <p className="mt-1 text-sm font-medium text-slate-900">
               {lastTriggeredLabel}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Shown when the backend provides trigger timestamps.
             </p>
           </div>
         </div>
@@ -238,15 +230,6 @@ export default function AutomationFlowCard({
           </span>
           <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-600">
             Trigger: {triggerLabel}
-          </span>
-          <span
-            className={`rounded-full px-3 py-1.5 font-semibold ${
-              replySummary.usesAI
-                ? "bg-blue-50 text-blue-700"
-                : "bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            {replySummary.usesAI ? "AI step uses credits" : "Template steps are free"}
           </span>
         </div>
 

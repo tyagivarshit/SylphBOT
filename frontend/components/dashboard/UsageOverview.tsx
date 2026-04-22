@@ -9,7 +9,6 @@ import { getUsagePresentation } from "@/lib/usagePresentation";
 import {
   RetryState,
   SkeletonCard,
-  TrustSignals,
 } from "@/components/ui/feedback";
 
 type UsageCardItem = {
@@ -127,21 +126,21 @@ export default function UsageOverview() {
     {
       label: "AI replies used today",
       value: `${usageState.aiUsedToday} / ${usageState.aiLimit}`,
-      helper: `${usageState.aiPercent}% of today's AI allowance`,
+      helper: `${usageState.aiPercent}% used`,
       percent: usageState.aiPercent,
       icon: <Bot size={16} />,
     },
     {
       label: "AI replies remaining",
       value: `${usageState.aiRemaining}`,
-      helper: "Left before extra credits are needed",
+      helper: "Available today",
       percent: usageState.aiPercent,
       icon: <Sparkles size={16} />,
     },
     {
       label: "Contacts",
       value: `${usage.usage.contacts.used} / ${usage.usage.contacts.limit}`,
-      helper: "Audience capacity included in your plan",
+      helper: "Plan limit",
       percent: getPercent(usage.usage.contacts.used, usage.usage.contacts.limit),
       icon: <Users size={16} />,
     },
@@ -151,7 +150,7 @@ export default function UsageOverview() {
         usage.usage.messages.limit === -1
           ? `${usage.usage.messages.used} / Unlimited`
           : `${usage.usage.messages.used} / ${usage.usage.messages.limit}`,
-      helper: "Conversation delivery included",
+      helper: "Plan limit",
       percent:
         usage.usage.messages.limit === -1
           ? 0
@@ -164,36 +163,23 @@ export default function UsageOverview() {
     <div className="brand-section-shell space-y-5 rounded-[28px] p-5 md:p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-            Monetization
-          </p>
-          <h2 className="mt-2 text-xl font-semibold text-slate-950">
-            AI usage visibility
-          </h2>
+          <h2 className="text-xl font-semibold text-slate-950">Usage</h2>
           <p className="mt-1 text-sm text-slate-500">
             {usage.trialActive
               ? `${usage.daysLeft} day${usage.daysLeft === 1 ? "" : "s"} left in your trial`
-              : "AI replies use credits. Template replies stay free."}
+              : `Plan: ${usageState.planLabel}`}
           </p>
         </div>
 
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
-              AI used today: {usageState.aiUsedToday}
-            </span>
-            <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-700">
-              Remaining: {usageState.aiRemaining}
-            </span>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-slate-900 px-3 py-1.5 font-semibold text-white">
+            Remaining: {usageState.aiRemaining}
+          </span>
+          {usageState.addonCredits > 0 ? (
             <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
               Extra credits: {usageState.addonCredits}
             </span>
-            <span className="rounded-full bg-indigo-50 px-3 py-1.5 font-semibold text-indigo-700">
-              Plan: {usageState.planLabel}
-            </span>
-          </div>
-
-          <TrustSignals />
+          ) : null}
         </div>
       </div>
 
@@ -269,40 +255,6 @@ export default function UsageOverview() {
             </div>
           </div>
         ))}
-      </div>
-
-      <div className="rounded-[22px] border border-slate-200/80 bg-white/84 p-5 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-slate-950">
-              Stay ahead of reply limits
-            </p>
-            <p className="mt-1 text-sm text-slate-500">
-              Keep replies flowing with extra credits now, or upgrade for a larger daily allowance.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Link href="/billing" className="brand-button-secondary">
-              Buy Credits
-            </Link>
-            <button
-              type="button"
-              onClick={() =>
-                openUpgrade({
-                  variant: usageState.aiDisabled ? "usage_limit" : "feature",
-                  title: usageState.notice?.title,
-                  description: usageState.notice?.message,
-                  remainingCredits: usageState.aiRemaining,
-                  addonCredits: usageState.addonCredits,
-                })
-              }
-              className="brand-button-primary"
-            >
-              Upgrade Plan
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

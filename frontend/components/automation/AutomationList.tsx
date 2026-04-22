@@ -15,7 +15,6 @@ import {
   EmptyState,
   RetryState,
   SkeletonCard,
-  TrustSignals,
 } from "@/components/ui/feedback";
 
 type AutomationStepType = "MESSAGE" | "DELAY" | "CONDITION" | "BOOKING";
@@ -363,14 +362,6 @@ export default function AutomationList() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200/70 pb-4">
-        <div className="space-y-2">
-          <h2 className="text-lg font-semibold text-gray-800">Automation flows</h2>
-          <p className="max-w-2xl text-sm text-slate-500">
-            Build reply paths your team can trust, with visible AI usage, cleaner handoffs, and conversion-focused follow-up.
-          </p>
-          <TrustSignals />
-        </div>
-
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-full bg-slate-900 px-3 py-1.5 font-semibold text-white">
             {flowStats.total} total
@@ -388,35 +379,22 @@ export default function AutomationList() {
             }}
             className="brand-button-primary"
           >
-            Create automation
+            Create Automation
           </button>
         </div>
       </div>
 
-      <div className="rounded-[22px] border border-slate-200/80 bg-white/84 p-4 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-slate-950">
-              Quick launch path
-            </p>
-            <p className="mt-1 text-sm text-slate-500">
-              Connect Instagram {"->"} create automation {"->"} start replies.
-            </p>
-          </div>
-
-          <div className="relative w-full max-w-sm">
-            <Search
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search automations"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-        </div>
+      <div className="relative w-full max-w-sm">
+        <Search
+          size={16}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+        />
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search automations"
+          className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-400"
+        />
       </div>
 
       {loading ? (
@@ -437,10 +415,8 @@ export default function AutomationList() {
 
       {!loading && !error && safeAutomations.length === 0 ? (
         <EmptyState
-          eyebrow="Automation"
           title="No automations yet"
-          description="Create your first automation to turn keywords into guided conversations automatically."
-          actionLabel="Create your first automation"
+          actionLabel="Create automation"
           onAction={() => {
             setActiveAutomation(null);
             setOpen(true);
@@ -450,8 +426,7 @@ export default function AutomationList() {
 
       {!loading && !error && safeAutomations.length > 0 && filteredAutomations.length === 0 ? (
         <EmptyState
-          title="No automations match this search"
-          description="Try a trigger keyword, channel, or automation name to find the flow you want faster."
+          title="No results"
         />
       ) : null}
 

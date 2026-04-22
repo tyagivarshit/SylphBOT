@@ -140,13 +140,6 @@ export default function CommentAutomationList() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Comment automations</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Route public comments into clear DM follow-ups with AI or template control.
-          </p>
-        </div>
-
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-full bg-slate-900 px-3 py-1.5 font-semibold text-white">
             {stats.total} total
@@ -164,7 +157,7 @@ export default function CommentAutomationList() {
             }}
             className="brand-button-primary w-full sm:w-auto"
           >
-            Create Trigger
+            Create Automation
           </button>
         </div>
       </div>
@@ -194,13 +187,7 @@ export default function CommentAutomationList() {
 
       {!loading && !automations.length ? (
         <div className="brand-empty-state rounded-[24px] p-8 text-center">
-          <p className="text-base font-semibold text-gray-900">
-            No comment automations yet
-          </p>
-
-          <p className="mt-1 text-sm text-gray-500">
-            Turn comments into leads automatically
-          </p>
+          <p className="text-base font-semibold text-gray-900">No automations yet</p>
 
           <button
             onClick={() => {
@@ -209,7 +196,7 @@ export default function CommentAutomationList() {
             }}
             className="brand-button-primary mt-4 w-full sm:w-auto"
           >
-            Create your first automation
+            Create one
           </button>
         </div>
       ) : null}

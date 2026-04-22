@@ -6,13 +6,11 @@ import { ShieldCheck, Sparkles } from "lucide-react";
 import { createCheckoutSession } from "@/lib/billing";
 import { notify } from "@/lib/toast";
 import PaymentHistory from "@/components/billing/PaymentHistory";
-import UsageSummary from "@/components/billing/UsageSummary";
 import { buildApiUrl } from "@/lib/userApi";
 import LoadingButton from "@/components/ui/LoadingButton";
 import {
   RetryState,
   SkeletonCard,
-  TrustSignals,
 } from "@/components/ui/feedback";
 
 type Currency = "INR" | "USD";
@@ -48,42 +46,6 @@ type BillingContext = {
   status?: "INACTIVE" | "ACTIVE" | "TRIAL";
   allowEarly?: boolean;
   remainingEarly?: number;
-};
-
-type UsageSummaryPayload = {
-  plan: string;
-  planLabel?: string;
-  trialActive: boolean;
-  daysLeft: number;
-  warning?: boolean;
-  warningMessage?: string | null;
-  addonCredits?: number;
-  ai: {
-    usedToday: number;
-    limit: number;
-    remaining: number | null;
-  };
-  usage: {
-    ai: {
-      used: number;
-      dailyLimit: number;
-      monthlyUsed: number;
-      monthlyLimit: number;
-      warning?: boolean;
-    };
-    contacts: {
-      used: number;
-      limit: number;
-    };
-    messages: {
-      used: number;
-      limit: number;
-    };
-  };
-  addons: {
-    aiCredits: number;
-    contacts?: number;
-  };
 };
 
 type PricingPlan = {
@@ -173,7 +135,6 @@ function BillingPageContent() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingContext, setBillingContext] = useState<BillingContext | null>(null);
-  const [usageSummary, setUsageSummary] = useState<UsageSummaryPayload | null>(null);
   const [plansResponse, setPlansResponse] = useState<PlansResponse>({
     plans: [],
     addons: [],
@@ -187,16 +148,14 @@ function BillingPageContent() {
       setPageLoading(true);
       setError(null);
 
-      const [billingData, plansData, usageData] = await Promise.all([
+      const [billingData, plansData] = await Promise.all([
         fetchJson<BillingApiResponse>(buildApiUrl("/api/billing")),
         fetchJson<PlansResponse>(buildApiUrl("/api/billing/plans")),
-        fetchJson<UsageSummaryPayload>(buildApiUrl("/api/usage")),
       ]);
 
       setSubscription(billingData.subscription || null);
       setInvoices(billingData.invoices || []);
       setBillingContext(billingData.billing || null);
-      setUsageSummary(usageData || null);
       setPlansResponse({
         plans: plansData.plans || [],
         addons: plansData.addons || [],
@@ -298,10 +257,6 @@ function BillingPageContent() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
               Pricing and billing
             </p>
-            <p className="max-w-2xl text-sm leading-6 text-slate-500">
-              Clear pricing, secure billing, and flexible credit top-ups so your team never gets stuck mid-conversation.
-            </p>
-            <TrustSignals />
           </div>
 
           <div className="flex rounded-2xl border border-slate-200/80 bg-white/90 p-1 shadow-sm">
@@ -376,8 +331,6 @@ function BillingPageContent() {
           </span>
         </div>
       </div>
-
-      <UsageSummary summary={usageSummary} />
 
       <div id="plans" className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
         {plans.map((plan) => {

@@ -82,34 +82,22 @@ export default function NotificationSettings() {
   }
 
   return (
-    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 shadow-sm space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold text-gray-900">
-          Notification Preferences
-        </h3>
-        <p className="text-sm text-gray-500 mt-1">
-          Control how you receive updates and alerts
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <div className="space-y-4">
         <Toggle
           label="Email Notifications"
-          desc="Receive important updates via email"
           value={settings.email}
           onChange={() => toggle("email")}
         />
 
         <Toggle
           label="WhatsApp Alerts"
-          desc="Get instant alerts on WhatsApp"
           value={settings.whatsapp}
           onChange={() => toggle("whatsapp")}
         />
 
         <Toggle
           label="Lead Notifications"
-          desc="Notify when new leads arrive"
           value={settings.leads}
           onChange={() => toggle("leads")}
         />
@@ -120,21 +108,16 @@ export default function NotificationSettings() {
 
 function Toggle({
   label,
-  desc,
   value,
   onChange,
 }: {
   label: string;
-  desc: string;
   value: boolean;
   onChange: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between p-4 border border-blue-100 rounded-2xl bg-white/70 backdrop-blur-xl hover:shadow-md transition">
-      <div>
-        <p className="text-sm font-semibold text-gray-900">{label}</p>
-        <p className="text-xs text-gray-500 mt-1">{desc}</p>
-      </div>
+    <div className="flex items-center justify-between rounded-2xl border border-blue-100 bg-white/70 p-4 backdrop-blur-xl transition hover:shadow-md">
+      <p className="text-sm font-semibold text-gray-900">{label}</p>
 
       <button
         onClick={onChange}

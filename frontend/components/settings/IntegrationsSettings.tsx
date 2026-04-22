@@ -175,17 +175,9 @@ export default function IntegrationsSettings() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-base font-semibold text-gray-900">Connection status</h3>
-        <p className="text-sm text-gray-500 mt-1">
-          Connect your external platforms and keep access synced.
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <IntegrationCard
         title="WhatsApp"
-        desc="Connect WhatsApp Business API"
         connected={connections.whatsapp.connected}
         healthy={connections.whatsapp.healthy}
         loading={connecting === "whatsapp"}
@@ -196,7 +188,6 @@ export default function IntegrationsSettings() {
 
       <IntegrationCard
         title="Instagram"
-        desc="Connect Instagram messaging and comments"
         connected={connections.instagram.connected}
         healthy={connections.instagram.healthy}
         loading={connecting === "instagram"}
@@ -212,7 +203,6 @@ export default function IntegrationsSettings() {
 
 function IntegrationCard({
   title,
-  desc,
   connected,
   healthy,
   loading,
@@ -221,7 +211,6 @@ function IntegrationCard({
   onDisconnect,
 }: {
   title: string;
-  desc: string;
   connected: boolean;
   healthy: boolean;
   loading: boolean;
@@ -231,10 +220,7 @@ function IntegrationCard({
 }) {
   return (
     <div className="flex items-center justify-between rounded-[24px] border border-slate-200/80 bg-white/84 p-5 transition hover:-translate-y-0.5 hover:shadow-md">
-      <div>
-        <p className="text-sm font-semibold text-gray-900">{title}</p>
-        <p className="text-xs text-gray-500">{desc}</p>
-      </div>
+      <p className="text-sm font-semibold text-gray-900">{title}</p>
 
       {connected && healthy ? (
         <div className="flex items-center gap-2">
@@ -305,10 +291,7 @@ function ApiKeySection() {
 
   return (
     <div className="rounded-[24px] border border-slate-200/80 bg-white/84 p-5 space-y-4">
-      <div>
-        <p className="text-sm font-semibold text-gray-900">API Key</p>
-        <p className="text-xs text-gray-500">Use this key to access API</p>
-      </div>
+      <p className="text-sm font-semibold text-gray-900">API Key</p>
 
       <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5">
         <span className="text-sm text-gray-700 truncate">

@@ -113,17 +113,8 @@ export default function BillingSettings() {
   }
 
   return (
-    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 space-y-6 shadow-sm">
-      <div>
-        <h3 className="text-base font-semibold text-gray-900">
-          Billing and Plan
-        </h3>
-        <p className="text-sm text-gray-500 mt-1">
-          Manage your subscription and billing
-        </p>
-      </div>
-
-      <div className="border border-blue-100 rounded-2xl p-5 flex items-center justify-between bg-white/70 backdrop-blur-xl hover:shadow-md transition gap-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4 rounded-2xl border border-blue-100 bg-white/70 p-5 backdrop-blur-xl transition hover:shadow-md">
         <div>
           <p className="text-sm font-semibold text-gray-900">
             {subscription?.plan?.name || "FREE PLAN"}
@@ -165,29 +156,6 @@ export default function BillingSettings() {
               {cancelMutation.isPending ? "Cancelling..." : "Cancel"}
             </button>
           )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 text-center hover:shadow-md transition">
-          <p className="text-xs text-gray-500">AI Calls</p>
-          <span className="text-lg font-semibold text-gray-900">
-            {data?.usage?.aiCallsUsed || 0}
-          </span>
-        </div>
-
-        <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 text-center hover:shadow-md transition">
-          <p className="text-xs text-gray-500">Messages</p>
-          <span className="text-lg font-semibold text-gray-900">
-            {data?.usage?.messagesUsed || 0}
-          </span>
-        </div>
-
-        <div className="bg-white/70 backdrop-blur-xl border border-blue-100 rounded-2xl p-4 text-center hover:shadow-md transition">
-          <p className="text-xs text-gray-500">Followups</p>
-          <span className="text-lg font-semibold text-gray-900">
-            {data?.usage?.followupsUsed || 0}
-          </span>
         </div>
       </div>
     </div>

@@ -23,7 +23,6 @@ import {
   LoadingSpinner,
   RetryState,
   SkeletonCard,
-  TrustSignals,
 } from "@/components/ui/feedback";
 
 type ReplyMode = "AI" | "TEMPLATE";
@@ -608,11 +607,10 @@ export default function ChatWindow({
           <EmptyState
             eyebrow="Conversation desk"
             title="Select a conversation to start replying"
-            description="Open a lead from the sidebar to review the full message history, switch between AI and template replies, and keep replies moving smoothly."
-            actionLabel="Create your first automation"
+            description="Open a lead from the sidebar."
+            actionLabel="Create automation"
             actionHref="/automation"
           />
-          <TrustSignals className="mt-4 justify-center" />
         </div>
       </div>
     );
@@ -639,25 +637,6 @@ export default function ChatWindow({
               <h2 className="mt-1 text-lg font-semibold text-slate-950">
                 {selectedLead.name || "Lead conversation"}
               </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                AI replies use credits. Template replies stay free.
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
-                  AI used today: {usageState.aiUsedToday}
-                </span>
-                <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-700">
-                  Remaining: {usageState.aiRemaining}
-                </span>
-                <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
-                  Extra credits: {usageState.addonCredits}
-                </span>
-              </div>
-
-              <TrustSignals />
             </div>
           </div>
 
@@ -730,9 +709,6 @@ export default function ChatWindow({
               <div className="mx-auto max-w-md rounded-3xl border border-slate-200/80 bg-white/88 px-4 py-4 text-center shadow-sm">
                 <p className="text-sm font-medium text-slate-800">
                   No messages yet
-                </p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  The first incoming message will appear here. Once it does, you can reply with AI or send a free template.
                 </p>
               </div>
             ) : (
@@ -845,34 +821,15 @@ export default function ChatWindow({
         ) : null}
 
         <div className="mb-3 rounded-[22px] border border-slate-200/80 bg-slate-50/80 p-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <span>Reply mode</span>
-              <button
-                type="button"
-                title="AI replies use credits. Template replies stay free."
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"
-              >
-                <Info size={14} />
-              </button>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/billing"
-                className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 transition hover:text-blue-700"
-              >
-                <Sparkles size={14} />
-                Buy credits
-              </Link>
-              <button
-                type="button"
-                onClick={openUpgradePrompt}
-                className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 transition hover:text-slate-950"
-              >
-                Upgrade plan
-              </button>
-            </div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <span>Reply mode</span>
+            <button
+              type="button"
+              title="Choose how this reply should be sent."
+              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"
+            >
+              <Info size={14} />
+            </button>
           </div>
 
           <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -889,9 +846,6 @@ export default function ChatWindow({
                 <Bot size={16} />
                 Use AI reply
               </span>
-              <span className="mt-1 block text-xs text-slate-500">
-                Uses credits and drafts the reply for you.
-              </span>
             </button>
 
             <button
@@ -907,19 +861,8 @@ export default function ChatWindow({
                 <Sparkles size={16} />
                 Use template reply
               </span>
-              <span className="mt-1 block text-xs text-slate-500">
-                Free reply. Sends exactly what you write.
-              </span>
             </button>
           </div>
-
-          <p className="mt-3 text-xs text-slate-500">
-            {replyMode === "AI"
-              ? latestUserMessage
-                ? "Leave the field blank to use the latest customer message as context, or add guidance for the AI reply."
-                : "Add guidance for the AI reply. Template replies remain free."
-              : "Template mode is free and sends your typed reply exactly as written."}
-          </p>
         </div>
 
         <div className="brand-input-shell gap-2 pl-4 pr-2">

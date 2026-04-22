@@ -35,7 +35,7 @@ export function EmptyState({
 }: {
   eyebrow?: string;
   title: string;
-  description: string;
+  description?: string;
   actionLabel?: string;
   actionHref?: string;
   onAction?: () => void;
@@ -57,16 +57,18 @@ export function EmptyState({
     : null;
 
   return (
-    <div className="brand-empty-state rounded-[28px] px-6 py-12 text-center">
+    <div className="brand-empty-state rounded-[28px] px-6 py-8 text-center">
       {eyebrow ? (
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
           {eyebrow}
         </p>
       ) : null}
       <p className="mt-2 text-base font-semibold text-slate-900">{title}</p>
-      <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-        {description}
-      </p>
+      {description ? (
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-500">
+          {description}
+        </p>
+      ) : null}
       {action}
     </div>
   );

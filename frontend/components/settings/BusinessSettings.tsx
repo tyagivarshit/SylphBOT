@@ -68,20 +68,8 @@ export default function BusinessSettings() {
   }
 
   return (
-    <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-6 space-y-6 shadow-sm">
-
-      {/* TITLE */}
-      <div>
-        <h3 className="text-base font-semibold text-gray-900">
-          Business Information
-        </h3>
-        <p className="text-sm text-gray-500 mt-1">
-          Update your workspace details
-        </p>
-      </div>
-
-      {/* FORM */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
         <input
           name="business"
@@ -146,7 +134,6 @@ export default function BusinessSettings() {
 
       </div>
 
-      {/* ACTION */}
       <div className="flex justify-end">
         <button
           onClick={handleSave}
@@ -156,7 +143,6 @@ export default function BusinessSettings() {
           {mutation.isPending ? "Saving..." : "Save Changes"}
         </button>
       </div>
-
     </div>
   );
 }

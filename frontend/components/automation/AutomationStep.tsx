@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { Bot, Info, Sparkles } from "lucide-react";
+import { Bot, Sparkles } from "lucide-react";
 import { useUpgrade } from "@/app/(dashboard)/layout";
 
 type StepType = "MESSAGE" | "DELAY" | "CONDITION" | "BOOKING";
@@ -31,15 +30,8 @@ type AutomationStepProps = {
   onConfigChange: (key: string, value: string | number) => void;
 };
 
-const STEP_HELPERS: Record<StepType, string> = {
-  MESSAGE: "Sends the reply your customer sees next.",
-  DELAY: "Adds a time gap before the next step starts.",
-  CONDITION: "Checks for a keyword or rule before continuing.",
-  BOOKING: "Moves the conversation toward booking.",
-};
-
 const sanitizeStepText = (value?: string | null) =>
-  value?.replace("ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â¹", "").trim() || "";
+  value?.replace("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹", "").trim() || "";
 
 export default function AutomationStep({
   step,
@@ -56,6 +48,7 @@ export default function AutomationStep({
   const { openUpgrade } = useUpgrade();
   const replyMode = step.config.replyMode === "AI" ? "AI" : "TEMPLATE";
   const isMessageStep = step.type === "MESSAGE";
+
   const openUsageLimitModal = () => {
     openUpgrade({
       variant: "usage_limit",
@@ -105,15 +98,12 @@ export default function AutomationStep({
                     : "bg-emerald-50 text-emerald-700"
                 }`}
               >
-                {replyMode === "AI" ? "AI step uses credits" : "Template step is free"}
+                {replyMode}
               </span>
             ) : null}
           </div>
 
-          <div>
-            <p className="text-base font-semibold text-slate-900">{step.label}</p>
-            <p className="mt-1 text-sm text-slate-500">{STEP_HELPERS[step.type]}</p>
-          </div>
+          <p className="text-base font-semibold text-slate-900">{step.label}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -149,29 +139,7 @@ export default function AutomationStep({
         {isMessageStep ? (
           <>
             <div className="rounded-[18px] border border-slate-200 bg-slate-50/80 p-3">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <span>Reply Mode</span>
-                  <button
-                    type="button"
-                    title="AI replies use credits. Template replies are free."
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"
-                  >
-                    <Info size={14} />
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
-                    AI Remaining: {aiRemaining}
-                  </span>
-                  <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
-                    Extra Credits: {addonCredits}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <div className="grid gap-2 md:grid-cols-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -190,10 +158,7 @@ export default function AutomationStep({
                 >
                   <span className="flex items-center gap-2 text-sm font-semibold">
                     <Bot size={16} />
-                    Use AI Reply
-                  </span>
-                  <span className="mt-1 block text-xs text-slate-500">
-                    Uses AI credits to generate the reply for this step.
+                    AI Reply
                   </span>
                 </button>
 
@@ -208,34 +173,10 @@ export default function AutomationStep({
                 >
                   <span className="flex items-center gap-2 text-sm font-semibold">
                     <Sparkles size={16} />
-                    Use Template Reply
-                  </span>
-                  <span className="mt-1 block text-xs text-slate-500">
-                    Free reply step. Sends exactly what you write.
+                    Template Reply
                   </span>
                 </button>
               </div>
-
-              {aiDisabled ? (
-                <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 md:flex-row md:items-center md:justify-between">
-                  <span>You've used all your AI replies for today.</span>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <Link
-                      href="/billing"
-                      className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
-                    >
-                      Buy credits
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={openUsageLimitModal}
-                      className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
-                    >
-                      Upgrade plan
-                    </button>
-                  </div>
-                </div>
-              ) : null}
             </div>
 
             {replyMode === "AI" ? (
@@ -250,17 +191,14 @@ export default function AutomationStep({
                     onChange={(event) =>
                       onConfigChange("aiPrompt", event.target.value || "")
                     }
-                    placeholder="Tell the AI how this step should reply. Example: answer pricing briefly, qualify the lead, and invite them to book."
+                    placeholder="Answer pricing briefly, qualify the lead, and invite them to book."
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
                   />
-                  <p className="mt-2 text-xs text-slate-500">
-                    AI will generate the reply. Keep the instruction outcome-focused.
-                  </p>
                 </div>
 
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    Fallback Template Reply
+                    Fallback Reply
                   </label>
                   <textarea
                     rows={3}
@@ -268,12 +206,9 @@ export default function AutomationStep({
                     onChange={(event) =>
                       onConfigChange("message", event.target.value || "")
                     }
-                    placeholder="Optional backup reply if AI is unavailable."
+                    placeholder="Optional backup reply"
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
                   />
-                  <p className="mt-2 text-xs text-slate-500">
-                    This fallback is free and keeps the flow usable if AI cannot respond.
-                  </p>
                 </div>
               </>
             ) : (
@@ -287,12 +222,9 @@ export default function AutomationStep({
                   onChange={(event) =>
                     onConfigChange("message", event.target.value || "")
                   }
-                  placeholder="Enter the exact static reply to send."
+                  placeholder="Enter the exact reply to send"
                   className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
                 />
-                <p className="mt-2 text-xs text-slate-500">
-                  This step is free. The automation sends exactly what you write.
-                </p>
               </div>
             )}
           </>
@@ -301,25 +233,21 @@ export default function AutomationStep({
         {step.type === "CONDITION" ? (
           <div>
             <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Condition Rule
+              Condition
             </label>
             <input
               value={step.config.condition || ""}
               onChange={(event) => onConfigChange("condition", event.target.value)}
-              placeholder="Example: only continue when the user says price"
+              placeholder="only continue when the user says price"
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-fuchsia-400 focus:outline-none focus:ring-4 focus:ring-fuchsia-100"
             />
-            <p className="mt-2 text-xs text-slate-500">
-              Use a simple keyword or phrase so the next action only runs in the
-              right scenario.
-            </p>
           </div>
         ) : null}
 
         {step.type === "DELAY" ? (
           <div>
             <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Delay In Seconds
+              Delay in Seconds
             </label>
             <input
               type="number"
@@ -328,19 +256,15 @@ export default function AutomationStep({
               onChange={(event) =>
                 onConfigChange("delay", Number(event.target.value) || 0)
               }
-              placeholder="Example: 30"
+              placeholder="30"
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-100"
             />
-            <p className="mt-2 text-xs text-slate-500">
-              Add breathing room before the next reply or action is sent.
-            </p>
           </div>
         ) : null}
 
         {step.type === "BOOKING" ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            This step hands the conversation into your booking flow when the
-            automation reaches it.
+            Booking step
           </div>
         ) : null}
       </div>

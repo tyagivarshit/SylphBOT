@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useUpgrade } from "@/app/(dashboard)/layout";
 import { buildApiUrl } from "@/lib/url";
@@ -51,15 +50,8 @@ type Step = {
   config: AutomationStepConfig;
 };
 
-const STEP_DESCRIPTIONS: Record<AutomationStepType, string> = {
-  MESSAGE: "Send a reply instantly with AI or a free template.",
-  DELAY: "Wait before the next action runs.",
-  CONDITION: "Continue only when the conversation matches your rule.",
-  BOOKING: "Hand the user into your booking step.",
-};
-
 const sanitizeStepText = (value?: string | null) =>
-  value?.replace("ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â¹", "").trim() || "";
+  value?.replace("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹", "").trim() || "";
 
 const getStepLabel = (type: AutomationStepType) => {
   switch (type) {
@@ -108,41 +100,40 @@ const normalizeInitialSteps = (
   }
 
   const normalized: Array<Step | null> = initialSteps.map((step, index) => {
-      const type = normalizeStepType(step.type || step.stepType);
+    const type = normalizeStepType(step.type || step.stepType);
 
-      if (!type) {
-        return null;
-      }
+    if (!type) {
+      return null;
+    }
 
-      const metadata = step.metadata || step.config || {};
-      const replyMode =
-        metadata.replyMode === "AI" ||
-        Boolean(sanitizeStepText(metadata.aiPrompt))
-          ? "AI"
-          : "TEMPLATE";
-      const delay =
-        typeof metadata.delay === "number" && Number.isFinite(metadata.delay)
-          ? metadata.delay
-          : undefined;
+    const metadata = step.metadata || step.config || {};
+    const replyMode =
+      metadata.replyMode === "AI" || Boolean(sanitizeStepText(metadata.aiPrompt))
+        ? "AI"
+        : "TEMPLATE";
+    const delay =
+      typeof metadata.delay === "number" && Number.isFinite(metadata.delay)
+        ? metadata.delay
+        : undefined;
 
-      return {
-        id:
-          typeof step.id === "number"
-            ? step.id
-            : typeof step.id === "string" && Number.isFinite(Number(step.id))
-              ? Number(step.id)
-              : Date.now() + index,
-        type,
-        label: getStepLabel(type),
-        config: {
-          message: sanitizeStepText(metadata.message ?? step.message),
-          condition: sanitizeStepText(metadata.condition ?? step.condition),
-          delay,
-          replyMode: type === "MESSAGE" ? replyMode : undefined,
-          aiPrompt: sanitizeStepText(metadata.aiPrompt),
-        },
-      };
-    });
+    return {
+      id:
+        typeof step.id === "number"
+          ? step.id
+          : typeof step.id === "string" && Number.isFinite(Number(step.id))
+            ? Number(step.id)
+            : Date.now() + index,
+      type,
+      label: getStepLabel(type),
+      config: {
+        message: sanitizeStepText(metadata.message ?? step.message),
+        condition: sanitizeStepText(metadata.condition ?? step.condition),
+        delay,
+        replyMode: type === "MESSAGE" ? replyMode : undefined,
+        aiPrompt: sanitizeStepText(metadata.aiPrompt),
+      },
+    };
+  });
 
   const filtered = normalized.filter((step): step is Step => step !== null);
 
@@ -173,23 +164,6 @@ export default function AutomationBuilder({
   const addonCredits = usage?.addonCredits ?? usage?.addons.aiCredits ?? 0;
   const aiRemaining = usage?.ai.remaining ?? 0;
   const aiDisabled = usage ? aiRemaining <= 0 && addonCredits <= 0 : false;
-
-  const flowSummary = useMemo(() => {
-    const aiSteps = steps.filter(
-      (step) =>
-        step.type === "MESSAGE" &&
-        (step.config.replyMode === "AI" || Boolean(step.config.aiPrompt))
-    ).length;
-    const templateSteps = steps.filter(
-      (step) => step.type === "MESSAGE" && step.config.replyMode !== "AI"
-    ).length;
-
-    return {
-      aiSteps,
-      templateSteps,
-      totalSteps: steps.length,
-    };
-  }, [steps]);
 
   const openUsageLimitModal = () => {
     openUpgrade({
@@ -330,75 +304,10 @@ export default function AutomationBuilder({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="rounded-[22px] border border-slate-200 bg-slate-50/85 p-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-slate-900">
-              Build the flow in order
-            </p>
-            <p className="text-xs leading-5 text-slate-500">
-              Step 1 starts the reply. Add wait, condition, or booking steps after
-              that to control what happens next.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-slate-900 px-3 py-1.5 font-semibold text-white">
-              {flowSummary.totalSteps}{" "}
-              {flowSummary.totalSteps === 1 ? "step" : "steps"}
-            </span>
-            <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
-              {flowSummary.aiSteps} AI step
-              {flowSummary.aiSteps === 1 ? "" : "s"}
-            </span>
-            <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
-              {flowSummary.templateSteps} free template step
-              {flowSummary.templateSteps === 1 ? "" : "s"}
-            </span>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-          <div className="rounded-[18px] border border-slate-200 bg-white px-4 py-3">
-            <p className="text-sm font-semibold text-slate-900">
-              AI replies use credits. Template replies are free.
-            </p>
-            <p className="mt-1 text-xs leading-5 text-slate-500">
-              Choose the reply mode inside each message step so everyone can see
-              what costs credits before the automation goes live.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">
-              AI Remaining Today: {aiRemaining}
-            </span>
-            <span className="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
-              Extra Credits: {addonCredits}
-            </span>
-          </div>
-        </div>
-
-        {aiDisabled ? (
-          <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 md:flex-row md:items-center md:justify-between">
-            <span>You've used all your AI replies for today.</span>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Link
-                href="/billing"
-                className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
-              >
-                Buy credits
-              </Link>
-              <button
-                type="button"
-                onClick={openUsageLimitModal}
-                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
-              >
-                Upgrade plan
-              </button>
-            </div>
-          </div>
-        ) : null}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-900">
+          {steps.length} {steps.length === 1 ? "step" : "steps"}
+        </p>
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 sm:space-y-4">
@@ -429,11 +338,7 @@ export default function AutomationBuilder({
       </div>
 
       <div className="shrink-0 rounded-[22px] border border-dashed border-slate-300 bg-slate-50 p-3 sm:p-4">
-        <p className="text-sm font-semibold text-slate-800">Add Another Step</p>
-        <p className="mt-1 text-xs leading-5 text-slate-500">
-          Message steps send the reply. Delay, condition, and booking steps let
-          you control the path after that.
-        </p>
+        <p className="text-sm font-semibold text-slate-800">Add step</p>
 
         <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {(
@@ -450,15 +355,20 @@ export default function AutomationBuilder({
               onClick={() => addStep(type)}
               className={getStepButtonClass(allowedSteps.includes(type))}
             >
-              <span className="flex flex-col items-center gap-1 text-center">
-                <span>{label}</span>
-                <span className="text-[11px] font-medium text-current/70">
-                  {STEP_DESCRIPTIONS[type]}
-                </span>
-              </span>
+              {label}
             </button>
           ))}
         </div>
+
+        {aiDisabled ? (
+          <button
+            type="button"
+            onClick={openUsageLimitModal}
+            className="mt-3 text-sm font-semibold text-rose-700 transition hover:text-rose-800"
+          >
+            AI replies are unavailable today
+          </button>
+        ) : null}
       </div>
     </div>
   );

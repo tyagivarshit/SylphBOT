@@ -114,19 +114,6 @@ export default function AuditLogsTab() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-          Event trace
-        </p>
-        <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
-          Audit logs
-        </h2>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
-          Review security-sensitive activity across the workspace with searchable
-          operator context, timestamps, and structured metadata.
-        </p>
-      </div>
-
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px_220px_auto]">
         <SearchInput
           label="User"
@@ -169,11 +156,6 @@ export default function AuditLogsTab() {
             Clear filters
           </button>
         </div>
-      </div>
-
-      <div className="rounded-[24px] border border-slate-200/80 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-        Date filters query the server. User and action filters refine the
-        currently loaded page for faster incident review.
       </div>
 
       {auditLogsQuery.isLoading ? <AuditLoadingState /> : null}

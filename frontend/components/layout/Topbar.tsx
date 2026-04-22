@@ -1,8 +1,7 @@
 "use client";
 
 import type { Route } from "next";
-import Link from "next/link";
-import { Menu, Search, ShieldCheck } from "lucide-react";
+import { Menu, Search } from "lucide-react";
 import {
   Dispatch,
   SetStateAction,
@@ -101,21 +100,12 @@ function TopbarComponent({ setOpen }: TopbarProps) {
           </div>
 
           <div className="hidden min-w-0 flex-1 lg:block">
-            <div className="flex items-center gap-3">
-              <span className="brand-eyebrow">{currentPage.eyebrow}</span>
-              <span className="brand-chip brand-chip-success hidden xl:inline-flex">
-                <ShieldCheck size={13} />
-                Always-on AI sales desk
-              </span>
-            </div>
+            <span className="brand-eyebrow">{currentPage.eyebrow}</span>
 
             <div className="mt-2">
               <h1 className="truncate text-xl font-semibold tracking-tight text-slate-950">
                 {currentPage.title}
               </h1>
-              <p className="truncate text-sm text-slate-500">
-                {currentPage.subtitle}
-              </p>
             </div>
           </div>
         </div>
@@ -210,49 +200,49 @@ function getPageMeta(pathname: string) {
   const routes = [
     {
       match: "/dashboard",
-      title: "Revenue command center",
+      title: "Dashboard",
       eyebrow: "Overview",
       subtitle: "Live visibility into leads, usage, and active conversations.",
     },
     {
       match: "/leads",
-      title: "Leads CRM",
+      title: "Leads",
       eyebrow: "CRM",
       subtitle: "Track stages, live activity, and conversion-ready conversations.",
     },
     {
       match: "/conversations",
-      title: "Conversation desk",
+      title: "Conversations",
       eyebrow: "Inbox",
       subtitle: "Manage live messages with a premium client-facing workflow.",
     },
     {
       match: "/automation",
-      title: "Automation engine",
+      title: "Automation",
       eyebrow: "Automation",
       subtitle: "Build flows that feel enterprise-grade, not generic.",
     },
     {
       match: "/comment-automation",
-      title: "Comment automation",
+      title: "Comment Automation",
       eyebrow: "Automation",
       subtitle: "Turn public engagement into private lead conversion.",
     },
     {
       match: "/ai-training",
-      title: "AI training",
+      title: "AI Training",
       eyebrow: "Intelligence",
       subtitle: "Shape tone, knowledge, and conversion behavior for your AI desk.",
     },
     {
       match: "/knowledge-base",
-      title: "Knowledge base",
+      title: "Knowledge Base",
       eyebrow: "Intelligence",
       subtitle: "Organize business context so replies stay accurate and on-brand.",
     },
     {
       match: "/booking",
-      title: "Booking operations",
+      title: "Booking",
       eyebrow: "Business",
       subtitle: "Availability, sessions, and scheduling with a trusted premium feel.",
     },
@@ -264,13 +254,19 @@ function getPageMeta(pathname: string) {
     },
     {
       match: "/billing",
-      title: "Billing and access",
+      title: "Billing",
       eyebrow: "Growth",
       subtitle: "Plans, payments, and activation controls for the workspace.",
     },
     {
+      match: "/settings/security",
+      title: "Security",
+      eyebrow: "System",
+      subtitle: "Manage API keys, logs, and alerts.",
+    },
+    {
       match: "/settings",
-      title: "Workspace settings",
+      title: "Settings",
       eyebrow: "System",
       subtitle:
         "Manage business details, integrations, notifications, and account security.",
@@ -283,7 +279,7 @@ function getPageMeta(pathname: string) {
         ? pathname === item.match
         : pathname.startsWith(item.match)
     ) || {
-      title: "Automexia AI workspace",
+      title: "Workspace",
       eyebrow: "Lead OS",
       subtitle: "Premium automation and conversion operations for your team.",
     }

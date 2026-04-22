@@ -21,14 +21,14 @@ type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
   isAuthenticated: boolean;
-  refreshUser: () => Promise<void>;
+  refreshUser: () => Promise<AuthUser | null>;
 };
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   isAuthenticated: false,
-  refreshUser: async () => {},
+  refreshUser: async () => null,
 });
 
 export const AuthProvider = ({
@@ -41,20 +41,25 @@ export const AuthProvider = ({
 
   const hasFetched = useRef(false);
 
-  const fetchUser = useCallback(async () => {
+  const fetchUser = useCallback(async (options?: { isInitial?: boolean }) => {
     try {
       const res = await getCurrentUser();
 
       if (res?.unauthorized || !res?.success) {
         setUser(null);
-        return;
+        return null;
       }
 
-      setUser(res?.data?.user ?? null);
+      const nextUser = res?.data?.user ?? null;
+      setUser(nextUser);
+      return nextUser;
     } catch {
       setUser(null);
+      return null;
     } finally {
-      setLoading(false);
+      if (options?.isInitial) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -62,7 +67,9 @@ export const AuthProvider = ({
     if (hasFetched.current) return;
     hasFetched.current = true;
 
-    void fetchUser();
+    void fetchUser({
+      isInitial: true,
+    });
   }, [fetchUser]);
 
   useEffect(() => {

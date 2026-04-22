@@ -42,6 +42,7 @@ const availability_routes_1 = __importDefault(require("./routes/availability.rou
 const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
 const health_routes_1 = __importDefault(require("./routes/health.routes"));
 const usage_routes_1 = __importDefault(require("./routes/usage.routes"));
+const client_controller_1 = require("./controllers/client.controller");
 const helpAi_routes_1 = __importDefault(require("./routes/helpAi.routes"));
 const ai_queue_1 = require("./queues/ai.queue");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
@@ -52,6 +53,7 @@ const rbac_service_1 = require("./services/rbac.service");
 const trial_cron_1 = require("./cron/trial.cron");
 const metaTokenRefresh_cron_1 = require("./cron/metaTokenRefresh.cron");
 const resetUsage_cron_1 = require("./cron/resetUsage.cron");
+const connectionHealth_cron_1 = require("./cron/connectionHealth.cron");
 const AppError_1 = require("./utils/AppError");
 const asyncHandler_1 = require("./utils/asyncHandler");
 const logger_1 = __importDefault(require("./utils/logger"));
@@ -293,6 +295,7 @@ app.use("/api/automation", auth_middleware_1.protect, subscription_middleware_1.
 app.use("/api/messages", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, message_routes_1.default);
 app.use("/api/conversations", auth_middleware_1.protect, conversation_routes_1.default);
 app.use("/api/comment-triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
+app.get("/api/client/status", auth_middleware_1.protect, client_controller_1.getClientStatus);
 app.use("/api/clients", auth_middleware_1.protect, client_routes_1.default);
 app.use("/api/instagram", auth_middleware_1.protect, instagram_routes_1.default);
 app.use("/api/knowledge", auth_middleware_1.protect, knowledge_routes_1.default);
@@ -356,6 +359,7 @@ if (process.env.ENABLE_CRON === "true") {
     (0, trial_cron_1.startTrialExpiryCron)();
     (0, metaTokenRefresh_cron_1.startMetaTokenRefreshCron)();
     (0, resetUsage_cron_1.startUsageResetCron)();
+    (0, connectionHealth_cron_1.startConnectionHealthCron)();
 }
 process.on("uncaughtException", (err) => {
     logger_1.default.error({ err }, "Unhandled uncaught exception in app");

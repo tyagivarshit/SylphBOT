@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect,useState } from "react"
+import { useCallback, useEffect,useState } from "react"
 import { getClients } from "@/lib/clients"
 
 import ClientCard from "@/components/clients/ClientCard"
@@ -15,9 +15,7 @@ const [open,setOpen] = useState(false)
 const [loading,setLoading] = useState(true)
 const [search,setSearch] = useState("")
 
-useEffect(()=>{
-
-const loadClients = async()=>{
+const loadClients = useCallback(async()=>{
 
 try{
 
@@ -34,11 +32,11 @@ setLoading(false)
 
 }
 
-}
-
-loadClients()
-
 },[])
+
+useEffect(()=>{
+void loadClients()
+},[loadClients])
 
 
 const filtered = clients.filter((c)=>
@@ -143,7 +141,10 @@ client={client}
 {/* MODAL */}
 
 {open && (
-<AddClientModal onClose={()=>setOpen(false)}/>
+<AddClientModal
+onClose={()=>setOpen(false)}
+onConnected={loadClients}
+/>
 )}
 
 </div>

@@ -21,11 +21,11 @@ export default function LoginClient({
   initialAuthError,
 }: LoginClientProps) {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, refreshUser } = useAuth();
 
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"email" | "google" | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
   const mounted = useRef(true);
@@ -62,6 +62,7 @@ export default function LoginClient({
     handledMessageRef.current = initialAuthError;
 
     const messageMap: Record<string, string> = {
+      google_auth_failed: "Google sign-in failed. Please try again.",
       oauth_cancelled: "Google sign-in was cancelled. Please try again.",
       oauth_failed: "Google sign-in failed. Please try again.",
       oauth_state_invalid:
@@ -95,12 +96,18 @@ export default function LoginClient({
     }
 
     try {
-      setLoading(true);
+      setLoading("email");
 
       const res = await loginUser(cleanEmail, password);
 
       if (!res.success) {
         throw new Error(res.message || "Login failed");
+      }
+
+      const refreshedUser = await refreshUser();
+
+      if (!refreshedUser) {
+        throw new Error("Authentication failed. Please try again.");
       }
 
       toast.success("Login successful");
@@ -109,13 +116,30 @@ export default function LoginClient({
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {
       if (mounted.current) {
-        setLoading(false);
+        setLoading(null);
       }
     }
   };
 
   const handleGoogleLogin = () => {
-    window.location.assign(buildGoogleAuthUrl(window.location.origin));
+    if (loading) {
+      return;
+    }
+
+    try {
+      setLoading("google");
+      window.location.href = buildGoogleAuthUrl(window.location.origin);
+    } catch (error) {
+      if (mounted.current) {
+        setLoading(null);
+      }
+
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Google sign-in failed. Please try again."
+      );
+    }
   };
 
   if (authLoading) {
@@ -163,9 +187,13 @@ export default function LoginClient({
         </div>
       </div>
 
-      <button onClick={handleGoogleLogin} className="brand-social-button">
+      <button
+        onClick={handleGoogleLogin}
+        disabled={Boolean(loading)}
+        className="brand-social-button disabled:cursor-not-allowed disabled:opacity-60"
+      >
         <FcGoogle size={18} />
-        Continue with Google
+        {loading === "google" ? "Redirecting to Google..." : "Continue with Google"}
       </button>
 
       <div className="brand-divider-label">or sign in with email</div>
@@ -224,10 +252,10 @@ export default function LoginClient({
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={Boolean(loading)}
           className="brand-button-primary w-full"
         >
-          {loading ? "Signing in..." : "Sign in to workspace"}
+          {loading === "email" ? "Signing you in..." : "Sign in to workspace"}
         </button>
       </form>
     </AuthShell>

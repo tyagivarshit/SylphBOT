@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   buildApiUrl,
   buildAppUrl,
+  fetchClientConnectionStatus,
   fetchWorkspaceApiKey,
 } from "@/lib/userApi";
 
@@ -15,10 +16,22 @@ type ClientConnection = {
   platform: string;
 };
 
+const defaultConnections = {
+  instagram: {
+    connected: false,
+    healthy: false,
+  },
+  whatsapp: {
+    connected: false,
+    healthy: false,
+  },
+};
+
 export default function IntegrationsSettings() {
   const queryClient = useQueryClient();
   const params = useSearchParams();
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [connections, setConnections] = useState(defaultConnections);
 
   const { data, isLoading } = useQuery({
     queryKey: ["integrations"],
@@ -39,20 +52,53 @@ export default function IntegrationsSettings() {
   const whatsapp = clients.find((client) => client.platform === "WHATSAPP");
   const instagram = clients.find((client) => client.platform === "INSTAGRAM");
 
+  const loadConnections = useCallback(async () => {
+    try {
+      const status = await fetchClientConnectionStatus();
+
+      setConnections({
+        instagram: {
+          connected: Boolean(status.instagram.connected),
+          healthy: Boolean(status.instagram.healthy),
+        },
+        whatsapp: {
+          connected: Boolean(status.whatsapp.connected),
+          healthy: Boolean(status.whatsapp.healthy),
+        },
+      });
+    } catch (error) {
+      console.error("Connection status error", error);
+      setConnections(defaultConnections);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadConnections();
+  }, [loadConnections]);
+
   useEffect(() => {
     const status = params.get("integration");
 
-    if (status === "success") {
-      toast.success("Integration connected successfully");
-      queryClient.invalidateQueries({ queryKey: ["integrations"] });
-      window.history.replaceState({}, "", buildAppUrl("/settings"));
-    }
+    const syncAfterConnect = async () => {
+      if (status === "success") {
+        toast.success("Integration connected successfully");
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["integrations"] }),
+          loadConnections(),
+        ]);
+        window.history.replaceState({}, "", buildAppUrl("/settings"));
+        return;
+      }
 
-    if (status === "error") {
-      toast.error("Integration failed");
-      window.history.replaceState({}, "", buildAppUrl("/settings"));
-    }
-  }, [params, queryClient]);
+      if (status === "error") {
+        toast.error("Integration failed");
+        await loadConnections();
+        window.history.replaceState({}, "", buildAppUrl("/settings"));
+      }
+    };
+
+    void syncAfterConnect();
+  }, [loadConnections, params, queryClient]);
 
   const disconnect = useMutation({
     mutationFn: async (id: string) => {
@@ -69,20 +115,33 @@ export default function IntegrationsSettings() {
     },
     onSuccess: async () => {
       toast.success("Disconnected successfully");
-      await queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["integrations"] }),
+        loadConnections(),
+      ]);
     },
     onError: () => {
       toast.error("Unable to disconnect right now");
     },
   });
 
-  const connectMeta = async () => {
+  const connectMeta = async (
+    platformKey: "instagram" | "whatsapp",
+    mode: "connect" | "reconnect" = "connect"
+  ) => {
     try {
-      setConnecting("meta");
+      setConnecting(platformKey);
 
-      const res = await fetch(buildApiUrl("/api/clients/oauth/meta"), {
-        credentials: "include",
+      const query = new URLSearchParams({
+        platform: platformKey.toUpperCase(),
+        mode,
       });
+      const res = await fetch(
+        buildApiUrl(`/api/clients/oauth/meta?${query.toString()}`),
+        {
+          credentials: "include",
+        }
+      );
 
       const payload = await res.json().catch(() => null);
 
@@ -94,6 +153,19 @@ export default function IntegrationsSettings() {
     } catch (err) {
       console.error(err);
       toast.error(err instanceof Error ? err.message : "Something went wrong");
+      setConnecting(null);
+    }
+  };
+
+  const reconnectPlatform = async (
+    platformKey: "instagram" | "whatsapp",
+    _clientId?: string
+  ) => {
+    try {
+      await connectMeta(platformKey, "reconnect");
+    } catch (error) {
+      console.error("Reconnect error", error);
+      toast.error("Unable to reconnect right now");
       setConnecting(null);
     }
   };
@@ -114,18 +186,22 @@ export default function IntegrationsSettings() {
       <IntegrationCard
         title="WhatsApp"
         desc="Connect WhatsApp Business API"
-        connected={Boolean(whatsapp)}
-        loading={connecting === "meta"}
-        onConnect={connectMeta}
+        connected={connections.whatsapp.connected}
+        healthy={connections.whatsapp.healthy}
+        loading={connecting === "whatsapp"}
+        onConnect={() => connectMeta("whatsapp")}
+        onReconnect={() => reconnectPlatform("whatsapp", whatsapp?.id)}
         onDisconnect={() => whatsapp && disconnect.mutate(whatsapp.id)}
       />
 
       <IntegrationCard
         title="Instagram"
         desc="Connect Instagram messaging and comments"
-        connected={Boolean(instagram)}
-        loading={connecting === "meta"}
-        onConnect={connectMeta}
+        connected={connections.instagram.connected}
+        healthy={connections.instagram.healthy}
+        loading={connecting === "instagram"}
+        onConnect={() => connectMeta("instagram")}
+        onReconnect={() => reconnectPlatform("instagram", instagram?.id)}
         onDisconnect={() => instagram && disconnect.mutate(instagram.id)}
       />
 
@@ -138,37 +214,70 @@ function IntegrationCard({
   title,
   desc,
   connected,
+  healthy,
   loading,
   onConnect,
+  onReconnect,
   onDisconnect,
 }: {
   title: string;
   desc: string;
   connected: boolean;
+  healthy: boolean;
   loading: boolean;
   onConnect: () => void;
+  onReconnect: () => void;
   onDisconnect: () => void;
 }) {
   return (
-      <div className="flex items-center justify-between rounded-[24px] border border-slate-200/80 bg-white/84 p-5 transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="flex items-center justify-between rounded-[24px] border border-slate-200/80 bg-white/84 p-5 transition hover:-translate-y-0.5 hover:shadow-md">
       <div>
         <p className="text-sm font-semibold text-gray-900">{title}</p>
         <p className="text-xs text-gray-500">{desc}</p>
       </div>
 
-      {connected ? (
-        <button
-          onClick={onDisconnect}
-          className="rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 transition hover:shadow-md"
-        >
-          Disconnect
-        </button>
+      {connected && healthy ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled
+            className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700"
+          >
+            Connected ✅
+          </button>
+          <button
+            type="button"
+            onClick={onDisconnect}
+            className="rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 transition hover:shadow-md"
+          >
+            Disconnect
+          </button>
+        </div>
+      ) : connected ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled
+            className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700"
+          >
+            Connection expired ⚠️
+          </button>
+          <button
+            type="button"
+            onClick={onReconnect}
+            disabled={loading}
+            className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:shadow-md disabled:opacity-60"
+          >
+            {loading ? "Connecting..." : "Reconnect"}
+          </button>
+        </div>
       ) : (
         <button
           onClick={onConnect}
+          disabled={loading}
           className="brand-button-primary px-4 py-2"
         >
-          {loading ? "Connecting..." : "Connect"}
+          {loading ? "Connecting..." : `Connect ${title}`}
         </button>
       )}
     </div>
@@ -217,4 +326,3 @@ function ApiKeySection() {
     </div>
   );
 }
-

@@ -85,7 +85,11 @@ export default function RegisterPage() {
   };
 
   const handleGoogleRegister = () => {
-    window.location.assign(buildGoogleAuthUrl(window.location.origin));
+    if (loading) {
+      return;
+    }
+
+    window.location.href = buildGoogleAuthUrl(window.location.origin);
   };
 
   return (
@@ -116,7 +120,11 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      <button onClick={handleGoogleRegister} className="brand-social-button">
+      <button
+        onClick={handleGoogleRegister}
+        disabled={loading}
+        className="brand-social-button disabled:cursor-not-allowed disabled:opacity-60"
+      >
         <FcGoogle size={18} />
         Continue with Google
       </button>

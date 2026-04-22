@@ -32,6 +32,7 @@ const buildAuthErrorUrl = (
 ) => {
   const url = new URL("/auth/login", redirectOrigin);
   url.searchParams.set("authError", authError);
+  url.searchParams.set("error", "google_auth_failed");
   return url.toString();
 };
 

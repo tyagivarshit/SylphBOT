@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { apiFetch } from "@/lib/apiClient"
+import { fetchClientConnectionStatus } from "@/lib/userApi"
 
 export default function MetaCallback(){
 
@@ -24,6 +25,8 @@ await apiFetch("/api/clients/oauth/meta",{
 method:"POST",
 body:JSON.stringify({ code })
 })
+
+await fetchClientConnectionStatus().catch(() => null)
 
 router.push("/clients")
 

@@ -35,6 +35,19 @@ export type SearchResult = {
   type: "page" | "lead" | "message";
 };
 
+export type ClientConnectionStatus = {
+  instagram: {
+    connected: boolean;
+    pageId: string | null;
+    healthy: boolean;
+  };
+  whatsapp: {
+    connected: boolean;
+    phoneNumberId: string | null;
+    healthy: boolean;
+  };
+};
+
 async function readJson<T>(res: Response): Promise<T | null> {
   try {
     return (await res.json()) as T;
@@ -138,6 +151,21 @@ export async function fetchWorkspaceApiKey() {
   }
 
   return data.apiKey;
+}
+
+export async function fetchClientConnectionStatus(): Promise<ClientConnectionStatus> {
+  const res = await fetch(buildApiUrl("/api/client/status"), {
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  const data = await readJson<ClientConnectionStatus>(res);
+
+  if (!res.ok || !data) {
+    throw new Error("Failed to load connection status");
+  }
+
+  return data;
 }
 
 export async function fetchNotifications() {

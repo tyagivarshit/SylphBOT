@@ -32,11 +32,11 @@ router.get("/meta/callback", async (req, res) => {
         /*
         🔥 SUCCESS → FRONTEND REDIRECT
         */
-        return res.redirect(`${process.env.FRONTEND_URL}/dashboard?integration=success&onboarding=1`);
+        return res.redirect(`${process.env.FRONTEND_URL}/settings?integration=success&onboarding=1`);
     }
     catch (error) {
         console.error("OAuth callback error:", error);
-        return res.redirect(`${process.env.FRONTEND_URL}/dashboard?integration=error`);
+        return res.redirect(`${process.env.FRONTEND_URL}/settings?integration=error`);
     }
 });
 exports.default = router;

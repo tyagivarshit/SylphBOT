@@ -3,7 +3,7 @@
 ====================================== */
 
 import type { ApiResponse } from "./apiClient";
-import { buildApiUrl } from "./url";
+import { buildAbsoluteApiUrl, buildApiUrl } from "./url";
 
 /* ======================================
 🔥 TYPES (STRICT)
@@ -27,6 +27,7 @@ type CurrentUserResponse = {
 let currentUserCache: User | null = null;
 let fetchingPromise: Promise<ApiResponse<CurrentUserResponse>> | null = null;
 const AUTH_TIMEOUT_MS = 15000;
+const AUTH_RETRY_DELAY_MS = 300;
 
 /* ======================================
 🔥 UTILS
@@ -41,6 +42,11 @@ const toAuthUrl = (path: string) => {
   return buildApiUrl(`/api${normalized}`);
 };
 
+const toAbsoluteAuthUrl = (path: string) => {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  return buildAbsoluteApiUrl(`/api${normalized}`);
+};
+
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
 
@@ -51,6 +57,11 @@ async function readJson<T>(res: Response): Promise<T | null> {
     return null;
   }
 }
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 async function authFetch<T>(
   path: string,
@@ -69,6 +80,7 @@ async function authFetch<T>(
       ...options,
       credentials: "include",
       mode: "cors",
+      cache: options.cache ?? "no-store",
       headers: {
         ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
         ...(options.headers || {}),
@@ -132,7 +144,7 @@ async function authFetch<T>(
 }
 
 export function buildGoogleAuthUrl(redirectTo?: string) {
-  const url = new URL(toAuthUrl("/auth/google"));
+  const url = new URL(toAbsoluteAuthUrl("/auth/google"));
 
   if (redirectTo) {
     url.searchParams.set("redirectTo", redirectTo);
@@ -140,6 +152,29 @@ export function buildGoogleAuthUrl(redirectTo?: string) {
 
   return url.toString();
 }
+
+const shouldRetryCurrentUser = (
+  response: ApiResponse<CurrentUserResponse>
+) => response.unauthorized || response.networkError;
+
+const fetchCurrentUserWithRetry = async () => {
+  const firstAttempt = await authFetch<CurrentUserResponse>("auth/me", {
+    cache: "no-store",
+  });
+
+  if (
+    firstAttempt.success ||
+    !shouldRetryCurrentUser(firstAttempt)
+  ) {
+    return firstAttempt;
+  }
+
+  await sleep(AUTH_RETRY_DELAY_MS);
+
+  return authFetch<CurrentUserResponse>("auth/me", {
+    cache: "no-store",
+  });
+};
 
 /* ======================================
 🔥 CURRENT USER (FINAL FIXED)
@@ -166,7 +201,7 @@ export async function getCurrentUser(): Promise<
 
   fetchingPromise = (async () => {
     try {
-      const res = await authFetch<CurrentUserResponse>("auth/me");
+      const res = await fetchCurrentUserWithRetry();
 
       if (res.unauthorized || !res.success) {
         currentUserCache = null;

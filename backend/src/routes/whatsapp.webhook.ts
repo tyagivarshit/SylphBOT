@@ -24,6 +24,80 @@ import {
 const router = Router();
 const isProduction = process.env.NODE_ENV === "production";
 
+const normalizeIdentifier = (value?: unknown) => {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+};
+
+const buildClientLookupOr = ({
+  pageIds = [],
+  phoneNumberIds = [],
+}: {
+  pageIds?: string[];
+  phoneNumberIds?: string[];
+}) => [
+  ...pageIds.map((pageId) => ({ pageId })),
+  ...phoneNumberIds.map((phoneNumberId) => ({ phoneNumberId })),
+];
+
+const attachResolvedBusinessContext = (
+  req: Request,
+  client: { id: string; businessId: string; platform: string }
+) => {
+  (req as any).businessId = client.businessId;
+  req.tenant = {
+    businessId: client.businessId,
+  };
+
+  console.log("[WHATSAPP WEBHOOK] businessId resolved", {
+    businessId: client.businessId,
+    clientId: client.id,
+    platform: client.platform,
+  });
+};
+
+const findWhatsAppClient = async ({
+  phoneNumberIds,
+  pageIds = [],
+}: {
+  phoneNumberIds: string[];
+  pageIds?: string[];
+}) => {
+  const lookupOr = buildClientLookupOr({
+    phoneNumberIds,
+    pageIds,
+  });
+
+  if (!lookupOr.length) {
+    return null;
+  }
+
+  const client = await prisma.client.findFirst({
+    where: {
+      OR: lookupOr,
+      isActive: true,
+    },
+  });
+
+  if (!client) {
+    console.error("❌ CRITICAL: Client mapping missing", {
+      pageId: pageIds[0] || null,
+      phoneNumberId: phoneNumberIds[0] || null,
+      action: "Reconnect required",
+    });
+    return null;
+  }
+
+  console.log("[WHATSAPP WEBHOOK] client found", {
+    phoneNumberIds,
+    pageIds,
+    clientId: client.id,
+    businessId: client.businessId,
+  });
+
+  return client;
+};
+
 const getSignatureHeader = (req: Request) =>
   req.headers["x-hub-signature-256"] || req.headers["x-hub-signature"];
 
@@ -118,25 +192,30 @@ router.post("/", async (req: any, res: Response) => {
     const text = message.text?.body;
     const phoneNumberId =
       body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+    const phoneNumberIds = [normalizeIdentifier(phoneNumberId)].filter(
+      (value): value is string => Boolean(value)
+    );
 
-    if (!from || !text || !phoneNumberId) {
+    if (!from || !text || !phoneNumberIds.length) {
       return res.sendStatus(200);
     }
 
+    console.log("[WHATSAPP WEBHOOK] identifiers", {
+      phoneNumberIds,
+    });
+
     console.log("[WHATSAPP WEBHOOK] incoming:", text);
 
-    const client = await prisma.client.findFirst({
-      where: {
-        platform: "WHATSAPP",
-        phoneNumberId,
-        isActive: true,
-      },
+    const client = await findWhatsAppClient({
+      phoneNumberIds,
     });
 
     if (!client) {
       console.log("[WHATSAPP WEBHOOK] client not found");
       return res.sendStatus(200);
     }
+
+    attachResolvedBusinessContext(req, client);
 
     const access = await getSubscriptionAccess(client.businessId);
 
@@ -249,7 +328,7 @@ router.post("/", async (req: any, res: Response) => {
           plan: subscription.plan,
           platform: "WHATSAPP",
           senderId: from,
-          phoneNumberId,
+          phoneNumberId: phoneNumberIds[0],
           accessTokenEncrypted: client.accessToken,
           externalEventId: eventId,
           skipInboundPersist: true,
@@ -265,7 +344,7 @@ router.post("/", async (req: any, res: Response) => {
       businessId: client.businessId,
       leadId: lead.id,
       eventId,
-      phoneNumberId,
+      phoneNumberId: phoneNumberIds[0],
     });
 
     await prisma.lead.update({

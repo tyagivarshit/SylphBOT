@@ -87,6 +87,7 @@ const authenticateGoogleUser = (req, res, next) => {
 const buildAuthErrorUrl = (redirectOrigin, authError) => {
     const loginUrl = new URL("/auth/login", redirectOrigin);
     loginUrl.searchParams.set("authError", authError);
+    loginUrl.searchParams.set("error", "google_auth_failed");
     return loginUrl.toString();
 };
 const handleGoogleCallback = async (req, res, next) => {

@@ -1,17 +1,338 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
-import { upsertClientByUniqueKey } from "../services/clientUpsert.service";
 import { encrypt } from "../utils/encrypt";
 import axios from "axios";
 import { getPlanKey } from "../config/plan.config";
 import { resolvePlanContext } from "../services/feature.service";
 import { triggerOnboardingDemo } from "../services/onboarding.service";
+import { checkConnectionHealth } from "../services/connectionHealth.service";
 
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
 ---------------------------------------------------
 */
+
+const normalizeOptionalString = (value?: unknown) => {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+};
+
+const getMetaDataArray = (value: any) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (Array.isArray(value?.data)) {
+    return value.data;
+  }
+
+  return [];
+};
+
+const getAxiosErrorMessage = (error: any) =>
+  error?.response?.data?.error?.message ||
+  error?.response?.data?.message ||
+  error?.message ||
+  "Unknown error";
+
+const createClientControllerError = (message: string, code: string) => {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = code;
+  return error;
+};
+
+const extractFirstWhatsAppPhoneNumberId = (payload: any) => {
+  const queue = [payload];
+  const visited = new Set<any>();
+
+  while (queue.length) {
+    const node = queue.shift();
+
+    if (!node || typeof node !== "object" || visited.has(node)) {
+      continue;
+    }
+
+    visited.add(node);
+
+    const phoneNumbers = getMetaDataArray((node as any).phone_numbers);
+
+    for (const phoneNumber of phoneNumbers) {
+      const phoneNumberId = normalizeOptionalString(phoneNumber?.id);
+
+      if (phoneNumberId) {
+        return phoneNumberId;
+      }
+    }
+
+    for (const child of Object.values(node)) {
+      if (child && typeof child === "object") {
+        queue.push(child);
+      }
+    }
+  }
+
+  return null;
+};
+
+const fetchInstagramConnection = async (accessToken: string) => {
+  const pagesRes = await axios.get(
+    "https://graph.facebook.com/v19.0/me/accounts",
+    {
+      params: {
+        fields: "id,name,access_token,instagram_business_account",
+        access_token: accessToken,
+      },
+    }
+  );
+
+  const page = getMetaDataArray(pagesRes.data)?.[0];
+  const facebookPageId = normalizeOptionalString(page?.id);
+  const pageId =
+    normalizeOptionalString(page?.instagram_business_account?.id) ||
+    facebookPageId;
+  const pageAccessToken =
+    normalizeOptionalString(page?.access_token) || normalizeOptionalString(accessToken);
+
+  console.log("INSTAGRAM CONNECT IDENTIFIERS", {
+    facebookPageId,
+    pageId,
+  });
+
+  return {
+    facebookPageId,
+    pageId,
+    pageAccessToken,
+  };
+};
+
+const fetchWhatsAppPhoneNumberId = async (accessToken: string) => {
+  const lookupRequests = [
+    {
+      label: "me/businesses",
+      url: "https://graph.facebook.com/v19.0/me/businesses",
+      params: {
+        fields:
+          "id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}",
+        access_token: accessToken,
+      },
+    },
+    {
+      label: "me",
+      url: "https://graph.facebook.com/v19.0/me",
+      params: {
+        fields:
+          "businesses{id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}}",
+        access_token: accessToken,
+      },
+    },
+  ];
+
+  for (const lookup of lookupRequests) {
+    try {
+      const response = await axios.get(lookup.url, {
+        params: lookup.params,
+      });
+
+      const phoneNumberId = extractFirstWhatsAppPhoneNumberId(response.data);
+
+      if (phoneNumberId) {
+        console.log("WHATSAPP CONNECT IDENTIFIERS", {
+          source: lookup.label,
+          phoneNumberId,
+        });
+
+        return phoneNumberId;
+      }
+    } catch (error: any) {
+      console.log("WHATSAPP CONNECT LOOKUP FAILED", {
+        source: lookup.label,
+        message: getAxiosErrorMessage(error),
+      });
+    }
+  }
+
+  return null;
+};
+
+const upsertConnectedClient = async ({
+  businessId,
+  platform,
+  phoneNumberId,
+  pageId,
+  accessToken,
+  aiTone,
+  businessInfo,
+  pricingInfo,
+  faqKnowledge,
+  salesInstructions,
+}: {
+  businessId: string;
+  platform: string;
+  phoneNumberId?: unknown;
+  pageId?: unknown;
+  accessToken: string;
+  aiTone?: unknown;
+  businessInfo?: unknown;
+  pricingInfo?: unknown;
+  faqKnowledge?: unknown;
+  salesInstructions?: unknown;
+}) => {
+  const normalizedPlatform =
+    normalizeOptionalString(platform)?.toUpperCase() || "SYSTEM";
+  const normalizedPhoneNumberId = normalizeOptionalString(phoneNumberId);
+  const normalizedPageId = normalizeOptionalString(pageId);
+  const normalizedAccessToken = String(accessToken || "").trim();
+  const uniqueWhere = normalizedPageId
+    ? { pageId: normalizedPageId }
+    : normalizedPhoneNumberId
+      ? { phoneNumberId: normalizedPhoneNumberId }
+      : null;
+
+  if (!uniqueWhere) {
+    throw createClientControllerError(
+      "pageId or phoneNumberId is required",
+      "CLIENT_UNIQUE_KEY_REQUIRED"
+    );
+  }
+
+  const existingPlatformClient = await prisma.client.findUnique({
+    where: {
+      businessId_platform: {
+        businessId,
+        platform: normalizedPlatform,
+      },
+    },
+  });
+
+  if (normalizedPageId) {
+    const existingPageClient = await prisma.client.findUnique({
+      where: {
+        pageId: normalizedPageId,
+      },
+    });
+
+    if (
+      existingPageClient &&
+      existingPageClient.businessId !== businessId &&
+      existingPageClient.id !== existingPlatformClient?.id
+    ) {
+      throw createClientControllerError(
+        "This connected account already exists for another business",
+        "CLIENT_OWNERSHIP_CONFLICT"
+      );
+    }
+  }
+
+  if (normalizedPhoneNumberId) {
+    const existingPhoneClient = await prisma.client.findUnique({
+      where: {
+        phoneNumberId: normalizedPhoneNumberId,
+      },
+    });
+
+    if (
+      existingPhoneClient &&
+      existingPhoneClient.businessId !== businessId &&
+      existingPhoneClient.id !== existingPlatformClient?.id
+    ) {
+      throw createClientControllerError(
+        "This connected account already exists for another business",
+        "CLIENT_OWNERSHIP_CONFLICT"
+      );
+    }
+  }
+
+  const updateData = {
+    businessId,
+    platform: normalizedPlatform,
+    phoneNumberId:
+      normalizedPhoneNumberId || existingPlatformClient?.phoneNumberId || null,
+    pageId: normalizedPageId || existingPlatformClient?.pageId || null,
+    accessToken: normalizedAccessToken,
+    ...(aiTone !== undefined
+      ? { aiTone: normalizeOptionalString(aiTone) }
+      : {}),
+    ...(businessInfo !== undefined
+      ? { businessInfo: normalizeOptionalString(businessInfo) }
+      : {}),
+    ...(pricingInfo !== undefined
+      ? { pricingInfo: normalizeOptionalString(pricingInfo) }
+      : {}),
+    ...(faqKnowledge !== undefined
+      ? { faqKnowledge: normalizeOptionalString(faqKnowledge) }
+      : {}),
+    ...(salesInstructions !== undefined
+      ? { salesInstructions: normalizeOptionalString(salesInstructions) }
+      : {}),
+    isActive: true,
+    deletedAt: null,
+  };
+
+  if (existingPlatformClient) {
+    const client = await prisma.client.update({
+      where: { id: existingPlatformClient.id },
+      data: updateData,
+    });
+
+    console.log("CLIENT UPSERT SUCCESS", {
+      businessId: client.businessId,
+      platform: client.platform,
+      pageId: client.pageId,
+      phoneNumberId: client.phoneNumberId,
+    });
+
+    return client;
+  }
+
+  if (normalizedPhoneNumberId) {
+    const client = await prisma.client.upsert({
+      where: { phoneNumberId: normalizedPhoneNumberId },
+      update: updateData,
+      create: updateData,
+    });
+
+    console.log("CLIENT UPSERT SUCCESS", {
+      businessId: client.businessId,
+      platform: client.platform,
+      pageId: client.pageId,
+      phoneNumberId: client.phoneNumberId,
+    });
+
+    return client;
+  }
+
+  if (normalizedPageId) {
+    const client = await prisma.client.upsert({
+      where: { pageId: normalizedPageId },
+      update: updateData,
+      create: updateData,
+    });
+
+    console.log("CLIENT UPSERT SUCCESS", {
+      businessId: client.businessId,
+      platform: client.platform,
+      pageId: client.pageId,
+      phoneNumberId: client.phoneNumberId,
+    });
+
+    return client;
+  }
+
+  const client = await prisma.client.upsert({
+    where: uniqueWhere,
+    update: updateData,
+    create: updateData,
+  });
+
+  console.log("CLIENT UPSERT SUCCESS", {
+    businessId: client.businessId,
+    pageId: client.pageId,
+    phoneNumberId: client.phoneNumberId,
+  });
+
+  return client;
+};
 
 const getBusinessByOwner = async (userId: string) => {
   return prisma.business.findFirst({
@@ -141,13 +462,39 @@ export const createClient = async (req: Request, res: Response) => {
       });
     }
 
+    let resolvedPhoneNumberId = normalizeOptionalString(phoneNumberId);
+    let resolvedPageId = normalizeOptionalString(pageId);
+
+    if (platform === "WHATSAPP" && !resolvedPhoneNumberId) {
+      resolvedPhoneNumberId = await fetchWhatsAppPhoneNumberId(accessToken);
+    }
+
+    if (platform === "INSTAGRAM" && !resolvedPageId) {
+      const instagramConnection = await fetchInstagramConnection(accessToken);
+
+      resolvedPageId = instagramConnection.pageId;
+      accessToken = instagramConnection.pageAccessToken || accessToken;
+    }
+
+    if (platform === "WHATSAPP" && !resolvedPhoneNumberId) {
+      return res.status(400).json({
+        message: "Unable to resolve WhatsApp phone number ID",
+      });
+    }
+
+    if (platform === "INSTAGRAM" && !resolvedPageId) {
+      return res.status(400).json({
+        message: "Unable to resolve Instagram page ID",
+      });
+    }
+
     const encryptedToken = encrypt(accessToken);
 
-    const client = await upsertClientByUniqueKey({
+    const client = await upsertConnectedClient({
       businessId: business.id,
       platform,
-      phoneNumberId,
-      pageId,
+      phoneNumberId: resolvedPhoneNumberId,
+      pageId: resolvedPageId,
       accessToken: encryptedToken,
       aiTone,
       businessInfo,
@@ -283,54 +630,47 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     const longToken = longTokenRes.data.access_token;
 
-    const pagesRes = await axios.get(
-      "https://graph.facebook.com/v19.0/me/accounts",
-      {
-        params: {
-          access_token: longToken,
-        },
-      }
-    );
+    const instagramConnection = await fetchInstagramConnection(longToken);
 
-    const page = pagesRes.data.data?.[0];
-
-    if (!page) {
+    if (!instagramConnection.pageId) {
       return res.status(400).json({
-        message: "No Facebook page found",
+        message: "No Instagram page found",
       });
     }
 
-    const igRes = await axios.get(
-      `https://graph.facebook.com/v19.0/${page.id}`,
-      {
-        params: {
-          fields: "instagram_business_account",
-          access_token: page.access_token,
-        },
-      }
-    );
+    const instagramAccessToken =
+      instagramConnection.pageAccessToken || longToken;
+    const encryptedInstagramToken = encrypt(instagramAccessToken);
 
-    const instagramId = igRes.data.instagram_business_account?.id;
-
-    if (!instagramId) {
-      return res.status(400).json({
-        message: "Instagram business account not connected to this page",
-      });
-    }
-
-    const encryptedToken = encrypt(page.access_token);
-
-    const client = await upsertClientByUniqueKey({
+    const client = await upsertConnectedClient({
       businessId: business.id,
       platform: "INSTAGRAM",
-      pageId: instagramId,
-      accessToken: encryptedToken,
+      pageId: instagramConnection.pageId,
+      accessToken: encryptedInstagramToken,
       aiTone,
       businessInfo,
       pricingInfo,
       faqKnowledge,
       salesInstructions,
     });
+
+    if (allowedPlatforms.includes("WHATSAPP")) {
+      const phoneNumberId = await fetchWhatsAppPhoneNumberId(longToken);
+      const encryptedWhatsAppToken = encrypt(longToken);
+
+      await upsertConnectedClient({
+        businessId: business.id,
+        platform: "WHATSAPP",
+        phoneNumberId,
+        accessToken: encryptedWhatsAppToken,
+      }).catch((error) => {
+        console.log("WHATSAPP CLIENT UPSERT FAILED", {
+          businessId: business.id,
+          phoneNumberId,
+          message: getAxiosErrorMessage(error),
+        });
+      });
+    }
 
     await queueOnboardingDemoForClient(business.id, client);
 
@@ -339,7 +679,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       client,
     });
 
-  } catch (error: any) {
+} catch (error: any) {
 
     if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
       return res.status(400).json({
@@ -373,6 +713,87 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
   }
 
+};
+
+/*
+---------------------------------------------------
+CLIENT CONNECTION STATUS
+---------------------------------------------------
+*/
+
+export const getClientStatus = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const business = await getBusinessByOwner(userId);
+
+    if (!business) {
+      return res.status(404).json({ message: "Business not found" });
+    }
+
+    const [instagramClient, whatsappClient] = await Promise.all([
+      prisma.client.findFirst({
+        where: {
+          businessId: business.id,
+          platform: "INSTAGRAM",
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          platform: true,
+          pageId: true,
+          accessToken: true,
+          isActive: true,
+        },
+      }),
+      prisma.client.findFirst({
+        where: {
+          businessId: business.id,
+          platform: "WHATSAPP",
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          platform: true,
+          phoneNumberId: true,
+          accessToken: true,
+          isActive: true,
+        },
+      }),
+    ]);
+
+    const [instagramHealthy, whatsappHealthy] = await Promise.all([
+      instagramClient?.pageId && instagramClient.isActive
+        ? checkConnectionHealth(instagramClient)
+        : false,
+      whatsappClient?.phoneNumberId && whatsappClient.isActive
+        ? checkConnectionHealth(whatsappClient)
+        : false,
+    ]);
+
+    return res.json({
+      instagram: {
+        connected: Boolean(instagramClient?.pageId),
+        pageId: instagramClient?.pageId || null,
+        healthy: instagramHealthy,
+      },
+      whatsapp: {
+        connected: Boolean(whatsappClient?.phoneNumberId),
+        phoneNumberId: whatsappClient?.phoneNumberId || null,
+        healthy: whatsappHealthy,
+      },
+    });
+  } catch (error) {
+    console.error("Client status error:", error);
+
+    return res.status(500).json({
+      message: "Failed to load client status",
+    });
+  }
 };
 
 /*
@@ -686,6 +1107,17 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const mode = String(req.query.mode || "").trim().toLowerCase();
+    const platform =
+      normalizeOptionalString(req.query.platform)?.toUpperCase() || null;
+
+    if (mode === "reconnect") {
+      console.info("Reconnect triggered", {
+        userId,
+        platform,
+      });
     }
 
     const redirectUri = `${process.env.BACKEND_URL}/api/oauth/meta/callback`;

@@ -38,6 +38,7 @@ import availabilityRoutes from "./routes/availability.routes";
 import conversationRoutes from "./routes/conversation.routes";
 import healthRoutes from "./routes/health.routes";
 import usageRoutes from "./routes/usage.routes";
+import { getClientStatus } from "./controllers/client.controller";
 import helpAiRoutes from "./routes/helpAi.routes";
 import {
   AIMessagePayload,
@@ -57,6 +58,7 @@ import { hasPermission } from "./services/rbac.service";
 import { startTrialExpiryCron } from "./cron/trial.cron";
 import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "./cron/resetUsage.cron";
+import { startConnectionHealthCron } from "./cron/connectionHealth.cron";
 
 import { isAppError } from "./utils/AppError";
 import { asyncHandler } from "./utils/asyncHandler";
@@ -389,6 +391,7 @@ app.use(
   commentTriggerRoutes
 );
 
+app.get("/api/client/status", protect, getClientStatus);
 app.use("/api/clients", protect, clientRoutes);
 app.use("/api/instagram", protect, instagramRoutes);
 app.use("/api/knowledge", protect, knowledgeRoutes);
@@ -467,6 +470,7 @@ if (process.env.ENABLE_CRON === "true") {
   startTrialExpiryCron();
   startMetaTokenRefreshCron();
   startUsageResetCron();
+  startConnectionHealthCron();
 }
 
 process.on("uncaughtException", (err) => {

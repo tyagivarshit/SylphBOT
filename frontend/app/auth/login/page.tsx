@@ -3,6 +3,7 @@ import LoginClient from "./loginClient";
 type LoginSearchParams = Promise<{
   email?: string | string[];
   authError?: string | string[];
+  error?: string | string[];
 }>;
 
 const getSingleValue = (value?: string | string[]) =>
@@ -18,7 +19,11 @@ export default async function LoginPage({
   return (
     <LoginClient
       initialEmail={getSingleValue(params.email) || ""}
-      initialAuthError={getSingleValue(params.authError) || ""}
+      initialAuthError={
+        getSingleValue(params.authError) ||
+        getSingleValue(params.error) ||
+        ""
+      }
     />
   );
 }

@@ -20,6 +20,7 @@ const hashToken = (token) => crypto_1.default.createHash("sha256").update(token)
 const buildAuthErrorUrl = (redirectOrigin, authError) => {
     const url = new URL("/auth/login", redirectOrigin);
     url.searchParams.set("authError", authError);
+    url.searchParams.set("error", "google_auth_failed");
     return url.toString();
 };
 /* ======================================

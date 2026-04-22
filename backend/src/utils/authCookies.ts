@@ -46,13 +46,14 @@ const resolveCookieDomain = (req?: Request) => {
 
 export const getAuthCookieOptions = (req?: Request) => {
   const domain = resolveCookieDomain(req);
+  const sameSite: "none" | "lax" = isProd ? "none" : "lax";
 
   return {
     httpOnly: true,
     secure: isProd,
-    // Frontend and API run on the same site, so Lax avoids Chrome's flaky
-    // third-party cookie handling while still preserving the OAuth redirect.
-    sameSite: "lax" as const,
+    // Production sign-in can happen across app/api subdomains, so use `none`
+    // there while preserving local HTTP development compatibility.
+    sameSite,
     ...(domain ? { domain } : {}),
     path: "/",
   };

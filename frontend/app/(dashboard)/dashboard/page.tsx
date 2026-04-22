@@ -9,6 +9,7 @@ import LeadsChart from "@/components/charts/LeadsCharts";
 import UsageOverview from "@/components/dashboard/UsageOverview";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 import { buildApiUrl } from "@/lib/url";
+import { fetchClientConnectionStatus } from "@/lib/userApi";
 import { useUpgrade } from "@/app/(dashboard)/layout";
 import {
   EmptyState,
@@ -62,6 +63,10 @@ export default function DashboardPage() {
 
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [convo, setConvo] = useState<ConversationStats | null>(null);
+  const [connections, setConnections] = useState({
+    instagram: false,
+    whatsapp: false,
+  });
   const [limited, setLimited] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState("");
@@ -81,18 +86,23 @@ export default function DashboardPage() {
       setPageLoading(true);
       setError("");
 
-      const [statsRes, convoRes] = await Promise.all([
+      const [statsRes, convoRes, status] = await Promise.all([
         axios.get(buildApiUrl("/dashboard/stats"), {
           withCredentials: true,
         }),
         axios.get(buildApiUrl("/dashboard/active-conversations"), {
           withCredentials: true,
         }),
+        fetchClientConnectionStatus().catch(() => null),
       ]);
 
       setStats(statsRes.data.data);
       setConvo(convoRes.data.data);
       setLimited(Boolean(statsRes.data.limited || convoRes.data.limited));
+      setConnections({
+        instagram: Boolean(status?.instagram.connected),
+        whatsapp: Boolean(status?.whatsapp.connected),
+      });
     } catch (dashboardError) {
       console.error("Dashboard error", dashboardError);
       setError("We couldn't load your dashboard right now.");
@@ -192,8 +202,24 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <span className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
-            Connect Instagram
+          <span
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+              connections.instagram
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-slate-900 text-white"
+            }`}
+          >
+            {connections.instagram ? "Instagram Connected ✅" : "Connect Instagram"}
+          </span>
+          <ArrowRight size={14} className="text-slate-400" />
+          <span
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+              connections.whatsapp
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-blue-50 text-blue-700"
+            }`}
+          >
+            {connections.whatsapp ? "WhatsApp Connected ✅" : "Connect WhatsApp"}
           </span>
           <ArrowRight size={14} className="text-slate-400" />
           <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">

@@ -23,6 +23,73 @@ const isProduction = process.env.NODE_ENV === "production";
 const log = (...args) => {
     console.log("[INSTAGRAM WEBHOOK]", ...args);
 };
+const normalizeIdentifier = (value) => {
+    const normalized = String(value || "").trim();
+    return normalized || null;
+};
+const getUniqueIdentifiers = (values) => Array.from(new Set(values
+    .map((value) => normalizeIdentifier(value))
+    .filter((value) => Boolean(value))));
+const buildClientLookupOr = ({ pageIds = [], phoneNumberIds = [], }) => [
+    ...pageIds.map((pageId) => ({ pageId })),
+    ...phoneNumberIds.map((phoneNumberId) => ({ phoneNumberId })),
+];
+const clientBusinessInclude = {
+    business: {
+        select: {
+            ownerId: true,
+            subscription: {
+                include: {
+                    plan: true,
+                },
+            },
+        },
+    },
+};
+const attachResolvedBusinessContext = (req, client) => {
+    req.businessId = client.businessId;
+    req.tenant = {
+        businessId: client.businessId,
+    };
+    log("businessId resolved", {
+        businessId: client.businessId,
+        clientId: client.id,
+        platform: client.platform,
+    });
+};
+const findInstagramClient = async ({ pageIds, includeBusiness = false, }) => {
+    const lookupOr = buildClientLookupOr({
+        pageIds,
+    });
+    if (!lookupOr.length) {
+        return null;
+    }
+    const client = await prisma_1.default.client.findFirst({
+        where: {
+            OR: lookupOr,
+            isActive: true,
+        },
+        ...(includeBusiness
+            ? {
+                include: clientBusinessInclude,
+            }
+            : {}),
+    });
+    if (!client) {
+        console.error("❌ CRITICAL: Client mapping missing", {
+            pageId: pageIds[0] || null,
+            phoneNumberId: null,
+            action: "Reconnect required",
+        });
+        return null;
+    }
+    log("client found", {
+        pageIds,
+        clientId: client.id,
+        businessId: client.businessId,
+    });
+    return client;
+};
 const parseWebhookBody = (req) => {
     const rawBody = req.body;
     if (Buffer.isBuffer(rawBody)) {
@@ -114,7 +181,8 @@ router.post("/", async (req, res) => {
             const commentText = change.value.comment?.text;
             const instagramUserId = change.value.from?.id;
             const reelId = change.value.media?.id;
-            const pageId = change.value.id;
+            const pageIds = getUniqueIdentifiers([change.value.id, entry.id]);
+            const pageId = pageIds[0] || null;
             const commentEventId = change.value.comment_id ||
                 change.value.comment?.id ||
                 `${pageId}:${instagramUserId}:${reelId}:${String(commentText || "").trim()}`;
@@ -128,16 +196,16 @@ router.post("/", async (req, res) => {
             if (!shouldProcessComment) {
                 continue;
             }
-            const client = await prisma_1.default.client.findFirst({
-                where: {
-                    platform: "INSTAGRAM",
-                    pageId,
-                    isActive: true,
-                },
+            log("comment identifiers", {
+                pageIds,
+            });
+            const client = await findInstagramClient({
+                pageIds,
             });
             if (!client) {
                 continue;
             }
+            attachResolvedBusinessContext(req, client);
             const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(client.businessId);
             if (!access.allowed) {
                 (0, subscriptionGuard_middleware_1.logSubscriptionLockedAction)({
@@ -161,25 +229,25 @@ router.post("/", async (req, res) => {
         let senderId;
         let text;
         let eventId;
-        let pageId;
+        let pageIds = [];
         const messaging = entry?.messaging?.[0];
         if (messaging?.message?.text && !messaging?.message?.is_echo) {
             senderId = messaging.sender?.id;
             text = messaging.message.text;
-            pageId = messaging.recipient?.id || entry.id;
+            pageIds = getUniqueIdentifiers([messaging.recipient?.id, entry.id]);
             eventId = messaging.message.mid;
         }
         const changeMessage = entry?.changes?.[0]?.value?.messages?.[0];
         if (!text && changeMessage?.text?.body) {
             senderId = changeMessage.from;
             text = changeMessage.text.body;
-            pageId = entry.id;
+            pageIds = getUniqueIdentifiers([entry.id]);
             eventId = changeMessage.id;
         }
-        if (!senderId || !text || !pageId) {
+        if (!senderId || !text || !pageIds.length) {
             return res.sendStatus(200);
         }
-        if (senderId === pageId) {
+        if (pageIds.includes(senderId)) {
             return res.sendStatus(200);
         }
         const lowerText = text.toLowerCase();
@@ -197,28 +265,17 @@ router.post("/", async (req, res) => {
         if (!shouldProcess) {
             return res.sendStatus(200);
         }
-        const client = await prisma_1.default.client.findFirst({
-            where: {
-                platform: "INSTAGRAM",
-                pageId,
-                isActive: true,
-            },
-            include: {
-                business: {
-                    select: {
-                        ownerId: true,
-                        subscription: {
-                            include: {
-                                plan: true,
-                            },
-                        },
-                    },
-                },
-            },
+        log("message identifiers", {
+            pageIds,
+        });
+        const client = await findInstagramClient({
+            pageIds,
+            includeBusiness: true,
         });
         if (!client) {
             return res.sendStatus(200);
         }
+        attachResolvedBusinessContext(req, client);
         const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(client.businessId);
         if (!access.allowed) {
             (0, subscriptionGuard_middleware_1.logSubscriptionLockedAction)({
@@ -327,7 +384,7 @@ router.post("/", async (req, res) => {
                 plan,
                 platform: "INSTAGRAM",
                 senderId,
-                pageId,
+                pageId: pageIds[0],
                 accessTokenEncrypted: client.accessToken,
                 externalEventId: eventId,
                 skipInboundPersist: true,
@@ -340,7 +397,7 @@ router.post("/", async (req, res) => {
             businessId: client.businessId,
             leadId: lead.id,
             eventId,
-            pageId,
+            pageId: pageIds[0],
             senderId,
         });
         await prisma_1.default.lead.update({

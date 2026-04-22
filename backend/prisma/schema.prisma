@@ -87,6 +87,7 @@ BUSINESS
 model Business {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
   name          String
+  stripeCustomerId String?
 
   ownerId       String   @db.ObjectId
   owner         User     @relation("BusinessOwner", fields: [ownerId], references: [id])
@@ -135,6 +136,7 @@ model Business {
   deletedAt DateTime?
 
   @@index([ownerId])
+  @@index([stripeCustomerId])
 }
 
 /* =====================================================
@@ -779,6 +781,12 @@ model StripeEvent {
   eventId   String   @unique
   type      String 
   createdAt DateTime @default(now())
+}
+
+model BillingEvent {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  stripeEventId String   @unique
+  createdAt     DateTime @default(now())
 }
 
 /* =====================================================

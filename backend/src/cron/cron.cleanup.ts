@@ -1,24 +1,13 @@
 import prisma from "../config/prisma";
-
-/* ======================================
-CONFIG
-====================================== */
+import { expirePastDueSubscriptions } from "../services/billingSync.service";
 
 const DAYS_TO_KEEP = 30;
-
-/* ======================================
-DATE HELPER
-====================================== */
 
 const getExpiryDate = () => {
   const date = new Date();
   date.setDate(date.getDate() - DAYS_TO_KEEP);
   return date;
 };
-
-/* ======================================
-STRIPE EVENT CLEANUP
-====================================== */
 
 const cleanStripeEvents = async () => {
   const expiry = getExpiryDate();
@@ -31,12 +20,22 @@ const cleanStripeEvents = async () => {
     },
   });
 
-  console.log(`🧹 Stripe events cleaned: ${result.count}`);
+  console.log(`Stripe events cleaned: ${result.count}`);
 };
 
-/* ======================================
-WEBHOOK EVENT CLEANUP
-====================================== */
+const cleanBillingEvents = async () => {
+  const expiry = getExpiryDate();
+
+  const result = await prisma.billingEvent.deleteMany({
+    where: {
+      createdAt: {
+        lt: expiry,
+      },
+    },
+  });
+
+  console.log(`Billing events cleaned: ${result.count}`);
+};
 
 const cleanWebhookEvents = async () => {
   const expiry = getExpiryDate();
@@ -49,12 +48,8 @@ const cleanWebhookEvents = async () => {
     },
   });
 
-  console.log(`🧹 Webhook events cleaned: ${result.count}`);
+  console.log(`Webhook events cleaned: ${result.count}`);
 };
-
-/* ======================================
-REFRESH TOKEN CLEANUP
-====================================== */
 
 const cleanExpiredTokens = async () => {
   const now = new Date();
@@ -67,25 +62,25 @@ const cleanExpiredTokens = async () => {
     },
   });
 
-  console.log(`🧹 Expired tokens removed: ${result.count}`);
+  console.log(`Expired tokens removed: ${result.count}`);
 };
-
-/* ======================================
-MAIN CLEANUP RUNNER
-====================================== */
 
 export const runCleanup = async () => {
   try {
-    console.log("🧹 Running cleanup job...");
+    console.log("Running cleanup job...");
+
+    const expiredCount = await expirePastDueSubscriptions();
 
     await Promise.all([
+      cleanBillingEvents(),
       cleanStripeEvents(),
       cleanWebhookEvents(),
       cleanExpiredTokens(),
     ]);
 
-    console.log("✅ Cleanup completed");
+    console.log(`Grace period expiries processed: ${expiredCount}`);
+    console.log("Cleanup completed");
   } catch (error) {
-    console.error("❌ Cleanup failed:", error);
+    console.error("Cleanup failed:", error);
   }
 };

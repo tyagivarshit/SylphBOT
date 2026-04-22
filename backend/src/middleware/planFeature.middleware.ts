@@ -49,6 +49,16 @@ export const requireFeature =
           ? false
           : hasFeature(plan, featureKey);
 
+      if (!allowed) {
+        console.warn("Feature access blocked", {
+          businessId,
+          feature,
+          plan: planKey,
+          subscriptionStatus: (req as any).subscription?.status || null,
+          graceUntil: (req as any).subscription?.graceUntil || null,
+        });
+      }
+
       (req as any).feature = {
         allowed,
         feature,

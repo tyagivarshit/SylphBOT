@@ -6,7 +6,7 @@ import { env } from "../config/env";
 import { getInvoices } from "../services/invoice.service";
 import { resolveBillingCurrency } from "../services/billingGeo.service";
 import { loadBillingContext } from "../middleware/subscription.middleware";
-import { confirmCheckoutSession } from "../services/billingSync.service";
+import { syncCheckoutSession } from "../services/billingSync.service";
 import {
   getAddonCatalog,
   getPublicPricingPlans,
@@ -40,6 +40,7 @@ async function getUserContext(req: Request) {
   }
 
   return {
+    userId,
     businessId,
     email: user.email,
   };
@@ -181,20 +182,22 @@ export class BillingController {
     res: Response
   ) {
     try {
-      const { plan, billing, coupon } = req.body;
+      const { plan, coupon } = req.body;
+      const billing = String(req.body?.billing || "monthly");
 
-      if (!plan || !billing) {
+      if (!plan) {
         return res.status(400).json({
           success: false,
-          message: "Plan & billing required",
+          message: "Plan is required",
         });
       }
 
-      const { businessId, email } = await getUserContext(req);
+      const { businessId, email, userId } = await getUserContext(req);
 
       const session = await createCheckoutSession(
         email,
         businessId,
+        userId,
         plan,
         billing,
         req,
@@ -340,6 +343,10 @@ export class BillingController {
     return BillingController.handleCheckout(req, res);
   }
 
+  static async createCheckoutSession(req: Request, res: Response) {
+    return BillingController.handleCheckout(req, res);
+  }
+
   static async confirmCheckout(req: Request, res: Response) {
     try {
       const sessionId =
@@ -354,7 +361,20 @@ export class BillingController {
 
       const { businessId } = await getUserContext(req);
 
-      await confirmCheckoutSession(sessionId, businessId);
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const sessionBusinessId =
+        session.metadata?.businessId || session.client_reference_id;
+
+      if (!sessionBusinessId || sessionBusinessId !== businessId) {
+        return res.status(403).json({
+          success: false,
+          message: "Checkout session does not belong to this user",
+        });
+      }
+
+      await syncCheckoutSession(session, {
+        strictBusinessId: businessId,
+      });
 
       res.setHeader("Cache-Control", "no-store");
 
@@ -365,16 +385,6 @@ export class BillingController {
         )
       );
     } catch (error: any) {
-      if (
-        error.message?.includes("does not belong") ||
-        error.message?.includes("missing billing metadata")
-      ) {
-        return res.status(403).json({
-          success: false,
-          message: error.message,
-        });
-      }
-
       console.error("Confirm checkout error:", error);
 
       return res.status(500).json({

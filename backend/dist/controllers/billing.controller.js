@@ -31,6 +31,7 @@ async function getUserContext(req) {
         throw new Error("Unauthorized");
     }
     return {
+        userId,
         businessId,
         email: user.email,
     };
@@ -119,15 +120,16 @@ class BillingController {
     }
     static async handleCheckout(req, res) {
         try {
-            const { plan, billing, coupon } = req.body;
-            if (!plan || !billing) {
+            const { plan, coupon } = req.body;
+            const billing = String(req.body?.billing || "monthly");
+            if (!plan) {
                 return res.status(400).json({
                     success: false,
-                    message: "Plan & billing required",
+                    message: "Plan is required",
                 });
             }
-            const { businessId, email } = await getUserContext(req);
-            const session = await (0, checkout_service_1.createCheckoutSession)(email, businessId, plan, billing, req, (0, billingGeo_service_1.resolveBillingCurrency)(req), coupon);
+            const { businessId, email, userId } = await getUserContext(req);
+            const session = await (0, checkout_service_1.createCheckoutSession)(email, businessId, userId, plan, billing, req, (0, billingGeo_service_1.resolveBillingCurrency)(req), coupon);
             return res.json({
                 success: true,
                 url: session.url,
@@ -236,6 +238,9 @@ class BillingController {
     static async checkout(req, res) {
         return BillingController.handleCheckout(req, res);
     }
+    static async createCheckoutSession(req, res) {
+        return BillingController.handleCheckout(req, res);
+    }
     static async confirmCheckout(req, res) {
         try {
             const sessionId = String(req.query.session_id || req.body?.session_id || "");
@@ -246,18 +251,21 @@ class BillingController {
                 });
             }
             const { businessId } = await getUserContext(req);
-            await (0, billingSync_service_1.confirmCheckoutSession)(sessionId, businessId);
+            const session = await stripe_service_1.stripe.checkout.sessions.retrieve(sessionId);
+            const sessionBusinessId = session.metadata?.businessId || session.client_reference_id;
+            if (!sessionBusinessId || sessionBusinessId !== businessId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Checkout session does not belong to this user",
+                });
+            }
+            await (0, billingSync_service_1.syncCheckoutSession)(session, {
+                strictBusinessId: businessId,
+            });
             res.setHeader("Cache-Control", "no-store");
             return res.json(await BillingController.buildBillingResponse(businessId, req));
         }
         catch (error) {
-            if (error.message?.includes("does not belong") ||
-                error.message?.includes("missing billing metadata")) {
-                return res.status(403).json({
-                    success: false,
-                    message: error.message,
-                });
-            }
             console.error("Confirm checkout error:", error);
             return res.status(500).json({
                 success: false,

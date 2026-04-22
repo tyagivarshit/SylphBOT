@@ -2,18 +2,20 @@ import crypto from "crypto";
 import { Request } from "express";
 import Stripe from "stripe";
 import prisma from "../config/prisma";
-import redis from "../config/redis";
 import { env } from "../config/env";
 import { stripe } from "./stripe.service";
 import { applyCoupon } from "./coupon.service";
 import { getTaxConfig } from "./tax.service";
 import { resolveBillingCurrency } from "./billingGeo.service";
-import { mapStripeSubscriptionStatus } from "./billingSync.service";
 import { getStripePriceId } from "../config/stripe.price.map";
 
 type Currency = "INR" | "USD";
 type Billing = "monthly" | "yearly";
 type Plan = "BASIC" | "PRO" | "ELITE";
+type HostedBillingSession = {
+  url: string | null;
+  kind: "checkout" | "subscription_update_confirm";
+};
 
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
 
@@ -68,15 +70,75 @@ const getOrCreateCustomerId = async (
   businessId: string,
   existingSub: {
     stripeCustomerId?: string | null;
+    businessId?: string;
   } | null
 ) => {
-  if (existingSub?.stripeCustomerId) {
-    return existingSub.stripeCustomerId;
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { stripeCustomerId: true },
+  });
+
+  const persistedCustomerId =
+    existingSub?.stripeCustomerId || business?.stripeCustomerId || null;
+
+  if (persistedCustomerId) {
+    if (business?.stripeCustomerId !== persistedCustomerId) {
+      await prisma.business.update({
+        where: { id: businessId },
+        data: {
+          stripeCustomerId: persistedCustomerId,
+        },
+      });
+    }
+
+    if (
+      existingSub &&
+      existingSub.stripeCustomerId !== persistedCustomerId
+    ) {
+      await prisma.subscription.update({
+        where: { businessId },
+        data: {
+          stripeCustomerId: persistedCustomerId,
+        },
+      });
+    }
+
+    console.info("Stripe checkout customer linked", {
+      businessId,
+      customerId: persistedCustomerId,
+      source: existingSub?.stripeCustomerId
+        ? "subscription"
+        : "business",
+    });
+
+    return persistedCustomerId;
   }
 
   const customer = await stripe.customers.create({
     email,
     metadata: { businessId },
+  });
+
+  await prisma.business.update({
+    where: { id: businessId },
+    data: {
+      stripeCustomerId: customer.id,
+    },
+  });
+
+  if (existingSub) {
+    await prisma.subscription.update({
+      where: { businessId },
+      data: {
+        stripeCustomerId: customer.id,
+      },
+    });
+  }
+
+  console.info("Stripe checkout customer linked", {
+    businessId,
+    customerId: customer.id,
+    source: "created",
   });
 
   return customer.id;
@@ -159,23 +221,93 @@ const isLiveUpdatableSubscription = async (
   }
 };
 
-const invalidateBillingCache = async (businessId: string) => {
-  try {
-    await redis.del(`sub:${businessId}`);
-  } catch {
-    console.warn("Billing cache clear failed:", businessId);
+const createSuccessUrl = (plan: Plan, billing: Billing) =>
+  `${env.FRONTEND_URL}/billing/success?plan=${plan}&billing=${billing}`;
+
+const createCancelUrl = (plan: Plan) =>
+  `${env.FRONTEND_URL}/billing/cancel?plan=${plan}`;
+
+const createSubscriptionUpdateFlow = async ({
+  businessId,
+  userId,
+  customerId,
+  subscription,
+  priceId,
+  plan,
+  billing,
+  currency,
+  couponId,
+}: {
+  businessId: string;
+  userId: string;
+  customerId: string;
+  subscription: Stripe.Subscription;
+  priceId: string;
+  plan: Plan;
+  billing: Billing;
+  currency: Currency;
+  couponId?: string;
+}) => {
+  const itemId = subscription.items.data[0]?.id;
+
+  if (!itemId) {
+    throw new Error("Unable to update current subscription");
   }
+
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: `${env.FRONTEND_URL}/billing`,
+    flow_data: {
+      type: "subscription_update_confirm",
+      after_completion: {
+        type: "redirect",
+        redirect: {
+          return_url: createSuccessUrl(plan, billing),
+        },
+      },
+      subscription_update_confirm: {
+        subscription: subscription.id,
+        items: [
+          {
+            id: itemId,
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+        ...(couponId
+          ? {
+              discounts: [{ coupon: couponId }],
+            }
+          : {}),
+      },
+    },
+  });
+
+  console.info("Stripe checkout session created", {
+    businessId,
+    userId,
+    plan,
+    billing,
+    currency,
+    kind: "subscription_update_confirm",
+  });
+
+  return {
+    url: session.url,
+    kind: "subscription_update_confirm" as const,
+  };
 };
 
 export const createCheckoutSession = async (
   email: string,
   businessId: string,
+  userId: string,
   planInput: string,
   billingInput: string,
   req: Request,
   currency?: Currency,
   couponCode?: string
-) => {
+): Promise<HostedBillingSession> => {
   const plan = validatePlan(planInput);
   const billing = validateBilling(billingInput);
 
@@ -213,6 +345,16 @@ export const createCheckoutSession = async (
     existingSub
   );
 
+  let couponId: string | undefined;
+
+  if (couponCode) {
+    try {
+      couponId = await applyCoupon(couponCode);
+    } catch {
+      throw new Error("Invalid coupon");
+    }
+  }
+
   const earlyAccess = await getEarlyAccessState(existingSub);
   const priceId = getPriceId(
     plan,
@@ -226,106 +368,71 @@ export const createCheckoutSession = async (
   );
 
   if (liveSubscription) {
-    const itemId = liveSubscription.items.data[0]?.id;
-
-    if (!itemId) {
-      throw new Error("Unable to update current subscription");
-    }
-
-    await stripe.subscriptions.update(liveSubscription.id, {
-      items: [
-        {
-          id: itemId,
-          price: priceId,
-        },
-      ],
-      metadata: {
-        businessId,
-        plan,
-        billing,
-        currency: finalCurrency,
-      },
-      proration_behavior: "create_prorations",
+    return createSubscriptionUpdateFlow({
+      businessId,
+      userId,
+      customerId,
+      subscription: liveSubscription,
+      priceId,
+      plan,
+      billing,
+      currency: finalCurrency,
+      couponId,
     });
-
-    await prisma.subscription.update({
-      where: { businessId },
-      data: {
-        plan: {
-          connect: { id: planData.id },
-        },
-        billingCycle: billing,
-        currency: finalCurrency,
-        status: mapStripeSubscriptionStatus(liveSubscription.status),
-      },
-    });
-
-    await invalidateBillingCache(businessId);
-
-    return {
-      url: `${env.FRONTEND_URL}/billing/success?upgraded=1&plan=${plan}`,
-    };
-  }
-
-  let discounts:
-    | Stripe.Checkout.SessionCreateParams.Discount[]
-    | undefined;
-
-  if (couponCode) {
-    try {
-      const couponId = await applyCoupon(couponCode);
-      discounts = [{ coupon: couponId }];
-    } catch {
-      throw new Error("Invalid coupon");
-    }
   }
 
   const isTrialEligible = !existingSub?.trialUsed;
 
   const sessionParams: Stripe.Checkout.SessionCreateParams = {
-      mode: "subscription",
-      customer: customerId,
-      client_reference_id: businessId,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      billing_address_collection: "required",
-      phone_number_collection: {
-        enabled: true,
+    mode: "subscription",
+    customer: customerId,
+    client_reference_id: businessId,
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price: priceId,
+        quantity: 1,
       },
-      allow_promotion_codes: !couponCode,
-      ...(getTaxConfig(
-        finalCurrency
-      ) as Partial<Stripe.Checkout.SessionCreateParams>),
-      ...(discounts ? { discounts } : {}),
-      subscription_data: {
-        ...(isTrialEligible
-          ? {
-              trial_period_days: 7,
-            }
-          : {}),
-        metadata: {
-          businessId,
-          plan,
-          billing,
-          currency: finalCurrency,
-        },
-      },
+    ],
+    billing_address_collection: "required",
+    phone_number_collection: {
+      enabled: true,
+    },
+    allow_promotion_codes: !couponCode,
+    ...(getTaxConfig(
+      finalCurrency
+    ) as Partial<Stripe.Checkout.SessionCreateParams>),
+    ...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
+    subscription_data: {
+      ...(isTrialEligible
+        ? {
+            trial_period_days: 7,
+          }
+        : {}),
       metadata: {
         businessId,
+        userId,
         plan,
         billing,
         currency: finalCurrency,
-        usedEarly: earlyAccess.allowEarly ? "true" : "false",
-        usedTrial: isTrialEligible ? "true" : "false",
-        billingVersion: "2026-04",
       },
-      success_url: `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${plan}`,
-      cancel_url: `${env.FRONTEND_URL}/billing?checkout=cancelled`,
-    };
+    },
+    metadata: {
+      businessId,
+      userId,
+      plan,
+      billing,
+      currency: finalCurrency,
+      usedEarly: earlyAccess.allowEarly ? "true" : "false",
+      usedTrial: isTrialEligible ? "true" : "false",
+      billingVersion: "2026-04",
+    },
+    success_url: `${createSuccessUrl(
+      plan,
+      billing
+    )}&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: createCancelUrl(plan),
+  };
 
   const session = await stripe.checkout.sessions.create(
     sessionParams,
@@ -340,7 +447,18 @@ export const createCheckoutSession = async (
     }
   );
 
+  console.info("Stripe checkout session created", {
+    businessId,
+    userId,
+    plan,
+    billing,
+    currency: finalCurrency,
+    kind: "checkout",
+    sessionId: session.id,
+  });
+
   return {
     url: session.url,
+    kind: "checkout",
   };
 };

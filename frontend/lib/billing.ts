@@ -49,13 +49,13 @@ const fetchWithTimeout = async (
   }
 }
 
-export const createCheckout = async (
+export const createCheckoutSession = async (
   plan: string,
   billing: "monthly" | "yearly"
 ) => {
   try {
     const data = await fetchWithTimeout(
-      buildApiUrl("/billing/checkout"),
+      buildApiUrl("/billing/create-checkout-session"),
       {
         method: "POST",
         body: JSON.stringify({ plan, billing }),
@@ -77,33 +77,15 @@ export const createCheckout = async (
   }
 }
 
+export const createCheckout = async (
+  plan: string,
+  billing: "monthly" | "yearly"
+) => createCheckoutSession(plan, billing)
+
 export const upgradePlan = async (
   plan: string,
   billing: "monthly" | "yearly"
-) => {
-  try {
-    const data = await fetchWithTimeout(
-      buildApiUrl("/billing/upgrade"),
-      {
-        method: "POST",
-        body: JSON.stringify({ plan, billing }),
-      }
-    )
-
-    if (!data?.url) {
-      throw new Error("No checkout URL received")
-    }
-
-    return data
-  } catch (error: any) {
-    console.error("Upgrade API error:", error)
-
-    return {
-      success: false,
-      message: error.message || "Upgrade failed",
-    }
-  }
-}
+) => createCheckoutSession(plan, billing)
 
 export const confirmCheckout = async (sessionId: string) => {
   try {

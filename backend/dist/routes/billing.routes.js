@@ -21,6 +21,7 @@ router.get("/current", auth_middleware_1.protect, tenant_middleware_1.requireBus
 /* ======================================
 CHECKOUT
 ====================================== */
+router.post("/create-checkout-session", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), rateLimit_middleware_1.authLimiter, (0, audit_middleware_1.auditRequest)("billing.checkout_requested"), billing_controller_1.BillingController.createCheckoutSession);
 router.post("/checkout", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), rateLimit_middleware_1.authLimiter, (0, audit_middleware_1.auditRequest)("billing.checkout_requested"), billing_controller_1.BillingController.checkout);
 router.get("/checkout/confirm", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), billing_controller_1.BillingController.confirmCheckout);
 /* ======================================

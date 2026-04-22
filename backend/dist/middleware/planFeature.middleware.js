@@ -28,6 +28,15 @@ const requireFeature = (feature) => async (req, res, next) => {
         const allowed = planKey === "FREE_LOCKED"
             ? false
             : (0, plan_config_1.hasFeature)(plan, featureKey);
+        if (!allowed) {
+            console.warn("Feature access blocked", {
+                businessId,
+                feature,
+                plan: planKey,
+                subscriptionStatus: req.subscription?.status || null,
+                graceUntil: req.subscription?.graceUntil || null,
+            });
+        }
         req.feature = {
             allowed,
             feature,

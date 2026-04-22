@@ -8,6 +8,7 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const plan_config_1 = require("../config/plan.config");
 const env_1 = require("../config/env");
+const billingSync_service_1 = require("../services/billingSync.service");
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
 const getKey = (businessId) => `sub:${businessId}`;
@@ -62,7 +63,10 @@ const getEarlyAccessSnapshot = async (subscription) => {
     };
 };
 const loadBillingContext = async (businessId) => {
-    const subscription = await getCachedSubscription(businessId);
+    const cachedSubscription = await getCachedSubscription(businessId);
+    const subscription = (cachedSubscription?.status === "PAST_DUE"
+        ? await (0, billingSync_service_1.expirePastDueSubscriptionIfNeeded)({ businessId })
+        : null) || cachedSubscription;
     const now = new Date();
     let context = getBaseContext();
     if (subscription?.plan) {

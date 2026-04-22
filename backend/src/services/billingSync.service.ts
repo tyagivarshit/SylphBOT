@@ -9,6 +9,29 @@ type Currency = "INR" | "USD";
 type BillingSyncOptions = {
   strictBusinessId?: string;
 };
+type StripeSubscriptionSyncOptions = {
+  businessId?: string | null;
+  planTypeHint?: string | null;
+  billingHint?: string | null;
+  currencyHint?: string | null;
+  trialUsed?: boolean;
+};
+type ExpirePastDueLookup =
+  | {
+      businessId: string;
+      stripeCustomerId?: string | null;
+      stripeSubscriptionId?: string | null;
+    }
+  | {
+      businessId?: string | null;
+      stripeCustomerId: string;
+      stripeSubscriptionId?: string | null;
+    }
+  | {
+      businessId?: string | null;
+      stripeCustomerId?: string | null;
+      stripeSubscriptionId: string;
+    };
 
 const safeRedisDel = async (key: string) => {
   try {
@@ -25,6 +48,28 @@ const getSubscriptionId = (
   if (typeof subscription === "string") return subscription;
   return subscription.id;
 };
+
+const getCustomerId = (
+  customer:
+    | string
+    | Stripe.Customer
+    | Stripe.DeletedCustomer
+    | null
+    | undefined
+) => {
+  if (!customer) return null;
+  if (typeof customer === "string") return customer;
+  return customer.id;
+};
+
+const hasExpiredGracePeriod = (
+  status: string | null | undefined,
+  graceUntil: Date | null | undefined,
+  now = Date.now()
+) =>
+  status === "PAST_DUE" &&
+  Boolean(graceUntil) &&
+  new Date(graceUntil as Date).getTime() < now;
 
 const getPeriodEnd = (subscription: Stripe.Subscription) => {
   const raw =
@@ -100,6 +145,176 @@ const resolvePlanType = (
   subscription: Stripe.Subscription
 ) => metadataPlan || getPlanFromPrice(getSubscriptionPriceId(subscription));
 
+const resolveBusinessIdForSubscription = async (
+  subscription: Stripe.Subscription,
+  providedBusinessId?: string | null
+) => {
+  if (providedBusinessId) {
+    return providedBusinessId;
+  }
+
+  const metadataBusinessId = subscription.metadata?.businessId;
+
+  if (metadataBusinessId) {
+    return metadataBusinessId;
+  }
+
+  const existing = await prisma.subscription.findFirst({
+    where: {
+      stripeSubscriptionId: subscription.id,
+    },
+    select: {
+      businessId: true,
+    },
+  });
+
+  if (existing?.businessId) {
+    return existing.businessId;
+  }
+
+  const customerId = getCustomerId(subscription.customer);
+
+  if (!customerId) {
+    return null;
+  }
+
+  const linkedSubscription = await prisma.subscription.findFirst({
+    where: {
+      stripeCustomerId: customerId,
+    },
+    select: {
+      businessId: true,
+    },
+  });
+
+  if (linkedSubscription?.businessId) {
+    return linkedSubscription.businessId;
+  }
+
+  const linkedBusiness = await prisma.business.findFirst({
+    where: {
+      stripeCustomerId: customerId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return linkedBusiness?.id || null;
+};
+
+const applyStripeSubscriptionSync = async (
+  subscription: Stripe.Subscription,
+  options: StripeSubscriptionSyncOptions = {}
+) => {
+  const businessId = await resolveBusinessIdForSubscription(
+    subscription,
+    options.businessId
+  );
+
+  if (!businessId) {
+    return null;
+  }
+
+  const existing = await prisma.subscription.findUnique({
+    where: { businessId },
+    include: { plan: true },
+  });
+
+  const planType =
+    options.planTypeHint ||
+    subscription.metadata?.plan ||
+    getPlanFromPrice(getSubscriptionPriceId(subscription)) ||
+    existing?.plan?.type ||
+    existing?.plan?.name ||
+    null;
+
+  if (!planType) {
+    throw new Error("Unable to resolve plan for Stripe subscription sync");
+  }
+
+  const plan = await findPlan(planType);
+
+  if (!plan) {
+    throw new Error("Plan not found for Stripe subscription sync");
+  }
+
+  const stripeCustomerId = getCustomerId(subscription.customer);
+  const status = mapStripeSubscriptionStatus(subscription.status);
+  const billingCycle =
+    normalizeBillingCycle(options.billingHint) ||
+    normalizeBillingCycle(subscription.metadata?.billing) ||
+    normalizeBillingCycle(
+      subscription.items.data[0]?.price?.recurring?.interval
+    );
+
+  const synced = await prisma.subscription.upsert({
+    where: { businessId },
+    update: {
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId,
+      currency: mapCurrency(
+        options.currencyHint ||
+          subscription.metadata?.currency ||
+          subscription.items.data[0]?.price?.currency
+      ),
+      billingCycle,
+      status,
+      currentPeriodEnd: getPeriodEnd(subscription),
+      isTrial: subscription.status === "trialing",
+      graceUntil:
+        status === "ACTIVE" || status === "CANCELLED"
+          ? null
+          : existing?.graceUntil ?? null,
+      plan: {
+        connect: { id: plan.id },
+      },
+      trialUsed:
+        existing?.trialUsed === true ||
+        options.trialUsed === true ||
+        subscription.status === "trialing",
+    },
+    create: {
+      business: {
+        connect: { id: businessId },
+      },
+      plan: {
+        connect: { id: plan.id },
+      },
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId,
+      currency: mapCurrency(
+        options.currencyHint ||
+          subscription.metadata?.currency ||
+          subscription.items.data[0]?.price?.currency
+      ),
+      billingCycle,
+      status,
+      currentPeriodEnd: getPeriodEnd(subscription),
+      isTrial: subscription.status === "trialing",
+      trialUsed:
+        options.trialUsed === true ||
+        subscription.status === "trialing",
+    },
+    include: {
+      plan: true,
+    },
+  });
+
+  if (stripeCustomerId) {
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        stripeCustomerId,
+      },
+    });
+  }
+
+  await safeRedisDel(`sub:${businessId}`);
+
+  return synced;
+};
+
 export const syncCheckoutSession = async (
   session: Stripe.Checkout.Session,
   options: BillingSyncOptions = {}
@@ -150,55 +365,14 @@ export const syncCheckoutSession = async (
       stripeSub.items.data[0]?.price?.recurring?.interval
     );
 
-  const subscriptionData = {
-    stripeSubscriptionId: stripeSub.id,
-    stripeCustomerId:
-      typeof stripeSub.customer === "string"
-        ? stripeSub.customer
-        : stripeSub.customer?.id ?? null,
-    currency: mapCurrency(
-      session.metadata?.currency ||
-        session.currency ||
-        stripeSub.items.data[0]?.price?.currency
-    ),
-    billingCycle,
-    status: mapStripeSubscriptionStatus(stripeSub.status),
-    currentPeriodEnd: getPeriodEnd(stripeSub),
-    isTrial: stripeSub.status === "trialing",
-  };
-
-  const subscription = await prisma.subscription.upsert({
-    where: { businessId },
-    update: {
-      ...subscriptionData,
-      plan: {
-        connect: { id: plan.id },
-      },
-      trialUsed:
-        existing?.trialUsed === true ||
-        session.metadata?.usedTrial === "true" ||
-        stripeSub.status === "trialing",
-    },
-    create: {
-      ...subscriptionData,
-      business: {
-        connect: { id: businessId },
-      },
-      plan: {
-        connect: { id: plan.id },
-      },
-      trialUsed:
-        session.metadata?.usedTrial === "true" ||
-        stripeSub.status === "trialing",
-    },
-    include: {
-      plan: true,
-    },
+  return applyStripeSubscriptionSync(stripeSub, {
+    businessId,
+    planTypeHint: planType,
+    billingHint: billingCycle,
+    currencyHint:
+      session.metadata?.currency || session.currency || null,
+    trialUsed: session.metadata?.usedTrial === "true",
   });
-
-  await safeRedisDel(`sub:${businessId}`);
-
-  return subscription;
 };
 
 export const confirmCheckoutSession = async (
@@ -213,51 +387,110 @@ export const confirmCheckoutSession = async (
 };
 
 export const syncStripeSubscriptionState = async (
-  subscription: Stripe.Subscription
+  subscription: Stripe.Subscription,
+  options: StripeSubscriptionSyncOptions = {}
 ) => {
-  const existing = await prisma.subscription.findFirst({
-    where: {
-      stripeSubscriptionId: subscription.id,
-    },
-  });
+  const synced = await applyStripeSubscriptionSync(subscription, options);
 
-  if (!existing) {
+  if (!synced) {
     return null;
   }
 
-  const status = mapStripeSubscriptionStatus(subscription.status);
-  const syncedPlanType = getPlanFromPrice(getSubscriptionPriceId(subscription));
-  const syncedPlan = syncedPlanType ? await findPlan(syncedPlanType) : null;
+  return {
+    businessId: synced.businessId,
+    status: synced.status,
+    planType: synced.plan?.type || synced.plan?.name || null,
+    stripeSubscriptionId: subscription.id,
+    stripeCustomerId: synced.stripeCustomerId || getCustomerId(subscription.customer),
+  };
+};
 
-  await prisma.subscription.update({
+export const expirePastDueSubscriptionIfNeeded = async (
+  lookup: ExpirePastDueLookup
+) => {
+  const subscription = await prisma.subscription.findFirst({
     where: {
-      stripeSubscriptionId: subscription.id,
+      OR: [
+        lookup.businessId
+          ? {
+              businessId: lookup.businessId,
+            }
+          : undefined,
+        lookup.stripeCustomerId
+          ? {
+              stripeCustomerId: lookup.stripeCustomerId,
+            }
+          : undefined,
+        lookup.stripeSubscriptionId
+          ? {
+              stripeSubscriptionId: lookup.stripeSubscriptionId,
+            }
+          : undefined,
+      ].filter(Boolean) as any[],
     },
-    data: {
-      ...(syncedPlan
-        ? {
-            plan: {
-              connect: {
-                id: syncedPlan.id,
-              },
-            },
-          }
-        : {}),
-      status,
-      currentPeriodEnd: getPeriodEnd(subscription),
-      isTrial: subscription.status === "trialing",
-      billingCycle:
-        normalizeBillingCycle(
-          subscription.items.data[0]?.price?.recurring?.interval
-        ) || existing.billingCycle,
-      graceUntil:
-        status === "ACTIVE" || status === "CANCELLED"
-          ? null
-          : existing.graceUntil,
+    include: {
+      plan: true,
     },
   });
 
-  await safeRedisDel(`sub:${existing.businessId}`);
+  if (!subscription) {
+    return null;
+  }
 
-  return existing.businessId;
+  if (!hasExpiredGracePeriod(subscription.status, subscription.graceUntil)) {
+    return subscription;
+  }
+
+  const updated = await prisma.subscription.update({
+    where: {
+      businessId: subscription.businessId,
+    },
+    data: {
+      status: "CANCELLED",
+      graceUntil: null,
+      isTrial: false,
+    },
+    include: {
+      plan: true,
+    },
+  });
+
+  await safeRedisDel(`sub:${updated.businessId}`);
+
+  console.log("Grace period expired, downgraded", {
+    businessId: updated.businessId,
+    stripeCustomerId: updated.stripeCustomerId || null,
+    stripeSubscriptionId: updated.stripeSubscriptionId || null,
+    effectivePlan: "FREE_LOCKED",
+    previousStatus: subscription.status,
+    nextStatus: updated.status,
+  });
+
+  return updated;
+};
+
+export const expirePastDueSubscriptions = async () => {
+  const expired = await prisma.subscription.findMany({
+    where: {
+      status: "PAST_DUE",
+      graceUntil: {
+        lt: new Date(),
+      },
+    },
+    include: {
+      plan: true,
+    },
+  });
+
+  if (!expired.length) {
+    return 0;
+  }
+
+  for (const subscription of expired) {
+    await expirePastDueSubscriptionIfNeeded({
+      businessId: subscription.businessId,
+    });
+  }
+
+  return expired.length;
 };

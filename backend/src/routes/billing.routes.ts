@@ -41,6 +41,15 @@ CHECKOUT
 ====================================== */
 
 router.post(
+  "/create-checkout-session",
+  protect,
+  requireBusinessContext,
+  requirePermission("billing:manage"),
+  authLimiter,
+  auditRequest("billing.checkout_requested"),
+  BillingController.createCheckoutSession
+);
+router.post(
   "/checkout",
   protect,
   requireBusinessContext,

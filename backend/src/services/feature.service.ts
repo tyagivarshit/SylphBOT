@@ -5,6 +5,7 @@ import {
   type PlanType,
 } from "../config/plan.config";
 import prisma from "../config/prisma";
+import { expirePastDueSubscriptionIfNeeded } from "./billingSync.service";
 
 type PlanRecord = {
   name?: string | null;
@@ -24,6 +25,7 @@ export type SubscriptionState = "ACTIVE" | "LOCKED";
 export type SubscriptionLockReason =
   | "missing_subscription"
   | "trial_expired"
+  | "grace_period_expired"
   | "subscription_cancelled"
   | "subscription_expired"
   | "subscription_inactive"
@@ -71,12 +73,27 @@ const isTrialActive = (subscription: SubscriptionRecord, now: number) => {
   );
 };
 
+const hasValidGracePeriod = (subscription: SubscriptionRecord, now: number) => {
+  if (!subscription?.plan || subscription.status !== "PAST_DUE") {
+    return false;
+  }
+
+  return (
+    Boolean(subscription.graceUntil) &&
+    subscription.graceUntil!.getTime() >= now
+  );
+};
+
 const isSubscriptionActive = (subscription: SubscriptionRecord, now: number) => {
   if (!subscription?.plan) {
     return false;
   }
 
   if (isTrialActive(subscription, now)) {
+    return true;
+  }
+
+  if (hasValidGracePeriod(subscription, now)) {
     return true;
   }
 
@@ -103,6 +120,13 @@ const resolveLockReason = (
 
   if (subscription.status === "CANCELLED") {
     return "subscription_cancelled";
+  }
+
+  if (subscription.status === "PAST_DUE") {
+    return subscription.graceUntil &&
+      subscription.graceUntil.getTime() < now
+      ? "grace_period_expired"
+      : "subscription_inactive";
   }
 
   if (
@@ -137,21 +161,26 @@ const createResolvedPlan = (
 const loadResolvedPlan = async (
   businessId: string
 ): Promise<ResolvedPlanContext> => {
-  const subscription = await prisma.subscription.findUnique({
-    where: { businessId },
-    select: {
-      status: true,
-      graceUntil: true,
-      currentPeriodEnd: true,
-      isTrial: true,
-      plan: {
-        select: {
-          name: true,
-          type: true,
+  const expired = await expirePastDueSubscriptionIfNeeded({
+    businessId,
+  });
+  const subscription =
+    expired ||
+    (await prisma.subscription.findUnique({
+      where: { businessId },
+      select: {
+        status: true,
+        graceUntil: true,
+        currentPeriodEnd: true,
+        isTrial: true,
+        plan: {
+          select: {
+            name: true,
+            type: true,
+          },
         },
       },
-    },
-  });
+    }));
 
   const now = Date.now();
 
@@ -230,9 +259,27 @@ export const hasFeature = async (
   const context = await resolvePlanContext(businessId);
 
   if (context.planKey === "LOCKED") {
+    console.warn("Feature access blocked", {
+      businessId,
+      featureKey,
+      planKey: context.planKey,
+      subscriptionStatus: context.subscriptionStatus,
+      lockReason: context.lockReason,
+    });
     return false;
   }
 
-  return planHasFeature(context.plan, featureKey);
-};
+  const allowed = planHasFeature(context.plan, featureKey);
 
+  if (!allowed) {
+    console.warn("Feature access blocked", {
+      businessId,
+      featureKey,
+      planKey: context.planKey,
+      subscriptionStatus: context.subscriptionStatus,
+      lockReason: context.lockReason,
+    });
+  }
+
+  return allowed;
+};

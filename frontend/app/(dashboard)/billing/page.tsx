@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ShieldCheck, Sparkles } from "lucide-react";
-import { createCheckout, upgradePlan } from "@/lib/billing";
+import { createCheckoutSession } from "@/lib/billing";
 import { notify } from "@/lib/toast";
 import PaymentHistory from "@/components/billing/PaymentHistory";
 import UsageSummary from "@/components/billing/UsageSummary";
@@ -258,14 +258,7 @@ function BillingPageContent() {
         );
       }
 
-      const action =
-        planKey !== "FREE_LOCKED" &&
-        planKey !== "LOCKED" &&
-        subscription?.stripeSubscriptionId
-          ? upgradePlan
-          : createCheckout;
-
-      const result = await action(plan, billing);
+      const result = await createCheckoutSession(plan, billing);
 
       if (!result?.url) {
         throw new Error(result?.message || "No checkout URL received");

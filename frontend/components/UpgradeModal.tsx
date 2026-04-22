@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { X, Check } from "lucide-react"
-import { createCheckout } from "@/lib/billing"
+import { createCheckoutSession } from "@/lib/billing"
 
 type Props = {
   open: boolean
@@ -43,7 +43,7 @@ export default function UpgradeModal({ open, setOpen }: Props){
     try{
       setLoading(plan)
 
-      const res = await createCheckout(plan, "monthly")
+      const res = await createCheckoutSession(plan, "monthly")
 
       if(res?.url){
         window.location.href = res.url

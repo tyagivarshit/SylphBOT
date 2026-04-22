@@ -5,21 +5,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runCleanup = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-/* ======================================
-CONFIG
-====================================== */
+const billingSync_service_1 = require("../services/billingSync.service");
 const DAYS_TO_KEEP = 30;
-/* ======================================
-DATE HELPER
-====================================== */
 const getExpiryDate = () => {
     const date = new Date();
     date.setDate(date.getDate() - DAYS_TO_KEEP);
     return date;
 };
-/* ======================================
-STRIPE EVENT CLEANUP
-====================================== */
 const cleanStripeEvents = async () => {
     const expiry = getExpiryDate();
     const result = await prisma_1.default.stripeEvent.deleteMany({
@@ -29,11 +21,19 @@ const cleanStripeEvents = async () => {
             },
         },
     });
-    console.log(`🧹 Stripe events cleaned: ${result.count}`);
+    console.log(`Stripe events cleaned: ${result.count}`);
 };
-/* ======================================
-WEBHOOK EVENT CLEANUP
-====================================== */
+const cleanBillingEvents = async () => {
+    const expiry = getExpiryDate();
+    const result = await prisma_1.default.billingEvent.deleteMany({
+        where: {
+            createdAt: {
+                lt: expiry,
+            },
+        },
+    });
+    console.log(`Billing events cleaned: ${result.count}`);
+};
 const cleanWebhookEvents = async () => {
     const expiry = getExpiryDate();
     const result = await prisma_1.default.webhookEvent.deleteMany({
@@ -43,11 +43,8 @@ const cleanWebhookEvents = async () => {
             },
         },
     });
-    console.log(`🧹 Webhook events cleaned: ${result.count}`);
+    console.log(`Webhook events cleaned: ${result.count}`);
 };
-/* ======================================
-REFRESH TOKEN CLEANUP
-====================================== */
 const cleanExpiredTokens = async () => {
     const now = new Date();
     const result = await prisma_1.default.refreshToken.deleteMany({
@@ -57,23 +54,23 @@ const cleanExpiredTokens = async () => {
             },
         },
     });
-    console.log(`🧹 Expired tokens removed: ${result.count}`);
+    console.log(`Expired tokens removed: ${result.count}`);
 };
-/* ======================================
-MAIN CLEANUP RUNNER
-====================================== */
 const runCleanup = async () => {
     try {
-        console.log("🧹 Running cleanup job...");
+        console.log("Running cleanup job...");
+        const expiredCount = await (0, billingSync_service_1.expirePastDueSubscriptions)();
         await Promise.all([
+            cleanBillingEvents(),
             cleanStripeEvents(),
             cleanWebhookEvents(),
             cleanExpiredTokens(),
         ]);
-        console.log("✅ Cleanup completed");
+        console.log(`Grace period expiries processed: ${expiredCount}`);
+        console.log("Cleanup completed");
     }
     catch (error) {
-        console.error("❌ Cleanup failed:", error);
+        console.error("Cleanup failed:", error);
     }
 };
 exports.runCleanup = runCleanup;

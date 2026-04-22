@@ -9,39 +9,65 @@ type BillingPayload = {
   success?: boolean;
   billing?: {
     status?: "INACTIVE" | "ACTIVE" | "TRIAL";
-  };
+  } | null;
   subscription?: {
     status?: string;
-  };
+    plan?: {
+      name?: string | null;
+      type?: string | null;
+    } | null;
+  } | null;
 };
 
 const sleep = (ms: number) =>
   new Promise((resolve) => window.setTimeout(resolve, ms));
 
-const isActivated = (payload: BillingPayload | null) => {
+const normalizePlanKey = (value?: string | null) =>
+  String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+const getResolvedPlanKey = (payload: BillingPayload | null) =>
+  normalizePlanKey(
+    payload?.subscription?.plan?.type || payload?.subscription?.plan?.name || null
+  );
+
+const isActivated = (
+  payload: BillingPayload | null,
+  expectedPlan: string
+) => {
   const billingStatus = payload?.billing?.status;
   const subscriptionStatus = payload?.subscription?.status;
-
-  return (
+  const active =
     billingStatus === "ACTIVE" ||
     billingStatus === "TRIAL" ||
-    subscriptionStatus === "ACTIVE"
-  );
+    subscriptionStatus === "ACTIVE";
+
+  if (!active) {
+    return false;
+  }
+
+  if (!expectedPlan) {
+    return true;
+  }
+
+  return getResolvedPlanKey(payload) === expectedPlan;
 };
 
-const getSuccessMessage = (
-  payload: BillingPayload | null,
-  upgraded: boolean
-) => {
-  if (upgraded) {
-    return "Your plan change is now live.";
-  }
+const getPlanLabel = (payload: BillingPayload | null) =>
+  payload?.subscription?.plan?.name ||
+  payload?.subscription?.plan?.type ||
+  "your selected";
+
+const getSuccessMessage = (payload: BillingPayload | null) => {
+  const planLabel = getPlanLabel(payload);
 
   if (payload?.billing?.status === "TRIAL") {
-    return "Your 7-day free trial is now active.";
+    return `${planLabel} is now active and your trial is running.`;
   }
 
-  return "Your subscription is now active.";
+  return `${planLabel} is now active on your workspace.`;
 };
 
 const fetchBilling = async (): Promise<BillingPayload | null> => {
@@ -64,12 +90,13 @@ const fetchBilling = async (): Promise<BillingPayload | null> => {
 function SuccessPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const expectedPlan = normalizePlanKey(searchParams.get("plan"));
   const sessionId = searchParams.get("session_id");
-  const upgraded = searchParams.get("upgraded") === "1";
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("Verifying your payment...");
   const [failed, setFailed] = useState(false);
+  const [message, setMessage] = useState("Verifying your subscription...");
+  const [resolvedPlan, setResolvedPlan] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,18 +111,20 @@ function SuccessPageContent() {
       if (sessionId) {
         const confirmed = await confirmCheckout(sessionId);
 
-        if (!cancelled && confirmed?.success && isActivated(confirmed)) {
-          setMessage(getSuccessMessage(confirmed, upgraded));
+        if (!cancelled && isActivated(confirmed, expectedPlan)) {
+          setResolvedPlan(getPlanLabel(confirmed));
+          setMessage(getSuccessMessage(confirmed));
           setLoading(false);
           return;
         }
       }
 
-      for (let attempt = 0; attempt < 10; attempt += 1) {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
         const billing = await fetchBilling();
 
-        if (!cancelled && isActivated(billing)) {
-          setMessage(getSuccessMessage(billing, upgraded));
+        if (!cancelled && isActivated(billing, expectedPlan)) {
+          setResolvedPlan(getPlanLabel(billing));
+          setMessage(getSuccessMessage(billing));
           setLoading(false);
           return;
         }
@@ -107,49 +136,61 @@ function SuccessPageContent() {
         setLoading(false);
         setFailed(true);
         setMessage(
-          "Payment completed, but activation is still syncing. Please reopen billing once."
+          "Your payment finished in Stripe, but the plan is still syncing. Please reopen billing in a moment."
         );
       }
     };
 
-    activate();
+    void activate();
 
     return () => {
       cancelled = true;
     };
-  }, [sessionId, upgraded]);
+  }, [expectedPlan, sessionId]);
+
+  const statusTitle = loading
+    ? "Verifying Payment"
+    : failed
+      ? "Activation Pending"
+      : "Subscription Active";
+  const statusTone = loading
+    ? "border-blue-400 text-blue-600"
+    : failed
+      ? "border-amber-400 text-amber-600"
+      : "border-green-500 text-green-600";
+  const statusIcon = loading ? "..." : failed ? "!" : "OK";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
         <div className="mb-6 flex justify-center">
           <div
-            className={`flex h-20 w-20 items-center justify-center rounded-full border-4 transition-all duration-500 ${
-              failed
-                ? "border-amber-400 text-amber-600"
-                : "border-green-500 text-green-600"
-            } ${show ? "scale-100" : "scale-0"}`}
+            className={`flex h-20 w-20 items-center justify-center rounded-full border-4 transition-all duration-500 ${statusTone} ${
+              show ? "scale-100" : "scale-0"
+            }`}
           >
-            <span className="text-3xl">{failed ? "!" : "OK"}</span>
+            <span className="text-3xl">{statusIcon}</span>
           </div>
         </div>
 
         <h1 className="text-xl font-semibold text-gray-900">
-          {failed ? "Activation Pending" : "Payment Successful"}
+          {statusTitle}
         </h1>
 
         <p className="mt-2 text-sm text-gray-500">{message}</p>
 
+        {!failed && resolvedPlan ? (
+          <p className="mt-3 text-sm font-semibold text-gray-900">
+            Active plan: {resolvedPlan}
+          </p>
+        ) : null}
+
         <button
-          onClick={() => router.push(failed ? "/billing" : "/dashboard")}
+          onClick={() => router.push("/billing")}
           disabled={loading}
           className="mt-6 w-full rounded-xl bg-blue-600 py-2.5 text-white disabled:opacity-50"
         >
-          {loading
-            ? "Please wait..."
-            : failed
-            ? "Back to Billing"
-            : "Go to Dashboard"}
+          {loading ? "Checking..." : "Open Billing"}
         </button>
       </div>
     </div>

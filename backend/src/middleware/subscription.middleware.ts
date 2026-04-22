@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import redis from "../config/redis";
 import { getPlanKey } from "../config/plan.config";
 import { env } from "../config/env";
+import { expirePastDueSubscriptionIfNeeded } from "../services/billingSync.service";
 
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
@@ -96,7 +97,11 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
 };
 
 export const loadBillingContext = async (businessId: string) => {
-  const subscription = await getCachedSubscription(businessId);
+  const cachedSubscription = await getCachedSubscription(businessId);
+  const subscription =
+    (cachedSubscription?.status === "PAST_DUE"
+      ? await expirePastDueSubscriptionIfNeeded({ businessId })
+      : null) || cachedSubscription;
   const now = new Date();
 
   let context = getBaseContext();

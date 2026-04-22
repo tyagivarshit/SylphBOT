@@ -60,6 +60,13 @@ import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 
 initializeSentry();
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
+console.log("🚀 Worker starting...");
+console.log("RUN_WORKER:", process.env.RUN_WORKER);
+
 const AI_WORKER_CONCURRENCY = Math.max(
   1,
   resolveWorkerConcurrency(
@@ -922,7 +929,7 @@ const processAIJob = async (job: AIWorkerJob) => {
 };
 
 const workers =
-  process.env.RUN_WORKER === "true"
+  shouldRunWorker
     ? getAIQueueNames().map((queueName) => {
         const worker = new Worker<AIJobPayload>(
           queueName,
@@ -1049,6 +1056,14 @@ logger.info(
   },
   "AI partition workers started"
 );
+
+if (workers.length > 0) {
+  console.log("✅ Worker initialized", {
+    queues: getAIQueueNames(),
+  });
+} else {
+  console.error("❌ No workers started — check RUN_WORKER or Redis config");
+}
 
 process.on("SIGINT", () => {
   void shutdown("SIGINT");

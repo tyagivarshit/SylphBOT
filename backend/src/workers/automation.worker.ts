@@ -15,7 +15,11 @@ import {
 
 initializeSentry();
 
-if (process.env.RUN_WORKER === "true") {
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
+if (shouldRunWorker) {
   const worker = new Worker(
     "automation",
     withRedisWorkerFailSafe("automation", async (job: any) =>
@@ -125,4 +129,6 @@ if (process.env.RUN_WORKER === "true") {
   });
 
   logger.info({ queueName: "automation" }, "Automation worker started");
+} else {
+  console.log("[automation.worker] RUN_WORKER disabled, worker not started");
 }

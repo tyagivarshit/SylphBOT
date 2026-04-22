@@ -38,7 +38,9 @@ const Sentry = __importStar(require("@sentry/node"));
 const redis_1 = require("../config/redis");
 const ai_queue_1 = require("../queues/ai.queue");
 const queue_defaults_1 = require("../queues/queue.defaults");
-const worker = process.env.RUN_WORKER === "true"
+const shouldRunWorker = process.env.RUN_WORKER === "true" ||
+    process.env.RUN_WORKER === undefined;
+const worker = shouldRunWorker
     ? new bullmq_1.Worker("inboxQueue", (0, queue_defaults_1.withRedisWorkerFailSafe)("inboxQueue", async (job) => {
         const { businessId, leadId, message, plan } = job.data;
         try {
@@ -65,4 +67,7 @@ const worker = process.env.RUN_WORKER === "true"
         connection: (0, redis_1.getWorkerRedisConnection)(),
     })
     : null;
+if (!shouldRunWorker) {
+    console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
+}
 exports.default = worker;

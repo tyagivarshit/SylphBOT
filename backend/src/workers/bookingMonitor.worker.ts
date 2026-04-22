@@ -10,8 +10,12 @@ MISSED BOOKING MONITOR (PRODUCTION SAFE)
 =========================================================
 */
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
 export const bookingMonitorWorker =
-  process.env.RUN_WORKER === "true"
+  shouldRunWorker
     ? new Worker(
   "booking-monitor",
   withRedisWorkerFailSafe("booking-monitor", async () => {
@@ -134,3 +138,7 @@ Reply YES and we’ll set it up again 👍`,
   }
 )
     : null;
+
+if (!shouldRunWorker) {
+  console.log("[bookingMonitor.worker] RUN_WORKER disabled, worker not started");
+}

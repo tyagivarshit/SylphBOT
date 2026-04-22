@@ -13,6 +13,10 @@ import {
   resolveWorkerConcurrency,
 } from "../workers/workerManager";
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
 export const exampleQueue = createResilientQueue(
   new Queue("example-queue", {
     connection: getQueueRedisConnection(),
@@ -22,7 +26,7 @@ export const exampleQueue = createResilientQueue(
 );
 
 export const exampleWorker =
-  process.env.RUN_WORKER === "true"
+  shouldRunWorker
     ? new Worker(
         "example-queue",
         withRedisWorkerFailSafe("example-queue", async (job: any) => {
@@ -37,3 +41,7 @@ export const exampleWorker =
         }
       )
     : null;
+
+if (!shouldRunWorker) {
+  console.log("[queues/example.queue] RUN_WORKER disabled, worker not started");
+}

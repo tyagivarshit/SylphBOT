@@ -10,7 +10,9 @@ const redis_1 = require("../config/redis");
 const queue_defaults_1 = require("../queues/queue.defaults");
 const whatsapp_service_1 = require("../services/whatsapp.service");
 const bookingReminder_queue_1 = require("../queues/bookingReminder.queue");
-exports.bookingReminderWorker = process.env.RUN_WORKER === "true"
+const shouldRunWorker = process.env.RUN_WORKER === "true" ||
+    process.env.RUN_WORKER === undefined;
+exports.bookingReminderWorker = shouldRunWorker
     ? new bullmq_1.Worker(bookingReminder_queue_1.BOOKING_REMINDER_QUEUE_NAME, (0, queue_defaults_1.withRedisWorkerFailSafe)(bookingReminder_queue_1.BOOKING_REMINDER_QUEUE_NAME, async (job) => {
         const { type, appointmentId } = job.data;
         try {
@@ -101,3 +103,6 @@ Please be ready 🚀`;
         concurrency: 5,
     })
     : null;
+if (!shouldRunWorker) {
+    console.log("[bookingReminder.worker] RUN_WORKER disabled, worker not started");
+}

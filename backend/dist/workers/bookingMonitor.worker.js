@@ -48,7 +48,9 @@ const aiFollowup_service_1 = require("../services/aiFollowup.service");
 MISSED BOOKING MONITOR (PRODUCTION SAFE)
 =========================================================
 */
-exports.bookingMonitorWorker = process.env.RUN_WORKER === "true"
+const shouldRunWorker = process.env.RUN_WORKER === "true" ||
+    process.env.RUN_WORKER === undefined;
+exports.bookingMonitorWorker = shouldRunWorker
     ? new bullmq_1.Worker("booking-monitor", (0, queue_defaults_1.withRedisWorkerFailSafe)("booking-monitor", async () => {
         try {
             const now = new Date();
@@ -154,3 +156,6 @@ Reply YES and we’ll set it up again 👍`,
         concurrency: 1, // 🔥 IMPORTANT (avoid race condition)
     })
     : null;
+if (!shouldRunWorker) {
+    console.log("[bookingMonitor.worker] RUN_WORKER disabled, worker not started");
+}

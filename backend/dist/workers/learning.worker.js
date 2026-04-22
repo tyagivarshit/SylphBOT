@@ -4,8 +4,11 @@ exports.startLearningWorker = void 0;
 const bullmq_1 = require("bullmq");
 const redis_1 = require("../config/redis");
 const queue_defaults_1 = require("../queues/queue.defaults");
+const shouldRunWorker = process.env.RUN_WORKER === "true" ||
+    process.env.RUN_WORKER === undefined;
 const startLearningWorker = () => {
-    if (process.env.RUN_WORKER !== "true") {
+    if (!shouldRunWorker) {
+        console.log("[learning.worker] RUN_WORKER disabled, worker not started");
         return null;
     }
     const worker = new bullmq_1.Worker("learning-queue", (0, queue_defaults_1.withRedisWorkerFailSafe)("learning-queue", async (job) => {

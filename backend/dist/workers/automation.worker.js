@@ -12,7 +12,9 @@ const sentry_1 = require("../observability/sentry");
 const requestContext_1 = require("../observability/requestContext");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 (0, sentry_1.initializeSentry)();
-if (process.env.RUN_WORKER === "true") {
+const shouldRunWorker = process.env.RUN_WORKER === "true" ||
+    process.env.RUN_WORKER === undefined;
+if (shouldRunWorker) {
     const worker = new bullmq_1.Worker("automation", (0, queue_defaults_1.withRedisWorkerFailSafe)("automation", async (job) => (0, requestContext_1.runWithRequestContext)({
         requestId: String(job.id || `${job.queueName}:${job.name}`),
         source: "worker",
@@ -88,4 +90,7 @@ if (process.env.RUN_WORKER === "true") {
         });
     });
     logger_1.default.info({ queueName: "automation" }, "Automation worker started");
+}
+else {
+    console.log("[automation.worker] RUN_WORKER disabled, worker not started");
 }

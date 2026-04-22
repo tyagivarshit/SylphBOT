@@ -6,39 +6,37 @@ import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 /* SENTRY MONITORING */
 import * as Sentry from "@sentry/node";
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
 const worker =
-  process.env.RUN_WORKER === "true"
+  shouldRunWorker
     ? new Worker(
-  "funnelQueue",
-  withRedisWorkerFailSafe("funnelQueue", async (job: any) => {
+        "funnelQueue",
+        withRedisWorkerFailSafe("funnelQueue", async (job: any) => {
+          const { executionId } = job.data;
 
-    const { executionId } = job.data;
+          try {
+            const execution = await prisma.automationExecution.findUnique({
+              where: { id: executionId },
+            });
 
-    try {
+            if (!execution) return;
 
-      const execution = await prisma.automationExecution.findUnique({
-        where: { id: executionId },
-      });
+            console.log("Running funnel job:", executionId);
+          } catch (error) {
+            console.error("Funnel worker error:", error);
+            Sentry.captureException(error);
 
-      if (!execution) return;
-
-      console.log("Running funnel job:", executionId);
-
-    } catch (error) {
-
-      console.error("Funnel worker error:", error);
-      Sentry.captureException(error);
-
-      throw error;
-
-    }
-
-  }),
-  {
-    connection: getWorkerRedisConnection(),
-    concurrency: 3,
-  }
-)
+            throw error;
+          }
+        }),
+        {
+          connection: getWorkerRedisConnection(),
+          concurrency: 3,
+        }
+      )
     : ({
         on() {
           return undefined;
@@ -48,12 +46,12 @@ const worker =
 /* WORKER FAILURE MONITORING */
 
 worker.on("failed", (job, err) => {
-
   console.error("Funnel Worker Failed:", job?.id, err);
   Sentry.captureException(err);
-
 });
 
-if (process.env.RUN_WORKER === "true") {
-  console.log("🚀 Funnel Worker Started");
+if (shouldRunWorker) {
+  console.log("Funnel Worker Started");
+} else {
+  console.log("[funnel.worker] RUN_WORKER disabled, worker not started");
 }

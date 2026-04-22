@@ -354,7 +354,11 @@ const followupQueueNames = Array.from(
   new Set([FOLLOWUP_QUEUE_NAME, LEGACY_FOLLOWUP_QUEUE_NAME])
 );
 
-if (process.env.RUN_WORKER === "true") {
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
+if (shouldRunWorker) {
   const workers = followupQueueNames.map((queueName) =>
     new Worker<FollowupJobData>(
       queueName,
@@ -620,4 +624,6 @@ if (process.env.RUN_WORKER === "true") {
     { queueNames: followupQueueNames, concurrency: FOLLOWUP_WORKER_CONCURRENCY },
     "Follow-up workers started"
   );
+} else {
+  console.log("[followup.worker] RUN_WORKER disabled, worker not started");
 }

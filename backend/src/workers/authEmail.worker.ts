@@ -7,8 +7,12 @@ import {
 } from "../services/authEmail.service";
 import type { AuthEmailJobData } from "../queues/authEmail.queue";
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
 const authEmailWorker =
-  process.env.RUN_WORKER === "true"
+  shouldRunWorker
     ? new Worker<AuthEmailJobData>(
         "authEmail",
         withRedisWorkerFailSafe("authEmail", async (job) => {
@@ -28,6 +32,10 @@ const authEmailWorker =
         }
       )
     : null;
+
+if (!shouldRunWorker) {
+  console.log("[authEmail.worker] RUN_WORKER disabled, worker not started");
+}
 
 if (authEmailWorker) {
   authEmailWorker.on("completed", (job) => {

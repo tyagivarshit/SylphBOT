@@ -209,7 +209,9 @@ const sendFollowupMessage = async (request) => {
     });
 };
 const followupQueueNames = Array.from(new Set([followup_queue_1.FOLLOWUP_QUEUE_NAME, followup_queue_1.LEGACY_FOLLOWUP_QUEUE_NAME]));
-if (process.env.RUN_WORKER === "true") {
+const shouldRunWorker = process.env.RUN_WORKER === "true" ||
+    process.env.RUN_WORKER === undefined;
+if (shouldRunWorker) {
     const workers = followupQueueNames.map((queueName) => new bullmq_1.Worker(queueName, (0, queue_defaults_1.withRedisWorkerFailSafe)(queueName, async (job) => (0, requestContext_1.runWithRequestContext)({
         requestId: String(job.id || buildFollowupJobKey(job)),
         source: "worker",
@@ -398,4 +400,7 @@ if (process.env.RUN_WORKER === "true") {
         });
     });
     logger_1.default.info({ queueNames: followupQueueNames, concurrency: FOLLOWUP_WORKER_CONCURRENCY }, "Follow-up workers started");
+}
+else {
+    console.log("[followup.worker] RUN_WORKER disabled, worker not started");
 }

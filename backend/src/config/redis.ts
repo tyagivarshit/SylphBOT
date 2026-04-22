@@ -35,6 +35,8 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     throw new Error("REDIS_URL must use rediss:// for Upstash TLS connections");
   }
 
+  const isWorker = connectionName.startsWith("worker");
+
   return {
     connectionName,
     enableReadyCheck: false,
@@ -45,7 +47,7 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     lazyConnect: true,
     keepAlive: 30000,
     noDelay: true,
-    maxRetriesPerRequest: 3,
+    maxRetriesPerRequest: isWorker ? null : 3,
     connectTimeout: env.REDIS_CONNECT_TIMEOUT_MS,
     retryStrategy(attempts) {
       if (attempts > MAX_RECONNECT_ATTEMPTS) {

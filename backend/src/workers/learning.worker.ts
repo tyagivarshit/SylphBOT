@@ -2,8 +2,13 @@ import { Worker } from "bullmq";
 import { getWorkerRedisConnection } from "../config/redis";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
 export const startLearningWorker = () => {
-  if (process.env.RUN_WORKER !== "true") {
+  if (!shouldRunWorker) {
+    console.log("[learning.worker] RUN_WORKER disabled, worker not started");
     return null;
   }
 

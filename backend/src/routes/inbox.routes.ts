@@ -4,8 +4,12 @@ import { getWorkerRedisConnection } from "../config/redis";
 import { enqueueAIBatch } from "../queues/ai.queue";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
 const worker =
-  process.env.RUN_WORKER === "true"
+  shouldRunWorker
     ? new Worker(
         "inboxQueue",
         withRedisWorkerFailSafe("inboxQueue", async (job: any) => {
@@ -36,5 +40,9 @@ const worker =
         }
       )
     : null;
+
+if (!shouldRunWorker) {
+  console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
+}
 
 export default worker;

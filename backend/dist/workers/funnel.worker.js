@@ -42,7 +42,9 @@ const redis_1 = require("../config/redis");
 const queue_defaults_1 = require("../queues/queue.defaults");
 /* SENTRY MONITORING */
 const Sentry = __importStar(require("@sentry/node"));
-const worker = process.env.RUN_WORKER === "true"
+const shouldRunWorker = process.env.RUN_WORKER === "true" ||
+    process.env.RUN_WORKER === undefined;
+const worker = shouldRunWorker
     ? new bullmq_1.Worker("funnelQueue", (0, queue_defaults_1.withRedisWorkerFailSafe)("funnelQueue", async (job) => {
         const { executionId } = job.data;
         try {
@@ -72,6 +74,9 @@ worker.on("failed", (job, err) => {
     console.error("Funnel Worker Failed:", job?.id, err);
     Sentry.captureException(err);
 });
-if (process.env.RUN_WORKER === "true") {
-    console.log("🚀 Funnel Worker Started");
+if (shouldRunWorker) {
+    console.log("Funnel Worker Started");
+}
+else {
+    console.log("[funnel.worker] RUN_WORKER disabled, worker not started");
 }

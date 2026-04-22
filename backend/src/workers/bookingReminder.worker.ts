@@ -10,8 +10,12 @@ type ReminderJob = {
   appointmentId: string;
 };
 
+const shouldRunWorker =
+  process.env.RUN_WORKER === "true" ||
+  process.env.RUN_WORKER === undefined;
+
 export const bookingReminderWorker =
-  process.env.RUN_WORKER === "true"
+  shouldRunWorker
     ? new Worker<ReminderJob>(
         BOOKING_REMINDER_QUEUE_NAME,
         withRedisWorkerFailSafe(BOOKING_REMINDER_QUEUE_NAME, async (job) => {
@@ -121,3 +125,7 @@ Please be ready 🚀`;
         }
       )
     : null;
+
+if (!shouldRunWorker) {
+  console.log("[bookingReminder.worker] RUN_WORKER disabled, worker not started");
+}

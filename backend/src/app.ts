@@ -390,6 +390,12 @@ app.use(
   attachBillingContext,
   commentTriggerRoutes
 );
+app.use(
+  "/api/triggers",
+  protect,
+  attachBillingContext,
+  commentTriggerRoutes
+);
 
 app.get("/api/client/status", protect, getClientStatus);
 app.use("/api/clients", protect, clientRoutes);

@@ -6,10 +6,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toggleCommentTrigger = exports.deleteCommentTrigger = exports.updateCommentTrigger = exports.getCommentTriggers = exports.createCommentTrigger = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const plan_config_1 = require("../config/plan.config");
+const tenant_service_1 = require("../services/tenant.service");
 /* --------------------------------------------------- */
 /* GET BUSINESS */
 /* --------------------------------------------------- */
-const getBusinessId = async (userId) => {
+const getBusinessId = async (req) => {
+    const requestBusinessId = (0, tenant_service_1.getRequestBusinessId)(req) || req.businessId;
+    if (requestBusinessId) {
+        return requestBusinessId;
+    }
+    const userId = req.user?.id;
+    if (!userId) {
+        return null;
+    }
     const business = await prisma_1.default.business.findFirst({
         where: { ownerId: userId },
         select: { id: true },
@@ -33,14 +42,30 @@ const normalizeKeyword = (keyword) => {
 const createCommentTrigger = async (req, res) => {
     try {
         const userId = req.user?.id;
-        if (!userId)
-            return res.status(401).json({ message: "Unauthorized" });
-        const businessId = await getBusinessId(userId);
-        if (!businessId)
-            return res.status(404).json({ message: "Business not found" });
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                data: null,
+                message: "Unauthorized",
+            });
+        }
+        const businessId = await getBusinessId(req);
+        console.log("POST /triggers hit", {
+            userId,
+            businessId,
+        });
+        if (!businessId) {
+            return res.status(404).json({
+                success: false,
+                data: null,
+                message: "Business not found",
+            });
+        }
         const { clientId, reelId, keyword, replyText, dmText } = req.body;
         if (!clientId || !reelId || !keyword || !replyText) {
             return res.status(400).json({
+                success: false,
+                data: null,
                 message: "clientId, reelId, keyword, replyText required",
             });
         }
@@ -55,6 +80,8 @@ const createCommentTrigger = async (req, res) => {
         });
         if (!client)
             return res.status(404).json({
+                success: false,
+                data: null,
                 message: "Instagram client not found",
             });
         const subscription = await prisma_1.default.subscription.findUnique({
@@ -70,6 +97,8 @@ const createCommentTrigger = async (req, res) => {
         });
         if (!(0, plan_config_1.canCreateTrigger)(subscription?.plan || null, triggerCount)) {
             return res.status(403).json({
+                success: false,
+                data: null,
                 message: "Trigger limit reached",
                 upgradeRequired: true,
             });
@@ -84,6 +113,8 @@ const createCommentTrigger = async (req, res) => {
         });
         if (existing) {
             return res.status(400).json({
+                success: false,
+                data: existing,
                 message: "Trigger already exists",
             });
         }
@@ -98,11 +129,19 @@ const createCommentTrigger = async (req, res) => {
                 isActive: true,
             },
         });
-        return res.status(201).json({ success: true, trigger });
+        return res.status(201).json({
+            success: true,
+            data: trigger,
+            trigger,
+        });
     }
     catch (error) {
-        console.error("Create comment trigger error:", error);
-        return res.status(500).json({ message: "Failed to create trigger" });
+        console.error("API ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            data: null,
+            message: "Internal error",
+        });
     }
 };
 exports.createCommentTrigger = createCommentTrigger;
@@ -112,11 +151,25 @@ exports.createCommentTrigger = createCommentTrigger;
 const getCommentTriggers = async (req, res) => {
     try {
         const userId = req.user?.id;
-        if (!userId)
-            return res.status(401).json({ message: "Unauthorized" });
-        const businessId = await getBusinessId(userId);
-        if (!businessId)
-            return res.status(404).json({ message: "Business not found" });
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                data: [],
+                message: "Unauthorized",
+            });
+        }
+        const businessId = await getBusinessId(req);
+        console.log("GET /triggers hit", {
+            userId,
+            businessId,
+        });
+        if (!businessId) {
+            return res.json({
+                success: true,
+                data: [],
+                triggers: [],
+            });
+        }
         const triggers = await prisma_1.default.commentTrigger.findMany({
             where: {
                 businessId: String(businessId),
@@ -124,11 +177,19 @@ const getCommentTriggers = async (req, res) => {
             },
             orderBy: { createdAt: "desc" },
         });
-        return res.json(triggers);
+        return res.json({
+            success: true,
+            data: triggers,
+            triggers,
+        });
     }
     catch (error) {
-        console.error("Fetch triggers error:", error);
-        return res.status(500).json({ message: "Failed to fetch triggers" });
+        console.error("API ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            data: [],
+            message: "Internal error",
+        });
     }
 };
 exports.getCommentTriggers = getCommentTriggers;
@@ -143,7 +204,7 @@ const updateCommentTrigger = async (req, res) => {
             return res.status(401).json({ message: "Unauthorized" });
         if (!id)
             return res.status(400).json({ message: "Invalid ID" });
-        const businessId = await getBusinessId(userId);
+        const businessId = await getBusinessId(req);
         if (!businessId)
             return res.status(404).json({ message: "Business not found" });
         const trigger = await prisma_1.default.commentTrigger.findFirst({
@@ -185,7 +246,7 @@ const deleteCommentTrigger = async (req, res) => {
             return res.status(401).json({ message: "Unauthorized" });
         if (!id)
             return res.status(400).json({ message: "Invalid ID" });
-        const businessId = await getBusinessId(userId);
+        const businessId = await getBusinessId(req);
         if (!businessId)
             return res.status(404).json({ message: "Business not found" });
         const trigger = await prisma_1.default.commentTrigger.findFirst({
@@ -217,7 +278,7 @@ const toggleCommentTrigger = async (req, res) => {
             return res.status(401).json({ message: "Unauthorized" });
         if (!id)
             return res.status(400).json({ message: "Invalid ID" });
-        const businessId = await getBusinessId(userId);
+        const businessId = await getBusinessId(req);
         if (!businessId)
             return res.status(404).json({ message: "Business not found" });
         const trigger = await prisma_1.default.commentTrigger.findFirst({

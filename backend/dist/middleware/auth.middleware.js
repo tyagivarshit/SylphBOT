@@ -43,6 +43,7 @@ const resolveActiveBusinessId = (user) => {
 };
 const bindAuthenticatedContext = (req, user) => {
     req.user = user;
+    req.businessId = user.businessId;
     req.tenant = {
         businessId: user.businessId,
     };

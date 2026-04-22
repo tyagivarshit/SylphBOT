@@ -6,6 +6,7 @@ declare module "express-serve-static-core" {
     requestId?: string;
     logger?: AppLogger;
     rawBody?: Buffer;
+    businessId?: string | null;
     tenant?: {
       businessId: string | null;
     };

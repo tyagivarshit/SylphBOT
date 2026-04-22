@@ -1,12 +1,25 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { canCreateTrigger } from "../config/plan.config";
+import { getRequestBusinessId } from "../services/tenant.service";
 
 /* --------------------------------------------------- */
 /* GET BUSINESS */
 /* --------------------------------------------------- */
 
-const getBusinessId = async (userId: string) => {
+const getBusinessId = async (req: Request) => {
+  const requestBusinessId = getRequestBusinessId(req) || req.businessId;
+
+  if (requestBusinessId) {
+    return requestBusinessId;
+  }
+
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return null;
+  }
+
   const business = await prisma.business.findFirst({
     where: { ownerId: userId },
     select: { id: true },
@@ -39,18 +52,35 @@ export const createCommentTrigger = async (
   try {
     const userId = req.user?.id;
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
+    }
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(req);
 
-    if (!businessId)
-      return res.status(404).json({ message: "Business not found" });
+    console.log("POST /triggers hit", {
+      userId,
+      businessId,
+    });
+
+    if (!businessId) {
+      return res.status(404).json({
+        success: false,
+        data: null,
+        message: "Business not found",
+      });
+    }
 
     const { clientId, reelId, keyword, replyText, dmText } = req.body;
 
     if (!clientId || !reelId || !keyword || !replyText) {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "clientId, reelId, keyword, replyText required",
       });
     }
@@ -68,6 +98,8 @@ export const createCommentTrigger = async (
 
     if (!client)
       return res.status(404).json({
+        success: false,
+        data: null,
         message: "Instagram client not found",
       });
 
@@ -86,6 +118,8 @@ export const createCommentTrigger = async (
 
     if (!canCreateTrigger(subscription?.plan || null, triggerCount)) {
       return res.status(403).json({
+        success: false,
+        data: null,
         message: "Trigger limit reached",
         upgradeRequired: true,
       });
@@ -102,6 +136,8 @@ export const createCommentTrigger = async (
 
     if (existing) {
       return res.status(400).json({
+        success: false,
+        data: existing,
         message: "Trigger already exists",
       });
     }
@@ -118,10 +154,18 @@ export const createCommentTrigger = async (
       },
     });
 
-    return res.status(201).json({ success: true, trigger });
+    return res.status(201).json({
+      success: true,
+      data: trigger,
+      trigger,
+    });
   } catch (error) {
-    console.error("Create comment trigger error:", error);
-    return res.status(500).json({ message: "Failed to create trigger" });
+    console.error("API ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      data: null,
+      message: "Internal error",
+    });
   }
 };
 
@@ -136,13 +180,28 @@ export const getCommentTriggers = async (
   try {
     const userId = req.user?.id;
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        data: [],
+        message: "Unauthorized",
+      });
+    }
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(req);
 
-    if (!businessId)
-      return res.status(404).json({ message: "Business not found" });
+    console.log("GET /triggers hit", {
+      userId,
+      businessId,
+    });
+
+    if (!businessId) {
+      return res.json({
+        success: true,
+        data: [],
+        triggers: [],
+      });
+    }
 
     const triggers = await prisma.commentTrigger.findMany({
       where: {
@@ -152,10 +211,18 @@ export const getCommentTriggers = async (
       orderBy: { createdAt: "desc" },
     });
 
-    return res.json(triggers);
+    return res.json({
+      success: true,
+      data: triggers,
+      triggers,
+    });
   } catch (error) {
-    console.error("Fetch triggers error:", error);
-    return res.status(500).json({ message: "Failed to fetch triggers" });
+    console.error("API ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      data: [],
+      message: "Internal error",
+    });
   }
 };
 
@@ -177,7 +244,7 @@ export const updateCommentTrigger = async (
     if (!id)
       return res.status(400).json({ message: "Invalid ID" });
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(req);
 
     if (!businessId)
       return res.status(404).json({ message: "Business not found" });
@@ -232,7 +299,7 @@ export const deleteCommentTrigger = async (
     if (!id)
       return res.status(400).json({ message: "Invalid ID" });
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(req);
 
     if (!businessId)
       return res.status(404).json({ message: "Business not found" });
@@ -275,7 +342,7 @@ export const toggleCommentTrigger = async (
     if (!id)
       return res.status(400).json({ message: "Invalid ID" });
 
-    const businessId = await getBusinessId(userId);
+    const businessId = await getBusinessId(req);
 
     if (!businessId)
       return res.status(404).json({ message: "Business not found" });

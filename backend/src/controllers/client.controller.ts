@@ -6,6 +6,7 @@ import { getPlanKey } from "../config/plan.config";
 import { resolvePlanContext } from "../services/feature.service";
 import { triggerOnboardingDemo } from "../services/onboarding.service";
 import { checkConnectionHealth } from "../services/connectionHealth.service";
+import { getRequestBusinessId } from "../services/tenant.service";
 
 /*
 ---------------------------------------------------
@@ -339,6 +340,23 @@ const getBusinessByOwner = async (userId: string) => {
     where: { ownerId: userId },
     select: { id: true },
   });
+};
+
+const resolveBusinessIdForRequest = async (req: Request) => {
+  const requestBusinessId = getRequestBusinessId(req) || req.businessId;
+
+  if (requestBusinessId) {
+    return requestBusinessId;
+  }
+
+  const userId = (req as any).user?.id;
+
+  if (!userId) {
+    return null;
+  }
+
+  const business = await getBusinessByOwner(userId);
+  return business?.id || null;
 };
 
 const getSubscription = async (businessId: string) => {
@@ -882,19 +900,33 @@ export const getClients = async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
 
     if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res.status(401).json({
+        success: false,
+        data: [],
+        message: "Unauthorized",
+      });
     }
 
-    const business = await getBusinessByOwner(userId);
+    const businessId = await resolveBusinessIdForRequest(req);
 
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
+    console.log("GET /clients hit", {
+      userId,
+      businessId,
+    });
+
+    if (!businessId) {
+      return res.json({
+        success: true,
+        data: [],
+        clients: [],
+      });
     }
 
     const clients = await prisma.client.findMany({
       where: {
-        businessId: business.id,
+        businessId,
         isActive: true,
+        deletedAt: null,
         platform: {
           not: "SYSTEM",
         },
@@ -902,14 +934,20 @@ export const getClients = async (req: Request, res: Response) => {
       orderBy: { createdAt: "desc" },
     });
 
-    return res.json(clients);
+    return res.json({
+      success: true,
+      data: clients,
+      clients,
+    });
 
   } catch (error: any) {
 
-    console.error("Fetch clients error:", error);
+    console.error("API ERROR:", error);
 
     return res.status(500).json({
-      message: "Fetch failed",
+      success: false,
+      data: [],
+      message: "Internal error",
     });
 
   }

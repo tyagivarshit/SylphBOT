@@ -11,6 +11,7 @@ const plan_config_1 = require("../config/plan.config");
 const feature_service_1 = require("../services/feature.service");
 const onboarding_service_1 = require("../services/onboarding.service");
 const connectionHealth_service_1 = require("../services/connectionHealth.service");
+const tenant_service_1 = require("../services/tenant.service");
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
@@ -253,6 +254,18 @@ const getBusinessByOwner = async (userId) => {
         where: { ownerId: userId },
         select: { id: true },
     });
+};
+const resolveBusinessIdForRequest = async (req) => {
+    const requestBusinessId = (0, tenant_service_1.getRequestBusinessId)(req) || req.businessId;
+    if (requestBusinessId) {
+        return requestBusinessId;
+    }
+    const userId = req.user?.id;
+    if (!userId) {
+        return null;
+    }
+    const business = await getBusinessByOwner(userId);
+    return business?.id || null;
 };
 const getSubscription = async (businessId) => {
     return prisma_1.default.subscription.findUnique({
@@ -656,28 +669,47 @@ const getClients = async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ message: "Unauthorized" });
+            return res.status(401).json({
+                success: false,
+                data: [],
+                message: "Unauthorized",
+            });
         }
-        const business = await getBusinessByOwner(userId);
-        if (!business) {
-            return res.status(404).json({ message: "Business not found" });
+        const businessId = await resolveBusinessIdForRequest(req);
+        console.log("GET /clients hit", {
+            userId,
+            businessId,
+        });
+        if (!businessId) {
+            return res.json({
+                success: true,
+                data: [],
+                clients: [],
+            });
         }
         const clients = await prisma_1.default.client.findMany({
             where: {
-                businessId: business.id,
+                businessId,
                 isActive: true,
+                deletedAt: null,
                 platform: {
                     not: "SYSTEM",
                 },
             },
             orderBy: { createdAt: "desc" },
         });
-        return res.json(clients);
+        return res.json({
+            success: true,
+            data: clients,
+            clients,
+        });
     }
     catch (error) {
-        console.error("Fetch clients error:", error);
+        console.error("API ERROR:", error);
         return res.status(500).json({
-            message: "Fetch failed",
+            success: false,
+            data: [],
+            message: "Internal error",
         });
     }
 };

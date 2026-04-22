@@ -27,16 +27,18 @@ export default function NotificationSettings() {
         throw new Error("Failed to load notification settings");
       }
 
-      return res.json();
+      return (await res.json().catch(() => null)) as
+        | Partial<typeof settings>
+        | null;
     },
   });
 
   useEffect(() => {
     if (data) {
       setSettings({
-        email: Boolean(data.email),
-        whatsapp: Boolean(data.whatsapp),
-        leads: Boolean(data.leads),
+        email: Boolean(data?.email),
+        whatsapp: Boolean(data?.whatsapp),
+        leads: Boolean(data?.leads),
       });
     }
   }, [data]);

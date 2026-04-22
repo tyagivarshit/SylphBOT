@@ -28,14 +28,16 @@ export default function BusinessSettings() {
      🔥 AUTO FILL
   ========================= */
   useEffect(() => {
-    if (data?.business) {
+    const business = data?.business || null;
+
+    if (business) {
       setForm({
-        business: data.business.name || "",
-        website: data.business.website || "",
-        industry: data.business.industry || "",
-        teamSize: data.business.teamSize || "",
-        type: data.business.type || "",
-        timezone: data.business.timezone || "",
+        business: business?.name || "",
+        website: business?.website || "",
+        industry: business?.industry || "",
+        teamSize: business?.teamSize || "",
+        type: business?.type || "",
+        timezone: business?.timezone || "",
       });
     }
   }, [data]);

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, startTransition } from "react";
+import { type ReactNode, startTransition, useEffect } from "react";
 import {
   BellRing,
   ChevronRight,
@@ -45,10 +45,19 @@ const isSecurityTab = (value: string | null): value is SecurityTabId =>
   SECURITY_TABS.some((tab) => tab.id === value);
 
 export default function SecurityCenter() {
-  const { user } = useAuth();
+  const auth = useAuth();
+  const user = auth?.user || null;
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  useEffect(() => {
+    console.log("Settings user:", user);
+  }, [user]);
+
+  if (!user) {
+    return null;
+  }
 
   const activeTab = isSecurityTab(searchParams.get("tab"))
     ? (searchParams.get("tab") as SecurityTabId)

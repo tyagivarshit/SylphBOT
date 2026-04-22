@@ -44,26 +44,30 @@ export default function IntegrationsSettings() {
         throw new Error("Failed to load integrations");
       }
 
-      return (await res.json()) as ClientConnection[];
+      const payload = await res.json().catch(() => null);
+
+      return Array.isArray(payload) ? (payload as ClientConnection[]) : [];
     },
   });
 
-  const clients = data || [];
+  const clients = Array.isArray(data) ? data : [];
   const whatsapp = clients.find((client) => client.platform === "WHATSAPP");
   const instagram = clients.find((client) => client.platform === "INSTAGRAM");
 
   const loadConnections = useCallback(async () => {
     try {
       const status = await fetchClientConnectionStatus();
+      const instagramStatus = status?.instagram || null;
+      const whatsappStatus = status?.whatsapp || null;
 
       setConnections({
         instagram: {
-          connected: Boolean(status.instagram.connected),
-          healthy: Boolean(status.instagram.healthy),
+          connected: Boolean(instagramStatus?.connected),
+          healthy: Boolean(instagramStatus?.healthy),
         },
         whatsapp: {
-          connected: Boolean(status.whatsapp.connected),
-          healthy: Boolean(status.whatsapp.healthy),
+          connected: Boolean(whatsappStatus?.connected),
+          healthy: Boolean(whatsappStatus?.healthy),
         },
       });
     } catch (error) {

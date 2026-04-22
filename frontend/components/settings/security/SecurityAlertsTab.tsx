@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
+  BellRing,
   ChevronDown,
   ChevronUp,
   ShieldAlert,
@@ -66,6 +68,37 @@ export default function SecurityAlertsTab() {
 
   return (
     <div className="space-y-5">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+          Live monitoring
+        </p>
+        <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
+          Security alerts
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
+          Review high-signal events such as failed login spikes, invalid API key
+          usage, and suspicious activity captured by the security pipeline.
+        </p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <SummaryCard
+          label="Failed login attempts"
+          description="Repeated sign-in failures are surfaced for review."
+          tone="amber"
+        />
+        <SummaryCard
+          label="Invalid API usage"
+          description="Bad or revoked key usage is raised as an incident signal."
+          tone="rose"
+        />
+        <SummaryCard
+          label="Suspicious activity"
+          description="Unusual patterns are flagged for deeper investigation."
+          tone="red"
+        />
+      </div>
+
       {alertsQuery.isLoading ? <AlertsLoadingState /> : null}
 
       {accessDenied ? (
@@ -171,6 +204,51 @@ function AlertCard({
           {formatStructuredData(alert.metadata)}
         </pre>
       ) : null}
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  description,
+  tone,
+}: {
+  label: string;
+  description: string;
+  tone: "amber" | "rose" | "red";
+}) {
+  const toneClass =
+    tone === "amber"
+      ? "bg-amber-50 text-amber-700"
+      : tone === "rose"
+        ? "bg-rose-50 text-rose-700"
+        : "bg-red-50 text-red-700";
+
+  const icon =
+    tone === "amber" ? (
+      <BellRing size={16} />
+    ) : tone === "rose" ? (
+      <AlertTriangle size={16} />
+    ) : (
+      <ShieldAlert size={16} />
+    );
+
+  return (
+    <div className="brand-kpi-card rounded-[24px] p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+            Signal
+          </p>
+          <p className="mt-3 text-base font-semibold text-slate-950">{label}</p>
+        </div>
+
+        <div className={`flex h-10 w-10 items-center justify-center rounded-[16px] ${toneClass}`}>
+          {icon}
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-slate-500">{description}</p>
     </div>
   );
 }

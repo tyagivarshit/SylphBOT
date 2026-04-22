@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  BadgeCheck,
+  KeyRound,
+  Plus,
+  RefreshCw,
+  Shield,
+  Trash2,
+} from "lucide-react";
 import ConfirmationModal from "@/components/automation/ConfirmationModal";
 import {
   createSecurityApiKey,
@@ -21,6 +28,7 @@ import {
   formatKeyName,
   formatRoleLabel,
 } from "./securityUtils";
+import { TrustSignals } from "@/components/ui/feedback";
 
 type PendingAction =
   | {
@@ -111,6 +119,10 @@ export default function ApiKeysTab() {
   );
 
   const apiKeys = apiKeysQuery.data ?? EMPTY_API_KEYS;
+  const adminKeys = useMemo(
+    () => apiKeys.filter((apiKey) => apiKey.scopes.includes("ADMIN")).length,
+    [apiKeys]
+  );
 
   const handleConfirmAction = async () => {
     if (!pendingAction) {
@@ -128,7 +140,21 @@ export default function ApiKeysTab() {
   return (
     <>
       <div className="space-y-5">
-        <div className="flex justify-end">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+              Credential lifecycle
+            </p>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
+              API keys
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
+              Issue, rotate, and revoke workspace credentials with a complete
+              masked inventory and one-time secret reveal.
+            </p>
+            <TrustSignals className="mt-4" />
+          </div>
+
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}
@@ -138,6 +164,32 @@ export default function ApiKeysTab() {
             <Plus size={16} />
             Create API key
           </button>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <StatCard
+            label="Active keys"
+            value={String(apiKeys.length)}
+            detail="Workspace-scoped credentials currently active."
+            icon={<KeyRound size={16} />}
+          />
+          <StatCard
+            label="Admin scope"
+            value={String(adminKeys)}
+            detail="Keys with full access should stay tightly controlled."
+            icon={<Shield size={16} />}
+          />
+          <StatCard
+            label="Visibility"
+            value="One-time reveal"
+            detail="Secrets are only shown immediately after create or rotate."
+            icon={<BadgeCheck size={16} />}
+          />
+        </div>
+
+        <div className="rounded-[24px] border border-slate-200/80 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+          Use the least privilege required for every integration. Rotating a key
+          issues a new secret and immediately revokes the previous credential.
         </div>
 
         {apiKeysQuery.isLoading ? <ApiKeysLoadingState /> : null}
@@ -158,6 +210,7 @@ export default function ApiKeysTab() {
         apiKeys.length === 0 ? (
           <EmptyState
             title="No API keys issued yet"
+            description="Create a dedicated key for each integration so access can be rotated and revoked independently."
             actionLabel="Create the first key"
             onAction={() => setCreateModalOpen(true)}
           />
@@ -399,6 +452,39 @@ export default function ApiKeysTab() {
   );
 }
 
+function StatCard({
+  label,
+  value,
+  detail,
+  icon,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="brand-kpi-card rounded-[24px] p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+            {label}
+          </p>
+          <p className="mt-3 text-xl font-semibold tracking-tight text-slate-950">
+            {value}
+          </p>
+        </div>
+
+        <div className="flex h-10 w-10 items-center justify-center rounded-[16px] bg-blue-50 text-blue-700">
+          {icon}
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-slate-500">{detail}</p>
+    </div>
+  );
+}
+
 function ScopePills({ scopes }: { scopes: ApiKeySummary["scopes"] }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -481,16 +567,21 @@ function ErrorState({
 
 function EmptyState({
   title,
+  description,
   actionLabel,
   onAction,
 }: {
   title: string;
+  description: string;
   actionLabel: string;
   onAction: () => void;
 }) {
   return (
     <div className="brand-empty-state rounded-[28px] px-6 py-12 text-center">
       <p className="text-base font-semibold text-slate-900">{title}</p>
+      <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-500">
+        {description}
+      </p>
       <button
         type="button"
         onClick={onAction}

@@ -63,9 +63,15 @@ export default function ChangePassword() {
 
   return (
     <div className="bg-white/80 backdrop-blur-xl border border-blue-100 rounded-2xl p-5 sm:p-6 shadow-sm space-y-6 max-w-lg">
-      <h3 className="text-base sm:text-lg font-semibold text-gray-900">
-        Change Password
-      </h3>
+      <div>
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900">
+          Change Password
+        </h3>
+
+        <p className="text-sm text-gray-500 mt-1">
+          Update your account password for better security
+        </p>
+      </div>
 
       <div className="space-y-4">
         <div className="relative">
@@ -139,6 +145,10 @@ export default function ChangePassword() {
           </p>
         )}
       </div>
+
+      <p className="text-xs text-gray-500">
+        Use at least 8 characters including letters and numbers.
+      </p>
 
       <button
         type="button"

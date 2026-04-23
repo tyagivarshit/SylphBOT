@@ -35,6 +35,7 @@ export default function CommentAutomationList() {
   const [automations, setAutomations] = useState<CommentAutomation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [fetchFailed, setFetchFailed] = useState(false);
   const [editData, setEditData] = useState<CommentAutomation | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CommentAutomation | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -54,16 +55,22 @@ export default function CommentAutomationList() {
     try {
       setLoading(true);
       setError("");
+      setFetchFailed(false);
 
-      const response = await api.get("/api/comment-triggers");
+      console.log("Fetching comment automation triggers");
+
+      const response = await api.get("/comment-automation/triggers");
       const data = Array.isArray(response.data)
         ? (response.data as CommentAutomation[])
         : ((response.data?.triggers || []) as CommentAutomation[]);
 
+      console.log("Comment automation triggers fetched:", data);
       setAutomations(sortAutomations(data));
     } catch (fetchError) {
-      console.error(fetchError);
-      setError("Failed to load triggers");
+      console.error("Comment automation triggers fetch failed", fetchError);
+      setAutomations([]);
+      setFetchFailed(true);
+      setError("We couldn't refresh your comment automations right now.");
     } finally {
       setLoading(false);
     }
@@ -98,7 +105,7 @@ export default function CommentAutomationList() {
     try {
       setTogglingId(automation.id);
 
-      const response = await api.patch(`/api/comment-triggers/${automation.id}/toggle`);
+      const response = await api.patch(`/comment-triggers/${automation.id}/toggle`);
       const updated = (response.data?.trigger as CommentAutomation | undefined) || {
         ...automation,
         isActive: !automation.isActive,
@@ -122,7 +129,7 @@ export default function CommentAutomationList() {
 
     try {
       setDeletingId(pendingDelete.id);
-      await api.delete(`/api/comment-triggers/${pendingDelete.id}`);
+      await api.delete(`/comment-triggers/${pendingDelete.id}`);
 
       setAutomations((current) =>
         current.filter((automation) => automation.id !== pendingDelete.id)
@@ -173,31 +180,38 @@ export default function CommentAutomationList() {
         </div>
       ) : null}
 
-      {error ? (
-        <div className="flex items-center justify-between rounded-[22px] border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-          <span>{error}</span>
-          <button
-            onClick={() => void fetchTriggers()}
-            className="text-xs font-medium underline"
-          >
-            Retry
-          </button>
-        </div>
-      ) : null}
-
       {!loading && !automations.length ? (
         <div className="brand-empty-state rounded-[24px] p-8 text-center">
-          <p className="text-base font-semibold text-gray-900">No automations yet</p>
+          <p className="text-base font-semibold text-gray-900">
+            {fetchFailed ? "Automation list unavailable" : "No automations yet"}
+          </p>
 
-          <button
-            onClick={() => {
-              setEditData(null);
-              setOpen(true);
-            }}
-            className="brand-button-primary mt-4 w-full sm:w-auto"
-          >
-            Create one
-          </button>
+          <p className="mt-2 text-sm text-slate-500">
+            {fetchFailed
+              ? error || "We couldn't refresh your comment automations right now."
+              : "Create your first Instagram comment automation."}
+          </p>
+
+          <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            {fetchFailed ? (
+              <button
+                onClick={() => void fetchTriggers()}
+                className="brand-button-secondary w-full sm:w-auto"
+              >
+                Retry
+              </button>
+            ) : null}
+
+            <button
+              onClick={() => {
+                setEditData(null);
+                setOpen(true);
+              }}
+              className="brand-button-primary w-full sm:w-auto"
+            >
+              Create one
+            </button>
+          </div>
         </div>
       ) : null}
 

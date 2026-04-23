@@ -391,6 +391,12 @@ app.use(
   commentTriggerRoutes
 );
 app.use(
+  "/api/comment-automation/triggers",
+  protect,
+  attachBillingContext,
+  commentTriggerRoutes
+);
+app.use(
   "/api/triggers",
   protect,
   attachBillingContext,

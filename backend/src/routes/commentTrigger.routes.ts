@@ -1,22 +1,18 @@
 import { Router } from "express";
 import {
   createCommentTrigger,
-  getCommentTriggers,
   deleteCommentTrigger,
-  toggleCommentTrigger, // ✅ ADD
+  getCommentTriggers,
+  toggleCommentTrigger,
+  updateCommentTrigger,
 } from "../controllers/commentTrigger.controller";
-
 import { protect } from "../middleware/auth.middleware";
-import { requireFeature } from "../middleware/planFeature.middleware";
 import { auditRequest } from "../middleware/audit.middleware";
+import { requireFeature } from "../middleware/planFeature.middleware";
 
 const router = Router();
 
-/* ---------------- AUTH ---------------- */
-
 router.use(protect);
-
-/* ---------------- ROUTES ---------------- */
 
 router.post(
   "/",
@@ -38,7 +34,12 @@ router.delete(
   deleteCommentTrigger
 );
 
-/* 🔥 TOGGLE ROUTE (NEW) */
+router.patch(
+  "/:id",
+  requireFeature("INSTAGRAM_COMMENT_AUTOMATION"),
+  auditRequest("automation.comment_trigger_updated"),
+  updateCommentTrigger
+);
 
 router.patch(
   "/:id/toggle",

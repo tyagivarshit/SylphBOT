@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, Sparkles } from "lucide-react";
 import { useUpgrade } from "@/app/(dashboard)/layout";
 import { api } from "@/lib/api";
@@ -24,10 +24,11 @@ type CommentAutomationDraft = {
   lastTriggeredAt?: string | null;
 };
 
-type ClientOption = {
-  id: string;
+type InstagramAccountOption = {
+  clientId?: string | null;
   name?: string | null;
   pageId?: string | null;
+  igUserId?: string | null;
 };
 
 type MediaItem = {
@@ -68,7 +69,7 @@ export default function CreateCommentAutomationModal({
   const [aiPrompt, setAiPrompt] = useState("");
   const [replyMode, setReplyMode] = useState<ReplyMode>("TEMPLATE");
 
-  const [clients, setClients] = useState<ClientOption[]>([]);
+  const [clients, setClients] = useState<InstagramAccountOption[]>([]);
   const [clientId, setClientId] = useState("");
 
   const [media, setMedia] = useState<MediaItem[]>([]);
@@ -77,6 +78,7 @@ export default function CreateCommentAutomationModal({
   const [loading, setLoading] = useState(false);
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingMedia, setLoadingMedia] = useState(false);
+  const [clientsFetchFailed, setClientsFetchFailed] = useState(false);
 
   const [usage, setUsage] = useState<UsagePayload | null>(null);
   const [error, setError] = useState("");
@@ -84,6 +86,10 @@ export default function CreateCommentAutomationModal({
   const addonCredits = usage?.addonCredits ?? usage?.addons.aiCredits ?? 0;
   const aiRemaining = usage?.ai.remaining ?? 0;
   const aiDisabled = usage ? aiRemaining <= 0 && addonCredits <= 0 : false;
+  const availableClients = useMemo(
+    () => clients.filter((client) => Boolean(client.clientId)),
+    [clients]
+  );
 
   const openUsageLimitModal = () => {
     openUpgrade({
@@ -103,6 +109,8 @@ export default function CreateCommentAutomationModal({
       setDm("");
       setAiPrompt("");
       setReplyMode("TEMPLATE");
+      setClients([]);
+      setClientsFetchFailed(false);
       setClientId("");
       setSelectedPost("");
       setMedia([]);
@@ -140,25 +148,38 @@ export default function CreateCommentAutomationModal({
     };
   }, [open]);
 
+  const fetchInstagramAccounts = useCallback(async () => {
+    try {
+      setLoadingClients(true);
+      setClientsFetchFailed(false);
+      console.log("Fetching Instagram accounts for comment automation");
+
+      const response = await api.get("/integrations/instagram/accounts");
+      const data = Array.isArray(response.data)
+        ? (response.data as InstagramAccountOption[])
+        : ((response.data?.accounts || []) as InstagramAccountOption[]);
+
+      console.log("Instagram accounts fetched for comment automation:", data);
+      setClients(data);
+    } catch (clientError) {
+      console.error("Instagram accounts fetch failed", clientError);
+      setClients([]);
+      setClientsFetchFailed(true);
+    } finally {
+      setLoadingClients(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      void fetchInstagramAccounts();
+    }
+  }, [open, fetchInstagramAccounts]);
+
   useEffect(() => {
     if (!open) {
       return;
     }
-
-    const fetchClients = async () => {
-      try {
-        setLoadingClients(true);
-        const response = await api.get("/api/clients");
-        const data = Array.isArray(response.data)
-          ? (response.data as ClientOption[])
-          : ((response.data?.clients || []) as ClientOption[]);
-        setClients(data);
-      } catch {
-        setError("Failed to load clients");
-      } finally {
-        setLoadingClients(false);
-      }
-    };
 
     const fetchUsage = async () => {
       try {
@@ -177,11 +198,14 @@ export default function CreateCommentAutomationModal({
       } catch {}
     };
 
-    void fetchClients();
     void fetchUsage();
   }, [open]);
 
   useEffect(() => {
+    if (!open) {
+      return;
+    }
+
     if (!clientId) {
       return;
     }
@@ -189,10 +213,15 @@ export default function CreateCommentAutomationModal({
     const fetchMedia = async () => {
       try {
         setLoadingMedia(true);
+        console.log("Fetching Instagram media for comment automation", {
+          clientId,
+        });
 
-        const response = await api.get(`/api/instagram/media?clientId=${clientId}`);
+        const response = await api.get(`/instagram/media?clientId=${clientId}`);
+        console.log("Instagram media fetched for comment automation:", response.data);
         setMedia(response.data?.data || []);
-      } catch {
+      } catch (mediaError) {
+        console.error("Instagram media fetch failed", mediaError);
         setError("Failed to load posts");
       } finally {
         setLoadingMedia(false);
@@ -235,9 +264,16 @@ export default function CreateCommentAutomationModal({
         aiPrompt: replyMode === "AI" ? aiPrompt.trim() : undefined,
       };
 
+      console.log("Saving comment automation", {
+        isEdit,
+        clientId,
+        reelId: selectedPost,
+        replyMode,
+      });
+
       const response = isEdit
-        ? await api.patch(`/api/comment-triggers/${editData?.id}`, payload)
-        : await api.post("/api/comment-triggers", payload);
+        ? await api.patch(`/comment-triggers/${editData?.id}`, payload)
+        : await api.post("/comment-triggers", payload);
 
       const savedAutomation =
         (response.data?.trigger as CommentAutomationDraft | undefined) || {
@@ -344,15 +380,44 @@ export default function CreateCommentAutomationModal({
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
               >
                 <option value="">
-                  {loadingClients ? "Loading..." : "Select account"}
+                  {loadingClients
+                    ? "Loading Instagram accounts..."
+                    : availableClients.length > 0
+                    ? "Select account"
+                    : clientsFetchFailed
+                    ? "Unable to load accounts"
+                    : "No Instagram account connected"}
                 </option>
 
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name || client.pageId}
+                {availableClients.map((client) => (
+                  <option
+                    key={client.clientId || client.pageId || client.igUserId}
+                    value={client.clientId || ""}
+                  >
+                    {client.name || client.igUserId || client.pageId}
                   </option>
                 ))}
               </select>
+
+              {!loadingClients && availableClients.length === 0 ? (
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <span>
+                    {clientsFetchFailed
+                      ? "We couldn't load connected Instagram accounts right now."
+                      : "No Instagram account connected"}
+                  </span>
+
+                  {clientsFetchFailed ? (
+                    <button
+                      type="button"
+                      onClick={() => void fetchInstagramAccounts()}
+                      className="font-semibold text-blue-600 transition hover:text-blue-700"
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             {clientId ? (

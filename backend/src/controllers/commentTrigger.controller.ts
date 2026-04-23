@@ -75,7 +75,7 @@ export const createCommentTrigger = async (
       });
     }
 
-    const { clientId, reelId, keyword, replyText, dmText } = req.body;
+    const { clientId, reelId, keyword, replyText, dmText, aiPrompt } = req.body;
 
     if (!clientId || !reelId || !keyword || !replyText) {
       return res.status(400).json({
@@ -150,8 +150,16 @@ export const createCommentTrigger = async (
         keyword: normalizedKeyword,
         replyText,
         dmText: dmText || null,
+        aiPrompt: aiPrompt || null,
         isActive: true,
       },
+    });
+
+    console.log("Comment automation trigger saved", {
+      businessId,
+      clientId,
+      triggerId: trigger.id,
+      hasAiPrompt: Boolean(aiPrompt),
     });
 
     return res.status(201).json({
@@ -190,17 +198,14 @@ export const getCommentTriggers = async (
 
     const businessId = await getBusinessId(req);
 
-    console.log("GET /triggers hit", {
+    console.log("GET /comment-automation/triggers hit", {
       userId,
       businessId,
     });
 
     if (!businessId) {
-      return res.json({
-        success: true,
-        data: [],
-        triggers: [],
-      });
+      console.log("Comment triggers fetched:", []);
+      return res.status(200).json([]);
     }
 
     const triggers = await prisma.commentTrigger.findMany({
@@ -211,18 +216,12 @@ export const getCommentTriggers = async (
       orderBy: { createdAt: "desc" },
     });
 
-    return res.json({
-      success: true,
-      data: triggers,
-      triggers,
-    });
+    console.log("Comment triggers fetched:", triggers);
+
+    return res.status(200).json(triggers || []);
   } catch (error) {
-    console.error("API ERROR:", error);
-    return res.status(500).json({
-      success: false,
-      data: [],
-      message: "Internal error",
-    });
+    console.error("❌ triggers error:", error);
+    return res.status(200).json([]);
   }
 };
 
@@ -257,7 +256,7 @@ export const updateCommentTrigger = async (
       return res.status(404).json({ message: "Trigger not found" });
     }
 
-    const { keyword, replyText, dmText } = req.body;
+    const { keyword, replyText, dmText, aiPrompt } = req.body;
 
     if (!keyword || !replyText) {
       return res.status(400).json({
@@ -271,6 +270,7 @@ export const updateCommentTrigger = async (
         keyword: normalizeKeyword(keyword),
         replyText,
         dmText: dmText || null,
+        aiPrompt: aiPrompt || null,
       },
     });
 

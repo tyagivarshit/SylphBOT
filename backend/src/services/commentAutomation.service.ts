@@ -17,9 +17,13 @@ import redis from "../config/redis";
 interface CommentInput {
   businessId: string;
   clientId: string;
-  instagramUserId: string;
-  reelId: string;
-  commentText: string;
+  instagramUserId?: string;
+  reelId?: string;
+  commentText?: string;
+  commentId?: string;
+  senderId?: string;
+  mediaId?: string;
+  text?: string;
 }
 
 type CommentAutomationResult = {
@@ -47,18 +51,45 @@ export const handleCommentAutomation = async ({
   instagramUserId,
   reelId,
   commentText,
+  commentId,
+  senderId,
+  mediaId,
+  text,
 }: CommentInput): Promise<CommentAutomationResult> => {
   let executed = false;
   let messageSent = false;
 
   try {
-    const text = commentText?.toLowerCase()?.trim();
-    if (!text) {
+    const normalizedCommentText = String(commentText || text || "").trim();
+    const normalizedText = normalizedCommentText.toLowerCase();
+    const normalizedInstagramUserId = String(
+      instagramUserId || senderId || ""
+    ).trim();
+    const normalizedReelId = String(reelId || mediaId || "").trim();
+    const normalizedCommentId = String(commentId || "").trim();
+
+    console.log("⚙️ Comment automation service received job", {
+      businessId,
+      clientId,
+      commentId: normalizedCommentId || null,
+      mediaId: normalizedReelId || null,
+      senderId: normalizedInstagramUserId || null,
+    });
+
+    if (!normalizedText || !normalizedInstagramUserId || !normalizedReelId) {
+      console.log("Comment automation skipped due to missing payload", {
+        businessId,
+        clientId,
+        commentId: normalizedCommentId || null,
+        mediaId: normalizedReelId || null,
+        senderId: normalizedInstagramUserId || null,
+        hasText: Boolean(normalizedText),
+      });
       return { executed, messageSent };
     }
 
     try {
-      await incrementRate(businessId, instagramUserId, "COMMENT", 60);
+      await incrementRate(businessId, normalizedInstagramUserId, "COMMENT", 60);
     } catch {
       return { executed, messageSent };
     }
@@ -74,7 +105,7 @@ export const handleCommentAutomation = async ({
       return { executed, messageSent };
     }
 
-    const cacheKey = `triggers:${businessId}:${clientId}:${reelId}`;
+    const cacheKey = `triggers:${businessId}:${clientId}:${normalizedReelId}`;
 
     let triggers: any = await redis.get(cacheKey);
 
@@ -85,7 +116,7 @@ export const handleCommentAutomation = async ({
         where: {
           businessId,
           clientId,
-          reelId,
+          reelId: normalizedReelId,
           isActive: true,
         },
         orderBy: { createdAt: "asc" },
@@ -95,6 +126,11 @@ export const handleCommentAutomation = async ({
     }
 
     if (!triggers.length) {
+      console.log("No comment automation triggers found", {
+        businessId,
+        clientId,
+        reelId: normalizedReelId,
+      });
       return { executed, messageSent };
     }
 
@@ -106,17 +142,30 @@ export const handleCommentAutomation = async ({
 
       if (!keywords?.length) return false;
 
-      return keywords.some((keyword: string) => text.includes(keyword));
+      return keywords.some((keyword: string) => normalizedText.includes(keyword));
     });
 
     if (!matchedTrigger) {
+      console.log("No comment automation trigger matched", {
+        businessId,
+        clientId,
+        reelId: normalizedReelId,
+        commentId: normalizedCommentId || null,
+      });
       return { executed, messageSent };
     }
+
+    console.log("🧠 Trigger matched", {
+      triggerId: matchedTrigger.id,
+      keyword: matchedTrigger.keyword,
+      commentId: normalizedCommentId || null,
+      businessId,
+    });
 
     let lead = await prisma.lead.findFirst({
       where: {
         businessId,
-        instagramId: instagramUserId,
+        instagramId: normalizedInstagramUserId,
       },
     });
 
@@ -128,7 +177,7 @@ export const handleCommentAutomation = async ({
             data: {
               businessId,
               clientId,
-              instagramId: instagramUserId,
+              instagramId: normalizedInstagramUserId,
               platform: "INSTAGRAM",
               stage: "NEW",
               followupCount: 0,
@@ -194,7 +243,7 @@ export const handleCommentAutomation = async ({
           businessId,
           leadId: lead.id,
           message: buildCommentAIMessage(
-            commentText,
+            normalizedCommentText,
             matchedTrigger.aiPrompt
           ),
           source: "COMMENT_AUTOMATION",
@@ -241,17 +290,52 @@ export const handleCommentAutomation = async ({
     const commentReply = matchedTrigger.replyText || "Check your DM";
 
     try {
-      await axios.post(
-        `https://graph.facebook.com/v19.0/${reelId}/comments`,
-        { message: commentReply },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          timeout: 10000,
-        }
-      );
-    } catch {}
+      if (normalizedCommentId) {
+        console.log("📤 Sending IG comment reply", normalizedCommentId);
+
+        await axios.post(
+          `https://graph.facebook.com/v19.0/${normalizedCommentId}/replies`,
+          { message: commentReply },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            timeout: 10000,
+          }
+        );
+
+        console.log("✅ IG comment reply sent", {
+          commentId: normalizedCommentId,
+          businessId,
+        });
+      } else {
+        console.log("📤 Sending IG comment reply", normalizedReelId);
+
+        await axios.post(
+          `https://graph.facebook.com/v19.0/${normalizedReelId}/comments`,
+          { message: commentReply },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            timeout: 10000,
+          }
+        );
+
+        console.log("✅ IG media comment sent", {
+          reelId: normalizedReelId,
+          businessId,
+        });
+      }
+    } catch (error: any) {
+      console.error("❌ IG comment reply failed", {
+        businessId,
+        clientId,
+        commentId: normalizedCommentId || null,
+        reelId: normalizedReelId,
+        error: error?.response?.data || error?.message || error,
+      });
+    }
 
     try {
       await reserveUsage({
@@ -270,7 +354,7 @@ export const handleCommentAutomation = async ({
       await axios.post(
         "https://graph.facebook.com/v19.0/me/messages",
         {
-          recipient: { id: instagramUserId },
+          recipient: { id: normalizedInstagramUserId },
           message: { text: replyMessage },
         },
         {
@@ -282,7 +366,18 @@ export const handleCommentAutomation = async ({
         }
       );
       messageSent = true;
-    } catch {
+      console.log("✅ IG DM sent from comment automation", {
+        businessId,
+        clientId,
+        senderId: normalizedInstagramUserId,
+      });
+    } catch (error: any) {
+      console.error("❌ IG DM send failed from comment automation", {
+        businessId,
+        clientId,
+        senderId: normalizedInstagramUserId,
+        error: error?.response?.data || error?.message || error,
+      });
       return { executed, messageSent };
     }
 

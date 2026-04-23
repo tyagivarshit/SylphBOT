@@ -183,6 +183,38 @@ const enforceWebhookSecurity = async (req: Request, body: any) => {
   return true;
 };
 
+const parseInstagramCommentChange = ({
+  entry,
+  change,
+}: {
+  entry: any;
+  change: any;
+}) => {
+  const value = change?.value || {};
+
+  const commentId = normalizeIdentifier(
+    value.id || value.comment_id || value.comment?.id
+  );
+  const commentText = normalizeIdentifier(
+    value.text || value.comment?.text
+  );
+  const mediaId = normalizeIdentifier(value.media?.id || value.media_id);
+  const senderId = normalizeIdentifier(value.from?.id);
+  const pageIds = getUniqueIdentifiers([
+    entry?.id,
+    value.instagram_business_account?.id,
+    value.instagram_business_account_id,
+  ]);
+
+  return {
+    commentId,
+    commentText,
+    mediaId,
+    senderId,
+    pageIds,
+  };
+};
+
 router.get("/", (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -239,67 +271,120 @@ router.post("/", async (req: any, res: Response) => {
         continue;
       }
 
-      const commentText = change.value.comment?.text;
-      const instagramUserId = change.value.from?.id;
-      const reelId = change.value.media?.id;
-      const pageIds = getUniqueIdentifiers([change.value.id, entry.id]);
-      const pageId = pageIds[0] || null;
-      const commentEventId =
-        change.value.comment_id ||
-        change.value.comment?.id ||
-        `${pageId}:${instagramUserId}:${reelId}:${String(commentText || "").trim()}`;
+      try {
+        const {
+          commentId,
+          commentText,
+          mediaId,
+          senderId,
+          pageIds,
+        } = parseInstagramCommentChange({
+          entry,
+          change,
+        });
 
-      if (!commentText || !instagramUserId || !reelId || !commentEventId) {
-        continue;
-      }
+        console.log("🔥 COMMENT EVENT RECEIVED", {
+          commentId,
+          text: commentText,
+          mediaId,
+          senderId,
+        });
 
-      const shouldProcessComment = await processWebhookEvent({
-        eventId: String(commentEventId),
-        platform: "INSTAGRAM",
-      });
+        const commentEventId =
+          commentId ||
+          `${pageIds[0] || "unknown"}:${senderId || "unknown"}:${mediaId || "unknown"}:${String(commentText || "").trim()}`;
 
-      if (!shouldProcessComment) {
-        continue;
-      }
+        if (!commentText || !senderId || !mediaId || !commentEventId) {
+          log("Comment event skipped due to missing identifiers", {
+            commentId,
+            mediaId,
+            senderId,
+            pageIds,
+          });
+          continue;
+        }
 
-      log("comment identifiers", {
-        pageIds,
-      });
+        const shouldProcessComment = await processWebhookEvent({
+          eventId: String(commentEventId),
+          platform: "INSTAGRAM",
+        });
 
-      const client = await findInstagramClient({
-        pageIds,
-      });
+        if (!shouldProcessComment) {
+          log("Duplicate Instagram comment event skipped", {
+            commentId,
+          });
+          continue;
+        }
 
-      if (!client) {
-        continue;
-      }
+        log("comment identifiers", {
+          pageIds,
+          commentId,
+          mediaId,
+          senderId,
+        });
 
-      attachResolvedBusinessContext(req, client);
+        const client = await findInstagramClient({
+          pageIds,
+        });
 
-      const access = await getSubscriptionAccess(client.businessId);
+        if (!client) {
+          continue;
+        }
 
-      if (!access.allowed) {
-        logSubscriptionLockedAction(
-          {
-            businessId: client.businessId,
-            requestId: req.requestId,
-            path: req.originalUrl,
-            method: req.method,
-            action: "instagram_comment_webhook",
-            lockReason: access.lockReason,
-          },
-          "Instagram comment webhook ignored because subscription is locked"
+        attachResolvedBusinessContext(req, client);
+
+        const access = await getSubscriptionAccess(client.businessId);
+
+        if (!access.allowed) {
+          logSubscriptionLockedAction(
+            {
+              businessId: client.businessId,
+              requestId: req.requestId,
+              path: req.originalUrl,
+              method: req.method,
+              action: "instagram_comment_webhook",
+              lockReason: access.lockReason,
+            },
+            "Instagram comment webhook ignored because subscription is locked"
+          );
+          continue;
+        }
+
+        const jobData = {
+          commentId,
+          businessId: client.businessId,
+          clientId: client.id,
+          instagramUserId: senderId,
+          senderId,
+          reelId: mediaId,
+          mediaId,
+          commentText,
+          text: commentText,
+        };
+
+        await automationQueue.add("comment-reply", jobData);
+
+        console.log("📦 Job added to queue", {
+          jobName: "comment-reply",
+          commentId,
+          businessId: client.businessId,
+          mediaId,
+          senderId,
+        });
+      } catch (commentError) {
+        req.logger?.error(
+          { error: commentError },
+          "Instagram comment webhook processing failed"
         );
+        captureExceptionWithContext(commentError, {
+          tags: {
+            webhook: "instagram",
+            stage: "comment_processing",
+          },
+        });
+        console.error("❌ Instagram comment webhook processing failed", commentError);
         continue;
       }
-
-      await automationQueue.add("comment", {
-        businessId: client.businessId,
-        clientId: client.id,
-        instagramUserId,
-        reelId,
-        commentText,
-      });
     }
 
     let senderId: string | undefined;

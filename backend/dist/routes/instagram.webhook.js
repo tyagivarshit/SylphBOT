@@ -131,6 +131,25 @@ const enforceWebhookSecurity = async (req, body) => {
     }
     return true;
 };
+const parseInstagramCommentChange = ({ entry, change, }) => {
+    const value = change?.value || {};
+    const commentId = normalizeIdentifier(value.id || value.comment_id || value.comment?.id);
+    const commentText = normalizeIdentifier(value.text || value.comment?.text);
+    const mediaId = normalizeIdentifier(value.media?.id || value.media_id);
+    const senderId = normalizeIdentifier(value.from?.id);
+    const pageIds = getUniqueIdentifiers([
+        entry?.id,
+        value.instagram_business_account?.id,
+        value.instagram_business_account_id,
+    ]);
+    return {
+        commentId,
+        commentText,
+        mediaId,
+        senderId,
+        pageIds,
+    };
+};
 router.get("/", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
@@ -178,53 +197,94 @@ router.post("/", async (req, res) => {
             if (change.field !== "comments") {
                 continue;
             }
-            const commentText = change.value.comment?.text;
-            const instagramUserId = change.value.from?.id;
-            const reelId = change.value.media?.id;
-            const pageIds = getUniqueIdentifiers([change.value.id, entry.id]);
-            const pageId = pageIds[0] || null;
-            const commentEventId = change.value.comment_id ||
-                change.value.comment?.id ||
-                `${pageId}:${instagramUserId}:${reelId}:${String(commentText || "").trim()}`;
-            if (!commentText || !instagramUserId || !reelId || !commentEventId) {
-                continue;
-            }
-            const shouldProcessComment = await (0, webhookDedup_service_1.processWebhookEvent)({
-                eventId: String(commentEventId),
-                platform: "INSTAGRAM",
-            });
-            if (!shouldProcessComment) {
-                continue;
-            }
-            log("comment identifiers", {
-                pageIds,
-            });
-            const client = await findInstagramClient({
-                pageIds,
-            });
-            if (!client) {
-                continue;
-            }
-            attachResolvedBusinessContext(req, client);
-            const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(client.businessId);
-            if (!access.allowed) {
-                (0, subscriptionGuard_middleware_1.logSubscriptionLockedAction)({
+            try {
+                const { commentId, commentText, mediaId, senderId, pageIds, } = parseInstagramCommentChange({
+                    entry,
+                    change,
+                });
+                console.log("🔥 COMMENT EVENT RECEIVED", {
+                    commentId,
+                    text: commentText,
+                    mediaId,
+                    senderId,
+                });
+                const commentEventId = commentId ||
+                    `${pageIds[0] || "unknown"}:${senderId || "unknown"}:${mediaId || "unknown"}:${String(commentText || "").trim()}`;
+                if (!commentText || !senderId || !mediaId || !commentEventId) {
+                    log("Comment event skipped due to missing identifiers", {
+                        commentId,
+                        mediaId,
+                        senderId,
+                        pageIds,
+                    });
+                    continue;
+                }
+                const shouldProcessComment = await (0, webhookDedup_service_1.processWebhookEvent)({
+                    eventId: String(commentEventId),
+                    platform: "INSTAGRAM",
+                });
+                if (!shouldProcessComment) {
+                    log("Duplicate Instagram comment event skipped", {
+                        commentId,
+                    });
+                    continue;
+                }
+                log("comment identifiers", {
+                    pageIds,
+                    commentId,
+                    mediaId,
+                    senderId,
+                });
+                const client = await findInstagramClient({
+                    pageIds,
+                });
+                if (!client) {
+                    continue;
+                }
+                attachResolvedBusinessContext(req, client);
+                const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(client.businessId);
+                if (!access.allowed) {
+                    (0, subscriptionGuard_middleware_1.logSubscriptionLockedAction)({
+                        businessId: client.businessId,
+                        requestId: req.requestId,
+                        path: req.originalUrl,
+                        method: req.method,
+                        action: "instagram_comment_webhook",
+                        lockReason: access.lockReason,
+                    }, "Instagram comment webhook ignored because subscription is locked");
+                    continue;
+                }
+                const jobData = {
+                    commentId,
                     businessId: client.businessId,
-                    requestId: req.requestId,
-                    path: req.originalUrl,
-                    method: req.method,
-                    action: "instagram_comment_webhook",
-                    lockReason: access.lockReason,
-                }, "Instagram comment webhook ignored because subscription is locked");
+                    clientId: client.id,
+                    instagramUserId: senderId,
+                    senderId,
+                    reelId: mediaId,
+                    mediaId,
+                    commentText,
+                    text: commentText,
+                };
+                await automation_queue_1.automationQueue.add("comment-reply", jobData);
+                console.log("📦 Job added to queue", {
+                    jobName: "comment-reply",
+                    commentId,
+                    businessId: client.businessId,
+                    mediaId,
+                    senderId,
+                });
+            }
+            catch (commentError) {
+                req.logger?.error({ error: commentError }, "Instagram comment webhook processing failed");
+                (0, sentry_1.captureExceptionWithContext)(commentError, {
+                    tags: {
+                        webhook: "instagram",
+                        stage: "comment_processing",
+                    },
+                });
+                console.error("❌ Instagram comment webhook processing failed", commentError);
                 continue;
             }
-            await automation_queue_1.automationQueue.add("comment", {
-                businessId: client.businessId,
-                clientId: client.id,
-                instagramUserId,
-                reelId,
-                commentText,
-            });
         }
         let senderId;
         let text;

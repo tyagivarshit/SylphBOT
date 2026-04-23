@@ -64,7 +64,8 @@ if (shouldRunWorker) {
             "Automation worker job started"
           );
 
-          if (job.name === "comment") {
+          if (job.name === "comment" || job.name === "comment-reply") {
+            console.log("⚙️ Processing comment reply job", job.data);
             await handleCommentAutomation(job.data);
           }
 

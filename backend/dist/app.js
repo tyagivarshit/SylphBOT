@@ -295,6 +295,7 @@ app.use("/api/automation", auth_middleware_1.protect, subscription_middleware_1.
 app.use("/api/messages", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, message_routes_1.default);
 app.use("/api/conversations", auth_middleware_1.protect, conversation_routes_1.default);
 app.use("/api/comment-triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
+app.use("/api/comment-automation/triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
 app.use("/api/triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
 app.get("/api/client/status", auth_middleware_1.protect, client_controller_1.getClientStatus);
 app.use("/api/clients", auth_middleware_1.protect, client_routes_1.default);

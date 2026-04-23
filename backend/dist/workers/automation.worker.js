@@ -43,7 +43,8 @@ if (shouldRunWorker) {
             businessId: job.data?.businessId || null,
             jobName: job.name,
         }, "Automation worker job started");
-        if (job.name === "comment") {
+        if (job.name === "comment" || job.name === "comment-reply") {
+            console.log("⚙️ Processing comment reply job", job.data);
             await (0, commentAutomation_service_1.handleCommentAutomation)(job.data);
         }
         logger_1.default.info({

@@ -9,7 +9,9 @@ import {
 import {
   AIJobPayload,
   AIMessagePayload,
+  AIQueuePayload,
   AI_QUEUE_PARTITIONS,
+  CommentReplyJobPayload,
   enqueueAIBatch,
   getAIQueueNames,
 } from "../queues/ai.queue";
@@ -57,6 +59,7 @@ import {
   resolveWorkerConcurrency,
 } from "./workerManager";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
+import { handleCommentAutomation } from "../services/commentAutomation.service";
 
 initializeSentry();
 
@@ -102,7 +105,7 @@ class BusinessRateLimitError extends Error {
   }
 }
 
-type AIWorkerJob = Job<AIJobPayload>;
+type AIWorkerJob = Job<AIQueuePayload>;
 type AIWorkerMessage = AIMessagePayload;
 type AIWorkerMessageKind = NonNullable<AIWorkerMessage["kind"]>;
 type AIWorkerTask = {
@@ -145,7 +148,10 @@ const getTaskKind = (
   job: AIWorkerJob,
   message: AIWorkerMessage
 ): AIWorkerMessageKind =>
-  message.kind || (job.data.source === "router" ? "router" : "message");
+  message.kind ||
+  (isAIBatchPayload(job.data) && job.data.source === "router"
+    ? "router"
+    : "message");
 
 const createWorkerTask = (
   job: AIWorkerJob,
@@ -158,8 +164,37 @@ const createWorkerTask = (
   kind: getTaskKind(job, message),
 });
 
-const getJobLeadId = (job?: AIWorkerJob | null) =>
-  job?.data?.messages?.[0]?.leadId;
+const isCommentReplyJobPayload = (
+  payload: AIQueuePayload | null | undefined
+): payload is CommentReplyJobPayload =>
+  Boolean(
+    payload &&
+      typeof payload === "object" &&
+      "type" in payload &&
+      payload.type === "comment-reply"
+  );
+
+const isAIBatchPayload = (
+  payload: AIQueuePayload | null | undefined
+): payload is AIJobPayload =>
+  Boolean(
+    payload &&
+      typeof payload === "object" &&
+      "messages" in payload &&
+      Array.isArray((payload as AIJobPayload).messages)
+  );
+
+const getJobLeadId = (job?: AIWorkerJob | null) => {
+  if (!job?.data) {
+    return null;
+  }
+
+  if (isAIBatchPayload(job.data)) {
+    return job.data.messages?.[0]?.leadId || null;
+  }
+
+  return null;
+};
 
 const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
   if (typeof aiReply === "string") {
@@ -897,8 +932,81 @@ const processAIMessage = async (task: AIWorkerTask) => {
   );
 };
 
+const processCommentReplyJob = async (job: AIWorkerJob) => {
+  if (!isCommentReplyJobPayload(job.data)) {
+    return;
+  }
+
+  const payload = job.data;
+
+  return runWithRequestContext(
+    {
+      requestId: `comment-reply-${String(job.id || "unknown")}`,
+      source: "worker",
+      route: `queue:${job.queueName}`,
+      queueName: job.queueName,
+      jobId: String(job.id || `${job.queueName}:${job.name}`),
+      leadId: null,
+      businessId: payload.businessId,
+    },
+    async () => {
+      const subscriptionAccess = await getSubscriptionAccess(
+        payload.businessId
+      ).catch(() => null);
+
+      if (!subscriptionAccess?.allowed) {
+        logSubscriptionLockedAction(
+          {
+            businessId: payload.businessId,
+            queueName: job.queueName,
+            jobId: job.id,
+            leadId: null,
+            action: "comment_reply_worker_job",
+            lockReason: subscriptionAccess?.lockReason,
+          },
+          "Comment reply worker skipped job because subscription is locked"
+        );
+        return;
+      }
+
+      console.log("Processing comment reply job");
+
+      logger.info(
+        {
+          jobId: job.id,
+          queueName: job.queueName,
+          businessId: payload.businessId,
+          clientId: payload.clientId,
+          commentId: payload.commentId || null,
+          jobType: payload.type,
+        },
+        "Comment reply worker job started"
+      );
+
+      await handleCommentAutomation(payload);
+
+      logger.info(
+        {
+          jobId: job.id,
+          queueName: job.queueName,
+          businessId: payload.businessId,
+          clientId: payload.clientId,
+          commentId: payload.commentId || null,
+          jobType: payload.type,
+        },
+        "Comment reply worker job completed"
+      );
+    }
+  );
+};
+
 const processAIJob = async (job: AIWorkerJob) => {
-  if (!job.data.messages.length) {
+  if (isCommentReplyJobPayload(job.data)) {
+    await processCommentReplyJob(job);
+    return;
+  }
+
+  if (!isAIBatchPayload(job.data) || !job.data.messages.length) {
     logger.warn(
       {
         jobId: job.id,
@@ -931,7 +1039,7 @@ const processAIJob = async (job: AIWorkerJob) => {
 const workers =
   shouldRunWorker
     ? getAIQueueNames().map((queueName) => {
-        const worker = new Worker<AIJobPayload>(
+        const worker = new Worker<AIQueuePayload>(
           queueName,
           withRedisWorkerFailSafe(queueName, async (job) => processAIJob(job)),
           {

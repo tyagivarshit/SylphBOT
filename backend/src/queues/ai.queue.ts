@@ -33,12 +33,27 @@ export type AIMessagePayload = {
   retryCount?: number;
 };
 
+export type CommentReplyJobPayload = {
+  type: "comment-reply";
+  businessId: string;
+  clientId: string;
+  instagramUserId?: string;
+  senderId?: string;
+  reelId?: string;
+  mediaId?: string;
+  commentText?: string;
+  text?: string;
+  commentId?: string;
+};
+
 export type AIJobPayload = {
   batchId: string;
   source: "api" | "router" | "message" | "retry";
   createdAt: string;
   messages: AIMessagePayload[];
 };
+
+export type AIQueuePayload = AIJobPayload | CommentReplyJobPayload;
 
 type EnqueueOptions = {
   source?: AIJobPayload["source"];
@@ -58,14 +73,14 @@ const defaultJobOptions: JobsOptions = {
 const queueConnection = getQueueRedisConnection();
 
 const globalForAIQueue = globalThis as typeof globalThis & {
-  __sylphAIHighQueue?: Queue<AIJobPayload>;
-  __sylphAILegacyQueue?: Queue<AIJobPayload>;
+  __sylphAIHighQueue?: Queue<AIQueuePayload>;
+  __sylphAILegacyQueue?: Queue<AIQueuePayload>;
 };
 
 export const aiQueue =
   globalForAIQueue.__sylphAIHighQueue ||
   createResilientQueue(
-    new Queue<AIJobPayload>(AI_QUEUE_NAME, {
+    new Queue<AIQueuePayload>(AI_QUEUE_NAME, {
       connection: queueConnection,
       prefix: env.AI_QUEUE_PREFIX,
       defaultJobOptions,
@@ -87,7 +102,7 @@ export const legacyAIQueue =
     ? aiQueue
     : globalForAIQueue.__sylphAILegacyQueue ||
       createResilientQueue(
-        new Queue<AIJobPayload>(LEGACY_AI_QUEUE_NAME, {
+        new Queue<AIQueuePayload>(LEGACY_AI_QUEUE_NAME, {
           connection: queueConnection,
           prefix: env.AI_QUEUE_PREFIX,
           defaultJobOptions,
@@ -270,6 +285,58 @@ export const enqueueAIMessage = async (
   return job;
 };
 
+const normalizeCommentReplyPayload = (
+  payload: CommentReplyJobPayload
+): CommentReplyJobPayload => ({
+  type: "comment-reply",
+  businessId: String(payload.businessId || "").trim(),
+  clientId: String(payload.clientId || "").trim(),
+  instagramUserId: payload.instagramUserId?.trim(),
+  senderId: payload.senderId?.trim(),
+  reelId: payload.reelId?.trim(),
+  mediaId: payload.mediaId?.trim(),
+  commentText: payload.commentText?.trim(),
+  text: payload.text?.trim(),
+  commentId: payload.commentId?.trim(),
+});
+
+export const enqueueCommentReplyJob = async (
+  payload: CommentReplyJobPayload
+) => {
+  const normalizedPayload = normalizeCommentReplyPayload(payload);
+  const jobId = normalizedPayload.commentId
+    ? `comment_reply_${normalizedPayload.commentId}`
+    : `comment_reply_${crypto.randomUUID()}`;
+
+  logger.info(
+    {
+      queue: AI_QUEUE_NAME,
+      source: "comment-reply",
+      businessId: normalizedPayload.businessId,
+      clientId: normalizedPayload.clientId,
+      commentId: normalizedPayload.commentId || null,
+      mediaId: normalizedPayload.mediaId || normalizedPayload.reelId || null,
+    },
+    "Comment reply job enqueue requested"
+  );
+
+  const job = await aiQueue.add("ai-high", normalizedPayload, {
+    jobId,
+  });
+
+  logger.info(
+    {
+      queue: AI_QUEUE_NAME,
+      source: "comment-reply",
+      jobId: job?.id || null,
+      commentId: normalizedPayload.commentId || null,
+    },
+    "Comment reply job enqueued"
+  );
+
+  return job;
+};
+
 export const addAIJob = async (data: AIMessagePayload) =>
   enqueueAIMessage(
     {
@@ -313,4 +380,4 @@ export const closeAIQueue = async () => {
   globalForAIQueue.__sylphAILegacyQueue = undefined;
 };
 
-export type AIQueueJob = Job<AIJobPayload>;
+export type AIQueueJob = Job<AIQueuePayload>;

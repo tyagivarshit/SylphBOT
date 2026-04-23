@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeAIQueue = exports.getAIQueueForLead = exports.getAIQueueNames = exports.getAIQueues = exports.addRouterJob = exports.addAIJob = exports.enqueueAIMessage = exports.enqueueAIBatch = exports.legacyAIQueue = exports.aiQueue = exports.AI_QUEUE_PARTITIONS = exports.LEGACY_AI_QUEUE_NAME = exports.AI_QUEUE_NAME = void 0;
+exports.closeAIQueue = exports.getAIQueueForLead = exports.getAIQueueNames = exports.getAIQueues = exports.addRouterJob = exports.addAIJob = exports.enqueueCommentReplyJob = exports.enqueueAIMessage = exports.enqueueAIBatch = exports.legacyAIQueue = exports.aiQueue = exports.AI_QUEUE_PARTITIONS = exports.LEGACY_AI_QUEUE_NAME = exports.AI_QUEUE_NAME = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const bullmq_1 = require("bullmq");
 const env_1 = require("../config/env");
@@ -162,6 +162,43 @@ const enqueueAIMessage = async (message, options) => {
     return job;
 };
 exports.enqueueAIMessage = enqueueAIMessage;
+const normalizeCommentReplyPayload = (payload) => ({
+    type: "comment-reply",
+    businessId: String(payload.businessId || "").trim(),
+    clientId: String(payload.clientId || "").trim(),
+    instagramUserId: payload.instagramUserId?.trim(),
+    senderId: payload.senderId?.trim(),
+    reelId: payload.reelId?.trim(),
+    mediaId: payload.mediaId?.trim(),
+    commentText: payload.commentText?.trim(),
+    text: payload.text?.trim(),
+    commentId: payload.commentId?.trim(),
+});
+const enqueueCommentReplyJob = async (payload) => {
+    const normalizedPayload = normalizeCommentReplyPayload(payload);
+    const jobId = normalizedPayload.commentId
+        ? `comment_reply_${normalizedPayload.commentId}`
+        : `comment_reply_${crypto_1.default.randomUUID()}`;
+    logger_1.default.info({
+        queue: exports.AI_QUEUE_NAME,
+        source: "comment-reply",
+        businessId: normalizedPayload.businessId,
+        clientId: normalizedPayload.clientId,
+        commentId: normalizedPayload.commentId || null,
+        mediaId: normalizedPayload.mediaId || normalizedPayload.reelId || null,
+    }, "Comment reply job enqueue requested");
+    const job = await exports.aiQueue.add("ai-high", normalizedPayload, {
+        jobId,
+    });
+    logger_1.default.info({
+        queue: exports.AI_QUEUE_NAME,
+        source: "comment-reply",
+        jobId: job?.id || null,
+        commentId: normalizedPayload.commentId || null,
+    }, "Comment reply job enqueued");
+    return job;
+};
+exports.enqueueCommentReplyJob = enqueueCommentReplyJob;
 const addAIJob = async (data) => (0, exports.enqueueAIMessage)({
     ...data,
     kind: data.kind || "message",

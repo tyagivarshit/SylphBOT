@@ -1,7 +1,6 @@
 import { Request, Response, Router } from "express";
 import prisma from "../config/prisma";
-import { enqueueAIBatch } from "../queues/ai.queue";
-import { automationQueue } from "../queues/automation.queue";
+import { enqueueAIBatch, enqueueCommentReplyJob } from "../queues/ai.queue";
 import { cancelFollowups, scheduleFollowups } from "../queues/followup.queue";
 import { getIO } from "../sockets/socket.server";
 import { fetchInstagramUsername } from "../services/instagramProfile.service";
@@ -362,10 +361,13 @@ router.post("/", async (req: any, res: Response) => {
           text: commentText,
         };
 
-        await automationQueue.add("comment-reply", jobData);
+        await enqueueCommentReplyJob({
+          type: "comment-reply",
+          ...jobData,
+        });
 
         console.log("📦 Job added to queue", {
-          jobName: "comment-reply",
+          jobName: "ai-high",
           commentId,
           businessId: client.businessId,
           mediaId,

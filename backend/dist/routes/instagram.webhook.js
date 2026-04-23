@@ -6,7 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const ai_queue_1 = require("../queues/ai.queue");
-const automation_queue_1 = require("../queues/automation.queue");
 const followup_queue_1 = require("../queues/followup.queue");
 const socket_server_1 = require("../sockets/socket.server");
 const instagramProfile_service_1 = require("../services/instagramProfile.service");
@@ -265,9 +264,12 @@ router.post("/", async (req, res) => {
                     commentText,
                     text: commentText,
                 };
-                await automation_queue_1.automationQueue.add("comment-reply", jobData);
+                await (0, ai_queue_1.enqueueCommentReplyJob)({
+                    type: "comment-reply",
+                    ...jobData,
+                });
                 console.log("📦 Job added to queue", {
-                    jobName: "comment-reply",
+                    jobName: "ai-high",
                     commentId,
                     businessId: client.businessId,
                     mediaId,

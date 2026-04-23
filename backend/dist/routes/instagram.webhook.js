@@ -162,6 +162,7 @@ router.get("/", (req, res) => {
 });
 router.post("/", async (req, res) => {
     let body;
+    console.log("🔥 WEBHOOK HIT", JSON.stringify(req.body));
     try {
         body = parseWebhookBody(req);
     }
@@ -197,9 +198,16 @@ router.post("/", async (req, res) => {
                 continue;
             }
             try {
+                const rawCommentValue = change?.value || {};
                 const { commentId, commentText, mediaId, senderId, pageIds, } = parseInstagramCommentChange({
                     entry,
                     change,
+                });
+                console.log("📩 COMMENT EVENT DETECTED", {
+                    commentId: rawCommentValue.id,
+                    text: rawCommentValue.text,
+                    mediaId: rawCommentValue.media?.id,
+                    from: rawCommentValue.from?.id,
                 });
                 console.log("🔥 COMMENT EVENT RECEIVED", {
                     commentId,
@@ -264,10 +272,16 @@ router.post("/", async (req, res) => {
                     commentText,
                     text: commentText,
                 };
+                console.log("📦 ADDING JOB TO QUEUE", {
+                    queue: "ai-high",
+                    type: "comment-reply",
+                    commentId,
+                });
                 await (0, ai_queue_1.enqueueCommentReplyJob)({
                     type: "comment-reply",
                     ...jobData,
                 });
+                console.log("✅ JOB ADDED SUCCESSFULLY");
                 console.log("📦 Job added to queue", {
                     jobName: "ai-high",
                     commentId,

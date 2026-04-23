@@ -937,6 +937,9 @@ const processCommentReplyJob = async (job: AIWorkerJob) => {
     return;
   }
 
+  console.log("⚙️ WORKER RECEIVED JOB", job.data);
+  console.log("🔍 JOB TYPE:", job.data.type);
+
   const payload = job.data;
 
   return runWithRequestContext(

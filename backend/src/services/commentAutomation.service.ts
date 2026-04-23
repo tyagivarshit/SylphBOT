@@ -134,6 +134,8 @@ export const handleCommentAutomation = async ({
       return { executed, messageSent };
     }
 
+    console.log("🧠 CHECKING TRIGGERS FOR:", normalizedCommentText);
+
     const matchedTrigger = triggers.find((trigger: any) => {
       const keywords = trigger.keyword
         ?.toLowerCase()
@@ -146,6 +148,7 @@ export const handleCommentAutomation = async ({
     });
 
     if (!matchedTrigger) {
+      console.log("❌ NO TRIGGER MATCH");
       console.log("No comment automation trigger matched", {
         businessId,
         clientId,
@@ -154,6 +157,8 @@ export const handleCommentAutomation = async ({
       });
       return { executed, messageSent };
     }
+
+    console.log("✅ TRIGGER MATCHED", matchedTrigger.keyword);
 
     console.log("🧠 Trigger matched", {
       triggerId: matchedTrigger.id,
@@ -290,10 +295,15 @@ export const handleCommentAutomation = async ({
     const commentReply = matchedTrigger.replyText || "Check your DM";
 
     try {
+      console.log("📤 SENDING COMMENT REPLY", {
+        commentId: normalizedCommentId || null,
+        message: commentReply,
+      });
+
       if (normalizedCommentId) {
         console.log("📤 Sending IG comment reply", normalizedCommentId);
 
-        await axios.post(
+        const response = await axios.post(
           `https://graph.facebook.com/v19.0/${normalizedCommentId}/replies`,
           { message: commentReply },
           {
@@ -304,6 +314,8 @@ export const handleCommentAutomation = async ({
           }
         );
 
+        console.log("✅ META RESPONSE SUCCESS", response.data);
+
         console.log("✅ IG comment reply sent", {
           commentId: normalizedCommentId,
           businessId,
@@ -311,7 +323,7 @@ export const handleCommentAutomation = async ({
       } else {
         console.log("📤 Sending IG comment reply", normalizedReelId);
 
-        await axios.post(
+        const response = await axios.post(
           `https://graph.facebook.com/v19.0/${normalizedReelId}/comments`,
           { message: commentReply },
           {
@@ -322,12 +334,18 @@ export const handleCommentAutomation = async ({
           }
         );
 
+        console.log("✅ META RESPONSE SUCCESS", response.data);
+
         console.log("✅ IG media comment sent", {
           reelId: normalizedReelId,
           businessId,
         });
       }
     } catch (error: any) {
+      console.error(
+        "❌ META RESPONSE ERROR",
+        error?.response?.data || error?.message
+      );
       console.error("❌ IG comment reply failed", {
         businessId,
         clientId,
@@ -397,6 +415,8 @@ export const handleCommentAutomation = async ({
         },
       });
     }
+
+    console.log("🏁 COMMENT AUTOMATION FLOW COMPLETED");
 
     return {
       executed,

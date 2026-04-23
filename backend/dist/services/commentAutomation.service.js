@@ -86,6 +86,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             });
             return { executed, messageSent };
         }
+        console.log("🧠 CHECKING TRIGGERS FOR:", normalizedCommentText);
         const matchedTrigger = triggers.find((trigger) => {
             const keywords = trigger.keyword
                 ?.toLowerCase()
@@ -96,6 +97,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             return keywords.some((keyword) => normalizedText.includes(keyword));
         });
         if (!matchedTrigger) {
+            console.log("❌ NO TRIGGER MATCH");
             console.log("No comment automation trigger matched", {
                 businessId,
                 clientId,
@@ -104,6 +106,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             });
             return { executed, messageSent };
         }
+        console.log("✅ TRIGGER MATCHED", matchedTrigger.keyword);
         console.log("🧠 Trigger matched", {
             triggerId: matchedTrigger.id,
             keyword: matchedTrigger.keyword,
@@ -208,14 +211,19 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
         executed = true;
         const commentReply = matchedTrigger.replyText || "Check your DM";
         try {
+            console.log("📤 SENDING COMMENT REPLY", {
+                commentId: normalizedCommentId || null,
+                message: commentReply,
+            });
             if (normalizedCommentId) {
                 console.log("📤 Sending IG comment reply", normalizedCommentId);
-                await axios_1.default.post(`https://graph.facebook.com/v19.0/${normalizedCommentId}/replies`, { message: commentReply }, {
+                const response = await axios_1.default.post(`https://graph.facebook.com/v19.0/${normalizedCommentId}/replies`, { message: commentReply }, {
                     headers: {
                         Authorization: `Bearer ${accessToken}`,
                     },
                     timeout: 10000,
                 });
+                console.log("✅ META RESPONSE SUCCESS", response.data);
                 console.log("✅ IG comment reply sent", {
                     commentId: normalizedCommentId,
                     businessId,
@@ -223,12 +231,13 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             }
             else {
                 console.log("📤 Sending IG comment reply", normalizedReelId);
-                await axios_1.default.post(`https://graph.facebook.com/v19.0/${normalizedReelId}/comments`, { message: commentReply }, {
+                const response = await axios_1.default.post(`https://graph.facebook.com/v19.0/${normalizedReelId}/comments`, { message: commentReply }, {
                     headers: {
                         Authorization: `Bearer ${accessToken}`,
                     },
                     timeout: 10000,
                 });
+                console.log("✅ META RESPONSE SUCCESS", response.data);
                 console.log("✅ IG media comment sent", {
                     reelId: normalizedReelId,
                     businessId,
@@ -236,6 +245,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
             }
         }
         catch (error) {
+            console.error("❌ META RESPONSE ERROR", error?.response?.data || error?.message);
             console.error("❌ IG comment reply failed", {
                 businessId,
                 clientId,
@@ -298,6 +308,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
                 },
             });
         }
+        console.log("🏁 COMMENT AUTOMATION FLOW COMPLETED");
         return {
             executed,
             messageSent,

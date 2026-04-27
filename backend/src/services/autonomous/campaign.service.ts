@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { format } from "date-fns";
 import prisma from "../../config/prisma";
 import { AI_QUEUE_NAME, enqueueAIBatch } from "../../queues/ai.queue";
+import { assertPhase5APreviewBypassEnabled } from "../runtimePolicy.service";
 import logger from "../../utils/logger";
 import { arbitrateOutboundChannel } from "../channelArbitration.service";
 import { getLeadControlAuthority } from "../leadControlState.service";
@@ -355,20 +356,51 @@ export const queueAutonomousCampaign = async ({
     engine: candidate.engine,
     recommendedAt: snapshot.now,
   });
-  const existing = await prisma.autonomousCampaign.findUnique({
-    where: {
-      idempotencyKey,
-    },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
+  const creationToken = crypto.randomUUID();
   const reservationKey = buildReservationKey({
     idempotencyKey,
     ruleKey: "autonomous_touch_14d",
   });
+  const controlState = await getLeadControlAuthority({
+    leadId: snapshot.leadId,
+    businessId: snapshot.businessId,
+  });
+  const campaign = await prisma.autonomousCampaign.upsert({
+    where: {
+      idempotencyKey,
+    },
+    update: {},
+    create: {
+      businessId: snapshot.businessId,
+      leadId: snapshot.leadId,
+      opportunityId,
+      engine: candidate.engine,
+      status: "QUEUED",
+      title: candidate.title,
+      objective: candidate.objective,
+      prompt: candidate.prompt,
+      outreachMode: "DIRECT_MESSAGE",
+      idempotencyKey,
+      channel: arbitration.channel,
+      cancelTokenVersion: controlState?.cancelTokenVersion ?? 0,
+      guardrail: toJsonSafe(guardrail) as any,
+      analytics: toJsonSafe({
+        score: candidate.score,
+        priority: candidate.priority,
+      }) as any,
+      metadata: toJsonSafe({
+        ...(candidate.metadata || {}),
+        reservationKey,
+        arbitration,
+        creationToken,
+      }) as any,
+      queuedAt: snapshot.now,
+    },
+  });
+
+  if (toRecord(campaign.metadata).creationToken !== creationToken) {
+    return campaign;
+  }
   const reservation = await reserveAutonomousCap({
     businessId: snapshot.businessId,
     leadId: snapshot.leadId,
@@ -401,39 +433,11 @@ export const queueAutonomousCampaign = async ({
     return null;
   }
 
-  const controlState = await getLeadControlAuthority({
-    leadId: snapshot.leadId,
-    businessId: snapshot.businessId,
-  });
-  const campaign = await prisma.autonomousCampaign.create({
-    data: {
-      businessId: snapshot.businessId,
-      leadId: snapshot.leadId,
-      opportunityId,
-      engine: candidate.engine,
-      status: "QUEUED",
-      title: candidate.title,
-      objective: candidate.objective,
-      prompt: candidate.prompt,
-      outreachMode: "DIRECT_MESSAGE",
-      idempotencyKey,
-      channel: arbitration.channel,
-      cancelTokenVersion: controlState?.cancelTokenVersion ?? 0,
-      guardrail: toJsonSafe(guardrail) as any,
-      analytics: toJsonSafe({
-        score: candidate.score,
-        priority: candidate.priority,
-      }) as any,
-      metadata: toJsonSafe({
-        ...(candidate.metadata || {}),
-        reservationKey,
-        arbitration,
-      }) as any,
-      queuedAt: snapshot.now,
-    },
-  });
-
   try {
+    assertPhase5APreviewBypassEnabled(
+      "autonomous_campaign_direct_ai_enqueue"
+    );
+
     const jobs = await enqueueAIBatch(
       [
         {

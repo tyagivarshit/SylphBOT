@@ -18,6 +18,33 @@ return 0
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+const runWithTimeout = async <T>({
+  promise,
+  timeoutMs,
+  timeoutMessage,
+}: {
+  promise: Promise<T>;
+  timeoutMs: number;
+  timeoutMessage: string;
+}) => {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
 export type DistributedLockHandle = {
   key: string;
   token: string;
@@ -47,7 +74,27 @@ export const acquireDistributedLock = async ({
   const effectivePollMs = Math.max(10, pollMs);
 
   do {
-    const result = await redis.set(key, lockToken, "PX", ttlMs, "NX");
+    const remainingWaitMs = Math.max(0, deadline - Date.now());
+    const commandTimeoutMs = Math.max(
+      50,
+      Math.min(
+        ttlMs,
+        waitMs > 0 ? Math.max(remainingWaitMs, effectivePollMs) : effectivePollMs,
+        1000
+      )
+    );
+
+    let result: string | null = null;
+
+    try {
+      result = await runWithTimeout({
+        promise: redis.set(key, lockToken, "PX", ttlMs, "NX"),
+        timeoutMs: commandTimeoutMs,
+        timeoutMessage: `distributed_lock_acquire_timeout:${key}`,
+      });
+    } catch {
+      result = null;
+    }
 
     if (result === "OK") {
       let released = false;

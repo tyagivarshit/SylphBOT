@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "async_hooks";
 
 export type RequestContext = {
   requestId: string;
+  traceId?: string;
   source?: "http" | "worker" | "webhook";
   route?: string;
   method?: string;
@@ -47,10 +48,11 @@ export const buildContextBindings = () => {
   }
 
   return cleanContext({
-    requestId: context.requestId,
-    userId: context.userId,
-    businessId: context.businessId,
-    route: context.route,
+      requestId: context.requestId,
+      traceId: context.traceId,
+      userId: context.userId,
+      businessId: context.businessId,
+      route: context.route,
     queueName: context.queueName,
     jobId: context.jobId,
     leadId: context.leadId,

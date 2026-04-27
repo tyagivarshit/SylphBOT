@@ -1,6 +1,7 @@
 import prisma from "../config/prisma";
 import { TRIAL_DAYS } from "../config/pricing.config";
 import { enqueueAIBatch } from "../queues/ai.queue";
+import { assertPhase5APreviewBypassEnabled } from "./runtimePolicy.service";
 import { getUsageOverview } from "./usage.service";
 import logger from "../utils/logger";
 
@@ -375,6 +376,8 @@ export const triggerOnboardingDemo = async ({
       onboardingStep: 2,
     },
   });
+
+  assertPhase5APreviewBypassEnabled("onboarding_demo_direct_ai_enqueue");
 
   await enqueueAIBatch(
     [

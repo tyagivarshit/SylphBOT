@@ -23,6 +23,7 @@ export const requestContextMiddleware = (
   runWithRequestContext(
     {
       requestId,
+      traceId: requestId,
       route,
       method: req.method,
       source: route.startsWith("/api/webhook") || route.startsWith("/webhook")

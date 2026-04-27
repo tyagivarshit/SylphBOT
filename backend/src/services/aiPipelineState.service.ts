@@ -4,7 +4,7 @@ import {
   releaseDistributedLock,
   type DistributedLockHandle,
 } from "./distributedLock.service";
-import { writeRedisJsonIfChanged } from "./redisState.service";
+import { writeRedisJsonIfChangedStrict } from "./redisState.service";
 
 const LEAD_LOCK_PREFIX = "ai_pipeline:lead_lock";
 const REPLY_STATE_PREFIX = "ai_pipeline:reply_state";
@@ -145,7 +145,7 @@ export const getReplyDeliveryState = async (
   }
 };
 
-const saveReplyDeliveryState = async (
+const saveReplyDeliveryStateStrict = async (
   jobKey: string,
   state: ReplyDeliveryState
 ) => {
@@ -155,7 +155,7 @@ const saveReplyDeliveryState = async (
     );
   }
 
-  await writeRedisJsonIfChanged(
+  await writeRedisJsonIfChangedStrict(
     buildReplyStateKey(jobKey),
     state,
     REPLY_STATE_TTL_SECONDS
@@ -168,7 +168,7 @@ export const markReplySaved = async (
 ) => {
   const current = await getReplyDeliveryState(jobKey);
 
-  await saveReplyDeliveryState(jobKey, {
+  await saveReplyDeliveryStateStrict(jobKey, {
     savedMessageId: messageId,
     confirmed: current.confirmed,
     confirmedAt: current.confirmedAt || null,
@@ -190,7 +190,7 @@ export const markReplyConfirmed = async (
 ) => {
   const current = await getReplyDeliveryState(jobKey);
 
-  await saveReplyDeliveryState(jobKey, {
+  await saveReplyDeliveryStateStrict(jobKey, {
     savedMessageId: current.savedMessageId || null,
     confirmed: true,
     confirmedAt: input.confirmedAt,
@@ -204,7 +204,7 @@ export const markReplyConfirmed = async (
 export const markReplySent = async (jobKey: string) => {
   const current = await getReplyDeliveryState(jobKey);
 
-  await saveReplyDeliveryState(jobKey, {
+  await saveReplyDeliveryStateStrict(jobKey, {
     savedMessageId: current.savedMessageId || null,
     confirmed: current.confirmed,
     confirmedAt: current.confirmedAt || null,

@@ -26,6 +26,32 @@ import { conversionPhase3Tests } from "./conversion.phase3.test";
 import { createLeadIntelligenceSnapshot } from "./crm.test.helpers";
 import { revenueBrainPhase3BTests } from "./revenueBrain.phase3b.test";
 import { revenueBrainPhase3CTests } from "./revenueBrain.phase3c.test";
+import { queueFailClosedTests } from "./queue.failclosed.test";
+import { deliveryReplayTests } from "./delivery.replay.test";
+import { leadLockExpiryTests } from "./lead.lock.expiry.test";
+import { schedulerLeaderTests } from "./scheduler.leader.test";
+import { webhookReconciliationTests } from "./webhook.reconciliation.test";
+import { consentRevokeMidflightTests } from "./consent.revoke.midflight.test";
+import { cancelTokenInvalidationTests } from "./cancelToken.invalidates.test";
+import { interactionNormalizerTests } from "./interactionNormalizer.test";
+import { receptionClassifierTests } from "./receptionClassifier.test";
+import { priorityEngineTests } from "./priorityEngine.test";
+import { inboxRouterTests } from "./inboxRouter.test";
+import { humanQueueTests } from "./humanQueue.test";
+import { slaPolicyTests } from "./slaPolicy.test";
+import { receptionMemoryTests } from "./receptionMemory.test";
+import { inboundIdempotencyTests } from "./inbound.idempotency.test";
+import { normalizeReplayTests } from "./normalize.replay.test";
+import { classificationReplayTests } from "./classification.replay.test";
+import { routingAuthorityTests } from "./routing.authority.test";
+import { spamFailClosedTests } from "./spam.failclosed.test";
+import { humanAssignmentIdempotentTests } from "./human.assignment.idempotent.test";
+import { revenueBridgeTests } from "./revenue.bridge.test";
+import { slaWarningTests } from "./sla.warning.test";
+import { slaBreachTests } from "./sla.breach.test";
+import { resolutionReopenTests } from "./resolution.reopen.test";
+import { controlAuthorityForceHumanTests } from "./controlAuthority.forceHuman.test";
+import { dashboardProjectionTests } from "./dashboardProjection.test";
 
 type TestCase = {
   name: string;
@@ -796,6 +822,32 @@ const tests: TestCase[] = [
     },
   },
   ...conversionPhase3Tests,
+  ...queueFailClosedTests,
+  ...deliveryReplayTests,
+  ...leadLockExpiryTests,
+  ...schedulerLeaderTests,
+  ...webhookReconciliationTests,
+  ...consentRevokeMidflightTests,
+  ...cancelTokenInvalidationTests,
+  ...interactionNormalizerTests,
+  ...receptionClassifierTests,
+  ...priorityEngineTests,
+  ...inboxRouterTests,
+  ...humanQueueTests,
+  ...slaPolicyTests,
+  ...receptionMemoryTests,
+  ...inboundIdempotencyTests,
+  ...normalizeReplayTests,
+  ...classificationReplayTests,
+  ...routingAuthorityTests,
+  ...spamFailClosedTests,
+  ...humanAssignmentIdempotentTests,
+  ...revenueBridgeTests,
+  ...slaWarningTests,
+  ...slaBreachTests,
+  ...resolutionReopenTests,
+  ...controlAuthorityForceHumanTests,
+  ...dashboardProjectionTests,
   ...autonomousPhase4Tests,
   ...revenueBrainPhase3BTests,
   ...revenueBrainPhase3CTests,

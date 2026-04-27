@@ -41,10 +41,12 @@ const booking_routes_1 = __importDefault(require("./routes/booking.routes"));
 const availability_routes_1 = __importDefault(require("./routes/availability.routes"));
 const conversation_routes_1 = __importDefault(require("./routes/conversation.routes"));
 const health_routes_1 = __importDefault(require("./routes/health.routes"));
+const receptionIntake_routes_1 = __importDefault(require("./routes/receptionIntake.routes"));
 const usage_routes_1 = __importDefault(require("./routes/usage.routes"));
 const client_controller_1 = require("./controllers/client.controller");
 const helpAi_routes_1 = __importDefault(require("./routes/helpAi.routes"));
 const ai_queue_1 = require("./queues/ai.queue");
+const runtimePolicy_service_1 = require("./services/runtimePolicy.service");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
 const requestContext_middleware_1 = require("./middleware/requestContext.middleware");
@@ -260,6 +262,13 @@ app.get("/", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
 app.post("/v1/messages", apiKey_middleware_1.optionalApiKeyAuth, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     let timeoutHandle;
     try {
+        if (!(0, runtimePolicy_service_1.isPhase5APreviewBypassEnabled)()) {
+            return res.status(410).json({
+                success: false,
+                requestId: req.requestId,
+                message: "Direct AI enqueue is disabled in production. Use the canonical reception intake runtime.",
+            });
+        }
         const body = (req.body || {});
         const messages = extractMessages(body);
         if (req.apiKey) {
@@ -344,6 +353,7 @@ app.use("/api/integrations", auth_middleware_1.protect, integration_routes_1.def
 app.use("/api/oauth", auth_middleware_1.protect, oauth_routes_1.default);
 app.use("/api/booking", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, booking_routes_1.default);
 app.use("/api/availability", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, availability_routes_1.default);
+app.use("/api/inbox/intake", auth_middleware_1.protect, receptionIntake_routes_1.default);
 app.use("/api/health", health_routes_1.default);
 app.get("/health", (req, res) => {
     res.status(200).json({

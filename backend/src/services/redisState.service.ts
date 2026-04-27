@@ -1,4 +1,4 @@
-import redis from "../config/redis";
+import redis, { getSharedRedisConnection } from "../config/redis";
 import logger from "../utils/logger";
 
 export const SALES_DECISION_TTL_SECONDS = 5 * 60;
@@ -50,6 +50,33 @@ export const writeRedisJsonIfChanged = async <T>(
   value: T,
   ttlSeconds: number
 ) => writeRedisValueIfChanged(key, JSON.stringify(value), ttlSeconds);
+
+export const writeRedisValueIfChangedStrict = async (
+  key: string,
+  value: string,
+  ttlSeconds: number
+) => {
+  const redisConnection = getSharedRedisConnection();
+  const existing = await redisConnection.get(key);
+
+  if (existing === value) {
+    return false;
+  }
+
+  const result = await redisConnection.set(key, value, "EX", ttlSeconds);
+
+  if (result !== "OK") {
+    throw new Error(`redis_value_write_failed:${key}`);
+  }
+
+  return true;
+};
+
+export const writeRedisJsonIfChangedStrict = async <T>(
+  key: string,
+  value: T,
+  ttlSeconds: number
+) => writeRedisValueIfChangedStrict(key, JSON.stringify(value), ttlSeconds);
 
 export const deleteRedisKeys = async (keys: string[]) => {
   const uniqueKeys = Array.from(

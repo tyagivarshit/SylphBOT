@@ -24,7 +24,7 @@ const buildRedisOptions = (connectionName) => {
         connectionName,
         enableReadyCheck: false,
         enableAutoPipelining: true,
-        enableOfflineQueue: true,
+        enableOfflineQueue: false,
         autoResubscribe: true,
         autoResendUnfulfilledCommands: false,
         lazyConnect: true,

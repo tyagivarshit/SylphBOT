@@ -39,10 +39,12 @@ const Sentry = __importStar(require("@sentry/node"));
 const redis_1 = require("../config/redis");
 const ai_queue_1 = require("../queues/ai.queue");
 const queue_defaults_1 = require("../queues/queue.defaults");
+const runtimePolicy_service_1 = require("../services/runtimePolicy.service");
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
     process.env.RUN_WORKER === undefined;
 const globalForInboxRouteWorker = globalThis;
 const initLegacyInboxRouteWorker = () => {
+    (0, runtimePolicy_service_1.assertPhase5ALegacyRuntimeEnabled)("legacy_inbox_route_worker");
     if (!shouldRunWorker) {
         console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
         return null;

@@ -3,6 +3,7 @@ import {
   createNotificationTx,
   emitNotification,
 } from "../notification.service";
+import { setLeadHumanControl } from "../leadControlState.service";
 
 export const activateRevenueBrainEscalation = async ({
   businessId,
@@ -15,53 +16,27 @@ export const activateRevenueBrainEscalation = async ({
   title: string;
   message: string;
 }) => {
+  const business = await prisma.business.findUnique({
+    where: {
+      id: businessId,
+    },
+    select: {
+      ownerId: true,
+    },
+  });
+
+  if (!business?.ownerId) {
+    throw new Error("owner_not_found");
+  }
+
+  const controlState = await setLeadHumanControl({
+    leadId,
+    businessId,
+    isActive: true,
+  });
+
   const result = await prisma.$transaction(async (tx) => {
-    const business = await tx.business.findUnique({
-      where: {
-        id: businessId,
-      },
-      select: {
-        ownerId: true,
-      },
-    });
-
-    if (!business?.ownerId) {
-      throw new Error("owner_not_found");
-    }
-
-    await tx.lead.update({
-      where: {
-        id: leadId,
-      },
-      data: {
-        isHumanActive: true,
-      },
-    });
-
-    await tx.leadControlState.upsert({
-      where: {
-        leadId,
-      },
-      update: {
-        lastHumanTakeoverAt: new Date(),
-      },
-      create: {
-        businessId,
-        leadId,
-        lastHumanTakeoverAt: new Date(),
-      },
-    });
-
-    const verifiedLead = await tx.lead.findUnique({
-      where: {
-        id: leadId,
-      },
-      select: {
-        isHumanActive: true,
-      },
-    });
-
-    if (!verifiedLead?.isHumanActive) {
+    if (!controlState.manualSuppressUntil) {
       throw new Error("human_lock_verification_failed");
     }
 

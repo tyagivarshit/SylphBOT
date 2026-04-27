@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { getAutonomousDashboard } from "../services/autonomous/dashboard.service";
-import { runAutonomousScheduler } from "../services/autonomous/scheduler.service";
+import { runAutonomousSchedulerAsLeader } from "../services/autonomous/scheduler.service";
 
 type AutonomousRequest = Request & {
   user?: {
@@ -58,7 +58,7 @@ export const runAutonomousSchedulerController = async (
     }
 
     const autoDispatch = req.body?.autoDispatch !== false;
-    const data = await runAutonomousScheduler({
+    const data = await runAutonomousSchedulerAsLeader({
       businessId,
       autoDispatch,
     });
@@ -66,6 +66,7 @@ export const runAutonomousSchedulerController = async (
     return res.json({
       success: true,
       data,
+      leaderAcquired: Boolean(data),
     });
   } catch (error) {
     console.error("Autonomous scheduler error:", error);

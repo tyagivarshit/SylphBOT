@@ -703,9 +703,7 @@ export const trackAIMessage = async (input: TrackAIMessageInput) => {
   const deliveryState =
     String(deliveryMetadata.status || "").trim().toUpperCase() === "FAILED"
       ? "FAILED"
-      : deliveryMode === "local_preview" || deliveryMode === "local_only"
-        ? "CONFIRMED"
-        : "DELIVERED";
+      : "CONFIRMED";
   const campaignId = String(
     ((mergedMetadata.autonomous as Record<string, unknown> | undefined)?.campaignId as
       | string
@@ -753,8 +751,7 @@ export const trackAIMessage = async (input: TrackAIMessageInput) => {
       providerAcceptedAt: input.timestamp || new Date(),
       providerMessagePersistedAt: providerMessageId ? new Date() : null,
       confirmedAt: input.timestamp || new Date(),
-      deliveredAt:
-        deliveryState === "DELIVERED" ? input.timestamp || new Date() : null,
+      deliveredAt: null,
       failedAt: deliveryState === "FAILED" ? input.timestamp || new Date() : null,
       cta: input.cta || null,
       angle: input.angle || null,

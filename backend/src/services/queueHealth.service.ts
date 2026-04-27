@@ -5,6 +5,7 @@ import { getAutomationQueue } from "../queues/automation.queue";
 import { getBookingReminderQueue } from "../queues/bookingReminder.queue";
 import { getFollowupQueue } from "../queues/followup.queue";
 import { getFunnelQueue } from "../queues/funnel.queue";
+import { getReceptionRuntimeQueues } from "../queues/receptionRuntime.queue";
 
 export type QueueHealthSnapshot = {
   name: string;
@@ -47,6 +48,7 @@ const getAllQueues = () => [
   getBookingReminderQueue(),
   getAuthEmailQueue(),
   getFunnelQueue(),
+  ...getReceptionRuntimeQueues(),
 ];
 
 const loadQueueHealth = async () =>

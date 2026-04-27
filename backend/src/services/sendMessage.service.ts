@@ -7,6 +7,8 @@ import { isConsentRevoked } from "./consentAuthority.service";
 import { bumpLeadCancelToken } from "./leadControlState.service";
 import {
   buildRevenueTouchOutboundKey,
+  findRevenueTouchLedgerByOutboundKey,
+  isRevenueTouchStateAtLeast,
   upsertRevenueTouchLedger,
 } from "./revenueTouchLedger.service";
 import { decrypt } from "../utils/encrypt";
@@ -265,10 +267,14 @@ export const deliverLeadMessage = async ({
         accessToken,
       });
 
+      if (!result.providerMessageId) {
+        throw new Error("provider_message_id_missing");
+      }
+
       return {
         delivered: true,
         platform,
-        providerMessageId: result.providerMessageId || null,
+        providerMessageId: result.providerMessageId,
         acceptedAt: new Date().toISOString(),
       };
     }
@@ -289,10 +295,14 @@ export const deliverLeadMessage = async ({
       accessToken,
     });
 
+    if (!result.providerMessageId) {
+      throw new Error("provider_message_id_missing");
+    }
+
     return {
       delivered: true,
       platform,
-      providerMessageId: result.providerMessageId || null,
+      providerMessageId: result.providerMessageId,
       acceptedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -347,7 +357,7 @@ const buildMessageMetadata = ({
 
   if (delivery) {
     metadata.delivery = {
-      status: delivery.delivered ? "DELIVERED" : "FAILED",
+      status: delivery.delivered ? "CONFIRMED" : "FAILED",
       platform: delivery.platform,
       providerMessageId: delivery.providerMessageId || null,
       reason: delivery.reason || null,
@@ -412,20 +422,126 @@ export const persistAndDispatchLeadMessage = async ({
         reason: "manual_send",
         outboundKey,
       },
-    }).catch((error) => {
-      logger.warn(
-        {
-          leadId: lead.id,
-          error,
-        },
-        "Lead cancel token bump failed before manual outbound send"
-      );
     });
 
-    delivery = await deliverLeadMessage({
-      lead,
-      message: content,
-    });
+    if (outboundKey) {
+      await upsertRevenueTouchLedger({
+        businessId: lead.businessId || "",
+        leadId: lead.id,
+        clientId: lead.clientId || null,
+        messageId: createdMessage.id,
+        touchType: "MANUAL_OUTBOUND",
+        touchReason: "manual_send",
+        channel: platform || "UNKNOWN",
+        actor: sender,
+        source: "MANUAL",
+        traceId: clientMessageId || null,
+        providerMessageId: null,
+        outboundKey,
+        deliveryState: "RESERVED",
+        cta:
+          typeof getMessageMetadata(createdMessage.metadata).cta === "string"
+            ? String(getMessageMetadata(createdMessage.metadata).cta)
+            : null,
+        angle: null,
+        leadState: null,
+        messageType: "MANUAL_OUTBOUND",
+        metadata: getMessageMetadata(createdMessage.metadata),
+      });
+    }
+
+    const existingTouch = outboundKey
+      ? await findRevenueTouchLedgerByOutboundKey(outboundKey)
+      : null;
+
+    if (
+      existingTouch &&
+      isRevenueTouchStateAtLeast(
+        existingTouch.deliveryState,
+        "PROVIDER_MESSAGE_ID_PERSISTED"
+      )
+    ) {
+      delivery = {
+        delivered: true,
+        platform,
+        providerMessageId: existingTouch.providerMessageId || null,
+        acceptedAt:
+          existingTouch.providerAcceptedAt?.toISOString() ||
+          new Date().toISOString(),
+      };
+    } else {
+      delivery = await deliverLeadMessage({
+        lead,
+        message: content,
+      });
+    }
+
+    if (delivery.delivered && !delivery.providerMessageId) {
+      throw new Error("provider_message_id_missing");
+    }
+
+    if (outboundKey && delivery.delivered) {
+      const providerAcceptedAt = delivery.acceptedAt
+        ? new Date(delivery.acceptedAt)
+        : new Date();
+      const providerMessagePersistedAt = new Date();
+
+      await upsertRevenueTouchLedger({
+        businessId: lead.businessId || "",
+        leadId: lead.id,
+        clientId: lead.clientId || null,
+        messageId: createdMessage.id,
+        touchType: "MANUAL_OUTBOUND",
+        touchReason: "manual_send",
+        channel: platform || "UNKNOWN",
+        actor: sender,
+        source: "MANUAL",
+        traceId: clientMessageId || null,
+        providerMessageId: delivery.providerMessageId || null,
+        outboundKey,
+        deliveryState: "PROVIDER_ACCEPTED",
+        providerAcceptedAt,
+        cta:
+          typeof getMessageMetadata(createdMessage.metadata).cta === "string"
+            ? String(getMessageMetadata(createdMessage.metadata).cta)
+            : null,
+        angle: null,
+        leadState: null,
+        messageType: "MANUAL_OUTBOUND",
+        metadata: {
+          ...getMessageMetadata(createdMessage.metadata),
+          providerMessageId: delivery.providerMessageId || null,
+        },
+      });
+      await upsertRevenueTouchLedger({
+        businessId: lead.businessId || "",
+        leadId: lead.id,
+        clientId: lead.clientId || null,
+        messageId: createdMessage.id,
+        touchType: "MANUAL_OUTBOUND",
+        touchReason: "manual_send",
+        channel: platform || "UNKNOWN",
+        actor: sender,
+        source: "MANUAL",
+        traceId: clientMessageId || null,
+        providerMessageId: delivery.providerMessageId || null,
+        outboundKey,
+        deliveryState: "PROVIDER_MESSAGE_ID_PERSISTED",
+        providerAcceptedAt,
+        providerMessagePersistedAt,
+        cta:
+          typeof getMessageMetadata(createdMessage.metadata).cta === "string"
+            ? String(getMessageMetadata(createdMessage.metadata).cta)
+            : null,
+        angle: null,
+        leadState: null,
+        messageType: "MANUAL_OUTBOUND",
+        metadata: {
+          ...getMessageMetadata(createdMessage.metadata),
+          providerMessageId: delivery.providerMessageId || null,
+        },
+      });
+    }
 
     const updatedMetadata = buildMessageMetadata({
       existingMetadata: createdMessage.metadata,
@@ -442,6 +558,37 @@ export const persistAndDispatchLeadMessage = async ({
       },
     });
 
+    if (outboundKey) {
+      await upsertRevenueTouchLedger({
+        businessId: lead.businessId || "",
+        leadId: lead.id,
+        clientId: lead.clientId || null,
+        messageId: persistedMessage.id,
+        touchType: "MANUAL_OUTBOUND",
+        touchReason: "manual_send",
+        channel: platform || "UNKNOWN",
+        actor: sender,
+        source: "MANUAL",
+        traceId: clientMessageId || null,
+        providerMessageId: delivery?.providerMessageId || null,
+        outboundKey,
+        deliveryState: delivery?.delivered ? "CONFIRMED" : "FAILED",
+        providerAcceptedAt: delivery?.acceptedAt ? new Date(delivery.acceptedAt) : null,
+        providerMessagePersistedAt:
+          delivery?.providerMessageId && delivery.delivered ? new Date() : null,
+        confirmedAt: delivery?.delivered ? new Date() : null,
+        failedAt: delivery && !delivery.delivered ? new Date() : null,
+        cta:
+          typeof getMessageMetadata(persistedMessage.metadata).cta === "string"
+            ? String(getMessageMetadata(persistedMessage.metadata).cta)
+            : null,
+        angle: null,
+        leadState: null,
+        messageType: "MANUAL_OUTBOUND",
+        metadata: getMessageMetadata(persistedMessage.metadata),
+      });
+    }
+
     await cancelFollowups(lead.id).catch((error) => {
       logger.warn(
         {
@@ -453,44 +600,33 @@ export const persistAndDispatchLeadMessage = async ({
     });
   }
 
-  if (sender !== "USER" && outboundKey) {
-    const touchState =
-      sender === "AGENT"
-        ? delivery?.delivered
-          ? "DELIVERED"
-          : "FAILED"
-        : "CONFIRMED";
-
+  if (sender !== "USER" && outboundKey && sender !== "AGENT") {
     await upsertRevenueTouchLedger({
       businessId: lead.businessId || "",
       leadId: lead.id,
       clientId: lead.clientId || null,
       messageId: persistedMessage.id,
-      touchType: sender === "AGENT" ? "MANUAL_OUTBOUND" : "AI_REPLY",
-      touchReason: sender === "AGENT" ? "manual_send" : "conversation_send",
+      touchType: "AI_REPLY",
+      touchReason: "conversation_send",
       channel: platform || "UNKNOWN",
       actor: sender,
-      source: sender === "AGENT" ? "MANUAL" : "API",
+      source: "API",
       traceId: clientMessageId || null,
       providerMessageId: delivery?.providerMessageId || null,
       outboundKey,
-      deliveryState: touchState,
+      deliveryState: "CONFIRMED",
       providerAcceptedAt: delivery?.acceptedAt ? new Date(delivery.acceptedAt) : null,
       providerMessagePersistedAt: delivery?.providerMessageId ? new Date() : null,
       confirmedAt: new Date(),
-      deliveredAt:
-        delivery?.delivered && delivery.acceptedAt
-          ? new Date(delivery.acceptedAt)
-          : null,
-      failedAt:
-        sender === "AGENT" && delivery && !delivery.delivered ? new Date() : null,
+      deliveredAt: null,
+      failedAt: null,
       cta:
         typeof getMessageMetadata(persistedMessage.metadata).cta === "string"
           ? String(getMessageMetadata(persistedMessage.metadata).cta)
           : null,
       angle: null,
       leadState: null,
-      messageType: sender === "AGENT" ? "MANUAL_OUTBOUND" : "AI_REPLY",
+      messageType: "AI_REPLY",
       metadata: getMessageMetadata(persistedMessage.metadata),
     }).catch((error) => {
       logger.error(

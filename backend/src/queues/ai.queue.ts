@@ -9,6 +9,7 @@ import {
 import { getLeadCancelTokenVersions } from "../services/leadControlState.service";
 import logger from "../utils/logger";
 import { getRequestContext } from "../observability/requestContext";
+import { assertPhase5APreviewBypassEnabled } from "../services/runtimePolicy.service";
 
 export const AI_QUEUE_NAME: string = "ai-high";
 export const LEGACY_AI_QUEUE_NAME: string = env.AI_QUEUE_NAME;
@@ -77,6 +78,20 @@ const defaultJobOptions: JobsOptions = {
 const globalForAIQueue = globalThis as typeof globalThis & {
   __sylphAIHighQueue?: Queue<AIQueuePayload>;
   __sylphAILegacyQueue?: Queue<AIQueuePayload>;
+  __sylphAIHighDeadLetterQueue?: Queue<AIDeadLetterPayload>;
+};
+
+const AI_HIGH_DLQ_NAME = "ai-high-dlq";
+
+export type AIDeadLetterPayload = {
+  jobId: string | null;
+  leadId: string | null;
+  reason: string;
+  stack: string | null;
+  traceId: string | null;
+  payload: AIQueuePayload | null;
+  retryCount: number;
+  failedAt: string;
 };
 
 export const initAIQueues = () => {
@@ -112,6 +127,19 @@ export const initAIQueues = () => {
         },
       }),
       LEGACY_AI_QUEUE_NAME
+    );
+  }
+
+  if (!globalForAIQueue.__sylphAIHighDeadLetterQueue) {
+    globalForAIQueue.__sylphAIHighDeadLetterQueue = createResilientQueue(
+      new Queue<AIDeadLetterPayload>(AI_HIGH_DLQ_NAME, {
+        connection: getQueueRedisConnection(),
+        prefix: env.AI_QUEUE_PREFIX,
+        defaultJobOptions: buildQueueJobOptions({
+          attempts: 1,
+        }),
+      }),
+      AI_HIGH_DLQ_NAME
     );
   }
 
@@ -334,6 +362,8 @@ const normalizeCommentReplyPayload = (
 export const enqueueCommentReplyJob = async (
   payload: CommentReplyJobPayload
 ) => {
+  assertPhase5APreviewBypassEnabled("instagram_comment_reply_queue");
+
   const normalizedPayload = normalizeCommentReplyPayload(payload);
   const jobId = normalizedPayload.commentId
     ? `comment_reply_${normalizedPayload.commentId}`
@@ -401,6 +431,25 @@ export const getAIQueues = () =>
 
 export const getAIQueueNames = () => getAIQueues().map((queue) => queue.name);
 
+const getAIHighDeadLetterQueue = () => {
+  if (!globalForAIQueue.__sylphAIHighDeadLetterQueue) {
+    initAIQueues();
+  }
+
+  return globalForAIQueue.__sylphAIHighDeadLetterQueue!;
+};
+
+export const enqueueAIDeadLetterJob = async (payload: AIDeadLetterPayload) =>
+  getAIHighDeadLetterQueue().add("dead-letter", payload, {
+    jobId: `ai_dlq_${payload.jobId || payload.traceId || crypto.randomUUID()}`,
+    removeOnComplete: {
+      count: 1000,
+    },
+    removeOnFail: {
+      count: 1000,
+    },
+  });
+
 export const getAIQueueForLead = (_leadId: string) => getAIQueue();
 
 export const closeAIQueue = async () => {
@@ -408,12 +457,14 @@ export const closeAIQueue = async () => {
     [
       globalForAIQueue.__sylphAIHighQueue,
       globalForAIQueue.__sylphAILegacyQueue,
+      globalForAIQueue.__sylphAIHighDeadLetterQueue,
     ]
       .filter(Boolean)
       .map((queue) => queue!.close())
   );
   globalForAIQueue.__sylphAIHighQueue = undefined;
   globalForAIQueue.__sylphAILegacyQueue = undefined;
+  globalForAIQueue.__sylphAIHighDeadLetterQueue = undefined;
 };
 
 export type AIQueueJob = Job<AIQueuePayload>;

@@ -16,6 +16,16 @@ export type LeadControlGateDecision = {
   state: LeadControlAuthority | null;
 };
 
+const HUMAN_TAKEOVER_SUPPRESS_YEARS = 100;
+
+const buildHumanTakeoverSuppressUntil = (changedAt: Date) => {
+  const suppressUntil = new Date(changedAt.getTime());
+  suppressUntil.setFullYear(
+    suppressUntil.getFullYear() + HUMAN_TAKEOVER_SUPPRESS_YEARS
+  );
+  return suppressUntil;
+};
+
 const buildAuthority = (input: {
   businessId: string;
   leadId: string;
@@ -241,16 +251,65 @@ export const markLeadHumanTakeover = async ({
   businessId?: string | null;
   lastHumanTakeoverAt?: Date;
 }) =>
-  ensureLeadControlAuthority({
+  setLeadHumanControl({
     leadId,
     businessId,
-  }).then(() =>
-    prisma.leadControlState.update({
+    isActive: true,
+    changedAt: lastHumanTakeoverAt,
+  });
+
+export const isLeadHumanControlActive = (
+  state: LeadControlAuthority | null | undefined,
+  now = new Date()
+) =>
+  Boolean(
+    state?.manualSuppressUntil &&
+      state.manualSuppressUntil.getTime() > now.getTime()
+  );
+
+export const setLeadHumanControl = async ({
+  leadId,
+  businessId,
+  isActive,
+  changedAt = new Date(),
+}: {
+  leadId: string;
+  businessId?: string | null;
+  isActive: boolean;
+  changedAt?: Date;
+}) => {
+  const resolvedBusinessId = await resolveBusinessId(leadId, businessId);
+
+  if (!resolvedBusinessId) {
+    throw new Error(`lead_control_business_not_found:${leadId}`);
+  }
+
+  const state = await prisma.$transaction(async (tx) => {
+    const updatedState = await tx.leadControlState.upsert({
       where: {
         leadId,
       },
-      data: {
-        lastHumanTakeoverAt,
+      update: {
+        cancelTokenVersion: {
+          increment: 1,
+        },
+        manualSuppressUntil: isActive
+          ? buildHumanTakeoverSuppressUntil(changedAt)
+          : null,
+        ...(isActive
+          ? {
+              lastHumanTakeoverAt: changedAt,
+            }
+          : {}),
+      },
+      create: {
+        businessId: resolvedBusinessId,
+        leadId,
+        cancelTokenVersion: 1,
+        manualSuppressUntil: isActive
+          ? buildHumanTakeoverSuppressUntil(changedAt)
+          : null,
+        lastHumanTakeoverAt: isActive ? changedAt : null,
       },
       select: {
         businessId: true,
@@ -260,8 +319,22 @@ export const markLeadHumanTakeover = async ({
         lastManualOutboundAt: true,
         lastHumanTakeoverAt: true,
       },
-    }).then(buildAuthority)
-  );
+    });
+
+    await tx.lead.update({
+      where: {
+        id: leadId,
+      },
+      data: {
+        isHumanActive: isActive,
+      },
+    });
+
+    return updatedState;
+  });
+
+  return buildAuthority(state);
+};
 
 export const evaluateLeadControlGate = async ({
   leadId,
@@ -285,8 +358,9 @@ export const evaluateLeadControlGate = async ({
   }
 
   if (
-    state.manualSuppressUntil instanceof Date &&
-    state.manualSuppressUntil.getTime() > now.getTime()
+    isLeadHumanControlActive(state, now) ||
+    (state.manualSuppressUntil instanceof Date &&
+      state.manualSuppressUntil.getTime() > now.getTime())
   ) {
     return {
       allowed: false,

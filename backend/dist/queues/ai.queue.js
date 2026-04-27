@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeAIQueue = exports.getAIQueueForLead = exports.getAIQueueNames = exports.getAIQueues = exports.addRouterJob = exports.addAIJob = exports.enqueueCommentReplyJob = exports.enqueueAIMessage = exports.enqueueAIBatch = exports.initAIQueues = exports.AI_QUEUE_PARTITIONS = exports.LEGACY_AI_QUEUE_NAME = exports.AI_QUEUE_NAME = void 0;
+exports.closeAIQueue = exports.getAIQueueForLead = exports.enqueueAIDeadLetterJob = exports.getAIQueueNames = exports.getAIQueues = exports.addRouterJob = exports.addAIJob = exports.enqueueCommentReplyJob = exports.enqueueAIMessage = exports.enqueueAIBatch = exports.initAIQueues = exports.AI_QUEUE_PARTITIONS = exports.LEGACY_AI_QUEUE_NAME = exports.AI_QUEUE_NAME = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const bullmq_1 = require("bullmq");
 const env_1 = require("../config/env");
@@ -12,6 +12,7 @@ const queue_defaults_1 = require("./queue.defaults");
 const leadControlState_service_1 = require("../services/leadControlState.service");
 const logger_1 = __importDefault(require("../utils/logger"));
 const requestContext_1 = require("../observability/requestContext");
+const runtimePolicy_service_1 = require("../services/runtimePolicy.service");
 exports.AI_QUEUE_NAME = "ai-high";
 exports.LEGACY_AI_QUEUE_NAME = env_1.env.AI_QUEUE_NAME;
 exports.AI_QUEUE_PARTITIONS = 1;
@@ -24,6 +25,7 @@ const defaultJobOptions = {
     }),
 };
 const globalForAIQueue = globalThis;
+const AI_HIGH_DLQ_NAME = "ai-high-dlq";
 const initAIQueues = () => {
     if (!globalForAIQueue.__sylphAIHighQueue) {
         globalForAIQueue.__sylphAIHighQueue = (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.AI_QUEUE_NAME, {
@@ -49,6 +51,15 @@ const initAIQueues = () => {
                 },
             },
         }), exports.LEGACY_AI_QUEUE_NAME);
+    }
+    if (!globalForAIQueue.__sylphAIHighDeadLetterQueue) {
+        globalForAIQueue.__sylphAIHighDeadLetterQueue = (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(AI_HIGH_DLQ_NAME, {
+            connection: (0, redis_1.getQueueRedisConnection)(),
+            prefix: env_1.env.AI_QUEUE_PREFIX,
+            defaultJobOptions: (0, queue_defaults_1.buildQueueJobOptions)({
+                attempts: 1,
+            }),
+        }), AI_HIGH_DLQ_NAME);
     }
     return (0, exports.getAIQueues)();
 };
@@ -199,6 +210,7 @@ const normalizeCommentReplyPayload = (payload) => ({
     commentId: payload.commentId?.trim(),
 });
 const enqueueCommentReplyJob = async (payload) => {
+    (0, runtimePolicy_service_1.assertPhase5APreviewBypassEnabled)("instagram_comment_reply_queue");
     const normalizedPayload = normalizeCommentReplyPayload(payload);
     const jobId = normalizedPayload.commentId
         ? `comment_reply_${normalizedPayload.commentId}`
@@ -247,16 +259,34 @@ const getAIQueues = () => exports.LEGACY_AI_QUEUE_NAME === exports.AI_QUEUE_NAME
 exports.getAIQueues = getAIQueues;
 const getAIQueueNames = () => (0, exports.getAIQueues)().map((queue) => queue.name);
 exports.getAIQueueNames = getAIQueueNames;
+const getAIHighDeadLetterQueue = () => {
+    if (!globalForAIQueue.__sylphAIHighDeadLetterQueue) {
+        (0, exports.initAIQueues)();
+    }
+    return globalForAIQueue.__sylphAIHighDeadLetterQueue;
+};
+const enqueueAIDeadLetterJob = async (payload) => getAIHighDeadLetterQueue().add("dead-letter", payload, {
+    jobId: `ai_dlq_${payload.jobId || payload.traceId || crypto_1.default.randomUUID()}`,
+    removeOnComplete: {
+        count: 1000,
+    },
+    removeOnFail: {
+        count: 1000,
+    },
+});
+exports.enqueueAIDeadLetterJob = enqueueAIDeadLetterJob;
 const getAIQueueForLead = (_leadId) => getAIQueue();
 exports.getAIQueueForLead = getAIQueueForLead;
 const closeAIQueue = async () => {
     await Promise.allSettled([
         globalForAIQueue.__sylphAIHighQueue,
         globalForAIQueue.__sylphAILegacyQueue,
+        globalForAIQueue.__sylphAIHighDeadLetterQueue,
     ]
         .filter(Boolean)
         .map((queue) => queue.close()));
     globalForAIQueue.__sylphAIHighQueue = undefined;
     globalForAIQueue.__sylphAILegacyQueue = undefined;
+    globalForAIQueue.__sylphAIHighDeadLetterQueue = undefined;
 };
 exports.closeAIQueue = closeAIQueue;

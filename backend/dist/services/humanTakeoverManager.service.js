@@ -8,11 +8,10 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const leadControlState_service_1 = require("./leadControlState.service");
 const isHumanActive = async (leadId) => {
     try {
-        const lead = await prisma_1.default.lead.findUnique({
-            where: { id: leadId },
-            select: { isHumanActive: true },
+        const controlState = await (0, leadControlState_service_1.getLeadControlAuthority)({
+            leadId,
         });
-        return lead?.isHumanActive || false;
+        return (0, leadControlState_service_1.isLeadHumanControlActive)(controlState);
     }
     catch (error) {
         console.error("HUMAN CHECK ERROR:", error);
@@ -22,19 +21,17 @@ const isHumanActive = async (leadId) => {
 exports.isHumanActive = isHumanActive;
 const activateHuman = async (leadId) => {
     try {
-        const lead = await prisma_1.default.lead.update({
+        const lead = await prisma_1.default.lead.findUnique({
             where: { id: leadId },
-            data: {
-                isHumanActive: true,
-            },
             select: {
                 businessId: true,
             },
         });
-        await (0, leadControlState_service_1.markLeadHumanTakeover)({
+        await (0, leadControlState_service_1.setLeadHumanControl)({
             leadId,
-            businessId: lead.businessId,
-        }).catch(() => undefined);
+            businessId: lead?.businessId || null,
+            isActive: true,
+        });
     }
     catch (error) {
         console.error("ACTIVATE HUMAN ERROR:", error);
@@ -44,11 +41,16 @@ const activateHuman = async (leadId) => {
 exports.activateHuman = activateHuman;
 const deactivateHuman = async (leadId) => {
     try {
-        await prisma_1.default.lead.update({
+        const lead = await prisma_1.default.lead.findUnique({
             where: { id: leadId },
-            data: {
-                isHumanActive: false,
+            select: {
+                businessId: true,
             },
+        });
+        await (0, leadControlState_service_1.setLeadHumanControl)({
+            leadId,
+            businessId: lead?.businessId || null,
+            isActive: false,
         });
     }
     catch (error) {
@@ -64,10 +66,9 @@ const autoDisableHumanAfterTimeout = async (leadId, timeoutMinutes = 10) => {
             where: { id: leadId },
             select: {
                 lastMessageAt: true,
-                isHumanActive: true,
             },
         });
-        if (!lead || !lead.isHumanActive)
+        if (!lead || !(await (0, exports.isHumanActive)(leadId)))
             return;
         const last = new Date(lead.lastMessageAt || 0).getTime();
         const now = Date.now();

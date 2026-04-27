@@ -15,10 +15,6 @@ import {
   initAuthEmailQueue,
 } from "../queues/authEmail.queue";
 import {
-  closeLegacyInboxQueueWorker,
-  initLegacyInboxQueueWorker,
-} from "../queues/inbox.queue";
-import {
   closeAutomationQueue,
   initAutomationQueue,
 } from "../queues/automation.queue";
@@ -32,15 +28,16 @@ import {
 } from "../queues/followup.queue";
 import { closeFunnelQueue, initFunnelQueue } from "../queues/funnel.queue";
 import {
+  closeReceptionRuntimeQueues,
+  initReceptionRuntimeQueues,
+} from "../queues/receptionRuntime.queue";
+import {
   closeCRMRefreshQueue,
   initCRMRefreshQueue,
 } from "../services/crm/refreshQueue.service";
+import { startInboundSlaMonitorCron } from "../cron/inboundSlaMonitor.cron";
 import { initRevenueBrainEventQueues } from "../services/revenueBrain/eventBus.service";
 import { shutdownLearningQueue } from "../services/learningQueue.service";
-import {
-  closeLegacyInboxRouteWorker,
-  initLegacyInboxRouteWorker,
-} from "../routes/inbox.routes";
 import {
   closeAuthEmailWorker,
   initAuthEmailWorker,
@@ -66,6 +63,10 @@ import {
   initFollowupWorkers,
 } from "../workers/followup.worker";
 import {
+  closeReceptionRuntimeWorkers,
+  initReceptionRuntimeWorkers,
+} from "../workers/receptionRuntime.worker";
+import {
   startCRMRefreshWorker,
   stopCRMRefreshWorker,
 } from "../workers/crmRefresh.worker";
@@ -88,8 +89,7 @@ export type WorkerLifecycleOptions = {
   automation?: boolean;
   bookingReminder?: boolean;
   bookingMonitor?: boolean;
-  legacyInboxQueue?: boolean;
-  legacyInboxRoute?: boolean;
+  receptionRuntime?: boolean;
 };
 
 const globalForLifecycle = globalThis as typeof globalThis & {
@@ -108,6 +108,7 @@ export const initQueues = () => {
   initFunnelQueue();
   initCRMRefreshQueue();
   initRevenueBrainEventQueues();
+  initReceptionRuntimeQueues();
 };
 
 export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
@@ -143,12 +144,8 @@ export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
     initBookingMonitorWorker();
   }
 
-  if (options.legacyInboxQueue) {
-    initLegacyInboxQueueWorker();
-  }
-
-  if (options.legacyInboxRoute) {
-    initLegacyInboxRouteWorker();
+  if (options.receptionRuntime) {
+    initReceptionRuntimeWorkers();
   }
 };
 
@@ -164,6 +161,7 @@ export const initCrons = () => {
     startUsageResetCron(),
     startConnectionHealthCron(),
     startCleanupCron(),
+    startInboundSlaMonitorCron(),
   ];
 
   return globalForLifecycle.__sylphCronTasks;
@@ -189,8 +187,7 @@ export const shutdown = async () => {
     closeBookingReminderWorker(),
     closeAutomationWorker(),
     closeAuthEmailWorker(),
-    closeLegacyInboxQueueWorker(),
-    closeLegacyInboxRouteWorker(),
+    closeReceptionRuntimeWorkers(),
     stopRevenueBrainEventWorker(),
     stopCRMRefreshWorker(),
     closeCRMRefreshQueue(),
@@ -200,6 +197,7 @@ export const shutdown = async () => {
     closeAuthEmailQueue(),
     closeBookingReminderQueue(),
     closeFunnelQueue(),
+    closeReceptionRuntimeQueues(),
     prisma.$disconnect(),
     closeRedisConnection(),
   ]);

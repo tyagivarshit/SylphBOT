@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import { type RequestHandler, Router } from "express";
+import { getInboxDashboardProjection } from "../services/inboxDashboardProjection.service";
 import { getQueueHealth } from "../services/queueHealth.service";
+import { getReceptionMetricsSnapshot } from "../services/receptionMetrics.service";
 import { getSystemHealth } from "../services/systemHealth.service";
 import { asyncHandler } from "../utils/asyncHandler";
 
@@ -66,6 +68,30 @@ router.get(
       success: true,
       requestId: req.requestId,
       ...health,
+    });
+  })
+);
+
+router.get(
+  "/reception-metrics",
+  asyncHandler(async (req, res) => {
+    res.status(200).json({
+      success: true,
+      requestId: req.requestId,
+      metrics: getReceptionMetricsSnapshot(),
+    });
+  })
+);
+
+router.get(
+  "/reception-dashboard",
+  asyncHandler(async (req, res) => {
+    const projection = await getInboxDashboardProjection();
+
+    res.status(200).json({
+      success: true,
+      requestId: req.requestId,
+      projection,
     });
   })
 );

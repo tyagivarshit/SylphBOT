@@ -39,6 +39,7 @@ export const startWorkerRuntime = async () => {
       revenueBrainEvents: true,
       aiPartition: true,
       followup: true,
+      receptionRuntime: true,
     });
   } catch (error) {
     started = false;

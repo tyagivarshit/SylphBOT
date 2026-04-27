@@ -12,6 +12,7 @@ import {
   getSubscriptionAccess,
   logSubscriptionLockedAction,
 } from "../middleware/subscriptionGuard.middleware";
+import { assertPhase5APreviewBypassEnabled } from "../services/runtimePolicy.service";
 
 const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
@@ -78,8 +79,11 @@ export const initAutomationWorker = () => {
           );
 
           if (job.name === "comment" || job.name === "comment-reply") {
+            assertPhase5APreviewBypassEnabled("comment_automation_worker");
             console.log("Processing comment reply job", job.data);
             await handleCommentAutomation(job.data);
+          } else {
+            throw new Error(`unsupported_automation_job:${String(job.name || "unknown")}`);
           }
 
           logger.info(

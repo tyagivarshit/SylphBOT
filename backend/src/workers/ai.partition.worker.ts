@@ -9,6 +9,7 @@ import {
   AIQueuePayload,
   AI_QUEUE_PARTITIONS,
   CommentReplyJobPayload,
+  enqueueAIDeadLetterJob,
   enqueueAIBatch,
   getAIQueueNames,
 } from "../queues/ai.queue";
@@ -24,7 +25,6 @@ import {
   type ReplyDeliveryMode,
   toConfirmedReplyPayload,
 } from "../services/replyDeliveryPipeline.service";
-import { isConsentRevoked } from "../services/consentAuthority.service";
 import { handleIncomingMessage } from "../services/executionRouter.servce";
 import { evaluateLeadControlGate } from "../services/leadControlState.service";
 import {
@@ -33,7 +33,13 @@ import {
 } from "../queues/followup.queue";
 import { clearSalesReplyState } from "../services/salesAgent/replyCache.service";
 import { trackAIMessage } from "../services/salesAgent/conversionTracker.service";
-import { buildRevenueTouchOutboundKey } from "../services/revenueTouchLedger.service";
+import {
+  buildRevenueTouchOutboundKey,
+  findRevenueTouchLedgerByOutboundKey,
+  isRevenueTouchStateAtLeast,
+  upsertRevenueTouchLedger,
+  type RevenueTouchLedgerCheckpoint,
+} from "../services/revenueTouchLedger.service";
 import { getIO } from "../sockets/socket.server";
 import { decrypt } from "../utils/encrypt";
 import logger from "../utils/logger";
@@ -47,6 +53,8 @@ import {
   getSubscriptionAccess,
   logSubscriptionLockedAction,
 } from "../middleware/subscriptionGuard.middleware";
+import { assertPhase5APreviewBypassEnabled } from "../services/runtimePolicy.service";
+import { resolveFreshReceptionExecutionGate } from "../services/receptionContext.service";
 import {
   finalizeAIUsageExecution,
   releaseAIUsageExecution,
@@ -165,6 +173,13 @@ type NormalizedReply = {
 type ThroughputBudget = {
   messagesPerMinute: number;
   aiPerHour: number;
+};
+
+type ReplyCheckpointSnapshot = {
+  confirmedAt: string;
+  deliveryMode: ReplyDeliveryMode;
+  platform: string | null;
+  confirmedReply: ReturnType<typeof toConfirmedReplyPayload>;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -390,6 +405,180 @@ const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
   };
 };
 
+const buildReplyCheckpointSnapshot = ({
+  task,
+  reply,
+  deliveryMode,
+  platform,
+  confirmedAt,
+  providerMessageId,
+}: {
+  task: AIWorkerTask;
+  reply: NormalizedReply;
+  deliveryMode: ReplyDeliveryMode;
+  platform: string | null;
+  confirmedAt: string;
+  providerMessageId?: string | null;
+}): ReplyCheckpointSnapshot => {
+  const outboundKey = buildTaskOutboundKey(task);
+
+  return {
+    confirmedAt,
+    deliveryMode,
+    platform,
+    confirmedReply: toConfirmedReplyPayload({
+      ...reply,
+      meta: {
+        ...(reply.meta || {}),
+        outboundKey,
+        providerMessageId: providerMessageId || null,
+      },
+    }),
+  };
+};
+
+const buildReplyCheckpointMetadata = ({
+  task,
+  checkpoint,
+  providerMessageId,
+}: {
+  task: AIWorkerTask;
+  checkpoint: ReplyCheckpointSnapshot;
+  providerMessageId?: string | null;
+}) => ({
+  outboundKey: buildTaskOutboundKey(task),
+  deliveryJobKey: task.jobKey,
+  sourceKind: task.kind,
+  platform: task.message.platform || null,
+  externalEventId: task.message.externalEventId || null,
+  providerMessageId: providerMessageId || null,
+  replyDeliveryCheckpoint: checkpoint,
+});
+
+const extractReplyCheckpointFromTouch = (
+  touch: RevenueTouchLedgerCheckpoint | null | undefined
+): ReplyCheckpointSnapshot | null => {
+  const checkpoint = asRecord(asRecord(touch?.metadata).replyDeliveryCheckpoint);
+
+  if (!checkpoint || typeof checkpoint.confirmedAt !== "string") {
+    return null;
+  }
+
+  const deliveryMode = checkpoint.deliveryMode;
+
+  if (
+    deliveryMode !== "platform" &&
+    deliveryMode !== "local_preview" &&
+    deliveryMode !== "local_only"
+  ) {
+    return null;
+  }
+
+  const confirmedReply = checkpoint.confirmedReply;
+
+  if (
+    !confirmedReply ||
+    typeof confirmedReply !== "object" ||
+    typeof (confirmedReply as { text?: unknown }).text !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    confirmedAt: checkpoint.confirmedAt,
+    deliveryMode,
+    platform:
+      typeof checkpoint.platform === "string" ? checkpoint.platform : null,
+    confirmedReply: toConfirmedReplyPayload(confirmedReply as any),
+  };
+};
+
+const restoreReplyCheckpointFromTouch = async (
+  task: AIWorkerTask,
+  touch: RevenueTouchLedgerCheckpoint | null | undefined
+) => {
+  const checkpoint = extractReplyCheckpointFromTouch(touch);
+
+  if (!checkpoint) {
+    return false;
+  }
+
+  await checkpointReplyConfirmation(task.jobKey, {
+    confirmedAt: checkpoint.confirmedAt,
+    deliveryMode: checkpoint.deliveryMode,
+    platform: checkpoint.platform,
+    confirmedReply: checkpoint.confirmedReply,
+  });
+
+  return true;
+};
+
+const upsertAIReplyTouchCheckpoint = async ({
+  task,
+  reply,
+  deliveryState,
+  deliveryMode,
+  platform,
+  confirmedAt,
+  providerMessageId,
+  providerAcceptedAt,
+  providerMessagePersistedAt,
+  messageId,
+}: {
+  task: AIWorkerTask;
+  reply: NormalizedReply;
+  deliveryState:
+    | "RESERVED"
+    | "PROVIDER_ACCEPTED"
+    | "PROVIDER_MESSAGE_ID_PERSISTED"
+    | "CONFIRMED"
+    | "FAILED";
+  deliveryMode: ReplyDeliveryMode;
+  platform: string | null;
+  confirmedAt: string;
+  providerMessageId?: string | null;
+  providerAcceptedAt?: Date | null;
+  providerMessagePersistedAt?: Date | null;
+  messageId?: string | null;
+}) => {
+  const checkpoint = buildReplyCheckpointSnapshot({
+    task,
+    reply,
+    deliveryMode,
+    platform,
+    confirmedAt,
+    providerMessageId,
+  });
+
+  return upsertRevenueTouchLedger({
+    businessId: task.message.businessId,
+    leadId: task.message.leadId,
+    messageId: messageId || null,
+    touchType: reply.messageType || "AI_REPLY",
+    touchReason: reply.source || task.kind || "AI_REPLY",
+    channel: task.message.platform || "UNKNOWN",
+    actor: "AI",
+    source: task.kind === "router" ? "AI_ROUTER" : "AI_MESSAGE",
+    traceId: reply.traceId || task.jobKey,
+    providerMessageId: providerMessageId || null,
+    outboundKey: buildTaskOutboundKey(task),
+    deliveryState,
+    providerAcceptedAt: providerAcceptedAt || null,
+    providerMessagePersistedAt: providerMessagePersistedAt || null,
+    confirmedAt: deliveryState === "CONFIRMED" ? new Date(confirmedAt) : null,
+    failedAt: deliveryState === "FAILED" ? new Date() : null,
+    cta: reply.cta || null,
+    angle: reply.angle || null,
+    leadState: reply.leadState || null,
+    messageType: reply.messageType || "AI_REPLY",
+    metadata: buildReplyCheckpointMetadata({
+      task,
+      checkpoint,
+      providerMessageId,
+    }),
+  });
+};
+
 const emitRealtimeMessage = (
   leadId: string,
   message: any,
@@ -505,8 +694,26 @@ const persistConfirmedReplyMessage = async ({
   const replyMeta = asRecord(reply.meta);
   const outboundKey =
     String(replyMeta?.outboundKey || "").trim() || buildTaskOutboundKey(task);
+  const touchCheckpoint = await findRevenueTouchLedgerByOutboundKey(outboundKey).catch(
+    () => null
+  );
+  const touchMessageId = String(touchCheckpoint?.messageId || "").trim() || null;
   const providerMessageId =
     String(replyMeta?.providerMessageId || "").trim() || null;
+
+  if (touchMessageId) {
+    const existingLedgerMessage = await prisma.message.findUnique({
+      where: { id: touchMessageId },
+    });
+
+    if (existingLedgerMessage) {
+      await markReplySaved(task.jobKey, existingLedgerMessage.id);
+      return {
+        message: existingLedgerMessage,
+        created: false,
+      };
+    }
+  }
 
   const createdMessage = await prisma.message.create({
     data: {
@@ -531,7 +738,7 @@ const persistConfirmedReplyMessage = async ({
         latencyMs: reply.latencyMs || null,
         traceId: reply.traceId || task.jobKey,
         delivery: {
-          status: "DELIVERED",
+          status: "CONFIRMED",
           mode,
           platform: platform || null,
           providerMessageId,
@@ -606,15 +813,18 @@ const sendPlatformReply = async (
 
   const normalizedPlatform = platform.toUpperCase();
 
-  if (
-    await isConsentRevoked({
-      businessId: task.message.businessId,
-      leadId: task.message.leadId,
-      channel: normalizedPlatform,
-      scope: "CONVERSATIONAL_OUTBOUND",
-    })
-  ) {
-    throw new DeliveryStageError("transport", "consent_revoked", false);
+  const executionGate = await resolveFreshReceptionExecutionGate({
+    businessId: task.message.businessId,
+    leadId: task.message.leadId,
+    channel: normalizedPlatform,
+  });
+
+  if (!executionGate.gate.allowed) {
+    throw new DeliveryStageError(
+      "transport",
+      `automation_blocked:${executionGate.gate.reasons.join(",") || "control_gate"}`,
+      false
+    );
   }
 
   logger.info(
@@ -648,10 +858,20 @@ const sendPlatformReply = async (
       }
     );
 
+    const resolvedProviderMessageId = extractProviderMessageId(response.data);
+
+    if (!resolvedProviderMessageId) {
+      throw new DeliveryStageError(
+        "persistence",
+        "provider_message_id_missing",
+        false
+      );
+    }
+
     return {
       delivered: true,
       platform: normalizedPlatform,
-      providerMessageId: extractProviderMessageId(response.data),
+      providerMessageId: resolvedProviderMessageId,
       acceptedAt: new Date().toISOString(),
     };
   }
@@ -679,10 +899,20 @@ const sendPlatformReply = async (
       }
     );
 
+    const resolvedProviderMessageId = extractProviderMessageId(response.data);
+
+    if (!resolvedProviderMessageId) {
+      throw new DeliveryStageError(
+        "persistence",
+        "provider_message_id_missing",
+        false
+      );
+    }
+
     return {
       delivered: true,
       platform: normalizedPlatform,
-      providerMessageId: extractProviderMessageId(response.data),
+      providerMessageId: resolvedProviderMessageId,
       acceptedAt: new Date().toISOString(),
     };
   }
@@ -1109,7 +1339,7 @@ const processAndSendReply = async (
   task: AIWorkerTask,
   aiReply: unknown
 ) => {
-  const existingState = await getReplyDeliveryState(task.jobKey);
+  let existingState = await getReplyDeliveryState(task.jobKey);
   const normalizedReply = normalizeReply(
     existingState.confirmed && existingState.confirmedReply
       ? existingState.confirmedReply
@@ -1145,6 +1375,10 @@ const processAndSendReply = async (
     await clearSalesReplyState(task.message.leadId).catch(() => undefined);
     return;
   }
+
+  let touchCheckpoint = await findRevenueTouchLedgerByOutboundKey(outboundKey).catch(
+    () => null
+  );
 
   if (existingState.sent) {
     await clearSalesReplyState(task.message.leadId).catch((error) => {
@@ -1185,6 +1419,24 @@ const processAndSendReply = async (
           text: replyText,
         };
 
+  if (
+    !existingState.confirmed &&
+    touchCheckpoint &&
+    isRevenueTouchStateAtLeast(touchCheckpoint.deliveryState, "PROVIDER_ACCEPTED")
+  ) {
+    const restored = await restoreReplyCheckpointFromTouch(task, touchCheckpoint);
+
+    if (!restored) {
+      throw new DeliveryStageError(
+        "persistence",
+        "provider_boundary_resume_checkpoint_missing",
+        false
+      );
+    }
+
+    existingState = await getReplyDeliveryState(task.jobKey);
+  }
+
   if (existingState.confirmed && existingState.confirmedReply) {
     logger.info(
       {
@@ -1216,6 +1468,22 @@ const processAndSendReply = async (
     const confirmedAt = new Date().toISOString();
 
     try {
+      await upsertAIReplyTouchCheckpoint({
+        task,
+        reply: deliveryReply,
+        deliveryState: "RESERVED",
+        deliveryMode,
+        platform: task.message.platform || null,
+        confirmedAt,
+      });
+      await upsertAIReplyTouchCheckpoint({
+        task,
+        reply: deliveryReply,
+        deliveryState: "CONFIRMED",
+        deliveryMode,
+        platform: task.message.platform || null,
+        confirmedAt,
+      });
       await checkpointReplyConfirmation(task.jobKey, {
         confirmedAt,
         deliveryMode,
@@ -1329,6 +1597,17 @@ const processAndSendReply = async (
   }
 
   const confirmedAt = new Date().toISOString();
+  const providerAcceptedAt = new Date();
+
+  await upsertAIReplyTouchCheckpoint({
+    task,
+    reply: deliveryReply,
+    deliveryState: "RESERVED",
+    deliveryMode,
+    platform: task.message.platform || null,
+    confirmedAt,
+  });
+
   let deliveryReceipt: {
     delivered: boolean;
     platform: string | null;
@@ -1356,6 +1635,48 @@ const processAndSendReply = async (
         true
       );
     }
+
+    await upsertAIReplyTouchCheckpoint({
+      task,
+      reply: deliveryReply,
+      deliveryState: "PROVIDER_ACCEPTED",
+      deliveryMode,
+      platform: task.message.platform || null,
+      confirmedAt,
+      providerMessageId: deliveryReceipt.providerMessageId || null,
+      providerAcceptedAt:
+        deliveryReceipt.acceptedAt
+          ? new Date(deliveryReceipt.acceptedAt)
+          : providerAcceptedAt,
+    });
+    await upsertAIReplyTouchCheckpoint({
+      task,
+      reply: deliveryReply,
+      deliveryState: "PROVIDER_MESSAGE_ID_PERSISTED",
+      deliveryMode,
+      platform: task.message.platform || null,
+      confirmedAt,
+      providerMessageId: deliveryReceipt.providerMessageId || null,
+      providerAcceptedAt:
+        deliveryReceipt.acceptedAt
+          ? new Date(deliveryReceipt.acceptedAt)
+          : providerAcceptedAt,
+      providerMessagePersistedAt: new Date(),
+    });
+    await upsertAIReplyTouchCheckpoint({
+      task,
+      reply: deliveryReply,
+      deliveryState: "CONFIRMED",
+      deliveryMode,
+      platform: task.message.platform || null,
+      confirmedAt,
+      providerMessageId: deliveryReceipt.providerMessageId || null,
+      providerAcceptedAt:
+        deliveryReceipt.acceptedAt
+          ? new Date(deliveryReceipt.acceptedAt)
+          : providerAcceptedAt,
+      providerMessagePersistedAt: new Date(),
+    });
   } catch (error) {
     const stageError =
       error instanceof DeliveryStageError
@@ -1383,6 +1704,14 @@ const processAndSendReply = async (
     });
 
     if (!stageError.retriable) {
+      await upsertAIReplyTouchCheckpoint({
+        task,
+        reply: deliveryReply,
+        deliveryState: "FAILED",
+        deliveryMode,
+        platform: task.message.platform || null,
+        confirmedAt,
+      }).catch(() => undefined);
       logger.warn(
         {
           leadId: task.message.leadId,
@@ -1675,8 +2004,10 @@ const processAIMessage = async (task: AIWorkerTask) => {
 
 const processCommentReplyJob = async (job: AIWorkerJob) => {
   if (!isCommentReplyJobPayload(job.data)) {
-    return;
+    throw new Error(`invalid_comment_reply_payload:${String(job.id || "unknown")}`);
   }
+
+  assertPhase5APreviewBypassEnabled("instagram_comment_reply_worker");
 
   console.log("⚙️ WORKER RECEIVED JOB", job.data);
   console.log("🔍 JOB TYPE:", job.data.type);
@@ -1751,14 +2082,7 @@ const processAIJob = async (job: AIWorkerJob) => {
   }
 
   if (!isAIBatchPayload(job.data) || !job.data.messages.length) {
-    logger.warn(
-      {
-        jobId: job.id,
-        queueName: job.queueName,
-      },
-      "AI worker received empty batch"
-    );
-    return;
+    throw new Error(`invalid_ai_batch_payload:${String(job.id || "unknown")}`);
   }
 
   logger.info(
@@ -1777,6 +2101,60 @@ const processAIJob = async (job: AIWorkerJob) => {
 
   for (const [messageIndex, message] of job.data.messages.entries()) {
     await processAIMessage(createWorkerTask(job, message, messageIndex));
+  }
+};
+
+const markAIJobTerminalFailure = async (
+  job: AIWorkerJob,
+  error: unknown
+) => {
+  if (!isAIBatchPayload(job.data)) {
+    return;
+  }
+
+  for (const [messageIndex, message] of job.data.messages.entries()) {
+    const task = createWorkerTask(job, message, messageIndex);
+    const existingTouch = await findRevenueTouchLedgerByOutboundKey(
+      buildTaskOutboundKey(task)
+    ).catch(() => null);
+
+    if (!existingTouch || isRevenueTouchStateAtLeast(existingTouch.deliveryState, "DELIVERED")) {
+      continue;
+    }
+
+    await upsertRevenueTouchLedger({
+      businessId: existingTouch.businessId,
+      leadId: existingTouch.leadId,
+      clientId: existingTouch.clientId || null,
+      messageId: existingTouch.messageId || null,
+      touchType: existingTouch.touchType,
+      touchReason: existingTouch.touchReason,
+      channel: existingTouch.channel,
+      actor: existingTouch.actor,
+      source: existingTouch.source,
+      traceId: existingTouch.traceId || task.jobKey,
+      providerMessageId: existingTouch.providerMessageId || null,
+      outboundKey: existingTouch.outboundKey,
+      deliveryState: "FAILED",
+      campaignId: existingTouch.campaignId || null,
+      conversionWindowEndsAt: existingTouch.conversionWindowEndsAt || null,
+      providerAcceptedAt: existingTouch.providerAcceptedAt || null,
+      providerMessagePersistedAt: existingTouch.providerMessagePersistedAt || null,
+      confirmedAt: existingTouch.confirmedAt || null,
+      deliveredAt: existingTouch.deliveredAt || null,
+      failedAt: new Date(),
+      cta: existingTouch.cta || null,
+      angle: existingTouch.angle || null,
+      leadState: existingTouch.leadState || null,
+      messageType: existingTouch.messageType || null,
+      metadata: {
+        ...(asRecord(existingTouch.metadata) || {}),
+        terminalFailureReason: String(
+          (error as { message?: unknown })?.message || error || "job_failed"
+        ),
+        terminalFailureAt: new Date().toISOString(),
+      },
+    }).catch(() => undefined);
   }
 };
 
@@ -1826,6 +2204,9 @@ export const initAIPartitionWorkers = () => {
     });
 
     worker.on("failed", (job, error) => {
+      const maxAttempts = Number(job?.opts?.attempts || 1);
+      const attemptsMade = Number(job?.attemptsMade || 0);
+
       if (error instanceof LeadQueueBusyError) {
         logger.warn(
           {
@@ -1870,6 +2251,36 @@ export const initAIPartitionWorkers = () => {
           jobId: job?.id,
           leadId: getJobLeadId(job),
         },
+      });
+
+      if (!job || attemptsMade < maxAttempts) {
+        return;
+      }
+
+      void markAIJobTerminalFailure(job, error);
+      void enqueueAIDeadLetterJob({
+        jobId: String(job.id || ""),
+        leadId: getJobLeadId(job),
+        reason: String(
+          (error as { message?: unknown })?.message || error || "job_failed"
+        ),
+        stack:
+          typeof (error as { stack?: unknown })?.stack === "string"
+            ? String((error as { stack?: string }).stack)
+            : null,
+        traceId: isAIBatchPayload(job.data) ? buildMessageJobKey(job, 0) : null,
+        payload: job.data || null,
+        retryCount: attemptsMade,
+        failedAt: new Date().toISOString(),
+      }).catch((deadLetterError) => {
+        logger.error(
+          {
+            jobId: job.id,
+            queueName,
+            error: deadLetterError,
+          },
+          "AI dead-letter enqueue failed"
+        );
       });
     });
 

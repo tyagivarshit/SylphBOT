@@ -43,7 +43,7 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     connectionName,
     enableReadyCheck: false,
     enableAutoPipelining: true,
-    enableOfflineQueue: true,
+    enableOfflineQueue: false,
     autoResubscribe: true,
     autoResendUnfulfilledCommands: false,
     lazyConnect: true,

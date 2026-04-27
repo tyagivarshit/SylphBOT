@@ -121,7 +121,7 @@ const consumeRateWindow = async (key, limit, ttlSeconds) => {
             ttlSeconds: Math.max(toNumber(raw?.[2]), ttlSeconds),
         };
     }, () => ({
-        allowed: true,
+        allowed: false,
         count: 0,
         ttlSeconds,
     }), {

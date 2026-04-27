@@ -92,6 +92,40 @@ const readNumber = (
   return parsed;
 };
 
+const readBoolean = (
+  name: string,
+  options?: {
+    required?: boolean;
+    defaultValue?: boolean;
+  }
+) => {
+  const value = readEnv(name, {
+    required: options?.required,
+    defaultValue:
+      options?.defaultValue === undefined
+        ? undefined
+        : options.defaultValue
+        ? "true"
+        : "false",
+  });
+
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.toLowerCase();
+
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`${name} must be a boolean`);
+};
+
 const readOriginList = (name: string) => {
   const value = readEnv(name, { required: false });
 
@@ -345,6 +379,20 @@ export const env = {
     defaultValue: 1800,
     min: 100,
   }) as number,
+  PHASE5A_PREVIEW_BYPASS_ENABLED: readBoolean(
+    "PHASE5A_PREVIEW_BYPASS_ENABLED",
+    {
+      required: false,
+      defaultValue: !IS_PROD,
+    }
+  ) as boolean,
+  PHASE5A_LEGACY_RUNTIME_ENABLED: readBoolean(
+    "PHASE5A_LEGACY_RUNTIME_ENABLED",
+    {
+      required: false,
+      defaultValue: false,
+    }
+  ) as boolean,
   REDIS_CONNECT_TIMEOUT_MS: readNumber("REDIS_CONNECT_TIMEOUT_MS", {
     required: false,
     defaultValue: 10000,

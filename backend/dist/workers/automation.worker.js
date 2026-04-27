@@ -12,6 +12,7 @@ const logger_1 = __importDefault(require("../utils/logger"));
 const sentry_1 = require("../observability/sentry");
 const requestContext_1 = require("../observability/requestContext");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
+const runtimePolicy_service_1 = require("../services/runtimePolicy.service");
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
     process.env.RUN_WORKER === undefined;
 const globalForAutomationWorker = globalThis;
@@ -53,8 +54,12 @@ const initAutomationWorker = () => {
             jobName: job.name,
         }, "Automation worker job started");
         if (job.name === "comment" || job.name === "comment-reply") {
+            (0, runtimePolicy_service_1.assertPhase5APreviewBypassEnabled)("comment_automation_worker");
             console.log("Processing comment reply job", job.data);
             await (0, commentAutomation_service_1.handleCommentAutomation)(job.data);
+        }
+        else {
+            throw new Error(`unsupported_automation_job:${String(job.name || "unknown")}`);
         }
         logger_1.default.info({
             jobId: job.id,

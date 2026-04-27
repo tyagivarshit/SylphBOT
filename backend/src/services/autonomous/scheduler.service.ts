@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import { acquireDistributedLock } from "../distributedLock.service";
 import {
   clearAutonomousOpportunity,
   persistAutonomousOpportunity,
@@ -12,6 +13,22 @@ import {
 import type { AutonomousSchedulerLeadResult } from "./types";
 
 const MIN_AUTODISPATCH_SCORE = 68;
+const AUTONOMOUS_SCHEDULER_LEADER_KEY = "autonomous:scheduler:leader";
+const AUTONOMOUS_SCHEDULER_LEASE_MS = 90_000;
+const AUTONOMOUS_SCHEDULER_REFRESH_MS = 30_000;
+
+const globalForAutonomousScheduler = globalThis as typeof globalThis & {
+  __sylphAutonomousSchedulerRun?: Promise<{
+    generatedAt: string;
+    businesses: number;
+    evaluatedLeads: number;
+    queued: number;
+    pending: number;
+    blocked: number;
+    skipped: number;
+    results: AutonomousSchedulerLeadResult[];
+  }> | null;
+};
 
 const getCandidateBusinessIds = async (limit: number) => {
   const businesses = await prisma.business.findMany({
@@ -191,4 +208,45 @@ export const runAutonomousScheduler = async ({
     skipped: results.filter((item) => item.status === "SKIPPED").length,
     results,
   };
+};
+
+export const runAutonomousSchedulerAsLeader = async ({
+  runner,
+  ...options
+}: Parameters<typeof runAutonomousScheduler>[0] & {
+  runner?: typeof runAutonomousScheduler;
+}) => {
+  if (globalForAutonomousScheduler.__sylphAutonomousSchedulerRun) {
+    return null;
+  }
+
+  const lock = await acquireDistributedLock({
+    key: AUTONOMOUS_SCHEDULER_LEADER_KEY,
+    ttlMs: AUTONOMOUS_SCHEDULER_LEASE_MS,
+    refreshIntervalMs: AUTONOMOUS_SCHEDULER_REFRESH_MS,
+    waitMs: 0,
+  });
+
+  if (!lock) {
+    return null;
+  }
+
+  if (globalForAutonomousScheduler.__sylphAutonomousSchedulerRun) {
+    await lock.release().catch(() => undefined);
+    return null;
+  }
+
+  const execute = runner || runAutonomousScheduler;
+  const runPromise = execute(options);
+  globalForAutonomousScheduler.__sylphAutonomousSchedulerRun = runPromise;
+
+  try {
+    return await runPromise;
+  } finally {
+    if (globalForAutonomousScheduler.__sylphAutonomousSchedulerRun === runPromise) {
+      globalForAutonomousScheduler.__sylphAutonomousSchedulerRun = null;
+    }
+
+    await lock.release().catch(() => undefined);
+  }
 };

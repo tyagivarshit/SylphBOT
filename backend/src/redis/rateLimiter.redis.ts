@@ -181,7 +181,7 @@ const consumeRateWindow = async (
       };
     },
     () => ({
-      allowed: true,
+      allowed: false,
       count: 0,
       ttlSeconds,
     }),

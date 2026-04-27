@@ -37,6 +37,7 @@ import bookingRoutes from "./routes/booking.routes";
 import availabilityRoutes from "./routes/availability.routes";
 import conversationRoutes from "./routes/conversation.routes";
 import healthRoutes from "./routes/health.routes";
+import receptionIntakeRoutes from "./routes/receptionIntake.routes";
 import usageRoutes from "./routes/usage.routes";
 import { getClientStatus } from "./controllers/client.controller";
 import helpAiRoutes from "./routes/helpAi.routes";
@@ -45,6 +46,7 @@ import {
   AI_QUEUE_NAME,
   enqueueAIBatch,
 } from "./queues/ai.queue";
+import { isPhase5APreviewBypassEnabled } from "./services/runtimePolicy.service";
 
 import {
   aiLimiter,
@@ -349,6 +351,15 @@ app.post("/v1/messages", optionalApiKeyAuth, asyncHandler(async (req: any, res) 
   let timeoutHandle: NodeJS.Timeout | undefined;
 
   try {
+    if (!isPhase5APreviewBypassEnabled()) {
+      return res.status(410).json({
+        success: false,
+        requestId: req.requestId,
+        message:
+          "Direct AI enqueue is disabled in production. Use the canonical reception intake runtime.",
+      });
+    }
+
     const body = (req.body || {}) as EnqueueRequestBody;
     const messages = extractMessages(body);
 
@@ -468,6 +479,7 @@ app.use(
   attachBillingContext,
   availabilityRoutes
 );
+app.use("/api/inbox/intake", protect, receptionIntakeRoutes);
 app.use("/api/health", healthRoutes);
 
 app.get("/health", (req: any, res) => {

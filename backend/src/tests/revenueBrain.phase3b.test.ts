@@ -338,7 +338,7 @@ export const revenueBrainPhase3BTests: TestCase[] = [
         }
       );
 
-      queueRevenueBrainEvent("revenue_brain.received", {
+      void queueRevenueBrainEvent("revenue_brain.received", {
         traceId: "trace_async",
         startedAt: Date.now(),
         input: {
@@ -348,6 +348,7 @@ export const revenueBrainPhase3BTests: TestCase[] = [
         },
       } as any);
 
+      await new Promise((resolve) => setTimeout(resolve, 0));
       assert.equal(completed, false);
       await waitForRevenueBrainBackgroundTasks();
       assert.equal(completed, true);

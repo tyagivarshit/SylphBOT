@@ -2,7 +2,8 @@ import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import {
   getLeadControlAuthority,
-  markLeadHumanTakeover,
+  isLeadHumanControlActive,
+  setLeadHumanControl,
 } from "../services/leadControlState.service";
 
 /* ======================================================
@@ -48,30 +49,26 @@ export const toggleHumanControl = async (req: Request, res: Response) => {
     ====================================================== */
 
     let nextState: boolean;
+    const controlState = await getLeadControlAuthority({
+      leadId: String(leadId),
+      businessId: String(businessId),
+    });
 
     if (typeof forceState === "boolean") {
       nextState = forceState; // direct control (UI toggle)
     } else {
-      nextState = !lead.isHumanActive; // toggle fallback
+      nextState = !isLeadHumanControlActive(controlState); // toggle fallback
     }
 
     /* ======================================================
     UPDATE LEAD
     ====================================================== */
 
-    const updated = await prisma.lead.update({
-      where: { id: String(leadId) },
-      data: {
-        isHumanActive: nextState,
-      },
+    const updatedControlState = await setLeadHumanControl({
+      leadId: String(leadId),
+      businessId: String(businessId),
+      isActive: nextState,
     });
-
-    if (nextState) {
-      await markLeadHumanTakeover({
-        leadId: String(leadId),
-        businessId: String(businessId),
-      }).catch(() => undefined);
-    }
 
     /* ======================================================
     SOCKET BROADCAST (REAL-TIME UI UPDATE)
@@ -79,7 +76,7 @@ export const toggleHumanControl = async (req: Request, res: Response) => {
 
     req.app.get("io")?.to(leadId).emit("control_update", {
       leadId,
-      isHumanActive: updated.isHumanActive,
+      isHumanActive: nextState,
     });
 
     /* ======================================================
@@ -88,8 +85,9 @@ export const toggleHumanControl = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      mode: updated.isHumanActive ? "HUMAN" : "AI",
-      isHumanActive: updated.isHumanActive,
+      mode: nextState ? "HUMAN" : "AI",
+      isHumanActive: nextState,
+      cancelTokenVersion: updatedControlState.cancelTokenVersion,
     });
 
   } catch (error) {
@@ -140,11 +138,12 @@ export const getLeadControlState = async (req: Request, res: Response) => {
       leadId: String(leadId),
       businessId: String(businessId),
     });
+    const isHumanActive = isLeadHumanControlActive(controlState);
 
     return res.json({
       success: true,
-      isHumanActive: lead.isHumanActive,
-      mode: lead.isHumanActive ? "HUMAN" : "AI",
+      isHumanActive,
+      mode: isHumanActive ? "HUMAN" : "AI",
       cancelTokenVersion: controlState?.cancelTokenVersion ?? 0,
       lastManualOutboundAt: controlState?.lastManualOutboundAt || null,
       lastHumanTakeoverAt: controlState?.lastHumanTakeoverAt || null,

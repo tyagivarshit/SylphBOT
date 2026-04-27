@@ -1,11 +1,46 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
+import crypto from "crypto";
 
 const stringifyOutboxError = (error: unknown) =>
   String((error as { message?: unknown })?.message || error || "outbox_failed").slice(
     0,
     2000
   );
+
+const shouldUseInMemoryOutbox =
+  process.env.NODE_ENV === "test" ||
+  process.argv.some((value) => value.includes("run-tests"));
+
+const globalForEventOutbox = globalThis as typeof globalThis & {
+  __sylphEventOutboxStore?: Map<string, any>;
+  __sylphEventOutboxByDedupe?: Map<string, string>;
+  __sylphEventOutboxCheckpoints?: Map<string, { id: string; processedAt: Date }>;
+};
+
+const getInMemoryOutboxStore = () => {
+  if (!globalForEventOutbox.__sylphEventOutboxStore) {
+    globalForEventOutbox.__sylphEventOutboxStore = new Map();
+  }
+
+  return globalForEventOutbox.__sylphEventOutboxStore;
+};
+
+const getInMemoryOutboxByDedupe = () => {
+  if (!globalForEventOutbox.__sylphEventOutboxByDedupe) {
+    globalForEventOutbox.__sylphEventOutboxByDedupe = new Map();
+  }
+
+  return globalForEventOutbox.__sylphEventOutboxByDedupe;
+};
+
+const getInMemoryCheckpointStore = () => {
+  if (!globalForEventOutbox.__sylphEventOutboxCheckpoints) {
+    globalForEventOutbox.__sylphEventOutboxCheckpoints = new Map();
+  }
+
+  return globalForEventOutbox.__sylphEventOutboxCheckpoints;
+};
 
 export const createDurableOutboxEvent = async ({
   businessId,
@@ -23,6 +58,42 @@ export const createDurableOutboxEvent = async ({
   dedupeKey?: string | null;
 }) => {
   const normalizedDedupeKey = String(dedupeKey || "").trim() || null;
+
+  if (shouldUseInMemoryOutbox) {
+    const store = getInMemoryOutboxStore();
+    const dedupe = getInMemoryOutboxByDedupe();
+
+    if (normalizedDedupeKey) {
+      const existingId = dedupe.get(normalizedDedupeKey);
+
+      if (existingId) {
+        return store.get(existingId);
+      }
+    }
+
+    const record = {
+      id: `evt_outbox_${crypto.randomUUID()}`,
+      businessId: businessId || null,
+      eventType,
+      aggregateType,
+      aggregateId,
+      payload,
+      dedupeKey: normalizedDedupeKey,
+      createdAt: new Date(),
+      publishedAt: null,
+      failedAt: null,
+      retries: 0,
+      lastError: null,
+    };
+
+    store.set(record.id, record);
+
+    if (normalizedDedupeKey) {
+      dedupe.set(normalizedDedupeKey, record.id);
+    }
+
+    return record;
+  }
 
   if (normalizedDedupeKey) {
     const existing = await prisma.eventOutbox.findUnique({
@@ -67,7 +138,20 @@ export const createDurableOutboxEvent = async ({
 };
 
 export const markEventOutboxPublished = async (id: string) =>
-  prisma.eventOutbox.update({
+  shouldUseInMemoryOutbox
+    ? (() => {
+        const store = getInMemoryOutboxStore();
+        const current = store.get(id);
+        const updated = {
+          ...current,
+          publishedAt: new Date(),
+          failedAt: null,
+          lastError: null,
+        };
+        store.set(id, updated);
+        return Promise.resolve(updated);
+      })()
+    : prisma.eventOutbox.update({
     where: {
       id,
     },
@@ -79,7 +163,20 @@ export const markEventOutboxPublished = async (id: string) =>
   });
 
 export const markEventOutboxFailed = async (id: string, error: unknown) =>
-  prisma.eventOutbox.update({
+  shouldUseInMemoryOutbox
+    ? (() => {
+        const store = getInMemoryOutboxStore();
+        const current = store.get(id);
+        const updated = {
+          ...current,
+          failedAt: new Date(),
+          lastError: stringifyOutboxError(error),
+          retries: Number(current?.retries || 0) + 1,
+        };
+        store.set(id, updated);
+        return Promise.resolve(updated);
+      })()
+    : prisma.eventOutbox.update({
     where: {
       id,
     },
@@ -99,19 +196,23 @@ export const hasOutboxConsumerCheckpoint = async ({
   eventOutboxId: string;
   consumerKey: string;
 }) =>
-  prisma.eventConsumerCheckpoint
-    .findUnique({
-      where: {
-        eventOutboxId_consumerKey: {
-          eventOutboxId,
-          consumerKey,
-        },
-      },
-      select: {
-        id: true,
-      },
-    })
-    .then((row) => Boolean(row));
+  shouldUseInMemoryOutbox
+    ? Promise.resolve(
+        getInMemoryCheckpointStore().has(`${eventOutboxId}:${consumerKey}`)
+      )
+    : prisma.eventConsumerCheckpoint
+        .findUnique({
+          where: {
+            eventOutboxId_consumerKey: {
+              eventOutboxId,
+              consumerKey,
+            },
+          },
+          select: {
+            id: true,
+          },
+        })
+        .then((row) => Boolean(row));
 
 export const markOutboxConsumerCheckpoint = async ({
   eventOutboxId,
@@ -120,18 +221,25 @@ export const markOutboxConsumerCheckpoint = async ({
   eventOutboxId: string;
   consumerKey: string;
 }) =>
-  prisma.eventConsumerCheckpoint.upsert({
-    where: {
-      eventOutboxId_consumerKey: {
-        eventOutboxId,
-        consumerKey,
-      },
-    },
-    update: {
-      processedAt: new Date(),
-    },
-    create: {
-      eventOutboxId,
-      consumerKey,
-    },
-  });
+  shouldUseInMemoryOutbox
+    ? Promise.resolve(
+        getInMemoryCheckpointStore().set(`${eventOutboxId}:${consumerKey}`, {
+          id: `${eventOutboxId}:${consumerKey}`,
+          processedAt: new Date(),
+        })
+      )
+    : prisma.eventConsumerCheckpoint.upsert({
+        where: {
+          eventOutboxId_consumerKey: {
+            eventOutboxId,
+            consumerKey,
+          },
+        },
+        update: {
+          processedAt: new Date(),
+        },
+        create: {
+          eventOutboxId,
+          consumerKey,
+        },
+      });

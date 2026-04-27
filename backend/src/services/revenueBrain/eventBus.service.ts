@@ -444,36 +444,11 @@ export const queueRevenueBrainEvent = <
   event: T,
   payload: RevenueBrainEventMap[T],
   options?: RevenueBrainQueuedEventOptions
-) => {
-  const queuedEvent = buildQueuedEvent(event, payload, options);
-
-  if (shouldUseLocalDispatch()) {
-    return queueLocalDispatch(queuedEvent);
-  }
-
-  return getRevenueBrainEventQueue()
-    .add("dispatch", queuedEvent, {
-      ...defaultJobOptions,
-      jobId: queuedEvent.eventId,
-    })
-    .catch((error) => {
-      if (isJobAlreadyExistsError(error)) {
-        return;
-      }
-
-      logger.error(
-        {
-          eventId: queuedEvent.eventId,
-          event: queuedEvent.event,
-          traceId: queuedEvent.traceId,
-          error,
-        },
-        "Revenue brain durable event enqueue failed, falling back to local dispatch"
-      );
-
-      return queueLocalDispatch(queuedEvent);
-    });
-};
+) =>
+  queueRevenueBrainEventDurably(event, payload, {
+    ...(options || {}),
+    requireDurable: true,
+  });
 
 export const queueRevenueBrainEventDurably = <
   T extends RevenueBrainEventName,

@@ -1,25 +1,16 @@
 import { Router, Request, Response } from "express";
 import prisma from "../config/prisma";
-import { enqueueAIBatch } from "../queues/ai.queue";
-import {
-  scheduleFollowups,
-  cancelFollowups,
-} from "../queues/followup.queue";
-import { getIO } from "../sockets/socket.server";
 import { processWebhookEvent } from "../services/webhookDedup.service";
-import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 import { captureExceptionWithContext } from "../observability/sentry";
-import {
-  getSubscriptionAccess,
-  logSubscriptionLockedAction,
-} from "../middleware/subscriptionGuard.middleware";
-import { runWithContactUsageLimit } from "../services/usage.service";
+import { reconcileRevenueTouchDeliveryByProviderMessageId } from "../services/revenueTouchLedger.service";
 import {
   extractMetaWebhookTimestamp,
   guardWebhookReplay,
   isWebhookTimestampFresh,
   verifyMetaWebhookSignature,
 } from "../services/webhookSecurity.service";
+import { resolveOrCreateReceptionLead } from "../services/receptionLead.service";
+import { receiveInboundInteraction } from "../services/receptionIntake.service";
 
 const router = Router();
 const isProduction = process.env.NODE_ENV === "production";
@@ -109,6 +100,17 @@ const parseBody = (req: any) => {
   throw new Error("Invalid webhook body");
 };
 
+const getWhatsAppDeliveryStatuses = (body: any) =>
+  Array.isArray(body?.entry)
+    ? body.entry.flatMap((entry: any) =>
+        Array.isArray(entry?.changes)
+          ? entry.changes.flatMap((change: any) =>
+              Array.isArray(change?.value?.statuses) ? change.value.statuses : []
+            )
+          : []
+      )
+    : [];
+
 const enforceWebhookSecurity = async (req: Request, body: any) => {
   const rawBody = Buffer.isBuffer((req as any).body)
     ? ((req as any).body as Buffer)
@@ -171,9 +173,34 @@ router.post("/", async (req: any, res: Response) => {
       return res.sendStatus(403);
     }
 
+    const deliveryStatuses = getWhatsAppDeliveryStatuses(body);
+    let reconciledDeliveryStatus = false;
+
+    for (const status of deliveryStatuses) {
+      const providerMessageId = normalizeIdentifier(
+        status?.id || status?.message_id
+      );
+      const deliveryStatus = String(status?.status || "").trim().toLowerCase();
+
+      if (
+        providerMessageId &&
+        ["sent", "delivered", "read"].includes(deliveryStatus)
+      ) {
+        await reconcileRevenueTouchDeliveryByProviderMessageId({
+          providerMessageId,
+          deliveredAt: new Date(),
+        }).catch(() => undefined);
+        reconciledDeliveryStatus = true;
+      }
+    }
+
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
     if (!message) {
+      if (reconciledDeliveryStatus) {
+        return res.sendStatus(200);
+      }
+
       return res.sendStatus(200);
     }
 
@@ -189,22 +216,19 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     const from = message.from;
-    const text = message.text?.body;
     const phoneNumberId =
       body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
     const phoneNumberIds = [normalizeIdentifier(phoneNumberId)].filter(
       (value): value is string => Boolean(value)
     );
 
-    if (!from || !text || !phoneNumberIds.length) {
+    if (!from || !phoneNumberIds.length) {
       return res.sendStatus(200);
     }
 
     console.log("[WHATSAPP WEBHOOK] identifiers", {
       phoneNumberIds,
     });
-
-    console.log("[WHATSAPP WEBHOOK] incoming:", text);
 
     const client = await findWhatsAppClient({
       phoneNumberIds,
@@ -216,148 +240,40 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     attachResolvedBusinessContext(req, client);
-
-    const access = await getSubscriptionAccess(client.businessId);
-
-    if (!access.allowed) {
-      logSubscriptionLockedAction(
-        {
-          businessId: client.businessId,
-          requestId: req.requestId,
-          path: req.originalUrl,
-          method: req.method,
-          action: "whatsapp_webhook",
-          lockReason: access.lockReason,
-        },
-        "WhatsApp webhook ignored because subscription is locked"
-      );
-      return res.sendStatus(200);
-    }
-
-    const subscription = await prisma.subscription.findUnique({
-      where: { businessId: client.businessId },
-      include: { plan: true },
-    });
-
-    if (!subscription || !subscription.plan) {
-      console.log("[WHATSAPP WEBHOOK] no subscription");
-      return res.sendStatus(200);
-    }
-
-    const planName = subscription.plan.name;
-
-    if (planName === "BASIC") {
-      console.log("[WHATSAPP WEBHOOK] BASIC plan blocked");
-      return res.sendStatus(200);
-    }
-
-    let lead = await prisma.lead.findFirst({
-      where: {
-        businessId: client.businessId,
-        phone: from,
+    const lead = await resolveOrCreateReceptionLead({
+      businessId: client.businessId,
+      clientId: client.id,
+      adapter: "WHATSAPP",
+      payload: {
+        ...body.entry?.[0]?.changes?.[0]?.value,
+        receivedAt: new Date().toISOString(),
       },
     });
-
-    if (!lead) {
-      const createdLead = await runWithContactUsageLimit(
-        client.businessId,
-        (tx) =>
-          tx.lead.create({
-            data: {
-              businessId: client.businessId,
-              clientId: client.id,
-              phone: from,
-              platform: "WHATSAPP",
-              stage: "NEW",
-              followupCount: 0,
-            },
-          })
-      ).catch((error) => {
-        if ((error as { code?: string })?.code === "LIMIT_REACHED") {
-          console.log("[WHATSAPP WEBHOOK] contact limit reached");
-          return null;
-        }
-
-        throw error;
-      });
-
-      if (!createdLead) {
-        return res.sendStatus(200);
-      }
-
-      lead = createdLead.result;
-
-      console.log("[WHATSAPP WEBHOOK] lead created");
-    }
-
-    const userMessage = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        content: text,
-        sender: "USER",
-        metadata: {
-          externalEventId: eventId || null,
-          platform: "WHATSAPP",
-        },
-      },
-    });
-
-    await recordConversionEvent({
+    const intake = await receiveInboundInteraction({
       businessId: client.businessId,
       leadId: lead.id,
-      outcome: "replied",
-      source: "WHATSAPP_WEBHOOK",
-      idempotencyKey: `reply:${eventId}`,
-      occurredAt: userMessage.createdAt,
+      clientId: client.id,
+      adapter: "WHATSAPP",
+      payload: {
+        ...body.entry?.[0]?.changes?.[0]?.value,
+        receivedAt: new Date().toISOString(),
+      },
+      providerMessageIdHint: eventId || null,
+      correlationId: req.requestId || eventId,
+      traceId: req.requestId || eventId || null,
       metadata: {
-        platform: "WHATSAPP",
-        externalEventId: eventId,
+        webhook: "whatsapp",
+        requestId: req.requestId,
+        phoneNumberId: phoneNumberIds[0],
       },
-    }).catch(() => {});
+    });
 
-    const io = getIO();
-    io.to(`lead_${lead.id}`).emit("new_message", userMessage);
-
-    await enqueueAIBatch(
-      [
-        {
-          businessId: client.businessId,
-          leadId: lead.id,
-          message: text,
-          kind: "router",
-          plan: subscription.plan,
-          platform: "WHATSAPP",
-          senderId: from,
-          phoneNumberId: phoneNumberIds[0],
-          accessTokenEncrypted: client.accessToken,
-          externalEventId: eventId,
-          skipInboundPersist: true,
-        },
-      ],
-      {
-        source: "router",
-        idempotencyKey: eventId,
-      }
-    );
-
-    console.log("[WHATSAPP WEBHOOK] queued AI reply", {
+    console.log("[WHATSAPP WEBHOOK] canonical interaction received", {
       businessId: client.businessId,
       leadId: lead.id,
-      eventId,
-      phoneNumberId: phoneNumberIds[0],
+      interactionId: intake.interaction.id,
+      externalInteractionKey: intake.interaction.externalInteractionKey,
     });
-
-    await prisma.lead.update({
-      where: { id: lead.id },
-      data: {
-        lastMessageAt: new Date(),
-        followupCount: 0,
-        unreadCount: { increment: 1 },
-      },
-    });
-
-    await cancelFollowups(lead.id);
-    await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);
   } catch (error) {

@@ -4,6 +4,7 @@ import { getWorkerRedisConnection } from "../config/redis";
 import { enqueueAIBatch } from "./ai.queue";
 import logger from "../utils/logger";
 import { withRedisWorkerFailSafe } from "./queue.defaults";
+import { assertPhase5ALegacyRuntimeEnabled } from "../services/runtimePolicy.service";
 
 const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
@@ -14,6 +15,8 @@ const globalForInboxQueueWorker = globalThis as typeof globalThis & {
 };
 
 export const initLegacyInboxQueueWorker = () => {
+  assertPhase5ALegacyRuntimeEnabled("legacy_inbox_queue_worker");
+
   if (!shouldRunWorker) {
     console.log("[queues/inbox.queue] RUN_WORKER disabled, worker not started");
     return null;

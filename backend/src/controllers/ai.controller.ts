@@ -12,6 +12,7 @@ import {
   reserveAIUsageExecution,
   runWithContactUsageLimit,
 } from "../services/usage.service";
+import { isPhase5APreviewBypassEnabled } from "../services/runtimePolicy.service";
 
 type TestAIBody = {
   message?: string;
@@ -60,6 +61,14 @@ export const testAI = async (
   let responseLeadId: string | null = null;
 
   try {
+    if (!isPhase5APreviewBypassEnabled()) {
+      return res.status(410).json({
+        success: false,
+        message:
+          "Preview Revenue Brain access is disabled in production. Use the canonical reception runtime.",
+      });
+    }
+
     const message = normalizeMessage(req.body.message);
 
     if (!message) {

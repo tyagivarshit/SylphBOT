@@ -92,6 +92,10 @@ export const captureExceptionWithContext = (
       scope.setTag("requestId", context.requestId);
     }
 
+    if (context?.traceId) {
+      scope.setTag("traceId", context.traceId);
+    }
+
     if (context?.businessId) {
       scope.setTag("businessId", context.businessId);
     }
@@ -120,6 +124,7 @@ export const captureExceptionWithContext = (
       "requestContext",
       safeValue({
         requestId: context?.requestId,
+        traceId: context?.traceId,
         userId: context?.userId,
         businessId: context?.businessId,
         route: context?.route,

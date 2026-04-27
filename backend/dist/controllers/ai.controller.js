@@ -9,6 +9,7 @@ const blueprint_service_1 = require("../services/salesAgent/blueprint.service");
 const reply_service_1 = require("../services/salesAgent/reply.service");
 const orchestrator_service_1 = require("../services/revenueBrain/orchestrator.service");
 const usage_service_1 = require("../services/usage.service");
+const runtimePolicy_service_1 = require("../services/runtimePolicy.service");
 const normalizeMessage = (message) => message?.trim() || "";
 const getBusinessForUser = async (userId) => {
     if (!userId) {
@@ -38,6 +39,12 @@ const testAI = async (req, res) => {
     let aiReservation = null;
     let responseLeadId = null;
     try {
+        if (!(0, runtimePolicy_service_1.isPhase5APreviewBypassEnabled)()) {
+            return res.status(410).json({
+                success: false,
+                message: "Preview Revenue Brain access is disabled in production. Use the canonical reception runtime.",
+            });
+        }
         const message = normalizeMessage(req.body.message);
         if (!message) {
             return res.status(400).json({ message: "Message required" });

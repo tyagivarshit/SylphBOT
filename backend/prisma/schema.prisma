@@ -26,6 +26,67 @@ enum PlanType {
   PRO
   ELITE
 }
+
+enum InboundChannel {
+  WHATSAPP
+  INSTAGRAM
+  EMAIL
+  FORM
+  VOICE
+}
+
+enum InboundInteractionType {
+  MESSAGE
+  CALL
+  EMAIL
+  FORM
+  COMMENT
+  REVIEW
+  DM
+}
+
+enum InteractionDirection {
+  INBOUND
+}
+
+enum InboundLifecycleState {
+  RECEIVED
+  NORMALIZED
+  CLASSIFIED
+  ROUTED
+  IN_PROGRESS
+  RESOLVED
+  REOPENED
+  CLOSED
+  FAILED
+}
+
+enum InboxRouteTarget {
+  REVENUE_BRAIN
+  SUPPORT
+  APPOINTMENTS
+  BILLING
+  OWNER
+  HUMAN_QUEUE
+  SPAM_BIN
+  ESCALATION
+}
+
+enum HumanWorkQueueState {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  ESCALATED
+  RESOLVED
+  CLOSED
+}
+
+enum PriorityLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
 generator client {
   provider = "prisma-client-js"
 }
@@ -141,6 +202,9 @@ model Business {
   capReservations AutonomousCapReservation[]
   channelHealthEntries ChannelHealth[]
   leadControlStates LeadControlState[]
+  inboundInteractions InboundInteraction[]
+  humanWorkQueues HumanWorkQueue[]
+  receptionMemories ReceptionMemory[]
 
   createdAt     DateTime @default(now())
   deletedAt DateTime?
@@ -183,6 +247,7 @@ model Client {
   salesOptimizationInsights SalesOptimizationInsight[]
   leadIntelligenceProfiles LeadIntelligenceProfile[]
   revenueTouchLedgerEntries RevenueTouchLedger[]
+  inboundInteractions InboundInteraction[]
 
   isActive      Boolean  @default(true)
   deletedAt     DateTime?
@@ -303,6 +368,9 @@ model Lead {
   capReservations AutonomousCapReservation[]
   channelHealthEntries ChannelHealth[]
   leadControlState LeadControlState?
+  inboundInteractions InboundInteraction[]
+  humanWorkQueues HumanWorkQueue[]
+  receptionMemory ReceptionMemory?
 
   lastMessageAt  DateTime?
 
@@ -878,6 +946,108 @@ model LeadControlState {
   metadata          Json?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@index([businessId, updatedAt])
+}
+
+model InboundInteraction {
+  id                     String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId             String   @db.ObjectId
+  business               Business @relation(fields: [businessId], references: [id])
+
+  leadId                 String   @db.ObjectId
+  lead                   Lead     @relation(fields: [leadId], references: [id])
+
+  clientId               String?  @db.ObjectId
+  client                 Client?  @relation(fields: [clientId], references: [id])
+
+  channel                InboundChannel
+  providerMessageId      String?
+  externalInteractionKey String   @unique
+  interactionType        InboundInteractionType
+  direction              InteractionDirection @default(INBOUND)
+  payload                Json
+  normalizedPayload      Json?
+  fingerprint            String?
+  lifecycleState         InboundLifecycleState @default(RECEIVED)
+  intentClass            String?
+  urgencyClass           String?
+  sentimentClass         String?
+  spamScore              Float    @default(0)
+  priorityScore          Int      @default(0)
+  priorityLevel          PriorityLevel?
+  routeDecision          InboxRouteTarget?
+  assignedQueueId        String?  @db.ObjectId
+  assignedHumanId        String?  @db.ObjectId
+  slaDeadline            DateTime?
+  correlationId          String?
+  traceId                String?
+  metadata               Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  humanWorkQueue HumanWorkQueue?
+
+  @@index([businessId, leadId, createdAt])
+  @@index([businessId, lifecycleState, createdAt])
+  @@index([routeDecision, lifecycleState])
+  @@index([priorityScore, createdAt])
+  @@index([slaDeadline])
+  @@index([correlationId])
+}
+
+model HumanWorkQueue {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId     String   @db.ObjectId
+  business       Business @relation(fields: [businessId], references: [id])
+
+  interactionId  String   @unique @db.ObjectId
+  interaction    InboundInteraction @relation(fields: [interactionId], references: [id])
+
+  leadId         String   @db.ObjectId
+  lead           Lead     @relation(fields: [leadId], references: [id])
+
+  queueType      String
+  assignedRole   String
+  assignedHumanId String? @db.ObjectId
+  state          HumanWorkQueueState @default(PENDING)
+  priority       PriorityLevel @default(MEDIUM)
+  slaDeadline    DateTime?
+  escalationAt   DateTime?
+  resolutionCode String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([assignedRole, state, priority])
+  @@index([slaDeadline])
+  @@index([businessId, state])
+}
+
+model ReceptionMemory {
+  id                      String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId              String   @db.ObjectId
+  business                Business @relation(fields: [businessId], references: [id])
+
+  leadId                  String   @unique @db.ObjectId
+  lead                    Lead     @relation(fields: [leadId], references: [id])
+
+  unresolvedCount         Int      @default(0)
+  complaintCount          Int      @default(0)
+  repeatIssueFingerprint  String?
+  preferredAgentId        String?  @db.ObjectId
+  preferredChannel        InboundChannel?
+  lastResolutionScore     Float?
+  escalationRisk          Float    @default(0)
+  abuseRisk               Float    @default(0)
+  vipScore                Float    @default(0)
+  communicationPreference Json?
+  metadata                Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   @@index([businessId, updatedAt])
 }

@@ -1,24 +1,17 @@
 import { Request, Response, Router } from "express";
 import prisma from "../config/prisma";
-import { enqueueAIBatch, enqueueCommentReplyJob } from "../queues/ai.queue";
-import { cancelFollowups, scheduleFollowups } from "../queues/followup.queue";
-import { getIO } from "../sockets/socket.server";
 import { fetchInstagramUsername } from "../services/instagramProfile.service";
-import { createNotification } from "../services/notification.service";
-import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 import { processWebhookEvent } from "../services/webhookDedup.service";
 import { captureExceptionWithContext } from "../observability/sentry";
-import {
-  getSubscriptionAccess,
-  logSubscriptionLockedAction,
-} from "../middleware/subscriptionGuard.middleware";
-import { runWithContactUsageLimit } from "../services/usage.service";
+import { reconcileRevenueTouchDeliveryByProviderMessageId } from "../services/revenueTouchLedger.service";
 import {
   extractMetaWebhookTimestamp,
   guardWebhookReplay,
   isWebhookTimestampFresh,
   verifyMetaWebhookSignature,
 } from "../services/webhookSecurity.service";
+import { resolveOrCreateReceptionLead } from "../services/receptionLead.service";
+import { receiveInboundInteraction } from "../services/receptionIntake.service";
 
 const router = Router();
 const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
@@ -214,6 +207,35 @@ const parseInstagramCommentChange = ({
   };
 };
 
+const getInstagramDeliveryMessageIds = (entry: any) => {
+  const messagingIds = Array.isArray(entry?.messaging)
+    ? entry.messaging.flatMap((item: any) =>
+        Array.isArray(item?.delivery?.mids)
+          ? item.delivery.mids
+          : item?.delivery?.mid
+            ? [item.delivery.mid]
+            : []
+      )
+    : [];
+  const changeStatusIds = Array.isArray(entry?.changes)
+    ? entry.changes.flatMap((change: any) =>
+        Array.isArray(change?.value?.statuses)
+          ? change.value.statuses
+              .map((status: any) => normalizeIdentifier(status?.id || status?.message_id))
+              .filter((value: string | null): value is string => Boolean(value))
+          : []
+      )
+    : [];
+
+  return Array.from(
+    new Set(
+      [...messagingIds, ...changeStatusIds]
+        .map((value) => normalizeIdentifier(value))
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+};
+
 router.get("/", (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -265,6 +287,17 @@ router.post("/", async (req: any, res: Response) => {
 
     if (!entry) {
       return res.sendStatus(200);
+    }
+
+    const deliveryMessageIds = getInstagramDeliveryMessageIds(entry);
+
+    if (deliveryMessageIds.length) {
+      for (const providerMessageId of deliveryMessageIds) {
+        await reconcileRevenueTouchDeliveryByProviderMessageId({
+          providerMessageId,
+          deliveredAt: new Date(),
+        }).catch(() => undefined);
+      }
     }
 
     for (const change of entry?.changes || []) {
@@ -341,56 +374,49 @@ router.post("/", async (req: any, res: Response) => {
         }
 
         attachResolvedBusinessContext(req, client);
-
-        const access = await getSubscriptionAccess(client.businessId);
-
-        if (!access.allowed) {
-          logSubscriptionLockedAction(
-            {
-              businessId: client.businessId,
-              requestId: req.requestId,
-              path: req.originalUrl,
-              method: req.method,
-              action: "instagram_comment_webhook",
-              lockReason: access.lockReason,
-            },
-            "Instagram comment webhook ignored because subscription is locked"
-          );
-          continue;
-        }
-
-        const jobData = {
-          commentId,
+        const lead = await resolveOrCreateReceptionLead({
           businessId: client.businessId,
           clientId: client.id,
-          instagramUserId: senderId,
-          senderId,
-          reelId: mediaId,
-          mediaId,
-          commentText,
-          text: commentText,
-        };
-
-        console.log("📦 ADDING JOB TO QUEUE", {
-          queue: "ai-high",
-          type: "comment-reply",
-          commentId,
+          adapter: "INSTAGRAM",
+          payload: {
+            comment: {
+              text: commentText,
+            },
+            from: {
+              id: senderId,
+            },
+            mediaId,
+            messageId: commentId || commentEventId,
+            receivedAt: new Date().toISOString(),
+          },
         });
-
-        await enqueueCommentReplyJob({
-          type: "comment-reply",
-          ...jobData,
-        });
-
-        console.log("✅ JOB ADDED SUCCESSFULLY");
-
-        console.log("📦 Job added to queue", {
-          jobName: "ai-high",
-          commentId,
+        await receiveInboundInteraction({
           businessId: client.businessId,
-          mediaId,
-          senderId,
+          leadId: lead.id,
+          clientId: client.id,
+          adapter: "INSTAGRAM",
+          payload: {
+            comment: {
+              text: commentText,
+            },
+            from: {
+              id: senderId,
+            },
+            mediaId,
+            messageId: commentId || commentEventId,
+            receivedAt: new Date().toISOString(),
+          },
+          interactionTypeHint: "COMMENT",
+          providerMessageIdHint: commentId || commentEventId,
+          correlationId: req.requestId || commentEventId,
+          traceId: req.requestId || commentEventId,
+          metadata: {
+            webhook: "instagram_comment",
+            requestId: req.requestId,
+            mediaId,
+          },
         });
+
       } catch (commentError) {
         req.logger?.error(
           { error: commentError },
@@ -474,28 +500,18 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     attachResolvedBusinessContext(req, client);
-
-    const access = await getSubscriptionAccess(client.businessId);
-
-    if (!access.allowed) {
-      logSubscriptionLockedAction(
-        {
-          businessId: client.businessId,
-          requestId: req.requestId,
-          path: req.originalUrl,
-          method: req.method,
-          action: "instagram_message_webhook",
-          lockReason: access.lockReason,
+    let lead = await resolveOrCreateReceptionLead({
+      businessId: client.businessId,
+      clientId: client.id,
+      adapter: "INSTAGRAM",
+      payload: {
+        message: text,
+        mid: eventId,
+        from: {
+          id: senderId,
         },
-        "Instagram webhook ignored because subscription is locked"
-      );
-      return res.sendStatus(200);
-    }
-
-    let lead = await prisma.lead.findFirst({
-      where: {
-        businessId: client.businessId,
-        instagramId: senderId,
+        threadId: pageIds[0],
+        receivedAt: new Date().toISOString(),
       },
     });
 
@@ -504,41 +520,7 @@ router.post("/", async (req: any, res: Response) => {
       client.accessToken
     );
 
-    if (!lead) {
-      const createdLead = await runWithContactUsageLimit(
-        client.businessId,
-        (tx) =>
-          tx.lead.create({
-            data: {
-              businessId: client.businessId,
-              clientId: client.id,
-              name: instagramUsername || null,
-              instagramId: senderId,
-              platform: "INSTAGRAM",
-              stage: "NEW",
-            },
-          })
-      ).catch((error) => {
-        if ((error as { code?: string })?.code === "LIMIT_REACHED") {
-          return null;
-        }
-
-        throw error;
-      });
-
-      if (!createdLead) {
-        return res.sendStatus(200);
-      }
-
-      lead = createdLead.result;
-
-      await createNotification({
-        userId: client.business.ownerId,
-        title: "New Lead",
-        message: "A new Instagram lead has been created",
-        type: "LEAD",
-      });
-    } else if (instagramUsername && !lead.name) {
+    if (instagramUsername && !lead.name) {
       lead = await prisma.lead.update({
         where: {
           id: lead.id,
@@ -548,96 +530,40 @@ router.post("/", async (req: any, res: Response) => {
         },
       });
     }
-
-    const userMessage = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        content: text,
-        sender: "USER",
-        metadata: {
-          externalEventId: eventId,
-          platform: "INSTAGRAM",
-        },
-      },
-    });
-
-    await recordConversionEvent({
+    const intake = await receiveInboundInteraction({
       businessId: client.businessId,
       leadId: lead.id,
-      outcome: "replied",
-      source: "INSTAGRAM_WEBHOOK",
-      idempotencyKey: `reply:${eventId}`,
-      occurredAt: userMessage.createdAt,
-      metadata: {
-        platform: "INSTAGRAM",
-        externalEventId: eventId,
+      clientId: client.id,
+      adapter: "INSTAGRAM",
+      payload: {
+        message: text,
+        mid: eventId,
+        from: {
+          id: senderId,
+          username: instagramUsername || undefined,
+        },
+        threadId: pageIds[0],
+        receivedAt: new Date().toISOString(),
       },
-    }).catch(() => {});
-
-    await createNotification({
-      userId: client.business.ownerId,
-      title: "New Message",
-      message: text,
-      type: "MESSAGE",
+      interactionTypeHint: "DM",
+      providerMessageIdHint: eventId,
+      correlationId: req.requestId || eventId,
+      traceId: req.requestId || eventId,
+      metadata: {
+        webhook: "instagram_message",
+        requestId: req.requestId,
+        pageId: pageIds[0],
+      },
     });
-
-    try {
-      const io = getIO();
-      io.to(`lead_${lead.id}`).emit("new_message", userMessage);
-    } catch {}
-
-    const plan = client.business?.subscription?.plan || null;
 
     if (WEBHOOK_DEBUG) {
-      log("Router job data", {
+      log("Canonical interaction accepted", {
         businessId: client.businessId,
         leadId: lead.id,
-        message: text,
-        planType: plan?.type || null,
+        interactionId: intake.interaction.id,
+        externalInteractionKey: intake.interaction.externalInteractionKey,
       });
     }
-
-    await enqueueAIBatch(
-      [
-        {
-          businessId: client.businessId,
-          leadId: lead.id,
-          message: text,
-          kind: "router",
-          plan,
-          platform: "INSTAGRAM",
-          senderId,
-          pageId: pageIds[0],
-          accessTokenEncrypted: client.accessToken,
-          externalEventId: eventId,
-          skipInboundPersist: true,
-        },
-      ],
-      {
-        source: "router",
-        idempotencyKey: eventId,
-      }
-    );
-
-    log("Queued AI reply", {
-      businessId: client.businessId,
-      leadId: lead.id,
-      eventId,
-      pageId: pageIds[0],
-      senderId,
-    });
-
-    await prisma.lead.update({
-      where: { id: lead.id },
-      data: {
-        lastMessageAt: new Date(),
-        followupCount: 0,
-        unreadCount: { increment: 1 },
-      },
-    });
-
-    await cancelFollowups(lead.id);
-    await scheduleFollowups(lead.id);
 
     return res.sendStatus(200);
   } catch (error) {

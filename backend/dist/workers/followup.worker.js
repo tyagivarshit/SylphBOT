@@ -55,13 +55,148 @@ const FOLLOWUP_WORKER_CONCURRENCY = (0, workerManager_1.resolveWorkerConcurrency
     min: 1,
     max: 32,
 });
+const buildFollowupCheckpointSnapshot = ({ job, jobKey, payload, confirmedAt, providerMessageId, }) => {
+    const trackingMetadata = buildFollowupTrackingMetadata({
+        job,
+        jobKey,
+        payload,
+    });
+    return {
+        confirmedAt,
+        deliveryMode: "platform",
+        platform: payload.lead.platform || null,
+        confirmedReply: (0, replyDeliveryPipeline_service_1.toConfirmedReplyPayload)({
+            text: payload.message,
+            cta: payload.cta,
+            angle: payload.angle,
+            variantId: payload.variant?.id || null,
+            variantKey: payload.variant?.variantKey || null,
+            leadState: payload.lead.revenueState || payload.lead.aiStage || null,
+            messageType: "FOLLOWUP",
+            source: "FOLLOWUP",
+            traceId: String(job.id || jobKey),
+            meta: {
+                ...trackingMetadata,
+                providerMessageId: providerMessageId || null,
+            },
+        }),
+    };
+};
+const buildFollowupCheckpointMetadata = ({ job, jobKey, payload, checkpoint, providerMessageId, }) => ({
+    ...buildFollowupTrackingMetadata({
+        job,
+        jobKey,
+        payload,
+    }),
+    platform: payload.lead.platform || null,
+    providerMessageId: providerMessageId || null,
+    replyDeliveryCheckpoint: checkpoint,
+});
+const extractFollowupCheckpointFromTouch = (touch) => {
+    const metadata = touch?.metadata && typeof touch.metadata === "object" && !Array.isArray(touch.metadata)
+        ? touch.metadata
+        : {};
+    const checkpoint = metadata.replyDeliveryCheckpoint &&
+        typeof metadata.replyDeliveryCheckpoint === "object" &&
+        !Array.isArray(metadata.replyDeliveryCheckpoint)
+        ? metadata.replyDeliveryCheckpoint
+        : null;
+    if (!checkpoint || typeof checkpoint.confirmedAt !== "string") {
+        return null;
+    }
+    if (checkpoint.deliveryMode !== "platform") {
+        return null;
+    }
+    const confirmedReply = checkpoint.confirmedReply;
+    if (!confirmedReply ||
+        typeof confirmedReply !== "object" ||
+        typeof confirmedReply.text !== "string") {
+        return null;
+    }
+    return {
+        confirmedAt: checkpoint.confirmedAt,
+        deliveryMode: "platform",
+        platform: typeof checkpoint.platform === "string" ? checkpoint.platform : null,
+        confirmedReply: (0, replyDeliveryPipeline_service_1.toConfirmedReplyPayload)(confirmedReply),
+    };
+};
+const restoreFollowupCheckpointFromTouch = async ({ jobKey, touch, }) => {
+    const checkpoint = extractFollowupCheckpointFromTouch(touch);
+    if (!checkpoint) {
+        return false;
+    }
+    await (0, replyDeliveryPipeline_service_1.checkpointReplyConfirmation)(jobKey, {
+        confirmedAt: checkpoint.confirmedAt,
+        deliveryMode: checkpoint.deliveryMode,
+        platform: checkpoint.platform,
+        confirmedReply: checkpoint.confirmedReply,
+    });
+    return true;
+};
+const upsertFollowupTouchCheckpoint = async ({ job, jobKey, payload, deliveryState, confirmedAt, providerMessageId, providerAcceptedAt, providerMessagePersistedAt, messageId, }) => {
+    const checkpoint = buildFollowupCheckpointSnapshot({
+        job,
+        jobKey,
+        payload,
+        confirmedAt,
+        providerMessageId,
+    });
+    return (0, revenueTouchLedger_service_1.upsertRevenueTouchLedger)({
+        businessId: payload.lead.businessId,
+        leadId: payload.lead.id,
+        clientId: payload.lead.clientId || null,
+        messageId: messageId || null,
+        touchType: "FOLLOWUP",
+        touchReason: payload.trigger || String(job.data.type || "FOLLOWUP"),
+        channel: payload.lead.platform || "UNKNOWN",
+        actor: "AI",
+        source: "FOLLOWUP",
+        traceId: String(job.id || jobKey),
+        providerMessageId: providerMessageId || null,
+        outboundKey: buildFollowupTrackingMetadata({
+            job,
+            jobKey,
+            payload,
+        }).outboundKey,
+        deliveryState,
+        providerAcceptedAt: providerAcceptedAt || null,
+        providerMessagePersistedAt: providerMessagePersistedAt || null,
+        confirmedAt: deliveryState === "CONFIRMED" ? new Date(confirmedAt) : null,
+        failedAt: deliveryState === "FAILED" ? new Date() : null,
+        cta: payload.cta,
+        angle: payload.angle,
+        leadState: payload.lead.revenueState || payload.lead.aiStage || null,
+        messageType: "FOLLOWUP",
+        metadata: buildFollowupCheckpointMetadata({
+            job,
+            jobKey,
+            payload,
+            checkpoint,
+            providerMessageId,
+        }),
+    });
+};
 const saveFollowupMessage = async ({ jobKey, leadId, message, cta, angle, trigger, variantId, variantKey, decision, jobId, outboundKey, }) => {
     const deliveryState = await (0, aiPipelineState_service_1.getReplyDeliveryState)(jobKey);
+    const touchCheckpoint = await (0, revenueTouchLedger_service_1.findRevenueTouchLedgerByOutboundKey)(outboundKey).catch(() => null);
+    const touchMessageId = String(touchCheckpoint?.messageId || "").trim() || null;
     if (deliveryState.savedMessageId) {
         const existing = await prisma_1.default.message.findUnique({
             where: { id: deliveryState.savedMessageId },
         });
         if (existing) {
+            return {
+                message: existing,
+                created: false,
+            };
+        }
+    }
+    if (touchMessageId) {
+        const existing = await prisma_1.default.message.findUnique({
+            where: { id: touchMessageId },
+        });
+        if (existing) {
+            await (0, aiPipelineState_service_1.markReplySaved)(jobKey, existing.id);
             return {
                 message: existing,
                 created: false,
@@ -154,7 +289,7 @@ const validateLeadState = async (job, payload) => {
         }, "Follow-up skipped because the lead control authority rejected the queued token");
         return false;
     }
-    if (lead.isHumanActive) {
+    if ((0, leadControlState_service_1.isLeadHumanControlActive)(controlGate.state)) {
         logger_1.default.info({
             jobId: job.id,
             queueName: job.queueName,
@@ -245,8 +380,12 @@ const sendFollowupMessage = async (request) => {
             Authorization: `Bearer ${request.accessToken}`,
         },
     });
+    const providerMessageId = extractProviderMessageId(response.data);
+    if (!providerMessageId) {
+        throw new Error("provider_message_id_missing");
+    }
     return {
-        providerMessageId: extractProviderMessageId(response.data),
+        providerMessageId,
         acceptedAt: new Date().toISOString(),
     };
 };
@@ -341,15 +480,6 @@ const finalizeConfirmedFollowupDelivery = async ({ job, jobKey, payload, mode, p
                 deliveryMode: confirmedMode,
                 deliveredMessageId: message.id,
             },
-        }).catch((error) => {
-            logger_1.default.warn({
-                jobId: job.id,
-                queueName: job.queueName,
-                leadId: payload.lead.id,
-                businessId: payload.lead.businessId,
-                messageId: message.id,
-                error,
-            }, "Follow-up message attribution failed");
         });
     },
     afterSent: async ({ created }) => {
@@ -365,6 +495,49 @@ const finalizeConfirmedFollowupDelivery = async ({ job, jobKey, payload, mode, p
     },
 });
 const followupQueueNames = Array.from(new Set([followup_queue_1.FOLLOWUP_QUEUE_NAME, followup_queue_1.LEGACY_FOLLOWUP_QUEUE_NAME]));
+const markFollowupJobTerminalFailure = async (job, error) => {
+    const outboundKey = (0, revenueTouchLedger_service_1.buildRevenueTouchOutboundKey)({
+        source: "FOLLOWUP",
+        leadId: String(job.data?.leadId || ""),
+        deliveryJobKey: buildFollowupJobKey(job),
+        step: String(job.data?.type || "FOLLOWUP"),
+    });
+    const existingTouch = await (0, revenueTouchLedger_service_1.findRevenueTouchLedgerByOutboundKey)(outboundKey).catch(() => null);
+    if (!existingTouch || (0, revenueTouchLedger_service_1.isRevenueTouchStateAtLeast)(existingTouch.deliveryState, "DELIVERED")) {
+        return;
+    }
+    await (0, revenueTouchLedger_service_1.upsertRevenueTouchLedger)({
+        businessId: existingTouch.businessId,
+        leadId: existingTouch.leadId,
+        clientId: existingTouch.clientId || null,
+        messageId: existingTouch.messageId || null,
+        touchType: existingTouch.touchType,
+        touchReason: existingTouch.touchReason,
+        channel: existingTouch.channel,
+        actor: existingTouch.actor,
+        source: existingTouch.source,
+        traceId: existingTouch.traceId || buildFollowupJobKey(job),
+        providerMessageId: existingTouch.providerMessageId || null,
+        outboundKey: existingTouch.outboundKey,
+        deliveryState: "FAILED",
+        campaignId: existingTouch.campaignId || null,
+        conversionWindowEndsAt: existingTouch.conversionWindowEndsAt || null,
+        providerAcceptedAt: existingTouch.providerAcceptedAt || null,
+        providerMessagePersistedAt: existingTouch.providerMessagePersistedAt || null,
+        confirmedAt: existingTouch.confirmedAt || null,
+        deliveredAt: existingTouch.deliveredAt || null,
+        failedAt: new Date(),
+        cta: existingTouch.cta || null,
+        angle: existingTouch.angle || null,
+        leadState: existingTouch.leadState || null,
+        messageType: existingTouch.messageType || null,
+        metadata: {
+            ...(existingTouch.metadata || {}),
+            terminalFailureReason: String(error?.message || error || "job_failed"),
+            terminalFailureAt: new Date().toISOString(),
+        },
+    }).catch(() => undefined);
+};
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
     process.env.RUN_WORKER === undefined;
 const globalForFollowupWorker = globalThis;
@@ -401,130 +574,194 @@ const initFollowupWorkers = () => {
             if (!payload.message || isSystemGenerated(payload.message)) {
                 return;
             }
-            // Generation and limits
-            const throughput = await resolveFollowupThroughput(payload.lead.businessId);
-            const aiWindow = await (0, rateLimiter_redis_1.consumeBusinessAIHourlyRate)(payload.lead.businessId, throughput.aiPerHour);
-            if (!aiWindow.allowed) {
-                await delayRateLimitedJob(job, aiWindow.ttlSeconds * 1000, "ai");
+            const lockAcquired = await (0, aiPipelineState_service_1.acquireLeadProcessingLock)(payload.lead.id, jobKey, {
+                waitMs: 1200,
+                pollMs: 50,
+            });
+            if (!lockAcquired) {
+                throw new Error(`followup_lead_lock_busy:${payload.lead.id}`);
             }
-            await (0, rateLimiter_redis_1.incrementDailyAIUsage)(payload.lead.businessId).catch(() => undefined);
-            const deliveryState = await (0, aiPipelineState_service_1.getReplyDeliveryState)(jobKey);
-            if (deliveryState.sent) {
+            try {
+                // Generation and limits
+                const throughput = await resolveFollowupThroughput(payload.lead.businessId);
+                const aiWindow = await (0, rateLimiter_redis_1.consumeBusinessAIHourlyRate)(payload.lead.businessId, throughput.aiPerHour);
+                if (!aiWindow.allowed) {
+                    await delayRateLimitedJob(job, aiWindow.ttlSeconds * 1000, "ai");
+                }
+                await (0, rateLimiter_redis_1.incrementDailyAIUsage)(payload.lead.businessId).catch(() => undefined);
+                let deliveryState = await (0, aiPipelineState_service_1.getReplyDeliveryState)(jobKey);
+                const outboundKey = buildFollowupTrackingMetadata({
+                    job,
+                    jobKey,
+                    payload,
+                }).outboundKey;
+                const touchCheckpoint = await (0, revenueTouchLedger_service_1.findRevenueTouchLedgerByOutboundKey)(outboundKey).catch(() => null);
+                if (!deliveryState.confirmed &&
+                    touchCheckpoint &&
+                    (0, revenueTouchLedger_service_1.isRevenueTouchStateAtLeast)(touchCheckpoint.deliveryState, "PROVIDER_ACCEPTED")) {
+                    const restored = await restoreFollowupCheckpointFromTouch({
+                        jobKey,
+                        touch: touchCheckpoint,
+                    });
+                    if (!restored) {
+                        throw new Error("followup_provider_boundary_resume_checkpoint_missing");
+                    }
+                    deliveryState = await (0, aiPipelineState_service_1.getReplyDeliveryState)(jobKey);
+                }
+                if (deliveryState.sent) {
+                    logger_1.default.info({
+                        jobId: job.id,
+                        queueName: job.queueName,
+                        leadId: payload.lead.id,
+                        businessId: payload.lead.businessId,
+                        step: job.data.type,
+                    }, "Follow-up delivery already finalized");
+                    return;
+                }
+                if (deliveryState.confirmed && deliveryState.confirmedReply) {
+                    await finalizeConfirmedFollowupDelivery({
+                        job,
+                        jobKey,
+                        payload,
+                        mode: deliveryState.deliveryMode ||
+                            "platform",
+                        platform: deliveryState.platform || payload.lead.platform || null,
+                        confirmedAt: deliveryState.confirmedAt || new Date().toISOString(),
+                    });
+                }
+                else {
+                    const deliveryRequest = resolveFollowupDeliveryRequest(job, payload);
+                    if (!deliveryRequest) {
+                        return;
+                    }
+                    const messageWindow = await (0, rateLimiter_redis_1.consumeBusinessMessageMinuteRate)(payload.lead.businessId, throughput.messagesPerMinute);
+                    if (!messageWindow.allowed) {
+                        await delayRateLimitedJob(job, messageWindow.ttlSeconds * 1000, "messages");
+                    }
+                    try {
+                        await (0, usage_service_1.reserveUsage)({
+                            businessId: payload.lead.businessId,
+                            feature: "messages_sent",
+                        });
+                    }
+                    catch (error) {
+                        if (error?.code === "LIMIT_REACHED") {
+                            logger_1.default.warn({
+                                jobId: job.id,
+                                queueName: job.queueName,
+                                leadId: payload.lead.id,
+                                businessId: payload.lead.businessId,
+                            }, "Follow-up delivery skipped because message usage limit exceeded");
+                            return;
+                        }
+                        throw error;
+                    }
+                    if (await (0, consentAuthority_service_1.isConsentRevoked)({
+                        businessId: payload.lead.businessId,
+                        leadId: payload.lead.id,
+                        channel: payload.lead.platform || "UNKNOWN",
+                        scope: "CONVERSATIONAL_OUTBOUND",
+                    })) {
+                        await upsertFollowupTouchCheckpoint({
+                            job,
+                            jobKey,
+                            payload,
+                            deliveryState: "FAILED",
+                            confirmedAt: new Date().toISOString(),
+                        }).catch(() => undefined);
+                        logger_1.default.info({
+                            jobId: job.id,
+                            queueName: job.queueName,
+                            leadId: payload.lead.id,
+                            businessId: payload.lead.businessId,
+                        }, "Follow-up skipped because outbound consent is revoked");
+                        return;
+                    }
+                    const confirmedAt = new Date().toISOString();
+                    await upsertFollowupTouchCheckpoint({
+                        job,
+                        jobKey,
+                        payload,
+                        deliveryState: "RESERVED",
+                        confirmedAt,
+                    });
+                    const deliveryResult = await sendFollowupMessage(deliveryRequest);
+                    const acceptedAt = deliveryResult.acceptedAt
+                        ? new Date(deliveryResult.acceptedAt)
+                        : new Date();
+                    const providerMessagePersistedAt = new Date();
+                    await upsertFollowupTouchCheckpoint({
+                        job,
+                        jobKey,
+                        payload,
+                        deliveryState: "PROVIDER_ACCEPTED",
+                        confirmedAt,
+                        providerMessageId: deliveryResult.providerMessageId || null,
+                        providerAcceptedAt: acceptedAt,
+                    });
+                    await upsertFollowupTouchCheckpoint({
+                        job,
+                        jobKey,
+                        payload,
+                        deliveryState: "PROVIDER_MESSAGE_ID_PERSISTED",
+                        confirmedAt,
+                        providerMessageId: deliveryResult.providerMessageId || null,
+                        providerAcceptedAt: acceptedAt,
+                        providerMessagePersistedAt,
+                    });
+                    await upsertFollowupTouchCheckpoint({
+                        job,
+                        jobKey,
+                        payload,
+                        deliveryState: "CONFIRMED",
+                        confirmedAt,
+                        providerMessageId: deliveryResult.providerMessageId || null,
+                        providerAcceptedAt: acceptedAt,
+                        providerMessagePersistedAt,
+                    });
+                    await (0, replyDeliveryPipeline_service_1.checkpointReplyConfirmation)(jobKey, {
+                        confirmedAt,
+                        deliveryMode: "platform",
+                        platform: payload.lead.platform || null,
+                        confirmedReply: buildFollowupCheckpointSnapshot({
+                            job,
+                            jobKey,
+                            payload,
+                            confirmedAt,
+                            providerMessageId: deliveryResult.providerMessageId || null,
+                        }).confirmedReply,
+                    });
+                    await finalizeConfirmedFollowupDelivery({
+                        job,
+                        jobKey,
+                        payload,
+                        mode: "platform",
+                        platform: payload.lead.platform || null,
+                        confirmedAt,
+                    });
+                }
                 logger_1.default.info({
                     jobId: job.id,
                     queueName: job.queueName,
                     leadId: payload.lead.id,
                     businessId: payload.lead.businessId,
                     step: job.data.type,
-                }, "Follow-up delivery already finalized");
-                return;
-            }
-            if (deliveryState.confirmed && deliveryState.confirmedReply) {
-                await finalizeConfirmedFollowupDelivery({
-                    job,
-                    jobKey,
-                    payload,
-                    mode: deliveryState.deliveryMode ||
-                        "platform",
-                    platform: deliveryState.platform || payload.lead.platform || null,
-                    confirmedAt: deliveryState.confirmedAt || new Date().toISOString(),
-                });
-            }
-            else {
-                const deliveryRequest = resolveFollowupDeliveryRequest(job, payload);
-                if (!deliveryRequest) {
-                    return;
-                }
-                const messageWindow = await (0, rateLimiter_redis_1.consumeBusinessMessageMinuteRate)(payload.lead.businessId, throughput.messagesPerMinute);
-                if (!messageWindow.allowed) {
-                    await delayRateLimitedJob(job, messageWindow.ttlSeconds * 1000, "messages");
-                }
-                try {
-                    await (0, usage_service_1.reserveUsage)({
-                        businessId: payload.lead.businessId,
-                        feature: "messages_sent",
-                    });
-                }
-                catch (error) {
-                    if (error?.code === "LIMIT_REACHED") {
-                        logger_1.default.warn({
-                            jobId: job.id,
-                            queueName: job.queueName,
-                            leadId: payload.lead.id,
-                            businessId: payload.lead.businessId,
-                        }, "Follow-up delivery skipped because message usage limit exceeded");
-                        return;
-                    }
-                    throw error;
-                }
-                if (await (0, consentAuthority_service_1.isConsentRevoked)({
+                }, "Follow-up sent");
+                await (0, followup_service_1.logSalesFollowupMessage)({
                     businessId: payload.lead.businessId,
                     leadId: payload.lead.id,
-                    channel: payload.lead.platform || "UNKNOWN",
-                    scope: "CONVERSATIONAL_OUTBOUND",
-                })) {
-                    logger_1.default.info({
-                        jobId: job.id,
-                        queueName: job.queueName,
-                        leadId: payload.lead.id,
-                        businessId: payload.lead.businessId,
-                    }, "Follow-up skipped because outbound consent is revoked");
-                    return;
-                }
-                const deliveryResult = await sendFollowupMessage(deliveryRequest);
-                const confirmedAt = new Date().toISOString();
-                const trackingMetadata = buildFollowupTrackingMetadata({
-                    job,
-                    jobKey,
-                    payload,
-                });
-                await (0, replyDeliveryPipeline_service_1.checkpointReplyConfirmation)(jobKey, {
-                    confirmedAt,
-                    deliveryMode: "platform",
-                    platform: payload.lead.platform || null,
-                    confirmedReply: (0, replyDeliveryPipeline_service_1.toConfirmedReplyPayload)({
-                        text: payload.message,
-                        cta: payload.cta,
-                        angle: payload.angle,
-                        variantId: payload.variant?.id || null,
-                        variantKey: payload.variant?.variantKey || null,
-                        leadState: payload.lead.revenueState || payload.lead.aiStage || null,
-                        messageType: "FOLLOWUP",
-                        source: "FOLLOWUP",
-                        traceId: String(job.id || jobKey),
-                        meta: {
-                            ...trackingMetadata,
-                            providerMessageId: deliveryResult.providerMessageId || null,
-                        },
-                    }),
-                });
-                await finalizeConfirmedFollowupDelivery({
-                    job,
-                    jobKey,
-                    payload,
-                    mode: "platform",
-                    platform: payload.lead.platform || null,
-                    confirmedAt,
+                    step: job.data.type,
+                    cta: payload.cta,
+                    angle: payload.angle,
+                    planKey: payload.planKey,
+                    temperature: payload.temperature,
+                    trigger: payload.trigger,
+                    variantId: payload.variant?.id || null,
                 });
             }
-            logger_1.default.info({
-                jobId: job.id,
-                queueName: job.queueName,
-                leadId: payload.lead.id,
-                businessId: payload.lead.businessId,
-                step: job.data.type,
-            }, "Follow-up sent");
-            await (0, followup_service_1.logSalesFollowupMessage)({
-                businessId: payload.lead.businessId,
-                leadId: payload.lead.id,
-                step: job.data.type,
-                cta: payload.cta,
-                angle: payload.angle,
-                planKey: payload.planKey,
-                temperature: payload.temperature,
-                trigger: payload.trigger,
-                variantId: payload.variant?.id || null,
-            });
+            finally {
+                await (0, aiPipelineState_service_1.releaseLeadProcessingLock)(payload.lead.id, jobKey);
+            }
         }
         catch (error) {
             if (error instanceof bullmq_1.DelayedError ||
@@ -560,12 +797,39 @@ const initFollowupWorkers = () => {
     }));
     workers.forEach((worker) => {
         worker.on("failed", (job, error) => {
+            const maxAttempts = Number(job?.opts?.attempts || 1);
+            const attemptsMade = Number(job?.attemptsMade || 0);
             logger_1.default.error({
                 jobId: job?.id,
                 queueName: job?.queueName || followup_queue_1.FOLLOWUP_QUEUE_NAME,
                 leadId: job?.data?.leadId || null,
                 error,
             }, "Follow-up worker job failed");
+            if (!job || attemptsMade < maxAttempts) {
+                return;
+            }
+            void markFollowupJobTerminalFailure(job, error);
+            void (0, followup_queue_1.enqueueFollowupDeadLetterJob)({
+                queueName: job.queueName,
+                payload: {
+                    jobId: String(job.id || ""),
+                    leadId: job.data?.leadId || null,
+                    reason: String(error?.message || error || "job_failed"),
+                    stack: typeof error?.stack === "string"
+                        ? String(error.stack)
+                        : null,
+                    traceId: buildFollowupJobKey(job),
+                    payload: (job.data || null),
+                    retryCount: attemptsMade,
+                    failedAt: new Date().toISOString(),
+                },
+            }).catch((deadLetterError) => {
+                logger_1.default.error({
+                    jobId: job.id,
+                    queueName: job.queueName,
+                    error: deadLetterError,
+                }, "Follow-up dead-letter enqueue failed");
+            });
         });
         worker.on("error", (error) => {
             logger_1.default.error({

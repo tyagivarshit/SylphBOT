@@ -23,6 +23,22 @@ export const LEGACY_FOLLOWUP_QUEUE_NAME: string = "followupQueue";
 const globalForFollowupQueue = globalThis as typeof globalThis & {
   __sylphFollowupQueue?: Queue<FollowupJobData>;
   __sylphLegacyFollowupQueue?: Queue<FollowupJobData>;
+  __sylphFollowupDeadLetterQueue?: Queue<FollowupDeadLetterPayload>;
+  __sylphLegacyFollowupDeadLetterQueue?: Queue<FollowupDeadLetterPayload>;
+};
+
+const FOLLOWUP_DLQ_NAME = "ai-low-dlq";
+const LEGACY_FOLLOWUP_DLQ_NAME = "followup-dlq";
+
+export type FollowupDeadLetterPayload = {
+  jobId: string | null;
+  leadId: string | null;
+  reason: string;
+  stack: string | null;
+  traceId: string | null;
+  payload: FollowupJobData | null;
+  retryCount: number;
+  failedAt: string;
 };
 
 const defaultJobOptions: JobsOptions = buildQueueJobOptions({
@@ -58,6 +74,33 @@ export const initFollowupQueues = () => {
     );
   }
 
+  if (!globalForFollowupQueue.__sylphFollowupDeadLetterQueue) {
+    globalForFollowupQueue.__sylphFollowupDeadLetterQueue = createResilientQueue(
+      new Queue<FollowupDeadLetterPayload>(FOLLOWUP_DLQ_NAME, {
+        connection: getQueueRedisConnection(),
+        prefix: "sylph",
+        defaultJobOptions: buildQueueJobOptions({
+          attempts: 1,
+        }),
+      }),
+      FOLLOWUP_DLQ_NAME
+    );
+  }
+
+  if (!globalForFollowupQueue.__sylphLegacyFollowupDeadLetterQueue) {
+    globalForFollowupQueue.__sylphLegacyFollowupDeadLetterQueue =
+      createResilientQueue(
+        new Queue<FollowupDeadLetterPayload>(LEGACY_FOLLOWUP_DLQ_NAME, {
+          connection: getQueueRedisConnection(),
+          prefix: "sylph",
+          defaultJobOptions: buildQueueJobOptions({
+            attempts: 1,
+          }),
+        }),
+        LEGACY_FOLLOWUP_DLQ_NAME
+      );
+  }
+
   return getFollowupQueues();
 };
 
@@ -85,6 +128,36 @@ export const getFollowupQueues = () =>
   LEGACY_FOLLOWUP_QUEUE_NAME === FOLLOWUP_QUEUE_NAME
     ? [getFollowupQueue()]
     : [getFollowupQueue(), getLegacyFollowupQueue()];
+
+const getFollowupDeadLetterQueue = (queueName?: string | null) => {
+  if (
+    !globalForFollowupQueue.__sylphFollowupDeadLetterQueue ||
+    !globalForFollowupQueue.__sylphLegacyFollowupDeadLetterQueue
+  ) {
+    initFollowupQueues();
+  }
+
+  return queueName === LEGACY_FOLLOWUP_QUEUE_NAME
+    ? globalForFollowupQueue.__sylphLegacyFollowupDeadLetterQueue!
+    : globalForFollowupQueue.__sylphFollowupDeadLetterQueue!;
+};
+
+export const enqueueFollowupDeadLetterJob = async ({
+  queueName,
+  payload,
+}: {
+  queueName?: string | null;
+  payload: FollowupDeadLetterPayload;
+}) =>
+  getFollowupDeadLetterQueue(queueName).add("dead-letter", payload, {
+    jobId: `followup_dlq_${payload.jobId || payload.traceId || payload.leadId || Date.now()}`,
+    removeOnComplete: {
+      count: 1000,
+    },
+    removeOnFail: {
+      count: 1000,
+    },
+  });
 
 export const scheduleFollowups = async (
   leadId: string,
@@ -180,10 +253,14 @@ export const closeFollowupQueue = async () => {
     [
       globalForFollowupQueue.__sylphFollowupQueue,
       globalForFollowupQueue.__sylphLegacyFollowupQueue,
+      globalForFollowupQueue.__sylphFollowupDeadLetterQueue,
+      globalForFollowupQueue.__sylphLegacyFollowupDeadLetterQueue,
     ]
       .filter(Boolean)
       .map((queue) => queue!.close())
   );
   globalForFollowupQueue.__sylphFollowupQueue = undefined;
   globalForFollowupQueue.__sylphLegacyFollowupQueue = undefined;
+  globalForFollowupQueue.__sylphFollowupDeadLetterQueue = undefined;
+  globalForFollowupQueue.__sylphLegacyFollowupDeadLetterQueue = undefined;
 };

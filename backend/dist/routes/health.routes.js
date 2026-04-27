@@ -5,7 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const crypto_1 = __importDefault(require("crypto"));
 const express_1 = require("express");
+const inboxDashboardProjection_service_1 = require("../services/inboxDashboardProjection.service");
 const queueHealth_service_1 = require("../services/queueHealth.service");
+const receptionMetrics_service_1 = require("../services/receptionMetrics.service");
 const systemHealth_service_1 = require("../services/systemHealth.service");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const router = (0, express_1.Router)();
@@ -48,6 +50,21 @@ router.get("/system", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         success: true,
         requestId: req.requestId,
         ...health,
+    });
+}));
+router.get("/reception-metrics", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    res.status(200).json({
+        success: true,
+        requestId: req.requestId,
+        metrics: (0, receptionMetrics_service_1.getReceptionMetricsSnapshot)(),
+    });
+}));
+router.get("/reception-dashboard", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const projection = await (0, inboxDashboardProjection_service_1.getInboxDashboardProjection)();
+    res.status(200).json({
+        success: true,
+        requestId: req.requestId,
+        projection,
     });
 }));
 exports.default = router;

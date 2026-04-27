@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/node";
 import { getWorkerRedisConnection } from "../config/redis";
 import { enqueueAIBatch } from "../queues/ai.queue";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
+import { assertPhase5ALegacyRuntimeEnabled } from "../services/runtimePolicy.service";
 
 const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
@@ -13,6 +14,8 @@ const globalForInboxRouteWorker = globalThis as typeof globalThis & {
 };
 
 export const initLegacyInboxRouteWorker = () => {
+  assertPhase5ALegacyRuntimeEnabled("legacy_inbox_route_worker");
+
   if (!shouldRunWorker) {
     console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
     return null;

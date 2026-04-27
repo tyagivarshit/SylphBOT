@@ -1,14 +1,17 @@
 import prisma from "../config/prisma";
-import { markLeadHumanTakeover } from "./leadControlState.service";
+import {
+  getLeadControlAuthority,
+  isLeadHumanControlActive,
+  setLeadHumanControl,
+} from "./leadControlState.service";
 
 export const isHumanActive = async (leadId: string) => {
   try {
-    const lead = await prisma.lead.findUnique({
-      where: { id: leadId },
-      select: { isHumanActive: true },
+    const controlState = await getLeadControlAuthority({
+      leadId,
     });
 
-    return lead?.isHumanActive || false;
+    return isLeadHumanControlActive(controlState);
   } catch (error) {
     console.error("HUMAN CHECK ERROR:", error);
     return false;
@@ -17,20 +20,18 @@ export const isHumanActive = async (leadId: string) => {
 
 export const activateHuman = async (leadId: string) => {
   try {
-    const lead = await prisma.lead.update({
+    const lead = await prisma.lead.findUnique({
       where: { id: leadId },
-      data: {
-        isHumanActive: true,
-      },
       select: {
         businessId: true,
       },
     });
 
-    await markLeadHumanTakeover({
+    await setLeadHumanControl({
       leadId,
-      businessId: lead.businessId,
-    }).catch(() => undefined);
+      businessId: lead?.businessId || null,
+      isActive: true,
+    });
   } catch (error) {
     console.error("ACTIVATE HUMAN ERROR:", error);
     throw error;
@@ -39,11 +40,17 @@ export const activateHuman = async (leadId: string) => {
 
 export const deactivateHuman = async (leadId: string) => {
   try {
-    await prisma.lead.update({
+    const lead = await prisma.lead.findUnique({
       where: { id: leadId },
-      data: {
-        isHumanActive: false,
+      select: {
+        businessId: true,
       },
+    });
+
+    await setLeadHumanControl({
+      leadId,
+      businessId: lead?.businessId || null,
+      isActive: false,
     });
   } catch (error) {
     console.error("DEACTIVATE HUMAN ERROR:", error);
@@ -61,11 +68,10 @@ export const autoDisableHumanAfterTimeout = async (
       where: { id: leadId },
       select: {
         lastMessageAt: true,
-        isHumanActive: true,
       },
     });
 
-    if (!lead || !lead.isHumanActive) return;
+    if (!lead || !(await isHumanActive(leadId))) return;
 
     const last = new Date(lead.lastMessageAt || 0).getTime();
     const now = Date.now();

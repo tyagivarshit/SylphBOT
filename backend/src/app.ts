@@ -5,7 +5,6 @@ import compression from "compression";
 import cookieParser from "cookie-parser";
 import passport from "passport";
 import { env } from "./config/env";
-import { configurePassport } from "./config/passport";
 import { protect } from "./middleware/auth.middleware";
 import { attachBillingContext } from "./middleware/subscription.middleware";
 
@@ -26,6 +25,7 @@ import knowledgeRoutes from "./routes/knowledge.routes";
 import trainingRoutes from "./routes/training.routes";
 import leadRoutes from "./routes/lead.routes";
 import analyticsRoutes from "./routes/analytics.routes";
+import autonomousRoutes from "./routes/autonomous.routes";
 import searchRoutes from "./routes/search.routes";
 import notificationRoutes from "./routes/notification";
 import userRoutes from "./routes/user.routes";
@@ -55,22 +55,59 @@ import { requestContextMiddleware } from "./middleware/requestContext.middleware
 import { optionalApiKeyAuth } from "./middleware/apiKey.middleware";
 import { hasPermission } from "./services/rbac.service";
 
-import { startTrialExpiryCron } from "./cron/trial.cron";
-import { startMetaTokenRefreshCron } from "./cron/metaTokenRefresh.cron";
-import { startUsageResetCron } from "./cron/resetUsage.cron";
-import { startConnectionHealthCron } from "./cron/connectionHealth.cron";
-
 import { isAppError } from "./utils/AppError";
 import { asyncHandler } from "./utils/asyncHandler";
-import logger from "./utils/logger";
 import {
   captureExceptionWithContext,
-  initializeSentry,
 } from "./observability/sentry";
 
-initializeSentry();
 const app = express();
-configurePassport();
+
+const isPlainRecord = (
+  value: unknown
+): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const normalizeJsonResponseBody = (body: unknown, statusCode: number) => {
+  const success = statusCode < 400;
+
+  if (body === undefined) {
+    return {
+      success,
+      data: null,
+    };
+  }
+
+  if (!isPlainRecord(body)) {
+    return {
+      success,
+      data: body,
+    };
+  }
+
+  const hasSuccess = typeof body.success === "boolean";
+  const hasData = Object.prototype.hasOwnProperty.call(body, "data");
+
+  if (hasSuccess && hasData) {
+    return body;
+  }
+
+  if (!success) {
+    return {
+      ...body,
+      success: false,
+      data: hasData ? (body.data ?? null) : null,
+    };
+  }
+
+  const { success: _ignoredSuccess, ...rest } = body;
+
+  return {
+    ...rest,
+    success: hasSuccess ? Boolean(body.success) : true,
+    data: hasData ? (body.data ?? null) : Object.keys(rest).length ? rest : null,
+  };
+};
 
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
@@ -179,6 +216,14 @@ app.options(/.*/, cors(corsOptions));
 app.use(globalLimiter);
 app.use(cookieParser());
 app.use(passport.initialize());
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+
+  res.json = ((body: unknown) =>
+    originalJson(normalizeJsonResponseBody(body, res.statusCode))) as typeof res.json;
+
+  next();
+});
 
 app.use(monitoringMiddleware);
 
@@ -410,6 +455,7 @@ app.use("/api/knowledge", protect, knowledgeRoutes);
 app.use("/api/training", protect, trainingRoutes);
 app.use("/api/leads", protect, leadRoutes);
 app.use("/api/analytics", protect, analyticsRoutes);
+app.use("/api/autonomous", protect, autonomousRoutes);
 app.use("/api/audit", protect, auditRoutes);
 app.use("/api/search", protect, searchRoutes);
 app.use("/api/security", protect, securityRoutes);
@@ -475,33 +521,6 @@ app.use((err: any, req: any, res: any, _next: any) => {
     success: false,
     message: env.IS_PROD ? "Internal server error" : err.message,
     requestId: req.requestId,
-  });
-});
-
-if (process.env.ENABLE_CRON === "true") {
-  startTrialExpiryCron();
-  startMetaTokenRefreshCron();
-  startUsageResetCron();
-  startConnectionHealthCron();
-}
-
-process.on("uncaughtException", (err) => {
-  logger.error({ err }, "Unhandled uncaught exception in app");
-  captureExceptionWithContext(err, {
-    tags: {
-      layer: "process",
-      event: "uncaughtException",
-    },
-  });
-});
-
-process.on("unhandledRejection", (err) => {
-  logger.error({ err }, "Unhandled rejection in app");
-  captureExceptionWithContext(err, {
-    tags: {
-      layer: "process",
-      event: "unhandledRejection",
-    },
   });
 });
 

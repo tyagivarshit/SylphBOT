@@ -15,6 +15,7 @@ import {
   BookOpen,
   Calendar,
   BarChart3,
+  Radar,
   CreditCard,
   Settings,
   MessageCircle,
@@ -68,6 +69,7 @@ const menu: MenuSection[] = [
     section: "Business",
     items: [
       { name: "Booking", href: "/booking", icon: Calendar },
+      { name: "Autonomous", href: "/autonomous", icon: Radar },
       { name: "Analytics", href: "/analytics", icon: BarChart3 },
       { name: "Billing", href: "/billing", icon: CreditCard },
     ],

@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.closeLegacyInboxRouteWorker = exports.initLegacyInboxRouteWorker = void 0;
 const bullmq_1 = require("bullmq");
 const Sentry = __importStar(require("@sentry/node"));
 const redis_1 = require("../config/redis");
@@ -40,8 +41,16 @@ const ai_queue_1 = require("../queues/ai.queue");
 const queue_defaults_1 = require("../queues/queue.defaults");
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
     process.env.RUN_WORKER === undefined;
-const worker = shouldRunWorker
-    ? new bullmq_1.Worker("inboxQueue", (0, queue_defaults_1.withRedisWorkerFailSafe)("inboxQueue", async (job) => {
+const globalForInboxRouteWorker = globalThis;
+const initLegacyInboxRouteWorker = () => {
+    if (!shouldRunWorker) {
+        console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
+        return null;
+    }
+    if (globalForInboxRouteWorker.__sylphInboxRouteWorker) {
+        return globalForInboxRouteWorker.__sylphInboxRouteWorker;
+    }
+    const worker = new bullmq_1.Worker("inboxQueue", (0, queue_defaults_1.withRedisWorkerFailSafe)("inboxQueue", async (job) => {
         const { businessId, leadId, message, plan } = job.data;
         try {
             await (0, ai_queue_1.enqueueAIBatch)([
@@ -65,9 +74,13 @@ const worker = shouldRunWorker
         }
     }), {
         connection: (0, redis_1.getWorkerRedisConnection)(),
-    })
-    : null;
-if (!shouldRunWorker) {
-    console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
-}
-exports.default = worker;
+    });
+    globalForInboxRouteWorker.__sylphInboxRouteWorker = worker;
+    return worker;
+};
+exports.initLegacyInboxRouteWorker = initLegacyInboxRouteWorker;
+const closeLegacyInboxRouteWorker = async () => {
+    await globalForInboxRouteWorker.__sylphInboxRouteWorker?.close().catch(() => undefined);
+    globalForInboxRouteWorker.__sylphInboxRouteWorker = undefined;
+};
+exports.closeLegacyInboxRouteWorker = closeLegacyInboxRouteWorker;

@@ -2,6 +2,7 @@ import { DelayedError, Job, Worker } from "bullmq";
 import axios from "axios";
 import prisma from "../config/prisma";
 import { getWorkerRedisConnection } from "../config/redis";
+import { publishCRMRefreshEvent } from "../services/crm/refreshEvents.service";
 import { decrypt } from "../utils/encrypt";
 import { getIO } from "../sockets/socket.server";
 import {
@@ -15,10 +16,18 @@ import {
 } from "../queues/followup.queue";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import {
+  checkpointReplyConfirmation,
+  finalizeCheckpointedReplyDelivery,
+  type ReplyDeliveryMode,
+  toConfirmedReplyPayload,
+} from "../services/replyDeliveryPipeline.service";
+import {
   getReplyDeliveryState,
   markReplySaved,
-  markReplySent,
 } from "../services/aiPipelineState.service";
+import { isConsentRevoked } from "../services/consentAuthority.service";
+import { evaluateLeadControlGate } from "../services/leadControlState.service";
+import { buildRevenueTouchOutboundKey } from "../services/revenueTouchLedger.service";
 import logger from "../utils/logger";
 import {
   captureExceptionWithContext,
@@ -45,13 +54,12 @@ import {
   resolveWorkerConcurrency,
 } from "./workerManager";
 
-initializeSentry();
-
 type FollowupJobData = {
   leadId?: string;
   type?: string;
   trigger?: string;
   scheduledFor?: string;
+  cancelTokenVersion?: number | null;
 };
 
 type FollowupJob = Job<FollowupJobData>;
@@ -72,6 +80,31 @@ const isSystemGenerated = (msg: string) => {
     normalizedMessage.includes("try again later") ||
     normalizedMessage.includes("conversation limit reached")
   );
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const extractProviderMessageId = (value: unknown) => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (typeof value.message_id === "string" && value.message_id.trim()) {
+    return value.message_id.trim();
+  }
+
+  if (Array.isArray(value.messages)) {
+    const first = value.messages.find(
+      (message) => isRecord(message) && typeof message.id === "string"
+    ) as { id?: string } | undefined;
+
+    if (typeof first?.id === "string" && first.id.trim()) {
+      return first.id.trim();
+    }
+  }
+
+  return null;
 };
 
 const buildFollowupJobKey = (job: { id?: string | number | null; data?: any }) =>
@@ -99,6 +132,7 @@ const saveFollowupMessage = async ({
   variantKey,
   decision,
   jobId,
+  outboundKey,
 }: {
   jobKey: string;
   leadId: string;
@@ -110,6 +144,7 @@ const saveFollowupMessage = async ({
   variantKey?: string | null;
   decision?: any;
   jobId?: string | number | null;
+  outboundKey: string;
 }) => {
   const deliveryState = await getReplyDeliveryState(jobKey);
 
@@ -139,6 +174,7 @@ const saveFollowupMessage = async ({
         variantId: variantId || null,
         variantKey: variantKey || null,
         jobId: jobId || null,
+        outboundKey,
         deliveryJobKey: jobKey,
         decisionCTA: decision?.cta || null,
         decisionCTAStyle: decision?.ctaStyle || null,
@@ -216,8 +252,29 @@ const validateSubscriptionAccess = async (
   return true;
 };
 
-const validateLeadState = (job: FollowupJob, payload: FollowupPayload) => {
+const validateLeadState = async (job: FollowupJob, payload: FollowupPayload) => {
   const { lead } = payload;
+  const controlGate = await evaluateLeadControlGate({
+    leadId: lead.id,
+    expectedCancelTokenVersion:
+      typeof job.data.cancelTokenVersion === "number"
+        ? job.data.cancelTokenVersion
+        : null,
+  });
+
+  if (!controlGate.allowed) {
+    logger.info(
+      {
+        jobId: job.id,
+        queueName: job.queueName,
+        leadId: lead.id,
+        businessId: lead.businessId,
+        reason: controlGate.reason,
+      },
+      "Follow-up skipped because the lead control authority rejected the queued token"
+    );
+    return false;
+  }
 
   if (lead.isHumanActive) {
     logger.info(
@@ -342,13 +399,167 @@ const resolveFollowupDeliveryRequest = (
 };
 
 const sendFollowupMessage = async (request: FollowupDeliveryRequest) => {
-  await axios.post(request.url, request.body, {
+  const response = await axios.post(request.url, request.body, {
     timeout: 10000,
     headers: {
       Authorization: `Bearer ${request.accessToken}`,
     },
   });
+
+  return {
+    providerMessageId: extractProviderMessageId(response.data),
+    acceptedAt: new Date().toISOString(),
+  };
 };
+
+const buildFollowupTrackingMetadata = ({
+  job,
+  jobKey,
+  payload,
+}: {
+  job: FollowupJob;
+  jobKey: string;
+  payload: FollowupPayload;
+}) => ({
+  outboundKey: buildRevenueTouchOutboundKey({
+    source: "FOLLOWUP",
+    leadId: payload.lead.id,
+    deliveryJobKey: jobKey,
+    step: String(job.data.type || payload.trigger || "FOLLOWUP"),
+  }),
+  trigger: payload.trigger,
+  step: job.data.type,
+  variantKey: payload.variant?.variantKey || null,
+  decisionCTA: payload.decision?.cta || null,
+  decisionCTAStyle: payload.decision?.ctaStyle || null,
+  decisionTone: payload.decision?.tone || null,
+  decisionStructure: payload.decision?.structure || null,
+  decisionStrategy: payload.decision?.strategy || null,
+  topPatterns: payload.decision?.topPatterns || [],
+  deliveryJobKey: jobKey,
+});
+
+const finalizeConfirmedFollowupDelivery = async ({
+  job,
+  jobKey,
+  payload,
+  mode,
+  platform,
+  confirmedAt,
+}: {
+  job: FollowupJob;
+  jobKey: string;
+  payload: FollowupPayload;
+  mode: ReplyDeliveryMode;
+  platform: string | null;
+  confirmedAt: string;
+}) =>
+  finalizeCheckpointedReplyDelivery<{ id: string }>({
+    jobKey,
+    fallbackDeliveryMode: mode,
+    fallbackPlatform: platform,
+    fallbackConfirmedAt: confirmedAt,
+    persistConfirmedReply: async ({ reply }) =>
+      saveFollowupMessage({
+        jobKey,
+        leadId: payload.lead.id,
+        message: reply.text,
+        cta: reply.cta || payload.cta,
+        angle: reply.angle || payload.angle,
+        trigger: payload.trigger,
+        variantId: reply.variantId || payload.variant?.id || null,
+        variantKey: reply.variantKey || payload.variant?.variantKey || null,
+        decision: payload.decision,
+        jobId: job.id || null,
+        outboundKey: String(reply.meta?.outboundKey || buildFollowupTrackingMetadata({
+          job,
+          jobKey,
+          payload,
+        }).outboundKey),
+      }),
+    afterPersist: async ({ message, created }) => {
+      if (!created) {
+        return;
+      }
+
+      try {
+        try {
+          const io = getIO();
+          io.to(`lead_${payload.lead.id}`).emit("new_message", message);
+        } catch {}
+
+        await prisma.lead.update({
+          where: { id: payload.lead.id },
+          data: {
+            followupCount: { increment: 1 },
+            lastFollowupAt: new Date(),
+          },
+        });
+      } catch (error) {
+        throw new Error(
+          String(
+            (error as { message?: unknown })?.message ||
+              error ||
+              "followup_finalize_persistence_failed"
+          )
+        );
+      }
+    },
+    beforeSent: async ({ message, reply, mode: confirmedMode }) => {
+      await trackAIMessage({
+        messageId: message.id,
+        businessId: payload.lead.businessId,
+        leadId: payload.lead.id,
+        clientId: payload.lead.clientId || null,
+        variantId: reply.variantId || payload.variant?.id || null,
+        source: reply.source || "FOLLOWUP",
+        cta: reply.cta || payload.cta,
+        angle: reply.angle || payload.angle,
+        leadState:
+          reply.leadState ||
+          payload.lead.revenueState ||
+          payload.lead.aiStage ||
+          null,
+        messageType: reply.messageType || "FOLLOWUP",
+        traceId: reply.traceId || String(job.id || jobKey),
+        metadata: {
+          ...(reply.meta || {}),
+          ...buildFollowupTrackingMetadata({
+            job,
+            jobKey,
+            payload,
+          }),
+          deliveryConfirmed: true,
+          deliveryMode: confirmedMode,
+          deliveredMessageId: message.id,
+        },
+      }).catch((error) => {
+        logger.warn(
+          {
+            jobId: job.id,
+            queueName: job.queueName,
+            leadId: payload.lead.id,
+            businessId: payload.lead.businessId,
+            messageId: message.id,
+            error,
+          },
+          "Follow-up message attribution failed"
+        );
+      });
+    },
+    afterSent: async ({ created }) => {
+      if (!created) {
+        return;
+      }
+
+      await publishCRMRefreshEvent({
+        businessId: payload.lead.businessId,
+        leadId: payload.lead.id,
+        event: "followup_sent",
+        waitForSync: true,
+      });
+    },
+  });
 
 const followupQueueNames = Array.from(
   new Set([FOLLOWUP_QUEUE_NAME, LEGACY_FOLLOWUP_QUEUE_NAME])
@@ -358,7 +569,22 @@ const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
   process.env.RUN_WORKER === undefined;
 
-if (shouldRunWorker) {
+const globalForFollowupWorker = globalThis as typeof globalThis & {
+  __sylphFollowupWorkers?: Worker<FollowupJobData>[];
+};
+
+export const initFollowupWorkers = () => {
+  if (!shouldRunWorker) {
+    console.log("[followup.worker] RUN_WORKER disabled, worker not started");
+    return [];
+  }
+
+  if (globalForFollowupWorker.__sylphFollowupWorkers) {
+    return globalForFollowupWorker.__sylphFollowupWorkers;
+  }
+
+  initializeSentry();
+
   const workers = followupQueueNames.map((queueName) =>
     new Worker<FollowupJobData>(
       queueName,
@@ -373,7 +599,7 @@ if (shouldRunWorker) {
             leadId: job.data?.leadId || null,
           },
           async () => {
-            let messageUsageReserved = false;
+            const jobKey = buildFollowupJobKey(job);
 
             try {
               // Validation
@@ -387,7 +613,7 @@ if (shouldRunWorker) {
                 return;
               }
 
-              if (!validateLeadState(job, payload)) {
+              if (!(await validateLeadState(job, payload))) {
                 return;
               }
 
@@ -415,29 +641,36 @@ if (shouldRunWorker) {
               await incrementDailyAIUsage(payload.lead.businessId).catch(
                 () => undefined
               );
-
-              const jobKey = buildFollowupJobKey(job);
-              const { message: aiMessage, created } = await saveFollowupMessage({
-                jobKey,
-                leadId: payload.lead.id,
-                message: payload.message,
-                cta: payload.cta,
-                angle: payload.angle,
-                trigger: payload.trigger,
-                variantId: payload.variant?.id || null,
-                variantKey: payload.variant?.variantKey || null,
-                decision: payload.decision,
-                jobId: job.id || null,
-              });
-
-              // Send
               const deliveryState = await getReplyDeliveryState(jobKey);
 
-              if (!deliveryState.sent) {
-                const deliveryRequest = resolveFollowupDeliveryRequest(
-                  job,
-                  payload
+              if (deliveryState.sent) {
+                logger.info(
+                  {
+                    jobId: job.id,
+                    queueName: job.queueName,
+                    leadId: payload.lead.id,
+                    businessId: payload.lead.businessId,
+                    step: job.data.type,
+                  },
+                  "Follow-up delivery already finalized"
                 );
+                return;
+              }
+
+              if (deliveryState.confirmed && deliveryState.confirmedReply) {
+                await finalizeConfirmedFollowupDelivery({
+                  job,
+                  jobKey,
+                  payload,
+                  mode:
+                    (deliveryState.deliveryMode as ReplyDeliveryMode | null) ||
+                    "platform",
+                  platform: deliveryState.platform || payload.lead.platform || null,
+                  confirmedAt:
+                    deliveryState.confirmedAt || new Date().toISOString(),
+                });
+              } else {
+                const deliveryRequest = resolveFollowupDeliveryRequest(job, payload);
 
                 if (!deliveryRequest) {
                   return;
@@ -461,7 +694,6 @@ if (shouldRunWorker) {
                     businessId: payload.lead.businessId,
                     feature: "messages_sent",
                   });
-                  messageUsageReserved = true;
                 } catch (error) {
                   if ((error as { code?: string })?.code === "LIMIT_REACHED") {
                     logger.warn(
@@ -479,63 +711,63 @@ if (shouldRunWorker) {
                   throw error;
                 }
 
-                await sendFollowupMessage(deliveryRequest);
-                await markReplySent(jobKey);
-              }
-
-              // Tracking
-              await trackAIMessage({
-                messageId: aiMessage.id,
-                businessId: payload.lead.businessId,
-                leadId: payload.lead.id,
-                clientId: payload.lead.clientId || null,
-                variantId: payload.variant?.id || null,
-                source: "FOLLOWUP",
-                cta: payload.cta,
-                angle: payload.angle,
-                leadState:
-                  payload.lead.revenueState || payload.lead.aiStage || null,
-                messageType: "FOLLOWUP",
-                traceId: String(job.id || ""),
-                metadata: {
-                  trigger: payload.trigger,
-                  step: job.data.type,
-                  variantKey: payload.variant?.variantKey || null,
-                  decisionCTA: payload.decision?.cta || null,
-                  decisionCTAStyle: payload.decision?.ctaStyle || null,
-                  decisionTone: payload.decision?.tone || null,
-                  decisionStructure: payload.decision?.structure || null,
-                  decisionStrategy: payload.decision?.strategy || null,
-                  topPatterns: payload.decision?.topPatterns || [],
-                },
-              }).catch((error) => {
-                logger.warn(
-                  {
-                    jobId: job.id,
-                    queueName: job.queueName,
-                    leadId: payload.lead.id,
+                if (
+                  await isConsentRevoked({
                     businessId: payload.lead.businessId,
-                    messageId: aiMessage.id,
-                    error,
-                  },
-                  "Follow-up message attribution failed"
-                );
-              });
+                    leadId: payload.lead.id,
+                    channel: payload.lead.platform || "UNKNOWN",
+                    scope: "CONVERSATIONAL_OUTBOUND",
+                  })
+                ) {
+                  logger.info(
+                    {
+                      jobId: job.id,
+                      queueName: job.queueName,
+                      leadId: payload.lead.id,
+                      businessId: payload.lead.businessId,
+                    },
+                    "Follow-up skipped because outbound consent is revoked"
+                  );
+                  return;
+                }
 
-              if (created) {
-                try {
-                  const io = getIO();
-                  io.to(`lead_${payload.lead.id}`).emit("new_message", aiMessage);
-                } catch {}
-              }
+                const deliveryResult = await sendFollowupMessage(deliveryRequest);
 
-              if (created) {
-                await prisma.lead.update({
-                  where: { id: payload.lead.id },
-                  data: {
-                    followupCount: { increment: 1 },
-                    lastFollowupAt: new Date(),
-                  },
+                const confirmedAt = new Date().toISOString();
+                const trackingMetadata = buildFollowupTrackingMetadata({
+                  job,
+                  jobKey,
+                  payload,
+                });
+                await checkpointReplyConfirmation(jobKey, {
+                  confirmedAt,
+                  deliveryMode: "platform",
+                  platform: payload.lead.platform || null,
+                  confirmedReply: toConfirmedReplyPayload({
+                    text: payload.message,
+                    cta: payload.cta,
+                    angle: payload.angle,
+                    variantId: payload.variant?.id || null,
+                    variantKey: payload.variant?.variantKey || null,
+                    leadState:
+                      payload.lead.revenueState || payload.lead.aiStage || null,
+                    messageType: "FOLLOWUP",
+                    source: "FOLLOWUP",
+                    traceId: String(job.id || jobKey),
+                    meta: {
+                      ...trackingMetadata,
+                      providerMessageId: deliveryResult.providerMessageId || null,
+                    },
+                  }),
+                });
+
+                await finalizeConfirmedFollowupDelivery({
+                  job,
+                  jobKey,
+                  payload,
+                  mode: "platform",
+                  platform: payload.lead.platform || null,
+                  confirmedAt,
                 });
               }
 
@@ -591,7 +823,11 @@ if (shouldRunWorker) {
                 },
               });
 
-              if (messageUsageReserved) {
+              const finalDeliveryState = await getReplyDeliveryState(jobKey).catch(
+                () => null
+              );
+
+              if (finalDeliveryState?.sent) {
                 return;
               }
 
@@ -618,12 +854,36 @@ if (shouldRunWorker) {
         "Follow-up worker job failed"
       );
     });
+
+    worker.on("error", (error) => {
+      logger.error(
+        {
+          queueName: worker.name,
+          error,
+        },
+        "Follow-up worker error"
+      );
+
+      captureExceptionWithContext(error, {
+        tags: {
+          worker: "followup",
+          queueName: worker.name,
+        },
+      });
+    });
   });
 
   logger.info(
     { queueNames: followupQueueNames, concurrency: FOLLOWUP_WORKER_CONCURRENCY },
     "Follow-up workers started"
   );
-} else {
-  console.log("[followup.worker] RUN_WORKER disabled, worker not started");
-}
+
+  globalForFollowupWorker.__sylphFollowupWorkers = workers;
+  return workers;
+};
+
+export const closeFollowupWorkers = async () => {
+  const workers = globalForFollowupWorker.__sylphFollowupWorkers || [];
+  await Promise.allSettled(workers.map((worker) => worker.close()));
+  globalForFollowupWorker.__sylphFollowupWorkers = undefined;
+};

@@ -27,7 +27,13 @@ router.get("/", async (req, res) => {
     }),
   ]);
 
-  res.json({ notifications, unreadCount });
+  res.json({
+    success: true,
+    data: {
+      notifications,
+      unreadCount,
+    },
+  });
 });
 
 /* ======================================================
@@ -51,7 +57,10 @@ router.get("/settings", async (req, res) => {
     });
   }
 
-  res.json(settings);
+  res.json({
+    success: true,
+    data: settings,
+  });
 });
 
 /* ======================================================
@@ -72,7 +81,10 @@ router.patch("/settings", async (req, res) => {
     create: { userId, email, whatsapp, leads },
   });
 
-  res.json(updated);
+  res.json({
+    success: true,
+    data: updated,
+  });
 });
 
 /* ======================================================
@@ -101,7 +113,12 @@ router.patch("/:id/read", async (req, res) => {
     io.to(`user_${userId}`).emit("notification_read", { id });
   } catch {}
 
-  res.json({ success: true });
+  res.json({
+    success: true,
+    data: {
+      id,
+    },
+  });
 });
 
 /* ======================================================
@@ -121,7 +138,12 @@ router.patch("/read-all", async (req, res) => {
     io.to(`user_${userId}`).emit("notifications_cleared");
   } catch {}
 
-  res.json({ success: true });
+  res.json({
+    success: true,
+    data: {
+      userId,
+    },
+  });
 });
 
 export default router;

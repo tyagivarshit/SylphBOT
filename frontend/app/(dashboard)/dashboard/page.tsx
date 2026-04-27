@@ -4,11 +4,13 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
-import axios from "axios";
 import LeadsChart from "@/components/charts/LeadsCharts";
 import UsageOverview from "@/components/dashboard/UsageOverview";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
-import { buildApiUrl } from "@/lib/url";
+import {
+  getActiveConversations,
+  getDashboardStats,
+} from "@/lib/dashboard.api";
 import { useUpgrade } from "@/app/(dashboard)/layout";
 import {
   EmptyState,
@@ -73,17 +75,21 @@ export default function DashboardPage() {
       setError("");
 
       const [statsRes, convoRes] = await Promise.all([
-        axios.get(buildApiUrl("/dashboard/stats"), {
-          withCredentials: true,
-        }),
-        axios.get(buildApiUrl("/dashboard/active-conversations"), {
-          withCredentials: true,
-        }),
+        getDashboardStats(),
+        getActiveConversations(),
       ]);
 
-      setStats(statsRes.data.data);
-      setConvo(convoRes.data.data);
-      setLimited(Boolean(statsRes.data.limited || convoRes.data.limited));
+      if (!statsRes.success || !statsRes.data) {
+        throw new Error(statsRes.message || "We couldn't load your dashboard right now.");
+      }
+
+      if (!convoRes.success || !convoRes.data) {
+        throw new Error(convoRes.message || "We couldn't load your conversations right now.");
+      }
+
+      setStats(statsRes.data as DashboardStats);
+      setConvo(convoRes.data as ConversationStats);
+      setLimited(Boolean(statsRes.limited || convoRes.limited));
     } catch (dashboardError) {
       console.error("Dashboard error", dashboardError);
       setError("We couldn't load your dashboard right now.");

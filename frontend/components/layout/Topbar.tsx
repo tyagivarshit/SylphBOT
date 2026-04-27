@@ -247,6 +247,12 @@ function getPageMeta(pathname: string) {
       subtitle: "Availability, sessions, and scheduling with a trusted premium feel.",
     },
     {
+      match: "/autonomous",
+      title: "Autonomous",
+      eyebrow: "Revenue Ops",
+      subtitle: "Proactive selling, ethical guardrails, and campaign observability.",
+    },
+    {
       match: "/analytics",
       title: "Analytics",
       eyebrow: "Insights",

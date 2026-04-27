@@ -79,48 +79,17 @@ const bindAuthenticatedContext = (
   });
 };
 
-const getAuthorizationHeader = (value?: string | string[]) => {
-  if (Array.isArray(value)) {
-    return value.find((entry) => typeof entry === "string" && entry.trim()) || null;
-  }
-
-  return typeof value === "string" && value.trim() ? value : null;
-};
-
-const getBearerToken = (authorizationHeader?: string | null) => {
-  const value = String(authorizationHeader || "").trim();
-
-  if (!value) {
-    return null;
-  }
-
-  const [scheme, ...tokenParts] = value.split(" ");
-  const token = tokenParts.join(" ").trim();
-
-  if (!/^Bearer$/i.test(scheme) || !token) {
-    return null;
-  }
-
-  return token;
-};
-
 export const protect = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    const authorizationHeader = getAuthorizationHeader(req.headers.authorization);
-    const bearerToken = getBearerToken(authorizationHeader);
-    const accessToken = req.cookies?.accessToken || bearerToken;
+    const accessToken = req.cookies?.accessToken;
     const refreshToken = req.cookies?.refreshToken;
 
     if (!accessToken && !refreshToken) {
-      throw unauthorized("Missing Authorization bearer token or session");
-    }
-
-    if (authorizationHeader && !bearerToken && !req.cookies?.accessToken) {
-      throw unauthorized("Invalid Authorization header");
+      throw unauthorized("Missing session");
     }
 
     if (accessToken) {
@@ -148,9 +117,7 @@ export const protect = async (
     }
 
     if (!refreshToken) {
-      throw unauthorized(
-        bearerToken ? "Invalid Authorization bearer token" : "Session expired"
-      );
+      throw unauthorized("Session expired");
     }
 
     const decoded = verifyRefreshToken(refreshToken);

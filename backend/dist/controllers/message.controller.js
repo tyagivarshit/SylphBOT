@@ -8,25 +8,69 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 const socket_server_1 = require("../sockets/socket.server");
 const sendMessage_service_1 = require("../services/sendMessage.service");
-/* ======================================
-GET MESSAGES
-====================================== */
+const getScopedLead = async (businessId, leadId) => prisma_1.default.lead.findFirst({
+    where: {
+        id: leadId,
+        businessId,
+        deletedAt: null,
+    },
+    include: {
+        client: {
+            select: {
+                accessToken: true,
+                phoneNumberId: true,
+                platform: true,
+            },
+        },
+    },
+});
 const getMessages = async (req, res) => {
     try {
+        const businessId = req.user?.businessId || null;
         const leadId = req.params.leadId;
+        if (!businessId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
         if (!leadId) {
             return res.status(400).json({
                 success: false,
                 message: "leadId required",
             });
         }
+        const lead = await prisma_1.default.lead.findFirst({
+            where: {
+                id: leadId,
+                businessId,
+                deletedAt: null,
+            },
+            select: {
+                id: true,
+            },
+        });
+        if (!lead) {
+            return res.status(404).json({
+                success: false,
+                message: "Lead not found",
+            });
+        }
         const messages = await prisma_1.default.message.findMany({
-            where: { leadId },
+            where: {
+                leadId: lead.id,
+                lead: {
+                    businessId,
+                    deletedAt: null,
+                },
+            },
             orderBy: { createdAt: "asc" },
         });
         return res.json({
             success: true,
-            messages: messages.map((message) => (0, sendMessage_service_1.formatConversationMessage)(message)),
+            data: {
+                messages: messages.map((message) => (0, sendMessage_service_1.formatConversationMessage)(message)),
+            },
         });
     }
     catch (error) {
@@ -38,9 +82,6 @@ const getMessages = async (req, res) => {
     }
 };
 exports.getMessages = getMessages;
-/* ======================================
-SEND MESSAGE
-====================================== */
 const sendManualMessage = async (req, res) => {
     try {
         const leadId = typeof req.body?.leadId === "string" ? req.body.leadId : "";
@@ -49,14 +90,20 @@ const sendManualMessage = async (req, res) => {
             req.body.clientMessageId.trim()
             ? req.body.clientMessageId.trim()
             : null;
-        const businessId = req.user?.businessId;
+        const businessId = req.user?.businessId || null;
+        if (!businessId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
         if (!leadId || !content) {
             return res.status(400).json({
                 success: false,
                 message: "leadId and content required",
             });
         }
-        const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(businessId || "");
+        const access = await (0, subscriptionGuard_middleware_1.getSubscriptionAccess)(businessId);
         if (!access.allowed) {
             (0, subscriptionGuard_middleware_1.logSubscriptionLockedAction)({
                 businessId,
@@ -72,21 +119,7 @@ const sendManualMessage = async (req, res) => {
                 requestId: req.requestId,
             });
         }
-        const lead = await prisma_1.default.lead.findFirst({
-            where: {
-                id: leadId,
-                ...(businessId ? { businessId } : {}),
-            },
-            include: {
-                client: {
-                    select: {
-                        accessToken: true,
-                        phoneNumberId: true,
-                        platform: true,
-                    },
-                },
-            },
-        });
+        const lead = await getScopedLead(businessId, leadId);
         if (!lead) {
             return res.status(404).json({
                 success: false,
@@ -101,8 +134,10 @@ const sendManualMessage = async (req, res) => {
         });
         return res.json({
             success: result.delivery?.delivered ?? true,
-            message: result.message,
-            delivery: result.delivery,
+            data: {
+                message: result.message,
+                delivery: result.delivery,
+            },
         });
     }
     catch (error) {
@@ -114,27 +149,64 @@ const sendManualMessage = async (req, res) => {
     }
 };
 exports.sendManualMessage = sendManualMessage;
-/* ======================================
-DELETE MESSAGE
-====================================== */
 const deleteMessage = async (req, res) => {
     try {
+        const businessId = req.user?.businessId || null;
         const messageId = req.params.messageId;
+        if (!businessId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
         if (!messageId) {
             return res.status(400).json({
                 success: false,
                 message: "messageId required",
             });
         }
-        const message = await prisma_1.default.message.update({
-            where: { id: messageId },
+        const message = await prisma_1.default.message.findFirst({
+            where: {
+                id: messageId,
+                lead: {
+                    businessId,
+                    deletedAt: null,
+                },
+            },
+            select: {
+                id: true,
+                leadId: true,
+            },
+        });
+        if (!message) {
+            return res.status(404).json({
+                success: false,
+                message: "Message not found",
+            });
+        }
+        await prisma_1.default.message.updateMany({
+            where: {
+                id: message.id,
+                lead: {
+                    businessId,
+                    deletedAt: null,
+                },
+            },
             data: {
                 content: "This message was deleted",
             },
         });
         const io = (0, socket_server_1.getIO)();
-        io.emit("message_deleted", message);
-        return res.json({ success: true });
+        io.to(`lead_${message.leadId}`).emit("message_deleted", {
+            id: message.id,
+            leadId: message.leadId,
+        });
+        return res.json({
+            success: true,
+            data: {
+                id: message.id,
+            },
+        });
     }
     catch (error) {
         console.error("Delete message error:", error);
@@ -145,23 +217,52 @@ const deleteMessage = async (req, res) => {
     }
 };
 exports.deleteMessage = deleteMessage;
-/* ======================================
-MARK READ
-====================================== */
 const markConversationRead = async (req, res) => {
     try {
-        const { leadId } = req.body;
+        const businessId = req.user?.businessId || null;
+        const leadId = typeof req.body?.leadId === "string" ? req.body.leadId : "";
+        if (!businessId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
         if (!leadId) {
             return res.status(400).json({
                 success: false,
                 message: "leadId required",
             });
         }
-        await prisma_1.default.lead.update({
-            where: { id: leadId },
+        const lead = await prisma_1.default.lead.findFirst({
+            where: {
+                id: leadId,
+                businessId,
+                deletedAt: null,
+            },
+            select: {
+                id: true,
+            },
+        });
+        if (!lead) {
+            return res.status(404).json({
+                success: false,
+                message: "Lead not found",
+            });
+        }
+        await prisma_1.default.lead.updateMany({
+            where: {
+                id: lead.id,
+                businessId,
+                deletedAt: null,
+            },
             data: { unreadCount: 0 },
         });
-        return res.json({ success: true });
+        return res.json({
+            success: true,
+            data: {
+                leadId: lead.id,
+            },
+        });
     }
     catch (error) {
         console.error("Mark read error:", error);

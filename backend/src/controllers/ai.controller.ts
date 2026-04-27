@@ -3,8 +3,8 @@ import prisma from "../config/prisma";
 import { getSalesAgentBlueprint } from "../services/salesAgent/blueprint.service";
 import {
   buildSalesAgentRecoveryReply,
-  generateSalesAgentReply,
 } from "../services/salesAgent/reply.service";
+import { runRevenueBrainOrchestrator } from "../services/revenueBrain/orchestrator.service";
 import { AuthenticatedRequest } from "../types/request";
 import {
   finalizeAIUsageExecution,
@@ -119,38 +119,56 @@ export const testAI = async (
 
     responseLeadId = lead.id;
 
-    aiReservation = await reserveAIUsageExecution({
-      businessId: business.id,
-    });
-
-    const reply = await generateSalesAgentReply({
+    const reply = await runRevenueBrainOrchestrator({
       businessId: business.id,
       leadId: lead.id,
       message,
       plan: business.subscription?.plan || null,
       source: "PREVIEW",
       preview: true,
+      beforeAIReply: async () => {
+        aiReservation = await reserveAIUsageExecution({
+          businessId: business.id,
+        });
+
+        return {
+          finalize: async () => {
+            if (!aiReservation) {
+              return;
+            }
+
+            const activeReservation = aiReservation;
+            aiReservation = null;
+            await finalizeAIUsageExecution(activeReservation);
+          },
+          release: async () => {
+            if (!aiReservation) {
+              return;
+            }
+
+            const activeReservation = aiReservation;
+            aiReservation = null;
+            await releaseAIUsageExecution(activeReservation);
+          },
+        };
+      },
     });
 
     if (!reply?.message) {
-      await releaseAIUsageExecution(aiReservation);
-      aiReservation = null;
-
       return res.json({
         success: true,
         aiReply: null,
-        payload: reply,
+        payload: reply?.structured || null,
+        internalPayload: reply || null,
         leadId: responseLeadId,
       });
     }
 
-    await finalizeAIUsageExecution(aiReservation);
-    aiReservation = null;
-
     return res.json({
       success: true,
-      aiReply: reply?.message || null,
-      payload: reply,
+      aiReply: reply.message,
+      payload: reply.structured || null,
+      internalPayload: reply,
       leadId: responseLeadId,
     });
   } catch (error: any) {
@@ -174,7 +192,8 @@ export const testAI = async (
       return res.json({
         success: true,
         aiReply: fallback.message,
-        payload: fallback,
+        payload: fallback.structured || null,
+        internalPayload: fallback,
         leadId: responseLeadId,
       });
     }

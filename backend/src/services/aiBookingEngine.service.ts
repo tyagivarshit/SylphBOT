@@ -18,12 +18,12 @@ import {
 } from "../utils/booking-ai.utils";
 
 import {
+  acquireSlotLock,
   releaseSlotLock,
-  isSlotLocked,
+  readSlotLock,
 } from "./slotLock.service";
 
 import { sendOwnerWhatsAppNotification } from "./ownerNotification.service";
-import { scheduleReminderJobs } from "../queues/bookingReminder.queue";
 
 /* ================================================= */
 interface BookingResult {
@@ -44,6 +44,32 @@ const isRescheduleIntent = (msg: string) =>
 /* ================================================= */
 const getContext = (state: any) => state?.context || {};
 
+const getSlotLockContext = (context: Record<string, any>) => {
+  const slot =
+    typeof context?.slot === "string" && context.slot.trim()
+      ? context.slot.trim()
+      : null;
+  const token =
+    typeof context?.slotLockToken === "string" && context.slotLockToken.trim()
+      ? context.slotLockToken.trim()
+      : null;
+
+  return {
+    slot,
+    token,
+  };
+};
+
+const releaseContextSlotLock = async (context: Record<string, any>) => {
+  const { slot, token } = getSlotLockContext(context);
+
+  if (!slot || !token) {
+    return;
+  }
+
+  await releaseSlotLock(slot, token).catch(() => undefined);
+};
+
 /* ================================================= */
 export const handleAIBookingIntent = async (
   businessId: string,
@@ -58,7 +84,8 @@ export const handleAIBookingIntent = async (
     /* ================= CANCEL ================= */
     if (isCancelIntent(clean)) {
       try {
-        await cancelAppointmentByLead(leadId);
+        await cancelAppointmentByLead(businessId, leadId);
+        await releaseContextSlotLock(context);
         await clearConversationState(leadId);
 
         await sendOwnerWhatsAppNotification({
@@ -72,6 +99,16 @@ export const handleAIBookingIntent = async (
           message: "❌ Your booking has been cancelled.",
         };
       } catch {
+        if (state?.state === "BOOKING_CONFIRMATION") {
+          await releaseContextSlotLock(context);
+          await clearConversationState(leadId);
+
+          return {
+            handled: true,
+            message: "Booking request cancelled.",
+          };
+        }
+
         return { handled: true, message: "No active booking found." };
       }
     }
@@ -80,8 +117,8 @@ export const handleAIBookingIntent = async (
     if (isRescheduleIntent(clean)) {
       try {
         /* 🔥 CANCEL OLD BOOKING FIRST */
-        await cancelAppointmentByLead(leadId);
-
+        await cancelAppointmentByLead(businessId, leadId);
+        await releaseContextSlotLock(context);
         await clearConversationState(leadId);
         await setConversationState(leadId, "RESCHEDULE_FLOW", {});
 
@@ -110,16 +147,22 @@ export const handleAIBookingIntent = async (
       const slotISO = context?.slot;
 
       if (!slotISO) {
+        await releaseContextSlotLock(context);
         await clearConversationState(leadId);
         return { handled: true, message: "Session expired." };
       }
 
       const selectedSlot = new Date(slotISO);
+      const slotLockToken =
+        typeof context?.slotLockToken === "string"
+          ? context.slotLockToken
+          : null;
 
       if (clean.includes("yes") || clean.includes("confirm")) {
-        const lockedBy = await isSlotLocked(slotISO);
+        const activeSlotLock = await readSlotLock(slotISO);
 
-        if (lockedBy && lockedBy !== leadId) {
+        if (activeSlotLock && activeSlotLock.token !== slotLockToken) {
+          await releaseContextSlotLock(context);
           await clearConversationState(leadId);
           return {
             handled: true,
@@ -136,6 +179,8 @@ export const handleAIBookingIntent = async (
         });
 
         if (existing) {
+          await releaseContextSlotLock(context);
+          await clearConversationState(leadId);
           return {
             handled: true,
             message: "⚠️ You already have a booking.",
@@ -145,8 +190,11 @@ export const handleAIBookingIntent = async (
         try {
           const endTime = new Date(selectedSlot.getTime() + 30 * 60000);
 
-          const lead = await prisma.lead.findUnique({
-            where: { id: leadId },
+          const lead = await prisma.lead.findFirst({
+            where: {
+              id: leadId,
+              businessId,
+            },
           });
 
           const appointment = await createNewAppointment({
@@ -159,24 +207,19 @@ export const handleAIBookingIntent = async (
             endTime,
           });
 
-          scheduleReminderJobs(appointment.id).catch(() => {});
-
-          await releaseSlotLock(slotISO);
+          if (slotLockToken) {
+            await releaseSlotLock(slotISO, slotLockToken);
+          }
           await clearConversationState(leadId);
-
-          await sendOwnerWhatsAppNotification({
-            businessId,
-            leadId,
-            slot: selectedSlot,
-            type: "BOOKED",
-          });
 
           return {
             handled: true,
             message: `✅ Booked for ${selectedSlot.toLocaleString()}`,
           };
         } catch {
-          await releaseSlotLock(slotISO);
+          if (slotLockToken) {
+            await releaseSlotLock(slotISO, slotLockToken);
+          }
 
           return {
             handled: true,
@@ -186,6 +229,7 @@ export const handleAIBookingIntent = async (
       }
 
       if (clean.includes("change")) {
+        await releaseContextSlotLock(context);
         await setConversationState(leadId, "BOOKING_SELECTION", {});
         return { handled: true, message: "Okay 👍 Select another slot." };
       }
@@ -251,8 +295,20 @@ export const handleAIBookingIntent = async (
         return { handled: true, message: "No suitable slot found." };
       }
 
+      const slotLock = await acquireSlotLock(closest.toISOString(), leadId);
+
+      if (!slotLock) {
+        return {
+          handled: true,
+          message: "That slot was just booked. Please choose another one.",
+        };
+      }
+
       await setConversationState(leadId, "BOOKING_CONFIRMATION", {
-        context: { slot: closest.toISOString() },
+        context: {
+          slot: closest.toISOString(),
+          slotLockToken: slotLock.token,
+        },
       });
 
       return {
@@ -321,8 +377,14 @@ export const confirmAIBooking = async (
   slot: Date
 ) => {
   try {
-    const lead = await prisma.lead.findUnique({
-      where: { id: leadId },
+    const state: any = await getConversationState(leadId);
+    const context = getContext(state);
+    const { token: slotLockToken } = getSlotLockContext(context);
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        businessId,
+      },
     });
 
     if (!lead) {
@@ -343,16 +405,10 @@ export const confirmAIBooking = async (
       endTime: new Date(slot.getTime() + 30 * 60000),
     });
 
-    scheduleReminderJobs(appointment.id).catch(() => {});
-    await releaseSlotLock(slot.toISOString()).catch(() => {});
+    if (slotLockToken) {
+      await releaseSlotLock(slot.toISOString(), slotLockToken).catch(() => undefined);
+    }
     await clearConversationState(leadId);
-
-    await sendOwnerWhatsAppNotification({
-      businessId,
-      leadId,
-      slot,
-      type: "BOOKED",
-    }).catch(() => {});
 
     return {
       success: true,

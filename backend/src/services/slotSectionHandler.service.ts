@@ -6,7 +6,6 @@ import {
 
 import {
   acquireSlotLock,
-  releaseSlotLock,
 } from "./slotLock.service";
 
 /*
@@ -80,12 +79,12 @@ export const handleSlotSelection = async ({
     /* =====================================================
     🔒 SLOT LOCK
     ===================================================== */
-    const locked = await acquireSlotLock(
+    const slotLock = await acquireSlotLock(
       selectedSlotISO,
       leadId
     );
 
-    if (!locked) {
+    if (!slotLock) {
       return "⚠️ This slot was just booked by someone else. Please choose another one.";
     }
 
@@ -95,6 +94,7 @@ export const handleSlotSelection = async ({
     await setConversationState(leadId, "BOOKING_CONFIRMATION", {
       context: {
         slot: selectedSlotISO,
+        slotLockToken: slotLock.token,
       },
     });
 

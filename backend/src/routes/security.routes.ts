@@ -10,7 +10,6 @@ import {
   exportTenantData,
   getApiKeys,
   getBackupConfiguration,
-  getLegacyWorkspaceApiKey,
   getSessions,
   logoutAllSessions,
   restoreTenantWorkspace,
@@ -59,12 +58,6 @@ router.delete(
   "/api-keys/:id",
   requirePermission("api_keys:manage"),
   asyncHandler(revokeWorkspaceApiKey)
-);
-
-router.get(
-  "/legacy-api-key",
-  requirePermission("api_keys:manage"),
-  asyncHandler(getLegacyWorkspaceApiKey)
 );
 
 router.get(

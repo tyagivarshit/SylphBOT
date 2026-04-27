@@ -3,7 +3,7 @@ import { buildSalesAgentRecoveryReply } from "./salesAgent/reply.service";
 import logger from "../utils/logger";
 
 export const handleIncomingMessage = async (data: any) => {
-  const { businessId, leadId, message, plan, traceId, beforeAIReply } =
+  const { businessId, leadId, message, plan, traceId, source, beforeAIReply } =
     data || {};
 
   try {
@@ -13,6 +13,7 @@ export const handleIncomingMessage = async (data: any) => {
       message,
       plan: plan || null,
       traceId,
+      source: source || null,
       beforeAIReply,
     });
   } catch (error) {

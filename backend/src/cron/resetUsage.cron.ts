@@ -7,7 +7,7 @@ Runs on the first day of every month at 00:00
 
 export const startUsageResetCron = () => {
 
-  cron.schedule("0 0 1 * *", async () => {
+  return cron.schedule("0 0 1 * *", async () => {
 
     try {
 
@@ -24,5 +24,4 @@ export const startUsageResetCron = () => {
     }
 
   });
-
 };

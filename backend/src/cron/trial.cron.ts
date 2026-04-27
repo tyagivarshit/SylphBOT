@@ -2,8 +2,7 @@ import cron from "node-cron";
 import prisma from "../config/prisma";
 
 export const startTrialExpiryCron = () => {
-
-  cron.schedule("0 2 * * *", async () => {
+  return cron.schedule("0 2 * * *", async () => {
 
     console.log("⏳ Running trial expiry check...");
 
@@ -55,5 +54,4 @@ export const startTrialExpiryCron = () => {
     }
 
   });
-
 };

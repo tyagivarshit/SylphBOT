@@ -32,6 +32,7 @@ export type PreviewAIReplyResponse = {
   aiReply?: string | null;
   message?: string;
   payload?: unknown;
+  internalPayload?: unknown;
   leadId?: string | null;
 };
 
@@ -80,12 +81,4 @@ export function sendConversationMessage(
     method: "POST",
     data: payload,
   });
-}
-
-export async function startBookingForLead(leadId: string) {
-  const response = await apiClient.post("/booking/start", {
-    leadId,
-  });
-
-  return response.data;
 }

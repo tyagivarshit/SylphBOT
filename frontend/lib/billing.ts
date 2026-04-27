@@ -1,109 +1,96 @@
-import { buildApiUrl } from "@/lib/url"
+import { apiFetch } from "@/lib/apiClient";
 
-const fetchWithTimeout = async (
-  url: string,
+type BillingRequestResult = {
+  success?: boolean;
+  url?: string;
+  message?: string;
+};
+
+const requestWithTimeout = async <T>(
+  path: string,
   options: RequestInit,
   timeout = 10000
 ) => {
-  const controller = new AbortController()
-  const id = setTimeout(() => controller.abort(), timeout)
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const res = await fetch(url, {
+    const response = await apiFetch<T>(path, {
       ...options,
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
       signal: controller.signal,
-    })
+    });
 
-    let data: any = null
-
-    try {
-      data = await res.json()
-    } catch {
-      data = null
+    if (!response.success || response.data == null) {
+      throw new Error(response.message || "Request failed");
     }
 
-    if (res.status === 401) {
-      throw new Error("Unauthorized")
-    }
-
-    if (!res.ok || !data?.success) {
-      throw new Error(data?.message || "Request failed")
-    }
-
-    return data
+    return response.data;
   } catch (error: any) {
-    const isAbort = error?.name === "AbortError"
+    const isAbort = error?.name === "AbortError";
 
-    throw new Error(
-      isAbort
-        ? "Request timeout"
-        : error?.message || "Network error"
-    )
+    throw new Error(isAbort ? "Request timeout" : error?.message || "Network error");
   } finally {
-    clearTimeout(id)
+    clearTimeout(id);
   }
-}
+};
 
 export const createCheckoutSession = async (
   plan: string,
   billing: "monthly" | "yearly"
-) => {
+): Promise<BillingRequestResult> => {
   try {
-    const data = await fetchWithTimeout(
-      buildApiUrl("/billing/create-checkout-session"),
+    const data = await requestWithTimeout<{ url?: string }>(
+      "/api/billing/create-checkout-session",
       {
         method: "POST",
         body: JSON.stringify({ plan, billing }),
       }
-    )
+    );
 
     if (!data?.url) {
-      throw new Error("No checkout URL received")
+      throw new Error("No checkout URL received");
     }
 
-    return data
+    return data;
   } catch (error: any) {
-    console.error("Checkout API error:", error)
+    console.error("Checkout API error:", error);
 
     return {
       success: false,
       message: error.message || "Checkout failed",
-    }
+    };
   }
-}
+};
 
 export const createCheckout = async (
   plan: string,
   billing: "monthly" | "yearly"
-) => createCheckoutSession(plan, billing)
+) => createCheckoutSession(plan, billing);
 
 export const upgradePlan = async (
   plan: string,
   billing: "monthly" | "yearly"
-) => createCheckoutSession(plan, billing)
+) => createCheckoutSession(plan, billing);
 
-export const confirmCheckout = async (sessionId: string) => {
+export const confirmCheckout = async (
+  sessionId: string
+): Promise<Record<string, unknown>> => {
   try {
-    return await fetchWithTimeout(
-      `${buildApiUrl("/billing/checkout/confirm")}?session_id=${encodeURIComponent(
+    return await requestWithTimeout(
+      `/api/billing/checkout/confirm?session_id=${encodeURIComponent(
         sessionId
       )}`,
       {
         method: "GET",
       },
       15000
-    )
+    );
   } catch (error: any) {
-    console.error("Checkout confirmation error:", error)
+    console.error("Checkout confirmation error:", error);
 
     return {
       success: false,
       message: error.message || "Checkout confirmation failed",
-    }
+    };
   }
-}
+};

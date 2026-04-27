@@ -1,40 +1,116 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isSlotLocked = exports.releaseSlotLock = exports.acquireSlotLock = void 0;
-const redis_1 = __importDefault(require("../config/redis"));
-const LOCK_TTL = 300; // 5 min
+exports.__slotLockTestInternals = exports.readSlotLock = exports.releaseSlotLock = exports.acquireSlotLock = void 0;
+const redis_1 = require("../config/redis");
+const distributedLock_service_1 = require("./distributedLock.service");
+const LOCK_TTL_MS = 5 * 60 * 1000;
 const buildKey = (slot) => `slot_lock:${slot}`;
+const buildMetadataKey = (slot) => `${buildKey(slot)}:meta`;
+const SLOT_LOCK_METADATA_SEPARATOR = "|";
+const DELETE_SLOT_LOCK_METADATA_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+`;
+const encodeSlotLockMetadata = ({ token, leadId, }) => `${token}${SLOT_LOCK_METADATA_SEPARATOR}${leadId}`;
+const parseSlotLockMetadata = (value) => {
+    if (!value) {
+        return null;
+    }
+    const [token, ...leadParts] = value.split(SLOT_LOCK_METADATA_SEPARATOR);
+    const leadId = leadParts.join(SLOT_LOCK_METADATA_SEPARATOR).trim();
+    if (!token?.trim()) {
+        return null;
+    }
+    return {
+        slot: "",
+        token: token.trim(),
+        leadId: leadId || null,
+    };
+};
+const cleanupSlotLockMetadata = async (slot, metadataValue) => {
+    await (0, redis_1.getSharedRedisConnection)().eval(DELETE_SLOT_LOCK_METADATA_SCRIPT, 1, buildMetadataKey(slot), metadataValue);
+};
 /* -----------------------------------------
 ACQUIRE LOCK
 ----------------------------------------- */
 const acquireSlotLock = async (slot, leadId) => {
+    const lock = await (0, distributedLock_service_1.acquireDistributedLock)({
+        key: buildKey(slot),
+        ttlMs: LOCK_TTL_MS,
+    });
+    if (!lock) {
+        return null;
+    }
+    const metadataValue = encodeSlotLockMetadata({
+        token: lock.token,
+        leadId,
+    });
     try {
-        const result = await redis_1.default.set(buildKey(slot), leadId, "EX", LOCK_TTL, "NX");
-        return result === "OK";
+        await (0, redis_1.getSharedRedisConnection)().set(buildMetadataKey(slot), metadataValue, "PX", LOCK_TTL_MS);
     }
-    catch (err) {
-        console.error("REDIS LOCK ERROR", err);
-        return true; // fail-open
+    catch (error) {
+        await lock.release().catch(() => undefined);
+        throw error;
     }
+    return {
+        slot,
+        token: lock.token,
+        leadId,
+        release: async () => {
+            await (0, exports.releaseSlotLock)(slot, lock.token);
+        },
+    };
 };
 exports.acquireSlotLock = acquireSlotLock;
 /* -----------------------------------------
 RELEASE LOCK
 ----------------------------------------- */
-const releaseSlotLock = async (slot) => {
-    try {
-        await redis_1.default.del(buildKey(slot));
+const releaseSlotLock = async (slot, token) => {
+    const metadataValue = await (0, redis_1.getSharedRedisConnection)().get(buildMetadataKey(slot));
+    await (0, distributedLock_service_1.releaseDistributedLock)({
+        key: buildKey(slot),
+        token,
+    }).catch(() => undefined);
+    if (metadataValue) {
+        const metadata = parseSlotLockMetadata(metadataValue);
+        if (metadata?.token === token) {
+            await cleanupSlotLockMetadata(slot, metadataValue).catch(() => undefined);
+        }
     }
-    catch { }
 };
 exports.releaseSlotLock = releaseSlotLock;
 /* -----------------------------------------
 CHECK LOCK
 ----------------------------------------- */
-const isSlotLocked = async (slot) => {
-    return await redis_1.default.get(buildKey(slot));
+const readSlotLock = async (slot) => {
+    const [tokenValue, metadataValue] = await (0, redis_1.getSharedRedisConnection)().mget(buildKey(slot), buildMetadataKey(slot));
+    if (!tokenValue) {
+        if (metadataValue) {
+            await cleanupSlotLockMetadata(slot, metadataValue).catch(() => undefined);
+        }
+        return null;
+    }
+    const metadata = parseSlotLockMetadata(metadataValue);
+    if (metadata?.token === tokenValue) {
+        return {
+            slot,
+            token: tokenValue,
+            leadId: metadata.leadId,
+        };
+    }
+    if (metadataValue) {
+        await cleanupSlotLockMetadata(slot, metadataValue).catch(() => undefined);
+    }
+    return {
+        slot,
+        token: tokenValue,
+        leadId: null,
+    };
 };
-exports.isSlotLocked = isSlotLocked;
+exports.readSlotLock = readSlotLock;
+exports.__slotLockTestInternals = {
+    encodeSlotLockMetadata,
+    parseSlotLockMetadata,
+};

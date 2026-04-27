@@ -1,15 +1,17 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAvailability = exports.updateAvailability = exports.getAvailability = exports.createAvailability = void 0;
-const client_1 = require("@prisma/client");
-const prisma = new client_1.PrismaClient();
+const prisma_1 = __importDefault(require("../config/prisma"));
 /*
 =====================================================
 CREATE AVAILABILITY
 =====================================================
 */
 const createAvailability = async (data) => {
-    return prisma.bookingSlot.create({
+    return prisma_1.default.bookingSlot.create({
         data: {
             businessId: data.businessId,
             dayOfWeek: data.dayOfWeek,
@@ -29,7 +31,7 @@ GET AVAILABILITY
 =====================================================
 */
 const getAvailability = async (businessId) => {
-    return prisma.bookingSlot.findMany({
+    return prisma_1.default.bookingSlot.findMany({
         where: { businessId },
         orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
     });
@@ -40,10 +42,28 @@ exports.getAvailability = getAvailability;
 UPDATE AVAILABILITY
 =====================================================
 */
-const updateAvailability = async (id, data) => {
-    return prisma.bookingSlot.update({
-        where: { id },
+const updateAvailability = async (businessId, id, data) => {
+    const availability = await prisma_1.default.bookingSlot.findFirst({
+        where: {
+            id,
+            businessId,
+        },
+    });
+    if (!availability) {
+        return null;
+    }
+    await prisma_1.default.bookingSlot.updateMany({
+        where: {
+            id: availability.id,
+            businessId,
+        },
         data,
+    });
+    return prisma_1.default.bookingSlot.findFirst({
+        where: {
+            id: availability.id,
+            businessId,
+        },
     });
 };
 exports.updateAvailability = updateAvailability;
@@ -52,9 +72,25 @@ exports.updateAvailability = updateAvailability;
 DELETE AVAILABILITY
 =====================================================
 */
-const deleteAvailability = async (id) => {
-    return prisma.bookingSlot.delete({
-        where: { id },
+const deleteAvailability = async (businessId, id) => {
+    const availability = await prisma_1.default.bookingSlot.findFirst({
+        where: {
+            id,
+            businessId,
+        },
+        select: {
+            id: true,
+        },
     });
+    if (!availability) {
+        return null;
+    }
+    await prisma_1.default.bookingSlot.deleteMany({
+        where: {
+            id: availability.id,
+            businessId,
+        },
+    });
+    return availability;
 };
 exports.deleteAvailability = deleteAvailability;

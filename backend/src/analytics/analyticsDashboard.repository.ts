@@ -1,4 +1,5 @@
 import prisma from "../config/prisma";
+import { listRevenueTouchTrackingRows } from "../services/revenueTouchLedger.service";
 
 export type AnalyticsLeadRecord = {
   id: string;
@@ -30,16 +31,24 @@ export type AnalyticsConversionEventRecord = {
   occurredAt: Date;
 };
 
+export type AnalyticsRevenueBrainEventRecord = {
+  type: string;
+  meta: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
 export type AnalyticsTrackedMessageRecord = {
   id: string;
   messageId: string;
   leadId: string;
   variantId: string | null;
+  source: string;
   cta: string | null;
   angle: string | null;
   leadState: string | null;
   messageType: string;
   sentAt: Date;
+  metadata?: unknown;
   message: {
     content: string;
   };
@@ -191,31 +200,39 @@ export async function getTrackedMessagesInRange(
   start: Date,
   end: Date
 ): Promise<AnalyticsTrackedMessageRecord[]> {
-  return prisma.salesMessageTracking.findMany({
+  return listRevenueTouchTrackingRows({
+    businessId,
+    start,
+    end,
+  }) as Promise<AnalyticsTrackedMessageRecord[]>;
+}
+
+export async function getRevenueBrainAnalyticsInRange(
+  businessId: string,
+  start: Date,
+  end: Date
+): Promise<AnalyticsRevenueBrainEventRecord[]> {
+  return prisma.analytics.findMany({
     where: {
       businessId,
-      sentAt: {
+      type: {
+        in: [
+          "REVENUE_BRAIN_COMPLETED",
+          "REVENUE_BRAIN_FAILED",
+          "REVENUE_BRAIN_TOOL",
+        ],
+      },
+      createdAt: {
         gte: start,
         lte: end,
       },
     },
-    include: {
-      message: {
-        select: {
-          content: true,
-        },
-      },
-      variant: {
-        select: {
-          variantKey: true,
-          label: true,
-          tone: true,
-          ctaStyle: true,
-          messageLength: true,
-        },
-      },
+    select: {
+      type: true,
+      meta: true,
+      createdAt: true,
     },
-  });
+  }) as Promise<AnalyticsRevenueBrainEventRecord[]>;
 }
 
 export async function getAppointmentsInRange(

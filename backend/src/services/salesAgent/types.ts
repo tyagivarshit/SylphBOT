@@ -42,6 +42,25 @@ export type SalesCTA =
   | "CAPTURE_LEAD"
   | "NONE";
 
+export type SalesResponseIntent =
+  | "price"
+  | "info"
+  | "booking"
+  | "support"
+  | "other";
+
+export type SalesResponseStage =
+  | "DISCOVERY"
+  | "QUALIFIED"
+  | "PITCH"
+  | "OBJECTION"
+  | "BOOKING"
+  | "CLOSED";
+
+export type SalesResponseLeadType = "LOW" | "MEDIUM" | "HIGH";
+
+export type SalesResponseCTA = "book" | "ask_more" | "none";
+
 export type SalesAngle =
   | "curiosity"
   | "urgency"
@@ -193,6 +212,37 @@ export type SalesQualificationState = {
   missingFields: string[];
 };
 
+export type SalesMemoryFact = {
+  id?: string | null;
+  key: string;
+  value: string;
+  confidence: number;
+  decayedConfidence: number;
+  stale: boolean;
+  source?: string | null;
+  lastObservedAt?: Date | null;
+  updatedAt?: Date | null;
+  createdAt?: Date | null;
+  ageDays: number;
+};
+
+export type SalesKnowledgeHit = {
+  id: string;
+  content: string;
+  score: number;
+  semanticScore: number;
+  keywordScore: number;
+  sourceType: string;
+  priority: string;
+  clientId?: string | null;
+  reinforcementScore: number;
+  retrievalCount: number;
+  successCount: number;
+  lastRetrievedAt?: Date | null;
+  lastReinforcedAt?: Date | null;
+  createdAt?: Date | null;
+};
+
 export type SalesIntentDirective = {
   primaryGoal: string;
   responseRule: string;
@@ -319,8 +369,10 @@ export type SalesAgentContext = {
     summary: string;
     memory: string;
     conversation: Array<{ role: "assistant" | "user"; content: string }>;
+    facts: SalesMemoryFact[];
   };
   knowledge: string[];
+  knowledgeHits: SalesKnowledgeHit[];
   profile: SalesLeadProfile;
   progression: SalesProgressionState;
   optimization: SalesOptimizationInsights;
@@ -333,10 +385,22 @@ export type SalesAgentContext = {
   variant?: SalesMessageVariantContext | null;
 };
 
+export type SalesStructuredOutput = {
+  message: string;
+  intent: SalesResponseIntent;
+  stage: SalesResponseStage;
+  leadType: SalesResponseLeadType;
+  cta: SalesResponseCTA;
+  confidence: number;
+  reason: string;
+};
+
 export type SalesAgentReply = {
   message: string;
   cta: SalesCTA;
   angle: SalesAngle;
   reason?: string | null;
+  confidence?: number;
+  structured?: SalesStructuredOutput;
   meta?: Record<string, unknown>;
 };

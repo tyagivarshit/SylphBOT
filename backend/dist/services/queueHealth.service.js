@@ -23,11 +23,11 @@ const getQueueSnapshot = async (queue) => {
 };
 const getAllQueues = () => [
     ...(0, ai_queue_1.getAIQueues)(),
-    followup_queue_1.followupQueue,
-    automation_queue_1.automationQueue,
-    bookingReminder_queue_1.bookingReminderQueue,
-    authEmail_queue_1.authEmailQueue,
-    funnel_queue_1.funnelQueue,
+    (0, followup_queue_1.getFollowupQueue)(),
+    (0, automation_queue_1.getAutomationQueue)(),
+    (0, bookingReminder_queue_1.getBookingReminderQueue)(),
+    (0, authEmail_queue_1.getAuthEmailQueue)(),
+    (0, funnel_queue_1.getFunnelQueue)(),
 ];
 const loadQueueHealth = async () => Promise.all(getAllQueues().map(getQueueSnapshot));
 const getQueueHealth = async () => {

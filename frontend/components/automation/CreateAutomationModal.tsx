@@ -6,6 +6,10 @@ import AutomationBuilder, {
   type AutomationPayloadStep,
 } from "./AutomationBuilder";
 import LoadingButton from "@/components/ui/LoadingButton";
+import {
+  createAutomationFlow,
+  updateAutomationFlow,
+} from "@/lib/automation.service";
 import { notify } from "@/lib/toast";
 
 type AutomationDraft = {
@@ -139,18 +143,11 @@ export default function CreateAutomationModal({
         steps,
       };
 
-      const response = await fetch(
-        isEdit ? `/api/automation/flows/${initialData?.id}` : "/api/automation/flows",
-        {
-          method: isEdit ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
+      const data = isEdit
+        ? await updateAutomationFlow(initialData?.id || "", payload)
+        : await createAutomationFlow(payload);
 
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
+      if (data?.success === false) {
         throw new Error(
           data?.message ||
             (isEdit ? "Failed to update automation" : "Failed to create automation")
@@ -160,7 +157,7 @@ export default function CreateAutomationModal({
       const savedAutomation: AutomationDraft =
         data?.flow ||
         ({
-          id: initialData?.id || data?.id || crypto.randomUUID(),
+          id: initialData?.id || crypto.randomUUID(),
           ...payload,
           createdAt: initialData?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),

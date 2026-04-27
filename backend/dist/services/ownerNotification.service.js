@@ -46,14 +46,17 @@ const sendOwnerWhatsAppNotification = async (data) => {
         /* =====================================================
         LEAD DATA
         ===================================================== */
-        const lead = await prisma_1.default.lead.findUnique({
-            where: { id: leadId },
+        const lead = await prisma_1.default.lead.findFirst({
+            where: {
+                id: leadId,
+                businessId,
+            },
         });
         /* =====================================================
         🧠 MESSAGE BASED ON TYPE
         ===================================================== */
         let messageText = "";
-        if (type === "BOOKED") {
+        if (type === "CONFIRMED") {
             messageText = `📅 New Booking!\n\n👤 ${lead?.name || "Customer"}\n📞 ${lead?.phone || "N/A"}\n🕒 ${slot?.toLocaleString()}`;
         }
         else if (type === "CANCELLED") {

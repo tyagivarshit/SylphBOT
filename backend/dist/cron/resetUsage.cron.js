@@ -10,7 +10,7 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 Runs on the first day of every month at 00:00
 */
 const startUsageResetCron = () => {
-    node_cron_1.default.schedule("0 0 1 * *", async () => {
+    return node_cron_1.default.schedule("0 0 1 * *", async () => {
         try {
             console.log("🔄 Running monthly usage reset...");
             await prisma_1.default.usage.deleteMany({});

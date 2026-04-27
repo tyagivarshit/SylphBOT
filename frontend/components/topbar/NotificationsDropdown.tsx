@@ -51,8 +51,6 @@ export default function NotificationsDropdown({
   useEffect(() => {
     if (!userId) return;
 
-    socket.emit("join_user_room", userId);
-
     socket.on("new_notification", (notification: NotificationItem) => {
       setNotifications((prev) => [notification, ...prev]);
       setUnread((prev) => prev + 1);

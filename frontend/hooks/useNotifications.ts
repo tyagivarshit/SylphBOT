@@ -1,5 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { buildApiUrl } from "@/lib/userApi";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/apiClient";
 
 export function useNotifications() {
   const qc = useQueryClient();
@@ -7,29 +7,51 @@ export function useNotifications() {
   const query = useQuery({
     queryKey: ["notifications"],
     queryFn: async () => {
-      const res = await fetch(buildApiUrl("/api/notifications"), {
+      const response = await apiFetch<{
+        notifications?: unknown[];
+        unreadCount?: number;
+      }>("/api/notifications", {
         credentials: "include",
       });
-      return res.json();
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || "Failed to load notifications");
+      }
+
+      return response.data;
     },
-    refetchInterval: 5000, // 🔥 real-time feel
+    refetchInterval: 5000,
   });
 
   const markRead = useMutation({
-    mutationFn: (id: string) =>
-      fetch(buildApiUrl(`/api/notifications/${id}/read`), {
+    mutationFn: async (id: string) => {
+      const response = await apiFetch(`/api/notifications/${id}/read`, {
         method: "PATCH",
         credentials: "include",
-      }),
+      });
+
+      if (!response.success) {
+        throw new Error(response.message || "Failed to mark notification as read");
+      }
+
+      return response.data;
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
   const clearAll = useMutation({
-    mutationFn: () =>
-      fetch(buildApiUrl("/api/notifications/read-all"), {
+    mutationFn: async () => {
+      const response = await apiFetch("/api/notifications/read-all", {
         method: "PATCH",
         credentials: "include",
-      }),
+      });
+
+      if (!response.success) {
+        throw new Error(response.message || "Failed to clear notifications");
+      }
+
+      return response.data;
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 

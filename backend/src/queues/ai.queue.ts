@@ -6,6 +6,7 @@ import {
   buildQueueJobOptions,
   createResilientQueue,
 } from "./queue.defaults";
+import { getLeadCancelTokenVersions } from "../services/leadControlState.service";
 import logger from "../utils/logger";
 import { getRequestContext } from "../observability/requestContext";
 
@@ -20,6 +21,7 @@ export type AIMessagePayload = {
   leadId: string;
   message: string;
   kind?: AIMessageKind;
+  source?: string;
   plan?: unknown;
   platform?: string;
   senderId?: string;
@@ -31,6 +33,7 @@ export type AIMessagePayload = {
   metadata?: Record<string, unknown>;
   skipInboundPersist?: boolean;
   retryCount?: number;
+  cancelTokenVersion?: number | null;
 };
 
 export type CommentReplyJobPayload = {
@@ -70,57 +73,70 @@ const defaultJobOptions: JobsOptions = {
     },
   }),
 };
-const queueConnection = getQueueRedisConnection();
 
 const globalForAIQueue = globalThis as typeof globalThis & {
   __sylphAIHighQueue?: Queue<AIQueuePayload>;
   __sylphAILegacyQueue?: Queue<AIQueuePayload>;
 };
 
-export const aiQueue =
-  globalForAIQueue.__sylphAIHighQueue ||
-  createResilientQueue(
-    new Queue<AIQueuePayload>(AI_QUEUE_NAME, {
-      connection: queueConnection,
-      prefix: env.AI_QUEUE_PREFIX,
-      defaultJobOptions,
-      streams: {
-        events: {
-          maxLen: 1000,
-        },
-      },
-    }),
-    AI_QUEUE_NAME
-  );
-
-if (!globalForAIQueue.__sylphAIHighQueue) {
-  globalForAIQueue.__sylphAIHighQueue = aiQueue;
-}
-
-export const legacyAIQueue =
-  LEGACY_AI_QUEUE_NAME === AI_QUEUE_NAME
-    ? aiQueue
-    : globalForAIQueue.__sylphAILegacyQueue ||
-      createResilientQueue(
-        new Queue<AIQueuePayload>(LEGACY_AI_QUEUE_NAME, {
-          connection: queueConnection,
-          prefix: env.AI_QUEUE_PREFIX,
-          defaultJobOptions,
-          streams: {
-            events: {
-              maxLen: 1000,
-            },
+export const initAIQueues = () => {
+  if (!globalForAIQueue.__sylphAIHighQueue) {
+    globalForAIQueue.__sylphAIHighQueue = createResilientQueue(
+      new Queue<AIQueuePayload>(AI_QUEUE_NAME, {
+        connection: getQueueRedisConnection(),
+        prefix: env.AI_QUEUE_PREFIX,
+        defaultJobOptions,
+        streams: {
+          events: {
+            maxLen: 1000,
           },
-        }),
-        LEGACY_AI_QUEUE_NAME
-      );
+        },
+      }),
+      AI_QUEUE_NAME
+    );
+  }
 
-if (
-  LEGACY_AI_QUEUE_NAME !== AI_QUEUE_NAME &&
-  !globalForAIQueue.__sylphAILegacyQueue
-) {
-  globalForAIQueue.__sylphAILegacyQueue = legacyAIQueue;
-}
+  if (
+    LEGACY_AI_QUEUE_NAME !== AI_QUEUE_NAME &&
+    !globalForAIQueue.__sylphAILegacyQueue
+  ) {
+    globalForAIQueue.__sylphAILegacyQueue = createResilientQueue(
+      new Queue<AIQueuePayload>(LEGACY_AI_QUEUE_NAME, {
+        connection: getQueueRedisConnection(),
+        prefix: env.AI_QUEUE_PREFIX,
+        defaultJobOptions,
+        streams: {
+          events: {
+            maxLen: 1000,
+          },
+        },
+      }),
+      LEGACY_AI_QUEUE_NAME
+    );
+  }
+
+  return getAIQueues();
+};
+
+const getAIQueue = () => {
+  if (!globalForAIQueue.__sylphAIHighQueue) {
+    initAIQueues();
+  }
+
+  return globalForAIQueue.__sylphAIHighQueue!;
+};
+
+const getLegacyAIQueue = () => {
+  if (LEGACY_AI_QUEUE_NAME === AI_QUEUE_NAME) {
+    return getAIQueue();
+  }
+
+  if (!globalForAIQueue.__sylphAILegacyQueue) {
+    initAIQueues();
+  }
+
+  return globalForAIQueue.__sylphAILegacyQueue!;
+};
 
 const setMetadataFieldIfMissing = (
   metadata: Record<string, unknown>,
@@ -164,10 +180,15 @@ const normalizeMessage = (
   leadId: String(message.leadId || "").trim(),
   message: String(message.message || "").trim(),
   kind: message.kind || "router",
+  source: message.source?.trim(),
   externalEventId: message.externalEventId?.trim(),
   idempotencyKey: message.idempotencyKey?.trim(),
   skipInboundPersist: Boolean(message.skipInboundPersist),
   retryCount: message.retryCount || 0,
+  cancelTokenVersion:
+    typeof message.cancelTokenVersion === "number"
+      ? message.cancelTokenVersion
+      : null,
   metadata: buildMessageMetadata(message, context),
 });
 
@@ -198,9 +219,9 @@ const buildStableToken = (
   }
 
   return crypto
-  .createHash("sha1")
-  .update(messageTokens.join("|"))
-  .digest("hex");
+    .createHash("sha1")
+    .update(messageTokens.join("|"))
+    .digest("hex");
 };
 
 const buildJobId = (
@@ -221,7 +242,6 @@ const buildJobId = (
   return `ai_${crypto.randomUUID()}`;
 };
 
-
 export const enqueueAIBatch = async (
   messages: AIMessagePayload[],
   options?: EnqueueOptions
@@ -235,7 +255,18 @@ export const enqueueAIBatch = async (
     throw new Error("At least one valid message is required");
   }
 
-  const chunks = chunkMessages(normalizedMessages, env.AI_JOB_BATCH_SIZE);
+  const cancelTokenVersions = await getLeadCancelTokenVersions(
+    normalizedMessages.map((message) => message.leadId)
+  );
+  const controlledMessages = normalizedMessages.map((message) => ({
+    ...message,
+    cancelTokenVersion:
+      typeof message.cancelTokenVersion === "number"
+        ? message.cancelTokenVersion
+        : cancelTokenVersions.get(message.leadId) ?? 0,
+  }));
+
+  const chunks = chunkMessages(controlledMessages, env.AI_JOB_BATCH_SIZE);
   const jobs = chunks.map((chunk, chunkIndex) => ({
     name: "process",
     data: {
@@ -255,15 +286,15 @@ export const enqueueAIBatch = async (
       queue: AI_QUEUE_NAME,
       source: options?.source || "api",
       requestedMessages: messages.length,
-      acceptedMessages: normalizedMessages.length,
+      acceptedMessages: controlledMessages.length,
       chunks: chunks.length,
-      leadIds: Array.from(new Set(normalizedMessages.map((item) => item.leadId))),
+      leadIds: Array.from(new Set(controlledMessages.map((item) => item.leadId))),
       idempotencyKey: options?.idempotencyKey || null,
     },
     "AI reply batch enqueue requested"
   );
 
-  const createdJobs = await aiQueue.addBulk(jobs);
+  const createdJobs = await getAIQueue().addBulk(jobs);
 
   logger.info(
     {
@@ -320,7 +351,7 @@ export const enqueueCommentReplyJob = async (
     "Comment reply job enqueue requested"
   );
 
-  const job = await aiQueue.add("ai-high", normalizedPayload, {
+  const job = await getAIQueue().add("ai-high", normalizedPayload, {
     jobId,
   });
 
@@ -365,16 +396,21 @@ export const addRouterJob = async (data: AIMessagePayload) =>
 
 export const getAIQueues = () =>
   LEGACY_AI_QUEUE_NAME === AI_QUEUE_NAME
-    ? [aiQueue]
-    : [aiQueue, legacyAIQueue];
+    ? [getAIQueue()]
+    : [getAIQueue(), getLegacyAIQueue()];
 
 export const getAIQueueNames = () => getAIQueues().map((queue) => queue.name);
 
-export const getAIQueueForLead = (_leadId: string) => aiQueue;
+export const getAIQueueForLead = (_leadId: string) => getAIQueue();
 
 export const closeAIQueue = async () => {
   await Promise.allSettled(
-    getAIQueues().map((queue) => queue.close())
+    [
+      globalForAIQueue.__sylphAIHighQueue,
+      globalForAIQueue.__sylphAILegacyQueue,
+    ]
+      .filter(Boolean)
+      .map((queue) => queue!.close())
   );
   globalForAIQueue.__sylphAIHighQueue = undefined;
   globalForAIQueue.__sylphAILegacyQueue = undefined;

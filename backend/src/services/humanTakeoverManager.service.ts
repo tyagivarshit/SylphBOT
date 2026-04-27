@@ -1,4 +1,5 @@
 import prisma from "../config/prisma";
+import { markLeadHumanTakeover } from "./leadControlState.service";
 
 export const isHumanActive = async (leadId: string) => {
   try {
@@ -16,14 +17,23 @@ export const isHumanActive = async (leadId: string) => {
 
 export const activateHuman = async (leadId: string) => {
   try {
-    await prisma.lead.update({
+    const lead = await prisma.lead.update({
       where: { id: leadId },
       data: {
         isHumanActive: true,
       },
+      select: {
+        businessId: true,
+      },
     });
+
+    await markLeadHumanTakeover({
+      leadId,
+      businessId: lead.businessId,
+    }).catch(() => undefined);
   } catch (error) {
     console.error("ACTIVATE HUMAN ERROR:", error);
+    throw error;
   }
 };
 
@@ -37,6 +47,7 @@ export const deactivateHuman = async (leadId: string) => {
     });
   } catch (error) {
     console.error("DEACTIVATE HUMAN ERROR:", error);
+    throw error;
   }
 };
 

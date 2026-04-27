@@ -91,10 +91,7 @@ const stateFromScore = (
 ): LeadRevenueState => {
   const normalizedOutcome = normalizeOutcome(outcome);
 
-  if (
-    normalizedOutcome === "payment_completed" ||
-    normalizedOutcome === "booked_call"
-  ) {
+  if (normalizedOutcome === "payment_completed") {
     return "CONVERTED";
   }
 
@@ -234,7 +231,6 @@ export const updateLeadState = async (
 
   if (normalizedOutcome === "booked_call") {
     data.lastBookedAt = now;
-    data.lastConvertedAt = now;
   }
 
   if (normalizedOutcome === "payment_completed") {

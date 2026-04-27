@@ -5,43 +5,73 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchKnowledge = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const cosineSimilarity = require("cosine-similarity");
 const clientScope_service_1 = require("./clientScope.service");
 const embedding_service_1 = require("./embedding.service");
-const SIMILARITY_THRESHOLD = 0.25;
-const MAX_RESULTS = 5;
+const cosineSimilarity = require("cosine-similarity");
+const SIMILARITY_THRESHOLD = 0.22;
+const MAX_RESULTS = 6;
 const PRIORITY_WEIGHT = {
-    HIGH: 0.3,
-    MEDIUM: 0.15,
-    LOW: 0,
+    HIGH: 0.16,
+    MEDIUM: 0.08,
+    LOW: 0.02,
 };
+const SOURCE_WEIGHT = {
+    SYSTEM: 0.16,
+    FAQ: 0.12,
+    MANUAL: 0.1,
+    AUTO_LEARN: 0.08,
+};
+const normalizeText = (value) => String(value || "")
+    .trim()
+    .toLowerCase();
 const keywordScore = (query, content) => {
-    const qWords = query.toLowerCase().split(" ").filter(Boolean);
-    const cText = content.toLowerCase();
-    let match = 0;
-    for (const word of qWords) {
-        if (cText.includes(word)) {
-            match++;
-        }
+    const queryTokens = normalizeText(query).split(/\s+/).filter(Boolean);
+    const contentText = normalizeText(content);
+    if (!queryTokens.length || !contentText) {
+        return 0;
     }
-    return qWords.length ? match / qWords.length : 0;
+    const hits = queryTokens.filter((token) => contentText.includes(token)).length;
+    return hits / queryTokens.length;
 };
-const businessIntentBoost = (content) => {
-    const text = content.toLowerCase();
+const businessIntentBoost = (query, content) => {
+    const message = normalizeText(query);
+    const text = normalizeText(content);
     let boost = 0;
-    if (/help|service|services|automation|reply|booking|offer|solution|support|works/i.test(text)) {
-        boost += 0.35;
+    if (/\b(help|service|services|automation|reply|booking|offer|solution|support)\b/i.test(message) &&
+        /\b(help|service|services|automation|reply|booking|offer|solution|support)\b/i.test(text)) {
+        boost += 0.08;
     }
-    if (/owner|multiple business/i.test(text)) {
-        boost -= 0.15;
+    if (/\b(price|pricing|cost|budget|package|plan)\b/i.test(message) &&
+        /\b(price|pricing|cost|budget|package|plan)\b/i.test(text)) {
+        boost += 0.06;
     }
     return boost;
 };
+const scoreRecency = (value) => {
+    if (!value) {
+        return 0;
+    }
+    const ageMs = Math.max(0, Date.now() - value.getTime());
+    const ageDays = ageMs / (24 * 60 * 60 * 1000);
+    return Math.max(0, 0.08 - ageDays * 0.0015);
+};
+const scoreReinforcement = ({ reinforcementScore, retrievalCount, successCount, }) => Math.min(0.25, Math.max(0, Number(reinforcementScore || 0)) * 0.08 +
+    Math.max(0, Number(retrievalCount || 0)) * 0.004 +
+    Math.max(0, Number(successCount || 0)) * 0.02);
+const scoreScope = ({ itemClientId, normalizedClientId, }) => {
+    if (normalizedClientId && itemClientId === normalizedClientId) {
+        return 0.18;
+    }
+    if (!itemClientId) {
+        return 0.03;
+    }
+    return 0;
+};
 const searchKnowledge = async (businessId, message, options) => {
     try {
-        const messageEmbedding = await (0, embedding_service_1.createEmbedding)(message);
         const normalizedClientId = String(options?.clientId || "").trim() || null;
         const includeShared = options?.includeShared !== false;
+        const messageEmbedding = await (0, embedding_service_1.createEmbedding)(message);
         const knowledge = await prisma_1.default.knowledgeBase.findMany({
             where: {
                 ...(0, clientScope_service_1.buildKnowledgeScopeFilter)({
@@ -51,7 +81,7 @@ const searchKnowledge = async (businessId, message, options) => {
                 }),
                 isActive: true,
                 sourceType: {
-                    in: ["SYSTEM", "FAQ", "MANUAL"],
+                    in: ["SYSTEM", "FAQ", "MANUAL", "AUTO_LEARN"],
                 },
             },
             select: {
@@ -59,60 +89,73 @@ const searchKnowledge = async (businessId, message, options) => {
                 content: true,
                 embedding: true,
                 priority: true,
+                sourceType: true,
                 clientId: true,
+                reinforcementScore: true,
+                retrievalCount: true,
+                successCount: true,
+                lastRetrievedAt: true,
+                lastReinforcedAt: true,
+                createdAt: true,
             },
         });
         if (!knowledge.length) {
             return [];
         }
         const scored = knowledge.map((item) => {
-            let semantic = 0;
-            let keyword = 0;
-            if (item.embedding) {
-                semantic = cosineSimilarity(messageEmbedding, item.embedding);
-            }
-            keyword = keywordScore(message, item.content);
-            let boost = 0;
-            const text = item.content.toLowerCase();
-            if (text.includes("service") ||
-                text.includes("business") ||
-                text.includes("company") ||
-                text.includes("digital")) {
-                boost = 0.1;
-            }
-            const priorityKey = item.priority || "MEDIUM";
-            const priorityBoost = PRIORITY_WEIGHT[priorityKey] || 0;
-            const scopeBoost = normalizedClientId && item.clientId === normalizedClientId
-                ? 0.35
-                : !item.clientId
-                    ? 0.05
-                    : 0;
-            const finalScore = semantic * 0.7 +
-                keyword * 0.3 +
-                boost +
+            const semanticScore = item.embedding
+                ? cosineSimilarity(messageEmbedding, item.embedding)
+                : 0;
+            const keyword = keywordScore(message, item.content);
+            const priorityBoost = PRIORITY_WEIGHT[String(item.priority || "MEDIUM").toUpperCase()] || 0;
+            const sourceBoost = SOURCE_WEIGHT[String(item.sourceType || "MANUAL").toUpperCase()] || 0;
+            const scopeBoost = scoreScope({
+                itemClientId: item.clientId || null,
+                normalizedClientId,
+            });
+            const reinforcementBoost = scoreReinforcement({
+                reinforcementScore: item.reinforcementScore,
+                retrievalCount: item.retrievalCount,
+                successCount: item.successCount,
+            });
+            const recencyBoost = scoreRecency(item.lastReinforcedAt || item.lastRetrievedAt || item.createdAt);
+            const intentBoost = businessIntentBoost(message, item.content);
+            const score = semanticScore * 0.55 +
+                keyword * 0.2 +
                 priorityBoost +
-                scopeBoost;
+                sourceBoost +
+                scopeBoost +
+                reinforcementBoost +
+                recencyBoost +
+                intentBoost;
             return {
                 id: item.id,
                 content: item.content,
-                score: finalScore,
+                score,
+                semanticScore,
+                keywordScore: keyword,
+                sourceType: item.sourceType || "MANUAL",
+                priority: item.priority || "MEDIUM",
                 clientId: item.clientId || null,
+                reinforcementScore: Number(item.reinforcementScore || 0),
+                retrievalCount: Number(item.retrievalCount || 0),
+                successCount: Number(item.successCount || 0),
+                lastRetrievedAt: item.lastRetrievedAt || null,
+                lastReinforcedAt: item.lastReinforcedAt || null,
+                createdAt: item.createdAt || null,
             };
         });
-        const lowerMsg = message.toLowerCase();
-        if (lowerMsg.includes("business") ||
-            lowerMsg.includes("service") ||
-            lowerMsg.includes("kya karte") ||
-            lowerMsg.includes("what do you do")) {
-            return scored
-                .sort((a, b) => b.score +
-                businessIntentBoost(b.content) -
-                (a.score + businessIntentBoost(a.content)))
-                .slice(0, 3);
-        }
         return scored
             .filter((item) => item.score >= SIMILARITY_THRESHOLD)
-            .sort((a, b) => b.score - a.score)
+            .sort((left, right) => {
+            if (right.score !== left.score) {
+                return right.score - left.score;
+            }
+            if (right.reinforcementScore !== left.reinforcementScore) {
+                return right.reinforcementScore - left.reinforcementScore;
+            }
+            return right.semanticScore - left.semanticScore;
+        })
             .slice(0, MAX_RESULTS);
     }
     catch (error) {

@@ -1,4 +1,5 @@
-import { enqueueLearning } from "./learningQueue.service"
+import { ingestKnowledge } from "./knowledgeIngestion.service";
+import { shouldLearn } from "./learningFilter.service";
 
 export const processAutoLearning = async ({
   businessId,
@@ -7,15 +8,20 @@ export const processAutoLearning = async ({
   aiReply,
 }: any) => {
   try {
-    if (!message || !aiReply) return;
+    if (!message || !aiReply) {
+      return;
+    }
 
-    await enqueueLearning({
+    if (!shouldLearn(message, aiReply)) {
+      return;
+    }
+
+    await ingestKnowledge({
       businessId,
       clientId,
       input: message,
       output: aiReply,
     });
-
   } catch (err) {
     console.error("Auto learning error:", err);
   }

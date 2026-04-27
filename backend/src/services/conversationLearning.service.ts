@@ -1,5 +1,11 @@
 import prisma from "../config/prisma";
 
+const PRIORITY_REINFORCEMENT: Record<string, number> = {
+  HIGH: 0.24,
+  MEDIUM: 0.16,
+  LOW: 0.08,
+};
+
 export const saveConversationLearning = async ({
   businessId,
   clientId,
@@ -9,55 +15,54 @@ export const saveConversationLearning = async ({
   priority,
 }: any) => {
   try {
-
-    /* =====================================================
-    🔥 CLEAN & SAFE DEFAULTS
-    ===================================================== */
-
-    const finalPriority = priority || "LOW";
-
+    const finalPriority = String(priority || "LOW").toUpperCase();
     const content = `User: ${input}\nAI: ${output}`;
+    const reinforcementSeed =
+      PRIORITY_REINFORCEMENT[finalPriority] || PRIORITY_REINFORCEMENT.LOW;
 
-    /* =====================================================
-    🔥 STRICT DUPLICATE PREVENTION (IMPROVED)
-    ===================================================== */
+    if (!input || !output || content.length < 20) {
+      return null;
+    }
 
     const existing = await prisma.knowledgeBase.findFirst({
       where: {
         businessId,
         clientId: clientId || null,
         content,
-        sourceType: "AUTO_LEARN", // 🔥 only check inside learning
+        sourceType: "AUTO_LEARN",
       },
     });
 
-    if (existing) return existing;
-
-    /* =====================================================
-    🔥 OPTIONAL: LENGTH FILTER (AVOID TRASH DATA)
-    ===================================================== */
-
-    if (!input || !output || content.length < 20) {
-      return null;
+    if (existing) {
+      return prisma.knowledgeBase.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          isActive: true,
+          priority: finalPriority,
+          embedding: existing.embedding || embedding,
+          reinforcementScore: {
+            increment: reinforcementSeed / 2,
+          },
+          lastReinforcedAt: new Date(),
+        },
+      });
     }
 
-    /* =====================================================
-    🔥 SAVE (ISOLATED MEMORY)
-    ===================================================== */
-
-    return await prisma.knowledgeBase.create({
+    return prisma.knowledgeBase.create({
       data: {
         businessId,
         clientId: clientId || null,
-        title: input.slice(0, 80),
+        title: String(input).slice(0, 80),
         content,
         embedding,
-        sourceType: "AUTO_LEARN", // ✅ ALWAYS MEMORY
-        priority: finalPriority,  // LOW by default
+        sourceType: "AUTO_LEARN",
+        priority: finalPriority,
+        reinforcementScore: reinforcementSeed,
         isActive: true,
       },
     });
-
   } catch (error) {
     console.error("Knowledge Save Error:", error);
     return null;

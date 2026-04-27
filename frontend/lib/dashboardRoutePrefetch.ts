@@ -1,11 +1,10 @@
 "use client";
 
 import type { QueryClient } from "@tanstack/react-query";
-import axios from "axios";
 import { getClients } from "@/lib/clients";
 import { api } from "@/lib/api";
+import { apiClient } from "@/lib/apiClient";
 import * as analyticsApi from "@/lib/analytics";
-import { buildApiUrl } from "@/lib/url";
 
 export const dashboardStatsQueryKey = ["dashboard-stats"] as const;
 export const dashboardConversationsQueryKey = [
@@ -38,24 +37,17 @@ export const analyticsChartsQueryKey = (range: string) =>
   ["analytics-charts-compat", range] as const;
 
 export async function fetchDashboardStats() {
-  const res = await axios.get(buildApiUrl("/dashboard/stats"), {
-    withCredentials: true,
-  });
-
+  const res = await apiClient.get("/dashboard/stats");
   return res.data;
 }
 
 export async function fetchDashboardActiveConversations() {
-  const res = await axios.get(buildApiUrl("/dashboard/active-conversations"), {
-    withCredentials: true,
-  });
-
+  const res = await apiClient.get("/dashboard/active-conversations");
   return res.data;
 }
 
 export async function fetchDashboardLeadsPage(page = 1, stage = "") {
-  const res = await axios.get(buildApiUrl("/dashboard/leads"), {
-    withCredentials: true,
+  const res = await apiClient.get("/dashboard/leads", {
     params: {
       page,
       limit: 10,
@@ -67,34 +59,18 @@ export async function fetchDashboardLeadsPage(page = 1, stage = "") {
 }
 
 export async function fetchConversationLeads() {
-  const res = await fetch(buildApiUrl("/conversations"), {
-    credentials: "include",
-  });
-
-  const data = await res.json();
-  return data.conversations || [];
+  const res = await apiClient.get("/conversations");
+  return res.data?.conversations || [];
 }
 
 export async function fetchConversationMessages(leadId: string) {
-  const res = await fetch(buildApiUrl(`/conversations/${leadId}/messages`), {
-    credentials: "include",
-  });
-
-  const data = await res.json();
-  return data.messages || [];
+  const res = await apiClient.get(`/conversations/${leadId}/messages`);
+  return res.data?.messages || [];
 }
 
 export async function fetchAutomationFlows() {
-  const res = await fetch("/api/automation/flows", {
-    credentials: "include",
-  });
-
-  if (!res.ok) {
-    throw new Error("Failed to load automations");
-  }
-
-  const data = await res.json();
-  return Array.isArray(data) ? data : [];
+  const res = await apiClient.get("/automation/flows");
+  return Array.isArray(res.data) ? res.data : res.data?.flows || [];
 }
 
 export async function fetchCommentTriggers() {

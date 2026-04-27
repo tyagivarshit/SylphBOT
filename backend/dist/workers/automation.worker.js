@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.closeAutomationWorker = exports.initAutomationWorker = void 0;
 const bullmq_1 = require("bullmq");
 const redis_1 = require("../config/redis");
 const queue_defaults_1 = require("../queues/queue.defaults");
@@ -11,10 +12,18 @@ const logger_1 = __importDefault(require("../utils/logger"));
 const sentry_1 = require("../observability/sentry");
 const requestContext_1 = require("../observability/requestContext");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
-(0, sentry_1.initializeSentry)();
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
     process.env.RUN_WORKER === undefined;
-if (shouldRunWorker) {
+const globalForAutomationWorker = globalThis;
+const initAutomationWorker = () => {
+    (0, sentry_1.initializeSentry)();
+    if (!shouldRunWorker) {
+        console.log("[automation.worker] RUN_WORKER disabled, worker not started");
+        return null;
+    }
+    if (globalForAutomationWorker.__sylphAutomationWorker) {
+        return globalForAutomationWorker.__sylphAutomationWorker;
+    }
     const worker = new bullmq_1.Worker("automation", (0, queue_defaults_1.withRedisWorkerFailSafe)("automation", async (job) => (0, requestContext_1.runWithRequestContext)({
         requestId: String(job.id || `${job.queueName}:${job.name}`),
         source: "worker",
@@ -44,7 +53,7 @@ if (shouldRunWorker) {
             jobName: job.name,
         }, "Automation worker job started");
         if (job.name === "comment" || job.name === "comment-reply") {
-            console.log("⚙️ Processing comment reply job", job.data);
+            console.log("Processing comment reply job", job.data);
             await (0, commentAutomation_service_1.handleCommentAutomation)(job.data);
         }
         logger_1.default.info({
@@ -91,7 +100,12 @@ if (shouldRunWorker) {
         });
     });
     logger_1.default.info({ queueName: "automation" }, "Automation worker started");
-}
-else {
-    console.log("[automation.worker] RUN_WORKER disabled, worker not started");
-}
+    globalForAutomationWorker.__sylphAutomationWorker = worker;
+    return worker;
+};
+exports.initAutomationWorker = initAutomationWorker;
+const closeAutomationWorker = async () => {
+    await globalForAutomationWorker.__sylphAutomationWorker?.close().catch(() => undefined);
+    globalForAutomationWorker.__sylphAutomationWorker = undefined;
+};
+exports.closeAutomationWorker = closeAutomationWorker;

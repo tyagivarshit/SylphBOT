@@ -1,0 +1,90 @@
+import prisma from "../../config/prisma";
+import {
+  createNotificationTx,
+  emitNotification,
+} from "../notification.service";
+
+export const activateRevenueBrainEscalation = async ({
+  businessId,
+  leadId,
+  title,
+  message,
+}: {
+  businessId: string;
+  leadId: string;
+  title: string;
+  message: string;
+}) => {
+  const result = await prisma.$transaction(async (tx) => {
+    const business = await tx.business.findUnique({
+      where: {
+        id: businessId,
+      },
+      select: {
+        ownerId: true,
+      },
+    });
+
+    if (!business?.ownerId) {
+      throw new Error("owner_not_found");
+    }
+
+    await tx.lead.update({
+      where: {
+        id: leadId,
+      },
+      data: {
+        isHumanActive: true,
+      },
+    });
+
+    await tx.leadControlState.upsert({
+      where: {
+        leadId,
+      },
+      update: {
+        lastHumanTakeoverAt: new Date(),
+      },
+      create: {
+        businessId,
+        leadId,
+        lastHumanTakeoverAt: new Date(),
+      },
+    });
+
+    const verifiedLead = await tx.lead.findUnique({
+      where: {
+        id: leadId,
+      },
+      select: {
+        isHumanActive: true,
+      },
+    });
+
+    if (!verifiedLead?.isHumanActive) {
+      throw new Error("human_lock_verification_failed");
+    }
+
+    const notification = await createNotificationTx(tx, {
+      userId: business.ownerId,
+      businessId,
+      title,
+      message,
+      type: "REVENUE_BRAIN_ESCALATION",
+      link: `/conversations?leadId=${leadId}`,
+    });
+
+    return {
+      ownerId: business.ownerId,
+      notification,
+    };
+  });
+
+  emitNotification(result.notification);
+
+  return {
+    activated: true,
+    ownerId: result.ownerId,
+    notificationId: result.notification.id,
+  };
+};

@@ -52,35 +52,12 @@ const bindAuthenticatedContext = (req, user) => {
         businessId: user.businessId,
     });
 };
-const getAuthorizationHeader = (value) => {
-    if (Array.isArray(value)) {
-        return value.find((entry) => typeof entry === "string" && entry.trim()) || null;
-    }
-    return typeof value === "string" && value.trim() ? value : null;
-};
-const getBearerToken = (authorizationHeader) => {
-    const value = String(authorizationHeader || "").trim();
-    if (!value) {
-        return null;
-    }
-    const [scheme, ...tokenParts] = value.split(" ");
-    const token = tokenParts.join(" ").trim();
-    if (!/^Bearer$/i.test(scheme) || !token) {
-        return null;
-    }
-    return token;
-};
 const protect = async (req, res, next) => {
     try {
-        const authorizationHeader = getAuthorizationHeader(req.headers.authorization);
-        const bearerToken = getBearerToken(authorizationHeader);
-        const accessToken = req.cookies?.accessToken || bearerToken;
+        const accessToken = req.cookies?.accessToken;
         const refreshToken = req.cookies?.refreshToken;
         if (!accessToken && !refreshToken) {
-            throw (0, AppError_1.unauthorized)("Missing Authorization bearer token or session");
-        }
-        if (authorizationHeader && !bearerToken && !req.cookies?.accessToken) {
-            throw (0, AppError_1.unauthorized)("Invalid Authorization header");
+            throw (0, AppError_1.unauthorized)("Missing session");
         }
         if (accessToken) {
             const decoded = (0, generateToken_1.verifyAccessToken)(accessToken);
@@ -101,7 +78,7 @@ const protect = async (req, res, next) => {
             }
         }
         if (!refreshToken) {
-            throw (0, AppError_1.unauthorized)(bearerToken ? "Invalid Authorization bearer token" : "Session expired");
+            throw (0, AppError_1.unauthorized)("Session expired");
         }
         const decoded = (0, generateToken_1.verifyRefreshToken)(refreshToken);
         if (!decoded?.id || typeof decoded.tokenVersion !== "number") {

@@ -2,10 +2,7 @@ import { Job, Worker } from "bullmq";
 import axios from "axios";
 import { env } from "../config/env";
 import prisma from "../config/prisma";
-import {
-  closeRedisConnection,
-  getWorkerRedisConnection,
-} from "../config/redis";
+import { getWorkerRedisConnection } from "../config/redis";
 import {
   AIJobPayload,
   AIMessagePayload,
@@ -19,13 +16,24 @@ import {
   acquireLeadProcessingLock,
   getReplyDeliveryState,
   markReplySaved,
-  markReplySent,
   releaseLeadProcessingLock,
 } from "../services/aiPipelineState.service";
+import {
+  checkpointReplyConfirmation,
+  finalizeCheckpointedReplyDelivery,
+  type ReplyDeliveryMode,
+  toConfirmedReplyPayload,
+} from "../services/replyDeliveryPipeline.service";
+import { isConsentRevoked } from "../services/consentAuthority.service";
 import { handleIncomingMessage } from "../services/executionRouter.servce";
-import { scheduleFollowups } from "../queues/followup.queue";
+import { evaluateLeadControlGate } from "../services/leadControlState.service";
+import {
+  cancelFollowups,
+  scheduleFollowups,
+} from "../queues/followup.queue";
 import { clearSalesReplyState } from "../services/salesAgent/replyCache.service";
 import { trackAIMessage } from "../services/salesAgent/conversionTracker.service";
+import { buildRevenueTouchOutboundKey } from "../services/revenueTouchLedger.service";
 import { getIO } from "../sockets/socket.server";
 import { decrypt } from "../utils/encrypt";
 import logger from "../utils/logger";
@@ -52,6 +60,15 @@ import {
 } from "../redis/rateLimiter.redis";
 import { buildSalesAgentRecoveryReply } from "../services/salesAgent/reply.service";
 import { resolvePlanContext } from "../services/feature.service";
+import {
+  queueRevenueBrainEvent,
+  queueRevenueBrainEventDurably,
+} from "../services/revenueBrain/eventBus.service";
+import {
+  resolveRevenueBrainDeliveryAttempt,
+  resolveRevenueBrainDeliveryEnvironment,
+} from "../services/revenueBrain/deliveryPolicy.service";
+import { isRevenueBrainDeliveryConfirmed } from "../services/revenueBrain/finalDecision.service";
 import { getPlanKey } from "../config/plan.config";
 import {
   getThroughputLimits,
@@ -61,14 +78,15 @@ import {
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import { handleCommentAutomation } from "../services/commentAutomation.service";
 
-initializeSentry();
 
 const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
   process.env.RUN_WORKER === undefined;
 
-console.log("🚀 Worker starting...");
-console.log("RUN_WORKER:", process.env.RUN_WORKER);
+
+const globalForAIPartitionWorker = globalThis as typeof globalThis & {
+  __sylphAIPartitionWorkers?: Worker<AIQueuePayload>[];
+};
 
 const AI_WORKER_CONCURRENCY = Math.max(
   1,
@@ -105,6 +123,22 @@ class BusinessRateLimitError extends Error {
   }
 }
 
+class DeliveryStageError extends Error {
+  stage: "transport" | "persistence" | "tracking";
+  retriable: boolean;
+
+  constructor(
+    stage: "transport" | "persistence" | "tracking",
+    message: string,
+    retriable = true
+  ) {
+    super(message);
+    this.name = "DeliveryStageError";
+    this.stage = stage;
+    this.retriable = retriable;
+  }
+}
+
 type AIWorkerJob = Job<AIQueuePayload>;
 type AIWorkerMessage = AIMessagePayload;
 type AIWorkerMessageKind = NonNullable<AIWorkerMessage["kind"]>;
@@ -131,6 +165,35 @@ type NormalizedReply = {
 type ThroughputBudget = {
   messagesPerMinute: number;
   aiPerHour: number;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const extractProviderMessageId = (value: unknown) => {
+  const record = asRecord(value);
+
+  if (!record) {
+    return null;
+  }
+
+  if (typeof record.message_id === "string" && record.message_id.trim()) {
+    return record.message_id.trim();
+  }
+
+  if (Array.isArray(record.messages)) {
+    const first = record.messages.find(
+      (message) => asRecord(message) && typeof (message as { id?: unknown }).id === "string"
+    ) as { id?: string } | undefined;
+
+    if (typeof first?.id === "string" && first.id.trim()) {
+      return first.id.trim();
+    }
+  }
+
+  return null;
 };
 
 const delay = (ms: number) =>
@@ -163,6 +226,40 @@ const createWorkerTask = (
   jobKey: buildMessageJobKey(job, messageIndex),
   kind: getTaskKind(job, message),
 });
+
+const buildTaskOutboundKey = (task: AIWorkerTask) =>
+  buildRevenueTouchOutboundKey({
+    source: task.kind === "router" ? "AI_ROUTER" : "AI_MESSAGE",
+    leadId: task.message.leadId,
+    deliveryJobKey: task.jobKey,
+    externalEventId: task.message.externalEventId || null,
+  });
+
+const isTaskControlAllowed = async (task: AIWorkerTask, stage: string) => {
+  const gate = await evaluateLeadControlGate({
+    leadId: task.message.leadId,
+    expectedCancelTokenVersion:
+      typeof task.message.cancelTokenVersion === "number"
+        ? task.message.cancelTokenVersion
+        : null,
+  });
+
+  if (!gate.allowed) {
+    logger.info(
+      {
+        leadId: task.message.leadId,
+        businessId: task.message.businessId,
+        jobKey: task.jobKey,
+        stage,
+        reason: gate.reason,
+      },
+      "AI worker skipped job because the lead control authority rejected the queued token"
+    );
+    return false;
+  }
+
+  return true;
+};
 
 const isCommentReplyJobPayload = (
   payload: AIQueuePayload | null | undefined
@@ -208,6 +305,7 @@ const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
 
   const reply = aiReply as {
     message?: unknown;
+    text?: unknown;
     cta?: unknown;
     source?: unknown;
     latencyMs?: unknown;
@@ -228,7 +326,7 @@ const normalizeReply = (aiReply: unknown): NormalizedReply | null => {
       messageType?: unknown;
     };
   };
-  const text = String(reply.message ?? "").trim();
+  const text = String(reply.message ?? reply.text ?? "").trim();
 
   if (!text) {
     return null;
@@ -376,11 +474,19 @@ const scheduleRateLimitedRetry = async (
   );
 };
 
-const saveReplyMessage = async (
-  task: AIWorkerTask,
-  replyText: string,
-  reply: NormalizedReply
-) => {
+const persistConfirmedReplyMessage = async ({
+  task,
+  reply,
+  mode,
+  platform,
+  confirmedAt,
+}: {
+  task: AIWorkerTask;
+  reply: NormalizedReply;
+  mode: "platform" | "local_preview" | "local_only";
+  platform: string | null;
+  confirmedAt: string;
+}) => {
   const currentState = await getReplyDeliveryState(task.jobKey);
 
   if (currentState.savedMessageId) {
@@ -396,10 +502,16 @@ const saveReplyMessage = async (
     }
   }
 
+  const replyMeta = asRecord(reply.meta);
+  const outboundKey =
+    String(replyMeta?.outboundKey || "").trim() || buildTaskOutboundKey(task);
+  const providerMessageId =
+    String(replyMeta?.providerMessageId || "").trim() || null;
+
   const createdMessage = await prisma.message.create({
     data: {
       leadId: task.message.leadId,
-      content: replyText,
+      content: reply.text,
       sender: "AI",
       metadata: {
         ...(reply.meta || {}),
@@ -410,12 +522,24 @@ const saveReplyMessage = async (
         leadState: reply.leadState || null,
         messageType: reply.messageType || "AI_REPLY",
         deliveryJobKey: task.jobKey,
+        outboundKey,
         sourceKind: task.kind,
         replySource: reply.source || task.kind,
         platform: task.message.platform || null,
         externalEventId: task.message.externalEventId || null,
+        providerMessageId,
         latencyMs: reply.latencyMs || null,
         traceId: reply.traceId || task.jobKey,
+        delivery: {
+          status: "DELIVERED",
+          mode,
+          platform: platform || null,
+          providerMessageId,
+          confirmedAt,
+          deliveryJobKey: task.jobKey,
+        },
+        deliveryConfirmed: true,
+        deliveryConfirmedAt: confirmedAt,
       },
     },
   });
@@ -448,7 +572,7 @@ const sendPlatformReply = async (
       },
       "AI reply delivery skipped because subscription is locked"
     );
-    return false;
+    throw new DeliveryStageError("transport", "subscription_locked", false);
   }
 
   const { platform, senderId, phoneNumberId, accessTokenEncrypted } =
@@ -462,7 +586,12 @@ const sendPlatformReply = async (
       },
       "AI reply kept local because no platform delivery was requested"
     );
-    return true;
+    return {
+      delivered: true,
+      platform: null,
+      providerMessageId: null,
+      acceptedAt: new Date().toISOString(),
+    };
   }
 
   if (!accessTokenEncrypted) {
@@ -476,6 +605,17 @@ const sendPlatformReply = async (
   }
 
   const normalizedPlatform = platform.toUpperCase();
+
+  if (
+    await isConsentRevoked({
+      businessId: task.message.businessId,
+      leadId: task.message.leadId,
+      channel: normalizedPlatform,
+      scope: "CONVERSATIONAL_OUTBOUND",
+    })
+  ) {
+    throw new DeliveryStageError("transport", "consent_revoked", false);
+  }
 
   logger.info(
     {
@@ -492,7 +632,7 @@ const sendPlatformReply = async (
       throw new Error("Missing WhatsApp delivery identifiers");
     }
 
-    await axios.post(
+    const response = await axios.post(
       `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
       {
         messaging_product: "whatsapp",
@@ -508,7 +648,12 @@ const sendPlatformReply = async (
       }
     );
 
-    return true;
+    return {
+      delivered: true,
+      platform: normalizedPlatform,
+      providerMessageId: extractProviderMessageId(response.data),
+      acceptedAt: new Date().toISOString(),
+    };
   }
 
   if (normalizedPlatform === "INSTAGRAM") {
@@ -520,7 +665,7 @@ const sendPlatformReply = async (
       await delay(INSTAGRAM_SEND_DELAY_MS);
     }
 
-    await axios.post(
+    const response = await axios.post(
       "https://graph.facebook.com/v19.0/me/messages",
       {
         recipient: { id: senderId },
@@ -534,7 +679,12 @@ const sendPlatformReply = async (
       }
     );
 
-    return true;
+    return {
+      delivered: true,
+      platform: normalizedPlatform,
+      providerMessageId: extractProviderMessageId(response.data),
+      acceptedAt: new Date().toISOString(),
+    };
   }
 
   logger.warn(
@@ -546,15 +696,439 @@ const sendPlatformReply = async (
     "Unsupported AI delivery platform"
   );
 
-  return true;
+  throw new DeliveryStageError(
+    "transport",
+    `unsupported_delivery_platform:${normalizedPlatform.toLowerCase()}`,
+    false
+  );
 };
+
+const buildRevenueBrainEventReply = ({
+  task,
+  reply,
+}: {
+  task: AIWorkerTask;
+  reply: NormalizedReply;
+}) => {
+  const replyMeta = asRecord(reply.meta);
+  const snapshot = asRecord(replyMeta?.revenueBrainSnapshot);
+  const route =
+    typeof snapshot?.resolvedDecision === "object" &&
+    snapshot?.resolvedDecision &&
+    typeof (snapshot.resolvedDecision as Record<string, unknown>).route === "string"
+      ? String((snapshot.resolvedDecision as Record<string, unknown>).route)
+      : typeof replyMeta?.route === "string"
+        ? replyMeta.route
+        : typeof reply.source === "string"
+          ? reply.source
+          : "SALES";
+
+  return {
+    snapshot,
+    route,
+    reply: {
+      message: reply.text,
+      cta: (reply.cta || "REPLY_DM") as any,
+      angle: (reply.angle || "value") as any,
+      reason:
+        typeof replyMeta?.reason === "string"
+          ? replyMeta.reason
+          : "delivery_event",
+      confidence:
+        typeof replyMeta?.confidence === "number"
+          ? replyMeta.confidence
+          : 0.8,
+      structured:
+        replyMeta?.structured && typeof replyMeta.structured === "object"
+          ? (replyMeta.structured as any)
+          : {
+              message: reply.text,
+              intent: "other",
+              stage: "DISCOVERY",
+              leadType: "LOW",
+              cta: "ask_more",
+              confidence:
+                typeof replyMeta?.confidence === "number"
+                  ? replyMeta.confidence
+                  : 0.8,
+              reason: "delivery_event",
+            },
+      source: route as any,
+      latencyMs: typeof reply.latencyMs === "number" ? reply.latencyMs : 0,
+      traceId: reply.traceId || task.jobKey,
+      meta: replyMeta || {},
+    },
+  };
+};
+
+const buildRevenueBrainDeliveryConfirmedEventId = ({
+  task,
+  messageId,
+}: {
+  task: AIWorkerTask;
+  messageId: string;
+}) => `rb_evt_delivery_confirmed:${task.jobKey}:${messageId}`;
+
+const publishRevenueBrainDeliveryConfirmed = async ({
+  task,
+  reply,
+  messageId,
+  mode,
+  platform,
+  confirmedAt,
+}: {
+  task: AIWorkerTask;
+  reply: NormalizedReply;
+  messageId: string;
+  mode: "platform" | "local_preview" | "local_only";
+  platform: string | null;
+  confirmedAt: string;
+}) => {
+  const { snapshot, route, reply: eventReply } = buildRevenueBrainEventReply({
+    task,
+    reply,
+  });
+  const environment = resolveRevenueBrainDeliveryEnvironment({
+    mode,
+    preview:
+      typeof snapshot?.preview === "boolean" ? Boolean(snapshot.preview) : false,
+    metadata: asRecord(task.message.metadata),
+  });
+
+  await queueRevenueBrainEventDurably(
+    "revenue_brain.delivery_confirmed",
+    {
+      traceId: reply.traceId || task.jobKey,
+      businessId: task.message.businessId,
+      leadId: task.message.leadId,
+      messageId,
+      reply: eventReply,
+      route: route as any,
+      source:
+        typeof snapshot?.source === "string"
+          ? (snapshot.source as any)
+          : "QUEUE",
+      planSnapshot: snapshot as any,
+      delivery: {
+        mode,
+        platform,
+        confirmedAt: Date.parse(confirmedAt),
+        deliveryJobKey: task.jobKey,
+        preview: environment.preview,
+        simulation: environment.simulation,
+        sandbox: environment.sandbox,
+        production: environment.production,
+      },
+    },
+    {
+      eventId: buildRevenueBrainDeliveryConfirmedEventId({
+        task,
+        messageId,
+      }),
+      requireDurable: true,
+    }
+  );
+};
+
+const publishRevenueBrainDeliveryFailed = ({
+  task,
+  reply,
+  mode,
+  platform,
+  failure,
+}: {
+  task: AIWorkerTask;
+  reply: NormalizedReply | null;
+  mode: "platform" | "local_preview" | "local_only";
+  platform: string | null;
+  failure: {
+    stage: "transport" | "persistence" | "tracking";
+    reason: string;
+    retriable: boolean;
+  };
+}) => {
+  const eventReply = reply
+    ? buildRevenueBrainEventReply({
+        task,
+        reply,
+      })
+    : null;
+  const snapshot = eventReply?.snapshot || null;
+  const environment = resolveRevenueBrainDeliveryEnvironment({
+    mode,
+    preview:
+      typeof snapshot?.preview === "boolean" ? Boolean(snapshot.preview) : false,
+    metadata: asRecord(task.message.metadata),
+  });
+  const attempts = resolveRevenueBrainDeliveryAttempt({
+    attemptsMade: Number(task.job.attemptsMade || 0),
+    maxAttempts: Number(task.job.opts.attempts || 1),
+    retriable: failure.retriable,
+  });
+
+  void queueRevenueBrainEvent("revenue_brain.delivery_failed", {
+    traceId:
+      reply?.traceId ||
+      (eventReply?.reply.traceId as string | undefined) ||
+      task.jobKey,
+    businessId: task.message.businessId,
+    leadId: task.message.leadId,
+    reply: eventReply?.reply || null,
+    route: (eventReply?.route || "SALES") as any,
+    source:
+      typeof snapshot?.source === "string"
+        ? (snapshot.source as any)
+        : "QUEUE",
+    planSnapshot: snapshot as any,
+    delivery: {
+      mode,
+      platform,
+      deliveryJobKey: task.jobKey,
+      failedAt: Date.now(),
+      preview: environment.preview,
+      simulation: environment.simulation,
+      sandbox: environment.sandbox,
+      production: environment.production,
+    },
+    failure: {
+      stage: failure.stage,
+      reason: failure.reason,
+      retriable: attempts.retriable,
+      currentAttempt: attempts.currentAttempt,
+      maxAttempts: attempts.maxAttempts,
+      willRetry: attempts.willRetry,
+      terminal: attempts.terminal,
+    },
+  });
+};
+
+const finalizeConfirmedReplyDelivery = async ({
+  task,
+  reply,
+  mode,
+  platform,
+  confirmedAt,
+  followupDirective,
+}: {
+  task: AIWorkerTask;
+  reply: NormalizedReply;
+  mode: "platform" | "local_preview" | "local_only";
+  platform: string | null;
+  confirmedAt: string;
+  followupDirective?: Record<string, unknown> | null;
+}) =>
+  finalizeCheckpointedReplyDelivery<{ id: string }>({
+    jobKey: task.jobKey,
+    fallbackDeliveryMode: mode,
+    fallbackPlatform: platform,
+    fallbackConfirmedAt: confirmedAt,
+    persistConfirmedReply: async ({
+      confirmedAt: checkpointConfirmedAt,
+      mode: checkpointMode,
+      platform: checkpointPlatform,
+      reply: checkpointedReply,
+    }) => {
+      try {
+        return await persistConfirmedReplyMessage({
+          task,
+          reply: checkpointedReply,
+          mode: checkpointMode,
+          platform: checkpointPlatform,
+          confirmedAt: checkpointConfirmedAt,
+        });
+      } catch (error) {
+        throw new DeliveryStageError(
+          "persistence",
+          String(
+            (error as { message?: unknown })?.message ||
+              error ||
+              "reply_persist_failed"
+          ),
+          true
+        );
+      }
+    },
+    afterPersist: async ({ message, created, reply: checkpointedReply }) => {
+      try {
+        if (created) {
+          emitRealtimeMessage(task.message.leadId, message, checkpointedReply.cta);
+
+          await prisma.lead.update({
+            where: { id: task.message.leadId },
+            data: {
+              lastMessageAt: new Date(),
+              unreadCount: { increment: 1 },
+            },
+          });
+        }
+      } catch (error) {
+        throw new DeliveryStageError(
+          "persistence",
+          String(
+            (error as { message?: unknown })?.message ||
+              error ||
+              "reply_finalize_persistence_failed"
+          ),
+          true
+        );
+      }
+
+      await clearSalesReplyState(task.message.leadId).catch((error) => {
+        logger.warn(
+          {
+            leadId: task.message.leadId,
+            jobKey: task.jobKey,
+            error,
+          },
+          "Sales reply cache cleanup skipped after confirmed delivery"
+        );
+      });
+    },
+    beforeSent: async ({
+      confirmedAt: checkpointConfirmedAt,
+      mode: checkpointMode,
+      platform: checkpointPlatform,
+      reply: checkpointedReply,
+      message,
+    }) => {
+      const replyMeta = asRecord(checkpointedReply.meta);
+      const replySnapshot = asRecord(replyMeta?.revenueBrainSnapshot);
+      const environment = resolveRevenueBrainDeliveryEnvironment({
+        mode: checkpointMode,
+        preview:
+          typeof replySnapshot?.preview === "boolean"
+            ? Boolean(replySnapshot.preview)
+            : false,
+        metadata: asRecord(task.message.metadata),
+      });
+
+      if (environment.production) {
+        try {
+          await trackAIMessage({
+            messageId: message.id,
+            businessId: task.message.businessId,
+            leadId: task.message.leadId,
+            variantId: checkpointedReply.variantId || null,
+            source: checkpointedReply.source || task.kind || "AI_ROUTER",
+            cta: checkpointedReply.cta || null,
+            angle: checkpointedReply.angle || null,
+            leadState: checkpointedReply.leadState || null,
+            messageType: checkpointedReply.messageType || "AI_REPLY",
+            traceId: checkpointedReply.traceId || task.jobKey,
+            metadata: {
+              ...(checkpointedReply.meta || {}),
+              platform: task.message.platform || null,
+              externalEventId: task.message.externalEventId || null,
+              deliveryJobKey: task.jobKey,
+              sourceKind: task.kind,
+              deliveryConfirmed: true,
+              deliveryMode: checkpointMode,
+              deliveredMessageId: message.id,
+            },
+          });
+        } catch (error) {
+          throw new DeliveryStageError(
+            "tracking",
+            String(
+              (error as { message?: unknown })?.message ||
+                error ||
+                "reply_tracking_failed"
+            ),
+            true
+          );
+        }
+      }
+
+      try {
+        await publishRevenueBrainDeliveryConfirmed({
+          task,
+          reply: checkpointedReply,
+          messageId: message.id,
+          mode: checkpointMode,
+          platform: checkpointPlatform,
+          confirmedAt: checkpointConfirmedAt,
+        });
+      } catch (error) {
+        throw new DeliveryStageError(
+          "tracking",
+          String(
+            (error as { message?: unknown })?.message ||
+              error ||
+              "delivery_confirmed_enqueue_failed"
+          ),
+          true
+        );
+      }
+    },
+    afterSent: async ({ created }) => {
+      if (!created) {
+        return;
+      }
+
+      const followupAction =
+        typeof followupDirective?.action === "string"
+          ? followupDirective.action
+          : "schedule";
+      const followupTrigger =
+        typeof followupDirective?.trigger === "string"
+          ? followupDirective.trigger
+          : undefined;
+
+      if (followupAction === "cancel") {
+        void cancelFollowups(task.message.leadId).catch((error) => {
+          logger.warn(
+            {
+              leadId: task.message.leadId,
+              jobKey: task.jobKey,
+              error,
+            },
+            "Follow-up cancellation after AI reply failed"
+          );
+        });
+        return;
+      }
+
+      if (followupAction === "schedule") {
+        void scheduleFollowups(task.message.leadId, {
+          trigger: followupTrigger as any,
+        }).catch((error) => {
+          logger.warn(
+            {
+              leadId: task.message.leadId,
+              jobKey: task.jobKey,
+              error,
+            },
+            "Follow-up scheduling after AI reply failed"
+          );
+        });
+      }
+    },
+  });
 
 const processAndSendReply = async (
   task: AIWorkerTask,
   aiReply: unknown
 ) => {
-  const normalizedReply = normalizeReply(aiReply);
+  const existingState = await getReplyDeliveryState(task.jobKey);
+  const normalizedReply = normalizeReply(
+    existingState.confirmed && existingState.confirmedReply
+      ? existingState.confirmedReply
+      : aiReply
+  );
   const localPreviewOnly = isLocalPreviewTask(task);
+  const revenueBrainMeta =
+    normalizedReply?.meta &&
+    typeof normalizedReply.meta === "object" &&
+    normalizedReply.meta.revenueBrain &&
+    typeof normalizedReply.meta.revenueBrain === "object"
+      ? (normalizedReply.meta.revenueBrain as Record<string, unknown>)
+      : null;
+  const outboundKey = buildTaskOutboundKey(task);
+  const followupDirective =
+    revenueBrainMeta?.followup &&
+    typeof revenueBrainMeta.followup === "object"
+      ? (revenueBrainMeta.followup as Record<string, unknown>)
+      : null;
 
   if (!normalizedReply) {
     logger.warn(
@@ -567,62 +1141,9 @@ const processAndSendReply = async (
     return;
   }
 
-  const existingState = await getReplyDeliveryState(task.jobKey);
-  const replyText =
-    normalizedReply.text.length > 1000
-      ? normalizedReply.text.slice(0, 1000)
-      : normalizedReply.text;
-
-  const { message, created } = await saveReplyMessage(
-    task,
-    replyText,
-    normalizedReply
-  );
-
-  if (!localPreviewOnly) {
-    await trackAIMessage({
-      messageId: message.id,
-      businessId: task.message.businessId,
-      leadId: task.message.leadId,
-      variantId: normalizedReply.variantId || null,
-      source: normalizedReply.source || task.kind || "AI_ROUTER",
-      cta: normalizedReply.cta || null,
-      angle: normalizedReply.angle || null,
-      leadState: normalizedReply.leadState || null,
-      messageType: normalizedReply.messageType || "AI_REPLY",
-      traceId: normalizedReply.traceId || task.jobKey,
-      metadata: {
-        ...(normalizedReply.meta || {}),
-        platform: task.message.platform || null,
-        externalEventId: task.message.externalEventId || null,
-        deliveryJobKey: task.jobKey,
-        sourceKind: task.kind,
-      },
-    }).catch((error) => {
-      logger.warn(
-        {
-          businessId: task.message.businessId,
-          leadId: task.message.leadId,
-          messageId: message.id,
-          jobKey: task.jobKey,
-          error,
-        },
-        "AI reply attribution failed"
-      );
-    });
-  }
-
-  if (created) {
-    emitRealtimeMessage(task.message.leadId, message, normalizedReply.cta);
-
-    await prisma.lead.update({
-      where: { id: task.message.leadId },
-      data: {
-        lastMessageAt: new Date(),
-        unreadCount: { increment: 1 },
-      },
-    });
-
+  if (!(await isTaskControlAllowed(task, "pre_delivery"))) {
+    await clearSalesReplyState(task.message.leadId).catch(() => undefined);
+    return;
   }
 
   if (existingState.sent) {
@@ -642,31 +1163,116 @@ const processAndSendReply = async (
         leadId: task.message.leadId,
         jobKey: task.jobKey,
       },
-      "Skipping platform delivery because reply was already sent"
+      "Skipping platform delivery because reply was already finalized"
     );
     return;
   }
 
-  if (localPreviewOnly) {
-    await markReplySent(task.jobKey);
-    await clearSalesReplyState(task.message.leadId).catch((error) => {
-      logger.warn(
-        {
-          leadId: task.message.leadId,
-          jobKey: task.jobKey,
-          error,
-        },
-        "Sales reply cache cleanup skipped after local preview"
-      );
-    });
+  const replyText =
+    normalizedReply.text.length > 1000
+      ? normalizedReply.text.slice(0, 1000)
+      : normalizedReply.text;
+  const deliveryMode = localPreviewOnly
+    ? "local_preview"
+    : task.message.platform
+      ? "platform"
+      : "local_only";
+  const deliveryReply =
+    replyText === normalizedReply.text
+      ? normalizedReply
+      : {
+          ...normalizedReply,
+          text: replyText,
+        };
 
+  if (existingState.confirmed && existingState.confirmedReply) {
     logger.info(
       {
         leadId: task.message.leadId,
         jobKey: task.jobKey,
+        deliveryMode: existingState.deliveryMode || deliveryMode,
       },
-      "AI reply kept local for onboarding preview"
+      "Resuming confirmed AI reply finalization"
     );
+
+    await finalizeConfirmedReplyDelivery({
+      task,
+      reply: deliveryReply,
+      mode:
+        (existingState.deliveryMode as
+          | "platform"
+          | "local_preview"
+          | "local_only"
+          | null) || deliveryMode,
+      platform: existingState.platform || task.message.platform || null,
+      confirmedAt: existingState.confirmedAt || new Date().toISOString(),
+      followupDirective,
+    });
+
+    return;
+  }
+
+  if (deliveryMode === "local_preview" || deliveryMode === "local_only") {
+    const confirmedAt = new Date().toISOString();
+
+    try {
+      await checkpointReplyConfirmation(task.jobKey, {
+        confirmedAt,
+        deliveryMode,
+        platform: task.message.platform || null,
+        confirmedReply: toConfirmedReplyPayload({
+          ...deliveryReply,
+          meta: {
+            ...(deliveryReply.meta || {}),
+            outboundKey,
+          },
+        }),
+      });
+    } catch (error) {
+      const stageError = new DeliveryStageError(
+        "persistence",
+        String(
+          (error as { message?: unknown })?.message ||
+            error ||
+            "delivery_confirmation_checkpoint_failed"
+        ),
+        true
+      );
+
+      publishRevenueBrainDeliveryFailed({
+        task,
+        reply: deliveryReply,
+        mode: deliveryMode,
+        platform: task.message.platform || null,
+        failure: {
+          stage: stageError.stage,
+          reason: stageError.message,
+          retriable: stageError.retriable,
+        },
+      });
+
+      throw stageError;
+    }
+
+    if (deliveryMode === "local_preview") {
+      logger.info(
+        {
+          leadId: task.message.leadId,
+          jobKey: task.jobKey,
+        },
+        "AI reply kept local for onboarding preview"
+      );
+    }
+
+    await finalizeConfirmedReplyDelivery({
+      task,
+      reply: deliveryReply,
+      mode: deliveryMode,
+      platform: task.message.platform || null,
+      confirmedAt,
+      followupDirective,
+    });
+
     return;
   }
 
@@ -722,49 +1328,180 @@ const processAndSendReply = async (
     }
   }
 
-  const delivered = await retryAsync(() => sendPlatformReply(task, replyText), 3, 800);
+  const confirmedAt = new Date().toISOString();
+  let deliveryReceipt: {
+    delivered: boolean;
+    platform: string | null;
+    providerMessageId: string | null;
+    acceptedAt: string | null;
+  } | null = null;
 
-  if (!delivered) {
-    return;
-  }
-
-  await markReplySent(task.jobKey);
-  await clearSalesReplyState(task.message.leadId).catch((error) => {
-    logger.warn(
-      {
-        leadId: task.message.leadId,
-        jobKey: task.jobKey,
-        error,
-      },
-      "Sales reply cache cleanup skipped after send"
+  try {
+    deliveryReceipt = await retryAsync(
+      () => sendPlatformReply(task, replyText),
+      3,
+      800
     );
-  });
 
-  if (created) {
-    void scheduleFollowups(task.message.leadId).catch((error) => {
+    const deliveryConfirmed = isRevenueBrainDeliveryConfirmed({
+      delivered: deliveryReceipt.delivered,
+      localPreviewOnly,
+      platform: task.message.platform || null,
+    });
+
+    if (!deliveryConfirmed) {
+      throw new DeliveryStageError(
+        "transport",
+        "delivery_not_confirmed",
+        true
+      );
+    }
+  } catch (error) {
+    const stageError =
+      error instanceof DeliveryStageError
+        ? error
+        : new DeliveryStageError(
+            "transport",
+            String(
+              (error as { message?: unknown })?.message ||
+                error ||
+                "delivery_transport_failed"
+            ),
+            true
+          );
+
+    publishRevenueBrainDeliveryFailed({
+      task,
+      reply: deliveryReply,
+      mode: deliveryMode,
+      platform: task.message.platform || null,
+      failure: {
+        stage: stageError.stage,
+        reason: stageError.message,
+        retriable: stageError.retriable,
+      },
+    });
+
+    if (!stageError.retriable) {
       logger.warn(
         {
           leadId: task.message.leadId,
           jobKey: task.jobKey,
-          error,
+          reason: stageError.message,
         },
-        "Follow-up scheduling after AI reply failed"
+        "AI reply delivery failed without retry"
       );
+      return;
+    }
+
+    throw stageError;
+  }
+
+  try {
+    await checkpointReplyConfirmation(task.jobKey, {
+      confirmedAt,
+      deliveryMode,
+      platform: task.message.platform || null,
+      confirmedReply: toConfirmedReplyPayload({
+        ...deliveryReply,
+        meta: {
+          ...(deliveryReply.meta || {}),
+          outboundKey,
+          providerMessageId: deliveryReceipt?.providerMessageId || null,
+        },
+      }),
     });
+  } catch (error) {
+    const stageError = new DeliveryStageError(
+      "persistence",
+      String(
+        (error as { message?: unknown })?.message ||
+          error ||
+          "delivery_confirmation_checkpoint_failed"
+      ),
+      true
+    );
+
+    publishRevenueBrainDeliveryFailed({
+      task,
+      reply: deliveryReply,
+      mode: deliveryMode,
+      platform: task.message.platform || null,
+      failure: {
+        stage: stageError.stage,
+        reason: stageError.message,
+        retriable: stageError.retriable,
+      },
+    });
+
+    throw stageError;
+  }
+
+  try {
+    await finalizeConfirmedReplyDelivery({
+      task,
+      reply: deliveryReply,
+      mode: deliveryMode,
+      platform: task.message.platform || null,
+      confirmedAt,
+      followupDirective,
+    });
+  } catch (error) {
+    const stageError =
+      error instanceof DeliveryStageError
+        ? error
+        : new DeliveryStageError(
+            "persistence",
+            String(
+              (error as { message?: unknown })?.message ||
+                error ||
+                "delivery_finalize_failed"
+            ),
+            true
+          );
+
+    publishRevenueBrainDeliveryFailed({
+      task,
+      reply: deliveryReply,
+      mode: deliveryMode,
+      platform: task.message.platform || null,
+      failure: {
+        stage: stageError.stage,
+        reason: stageError.message,
+        retriable: stageError.retriable,
+      },
+    });
+
+    throw stageError;
   }
 
   logger.info(
     {
       leadId: task.message.leadId,
       jobKey: task.jobKey,
-      replySource: normalizedReply.source || task.kind,
-      latencyMs: normalizedReply.latencyMs || null,
+      replySource: deliveryReply.source || task.kind,
+      latencyMs: deliveryReply.latencyMs || null,
     },
     "AI reply completed"
   );
 };
 
 const executeRouterFlow = async (task: AIWorkerTask) => {
+  const currentDeliveryState = await getReplyDeliveryState(task.jobKey);
+
+  if (
+    currentDeliveryState.confirmed &&
+    currentDeliveryState.confirmedReply &&
+    !currentDeliveryState.sent
+  ) {
+    await processAndSendReply(task, currentDeliveryState.confirmedReply);
+    return;
+  }
+
+  if (currentDeliveryState.sent) {
+    return;
+  }
+
   const throughput = await getTaskPlanThroughput(task);
   const aiWindow = await consumeBusinessAIHourlyRate(
     task.message.businessId,
@@ -871,6 +1608,10 @@ const processAIMessage = async (task: AIWorkerTask) => {
         },
         "AI reply task started"
       );
+
+      if (!(await isTaskControlAllowed(task, "worker_start"))) {
+        return;
+      }
 
       const lockAcquired = await acquireLeadProcessingLock(
         task.message.leadId,
@@ -1039,168 +1780,141 @@ const processAIJob = async (job: AIWorkerJob) => {
   }
 };
 
-const workers =
-  shouldRunWorker
-    ? getAIQueueNames().map((queueName) => {
-        const worker = new Worker<AIQueuePayload>(
+export const initAIPartitionWorkers = () => {
+  if (!shouldRunWorker) {
+    console.log("[ai.partition.worker] RUN_WORKER disabled, worker not started");
+    return [];
+  }
+
+  if (globalForAIPartitionWorker.__sylphAIPartitionWorkers) {
+    return globalForAIPartitionWorker.__sylphAIPartitionWorkers;
+  }
+
+  initializeSentry();
+
+  const workers = getAIQueueNames().map((queueName) => {
+    const worker = new Worker<AIQueuePayload>(
+      queueName,
+      withRedisWorkerFailSafe(queueName, async (job) => processAIJob(job)),
+      {
+        connection: getWorkerRedisConnection(),
+        prefix: env.AI_QUEUE_PREFIX,
+        concurrency: AI_WORKER_CONCURRENCY,
+      }
+    );
+
+    worker.on("active", (job) => {
+      logger.info(
+        {
+          jobId: job.id,
           queueName,
-          withRedisWorkerFailSafe(queueName, async (job) => processAIJob(job)),
+          leadId: getJobLeadId(job),
+        },
+        "AI worker activated job"
+      );
+    });
+
+    worker.on("completed", (job) => {
+      logger.info(
+        {
+          jobId: job.id,
+          queueName,
+          leadId: getJobLeadId(job),
+        },
+        "AI worker completed job"
+      );
+    });
+
+    worker.on("failed", (job, error) => {
+      if (error instanceof LeadQueueBusyError) {
+        logger.warn(
           {
-            connection: getWorkerRedisConnection(),
-            prefix: env.AI_QUEUE_PREFIX,
-            concurrency: AI_WORKER_CONCURRENCY,
-          }
+            jobId: job?.id,
+            queueName,
+            leadId: getJobLeadId(job),
+          },
+          "Lead queue busy, BullMQ will retry"
         );
+        return;
+      }
 
-        worker.on("active", (job) => {
-          logger.info(
-            {
-              jobId: job.id,
-              queueName,
-              leadId: getJobLeadId(job),
-            },
-            "AI worker activated job"
-          );
-        });
+      if (error instanceof BusinessRateLimitError) {
+        logger.warn(
+          {
+            jobId: job?.id,
+            queueName,
+            leadId: getJobLeadId(job),
+            retryAfterMs: error.retryAfterMs,
+            scope: error.scope,
+          },
+          "AI worker moved throttled job to failed set after retry budget was exhausted"
+        );
+        return;
+      }
 
-        worker.on("completed", (job) => {
-          logger.info(
-            {
-              jobId: job.id,
-              queueName,
-              leadId: getJobLeadId(job),
-            },
-            "AI worker completed job"
-          );
-        });
+      logger.error(
+        {
+          jobId: job?.id,
+          queueName,
+          leadId: getJobLeadId(job),
+          error,
+        },
+        "AI partition worker failed"
+      );
+      captureExceptionWithContext(error, {
+        tags: {
+          worker: "ai.partition",
+          queueName,
+        },
+        extras: {
+          jobId: job?.id,
+          leadId: getJobLeadId(job),
+        },
+      });
+    });
 
-        worker.on("failed", (job, error) => {
-          if (error instanceof LeadQueueBusyError) {
-            logger.warn(
-              {
-                jobId: job?.id,
-                queueName,
-                leadId: getJobLeadId(job),
-              },
-              "Lead queue busy, BullMQ will retry"
-            );
-            return;
-          }
+    worker.on("error", (error) => {
+      logger.error(
+        {
+          queueName,
+          error,
+        },
+        "AI partition worker error"
+      );
+      captureExceptionWithContext(error, {
+        tags: {
+          worker: "ai.partition",
+          queueName,
+        },
+      });
+    });
 
-          if (error instanceof BusinessRateLimitError) {
-            logger.warn(
-              {
-                jobId: job?.id,
-                queueName,
-                leadId: getJobLeadId(job),
-                retryAfterMs: error.retryAfterMs,
-                scope: error.scope,
-              },
-              "AI worker moved throttled job to failed set after retry budget was exhausted"
-            );
-            return;
-          }
+    return worker;
+  });
 
-          logger.error(
-            {
-              jobId: job?.id,
-              queueName,
-              leadId: getJobLeadId(job),
-              error,
-            },
-            "AI partition worker failed"
-          );
-          captureExceptionWithContext(error, {
-            tags: {
-              worker: "ai.partition",
-              queueName,
-            },
-            extras: {
-              jobId: job?.id,
-              leadId: getJobLeadId(job),
-            },
-          });
-        });
+  logger.info(
+    {
+      partitions: AI_QUEUE_PARTITIONS,
+      workers: workers.length,
+      concurrencyPerPartition: AI_WORKER_CONCURRENCY,
+    },
+    "AI partition workers started"
+  );
 
-        worker.on("error", (error) => {
-          logger.error(
-            {
-              queueName,
-              error,
-            },
-            "AI partition worker error"
-          );
-          captureExceptionWithContext(error, {
-            tags: {
-              worker: "ai.partition",
-              queueName,
-            },
-          });
-        });
-
-        return worker;
-      })
-    : [];
-
-let isShuttingDown = false;
-
-const shutdown = async (signal: string) => {
-  if (isShuttingDown) {
-    return;
+  if (workers.length > 0) {
+    console.log("✅ Worker initialized", {
+      queues: getAIQueueNames(),
+    });
+  } else {
+    console.error("[ai.partition.worker] No workers started");
   }
 
-  isShuttingDown = true;
-
-  await Promise.allSettled(workers.map((worker) => worker.close()));
-  await Promise.allSettled([prisma.$disconnect(), closeRedisConnection()]);
-
-  if (signal === "uncaughtException") {
-    process.exit(1);
-  }
+  globalForAIPartitionWorker.__sylphAIPartitionWorkers = workers;
+  return workers;
 };
 
-logger.info(
-  {
-    partitions: AI_QUEUE_PARTITIONS,
-    workers: workers.length,
-    concurrencyPerPartition: AI_WORKER_CONCURRENCY,
-  },
-  "AI partition workers started"
-);
-
-if (workers.length > 0) {
-  console.log("✅ Worker initialized", {
-    queues: getAIQueueNames(),
-  });
-} else {
-  console.error("❌ No workers started — check RUN_WORKER or Redis config");
-}
-
-process.on("SIGINT", () => {
-  void shutdown("SIGINT");
-});
-
-process.on("SIGTERM", () => {
-  void shutdown("SIGTERM");
-});
-
-process.on("uncaughtException", (error) => {
-  logger.error({ error }, "AI worker uncaught exception");
-  captureExceptionWithContext(error, {
-    tags: {
-      worker: "ai.partition",
-      event: "uncaughtException",
-    },
-  });
-  void shutdown("uncaughtException");
-});
-
-process.on("unhandledRejection", (error) => {
-  logger.error({ error }, "AI worker unhandled rejection");
-  captureExceptionWithContext(error, {
-    tags: {
-      worker: "ai.partition",
-      event: "unhandledRejection",
-    },
-  });
-});
+export const closeAIPartitionWorkers = async () => {
+  const workers = globalForAIPartitionWorker.__sylphAIPartitionWorkers || [];
+  await Promise.allSettled(workers.map((worker) => worker.close()));
+  globalForAIPartitionWorker.__sylphAIPartitionWorkers = undefined;
+};

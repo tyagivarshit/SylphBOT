@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.autoDisableHumanAfterTimeout = exports.deactivateHuman = exports.activateHuman = exports.isHumanActive = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
+const leadControlState_service_1 = require("./leadControlState.service");
 const isHumanActive = async (leadId) => {
     try {
         const lead = await prisma_1.default.lead.findUnique({
@@ -21,15 +22,23 @@ const isHumanActive = async (leadId) => {
 exports.isHumanActive = isHumanActive;
 const activateHuman = async (leadId) => {
     try {
-        await prisma_1.default.lead.update({
+        const lead = await prisma_1.default.lead.update({
             where: { id: leadId },
             data: {
                 isHumanActive: true,
             },
+            select: {
+                businessId: true,
+            },
         });
+        await (0, leadControlState_service_1.markLeadHumanTakeover)({
+            leadId,
+            businessId: lead.businessId,
+        }).catch(() => undefined);
     }
     catch (error) {
         console.error("ACTIVATE HUMAN ERROR:", error);
+        throw error;
     }
 };
 exports.activateHuman = activateHuman;
@@ -44,6 +53,7 @@ const deactivateHuman = async (leadId) => {
     }
     catch (error) {
         console.error("DEACTIVATE HUMAN ERROR:", error);
+        throw error;
     }
 };
 exports.deactivateHuman = deactivateHuman;

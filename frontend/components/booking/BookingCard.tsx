@@ -10,7 +10,7 @@ export default function BookingCard({ booking, onClick }: any) {
   };
 
   const statusStyles: any = {
-    BOOKED: "bg-green-100 text-green-700",
+    CONFIRMED: "bg-green-100 text-green-700",
     CANCELLED: "bg-red-100 text-red-600",
     RESCHEDULED: "bg-yellow-100 text-yellow-700",
   };

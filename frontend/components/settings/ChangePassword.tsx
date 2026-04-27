@@ -47,7 +47,11 @@ export default function ChangePassword() {
         confirmPassword: form.confirm,
       });
 
-      setSuccess(result?.message || "Password updated successfully.");
+      setSuccess(
+        typeof result?.message === "string"
+          ? result.message
+          : "Password updated successfully."
+      );
 
       window.setTimeout(() => {
         window.location.assign(buildAppUrl("/auth/login"));

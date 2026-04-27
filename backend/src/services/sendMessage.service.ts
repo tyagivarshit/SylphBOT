@@ -3,6 +3,12 @@ import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { cancelFollowups } from "../queues/followup.queue";
 import { getIO } from "../sockets/socket.server";
+import { isConsentRevoked } from "./consentAuthority.service";
+import { bumpLeadCancelToken } from "./leadControlState.service";
+import {
+  buildRevenueTouchOutboundKey,
+  upsertRevenueTouchLedger,
+} from "./revenueTouchLedger.service";
 import { decrypt } from "../utils/encrypt";
 import logger from "../utils/logger";
 
@@ -13,6 +19,8 @@ type MessageMetadata = Record<string, unknown>;
 
 type LeadMessageTarget = {
   id: string;
+  businessId?: string | null;
+  clientId?: string | null;
   platform?: string | null;
   phone?: string | null;
   instagramId?: string | null;
@@ -26,6 +34,8 @@ type LeadMessageTarget = {
 export type OutboundDeliveryResult = {
   delivered: boolean;
   platform: SupportedOutboundPlatform | null;
+  providerMessageId?: string | null;
+  acceptedAt?: string | null;
   reason?: string;
   error?: string;
 };
@@ -86,6 +96,28 @@ const getDeliveryErrorMessage = (error: unknown) => {
   return "Unknown delivery error";
 };
 
+const extractProviderMessageId = (value: unknown) => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (typeof value.message_id === "string" && value.message_id.trim()) {
+    return value.message_id.trim();
+  }
+
+  if (Array.isArray(value.messages)) {
+    const first = value.messages.find(
+      (message) => isRecord(message) && typeof message.id === "string"
+    ) as { id?: string } | undefined;
+
+    if (typeof first?.id === "string" && first.id.trim()) {
+      return first.id.trim();
+    }
+  }
+
+  return null;
+};
+
 export const formatConversationMessage = <T extends { metadata?: unknown }>(
   message: T
 ) => {
@@ -108,7 +140,7 @@ export const sendInstagramMessage = async ({
   message: string;
   accessToken: string;
 }) => {
-  await axios.post(
+  const response = await axios.post(
     "https://graph.facebook.com/v19.0/me/messages",
     {
       recipient: { id: recipientId },
@@ -122,6 +154,10 @@ export const sendInstagramMessage = async ({
       },
     }
   );
+
+  return {
+    providerMessageId: extractProviderMessageId(response.data),
+  };
 };
 
 export const sendWhatsAppMessage = async ({
@@ -135,7 +171,7 @@ export const sendWhatsAppMessage = async ({
   message: string;
   accessToken: string;
 }) => {
-  await axios.post(
+  const response = await axios.post(
     `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
     {
       messaging_product: "whatsapp",
@@ -151,6 +187,10 @@ export const sendWhatsAppMessage = async ({
       },
     }
   );
+
+  return {
+    providerMessageId: extractProviderMessageId(response.data),
+  };
 };
 
 export const deliverLeadMessage = async ({
@@ -191,6 +231,23 @@ export const deliverLeadMessage = async ({
     };
   }
 
+  if (
+    lead.businessId &&
+    (await isConsentRevoked({
+      businessId: lead.businessId,
+      leadId: lead.id,
+      channel: platform,
+      scope: "CONVERSATIONAL_OUTBOUND",
+    }))
+  ) {
+    return {
+      delivered: false,
+      platform,
+      reason: "CONSENT_REVOKED",
+      error: "Outbound consent is revoked for this channel",
+    };
+  }
+
   try {
     if (platform === "INSTAGRAM") {
       if (!lead.instagramId) {
@@ -202,7 +259,7 @@ export const deliverLeadMessage = async ({
         };
       }
 
-      await sendInstagramMessage({
+      const result = await sendInstagramMessage({
         recipientId: lead.instagramId,
         message,
         accessToken,
@@ -211,6 +268,8 @@ export const deliverLeadMessage = async ({
       return {
         delivered: true,
         platform,
+        providerMessageId: result.providerMessageId || null,
+        acceptedAt: new Date().toISOString(),
       };
     }
 
@@ -223,7 +282,7 @@ export const deliverLeadMessage = async ({
       };
     }
 
-    await sendWhatsAppMessage({
+    const result = await sendWhatsAppMessage({
       phoneNumberId: lead.client.phoneNumberId,
       to: lead.phone,
       message,
@@ -233,6 +292,8 @@ export const deliverLeadMessage = async ({
     return {
       delivered: true,
       platform,
+      providerMessageId: result.providerMessageId || null,
+      acceptedAt: new Date().toISOString(),
     };
   } catch (error) {
     const errorMessage = getDeliveryErrorMessage(error);
@@ -260,11 +321,13 @@ const buildMessageMetadata = ({
   clientMessageId,
   platform,
   delivery,
+  outboundKey,
 }: {
   existingMetadata?: unknown;
   clientMessageId?: string | null;
   platform?: string | null;
   delivery?: OutboundDeliveryResult | null;
+  outboundKey?: string | null;
 }) => {
   const metadata = {
     ...getMessageMetadata(existingMetadata),
@@ -278,13 +341,18 @@ const buildMessageMetadata = ({
     metadata.platform = platform;
   }
 
+  if (outboundKey) {
+    metadata.outboundKey = outboundKey;
+  }
+
   if (delivery) {
     metadata.delivery = {
       status: delivery.delivered ? "DELIVERED" : "FAILED",
       platform: delivery.platform,
+      providerMessageId: delivery.providerMessageId || null,
       reason: delivery.reason || null,
       error: delivery.error || null,
-      attemptedAt: new Date().toISOString(),
+      attemptedAt: delivery.acceptedAt || new Date().toISOString(),
     };
   }
 
@@ -325,8 +393,35 @@ export const persistAndDispatchLeadMessage = async ({
 
   let delivery: OutboundDeliveryResult | null = null;
   let persistedMessage = createdMessage;
+  const outboundKey =
+    sender === "USER"
+      ? null
+      : buildRevenueTouchOutboundKey({
+          source: sender === "AGENT" ? "MANUAL" : sender,
+          leadId: lead.id,
+          clientMessageId,
+          messageId: createdMessage.id,
+        });
 
   if (sender === "AGENT") {
+    await bumpLeadCancelToken({
+      leadId: lead.id,
+      businessId: lead.businessId || null,
+      lastManualOutboundAt: new Date(),
+      metadata: {
+        reason: "manual_send",
+        outboundKey,
+      },
+    }).catch((error) => {
+      logger.warn(
+        {
+          leadId: lead.id,
+          error,
+        },
+        "Lead cancel token bump failed before manual outbound send"
+      );
+    });
+
     delivery = await deliverLeadMessage({
       lead,
       message: content,
@@ -337,6 +432,7 @@ export const persistAndDispatchLeadMessage = async ({
       clientMessageId,
       platform,
       delivery,
+      outboundKey,
     });
 
     persistedMessage = await prisma.message.update({
@@ -354,6 +450,59 @@ export const persistAndDispatchLeadMessage = async ({
         },
         "Follow-up cancellation failed after manual message"
       );
+    });
+  }
+
+  if (sender !== "USER" && outboundKey) {
+    const touchState =
+      sender === "AGENT"
+        ? delivery?.delivered
+          ? "DELIVERED"
+          : "FAILED"
+        : "CONFIRMED";
+
+    await upsertRevenueTouchLedger({
+      businessId: lead.businessId || "",
+      leadId: lead.id,
+      clientId: lead.clientId || null,
+      messageId: persistedMessage.id,
+      touchType: sender === "AGENT" ? "MANUAL_OUTBOUND" : "AI_REPLY",
+      touchReason: sender === "AGENT" ? "manual_send" : "conversation_send",
+      channel: platform || "UNKNOWN",
+      actor: sender,
+      source: sender === "AGENT" ? "MANUAL" : "API",
+      traceId: clientMessageId || null,
+      providerMessageId: delivery?.providerMessageId || null,
+      outboundKey,
+      deliveryState: touchState,
+      providerAcceptedAt: delivery?.acceptedAt ? new Date(delivery.acceptedAt) : null,
+      providerMessagePersistedAt: delivery?.providerMessageId ? new Date() : null,
+      confirmedAt: new Date(),
+      deliveredAt:
+        delivery?.delivered && delivery.acceptedAt
+          ? new Date(delivery.acceptedAt)
+          : null,
+      failedAt:
+        sender === "AGENT" && delivery && !delivery.delivered ? new Date() : null,
+      cta:
+        typeof getMessageMetadata(persistedMessage.metadata).cta === "string"
+          ? String(getMessageMetadata(persistedMessage.metadata).cta)
+          : null,
+      angle: null,
+      leadState: null,
+      messageType: sender === "AGENT" ? "MANUAL_OUTBOUND" : "AI_REPLY",
+      metadata: getMessageMetadata(persistedMessage.metadata),
+    }).catch((error) => {
+      logger.error(
+        {
+          leadId: lead.id,
+          messageId: persistedMessage.id,
+          outboundKey,
+          error,
+        },
+        "Canonical touch ledger write failed after manual conversation send"
+      );
+      throw error;
     });
   }
 

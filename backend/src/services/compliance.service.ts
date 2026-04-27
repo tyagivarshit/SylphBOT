@@ -440,7 +440,42 @@ const permanentDeleteBusinessData = async (input: {
             leadId: { in: leadIds },
           },
         }),
+        tx.revenueTouchLedger.deleteMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+        }),
         tx.conversionEvent.deleteMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+        }),
+        tx.consentLedger.deleteMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+        }),
+        tx.autonomousCapReservation.deleteMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+        }),
+        tx.channelHealth.deleteMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+        }),
+        tx.leadControlState.deleteMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+        }),
+        tx.autonomousCampaign.deleteMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+        }),
+        tx.autonomousOpportunity.deleteMany({
           where: {
             leadId: { in: leadIds },
           },

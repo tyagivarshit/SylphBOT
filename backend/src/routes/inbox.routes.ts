@@ -8,41 +8,55 @@ const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
   process.env.RUN_WORKER === undefined;
 
-const worker =
-  shouldRunWorker
-    ? new Worker(
-        "inboxQueue",
-        withRedisWorkerFailSafe("inboxQueue", async (job: any) => {
-          const { businessId, leadId, message, plan } = job.data;
+const globalForInboxRouteWorker = globalThis as typeof globalThis & {
+  __sylphInboxRouteWorker?: Worker | null;
+};
 
-          try {
-            await enqueueAIBatch([
-              {
-                businessId,
-                leadId,
-                message,
-                plan,
-              },
-            ]);
-          } catch (error: unknown) {
-            if (error instanceof Error) {
-              console.error("Worker failed:", error.message);
-              Sentry.captureException(error);
-            } else {
-              console.error("Worker failed:", error);
-            }
+export const initLegacyInboxRouteWorker = () => {
+  if (!shouldRunWorker) {
+    console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
+    return null;
+  }
 
-            throw error;
-          }
-        }),
-        {
-          connection: getWorkerRedisConnection(),
+  if (globalForInboxRouteWorker.__sylphInboxRouteWorker) {
+    return globalForInboxRouteWorker.__sylphInboxRouteWorker;
+  }
+
+  const worker = new Worker(
+    "inboxQueue",
+    withRedisWorkerFailSafe("inboxQueue", async (job: any) => {
+      const { businessId, leadId, message, plan } = job.data;
+
+      try {
+        await enqueueAIBatch([
+          {
+            businessId,
+            leadId,
+            message,
+            plan,
+          },
+        ]);
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          console.error("Worker failed:", error.message);
+          Sentry.captureException(error);
+        } else {
+          console.error("Worker failed:", error);
         }
-      )
-    : null;
 
-if (!shouldRunWorker) {
-  console.log("[routes/inbox.routes] RUN_WORKER disabled, worker not started");
-}
+        throw error;
+      }
+    }),
+    {
+      connection: getWorkerRedisConnection(),
+    }
+  );
 
-export default worker;
+  globalForInboxRouteWorker.__sylphInboxRouteWorker = worker;
+  return worker;
+};
+
+export const closeLegacyInboxRouteWorker = async () => {
+  await globalForInboxRouteWorker.__sylphInboxRouteWorker?.close().catch(() => undefined);
+  globalForInboxRouteWorker.__sylphInboxRouteWorker = undefined;
+};

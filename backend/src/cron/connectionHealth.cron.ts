@@ -9,7 +9,7 @@ const log = (...args: any[]) => {
 export const startConnectionHealthCron = () => {
   log("Connection health cron started");
 
-  cron.schedule("0 */6 * * *", async () => {
+  return cron.schedule("0 */6 * * *", async () => {
     try {
       const clients = await prisma.client.findMany({
         where: {

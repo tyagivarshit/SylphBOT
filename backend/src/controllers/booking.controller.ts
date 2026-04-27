@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import prisma from "../config/prisma";
 import {
   fetchAvailableSlots,
   createNewAppointment,
@@ -6,26 +7,45 @@ import {
   rescheduleAppointment,
 } from "../services/booking.service";
 
-/*
-=====================================================
-GET AVAILABLE SLOTS
-=====================================================
-*/
-export const getAvailableSlots = async (req: Request, res: Response) => {
+type AuthenticatedRequest = Request & {
+  user?: {
+    businessId?: string | null;
+  };
+};
+
+export const getAvailableSlots = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
-    const businessId = req.params.businessId as string;
+    const requestedBusinessId = req.params.businessId as string;
+    const businessId = req.user?.businessId || null;
     const date = req.query.date as string;
 
-    if (!businessId || !date) {
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    if (!requestedBusinessId || !date) {
       return res.status(400).json({
         success: false,
         message: "Business ID and date are required",
       });
     }
 
+    if (requestedBusinessId !== businessId) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden",
+      });
+    }
+
     const parsedDate = new Date(date);
 
-    if (isNaN(parsedDate.getTime())) {
+    if (Number.isNaN(parsedDate.getTime())) {
       return res.status(400).json({
         success: false,
         message: "Invalid date format",
@@ -36,7 +56,9 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      slots,
+      data: {
+        slots,
+      },
     });
   } catch (error: any) {
     console.error("GET SLOTS ERROR:", error);
@@ -48,23 +70,13 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
   }
 };
 
-/*
-=====================================================
-CREATE APPOINTMENT (🔥 FIXED SECURITY)
-=====================================================
-*/
-export const createAppointment = async (req: any, res: Response) => {
+export const createAppointment = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
-    const businessId = req.user?.businessId; // 🔥 FIX
-
-    const {
-      leadId,
-      name,
-      email,
-      phone,
-      startTime,
-      endTime,
-    } = req.body;
+    const businessId = req.user?.businessId || null;
+    const { leadId, name, email, phone, startTime, endTime } = req.body;
 
     if (!businessId || !startTime || !endTime) {
       return res.status(400).json({
@@ -76,7 +88,7 @@ export const createAppointment = async (req: any, res: Response) => {
     const start = new Date(startTime);
     const end = new Date(endTime);
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
       return res.status(400).json({
         success: false,
         message: "Invalid date format",
@@ -102,7 +114,9 @@ export const createAppointment = async (req: any, res: Response) => {
 
     return res.status(201).json({
       success: true,
-      appointment,
+      data: {
+        appointment,
+      },
     });
   } catch (error: any) {
     console.error("CREATE APPOINTMENT ERROR:", error);
@@ -114,18 +128,21 @@ export const createAppointment = async (req: any, res: Response) => {
   }
 };
 
-/*
-=====================================================
-RESCHEDULE APPOINTMENT
-=====================================================
-*/
 export const rescheduleAppointmentController = async (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response
 ) => {
   try {
+    const businessId = req.user?.businessId || null;
     const appointmentId = req.params.appointmentId as string;
     const { startTime, endTime } = req.body;
+
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!appointmentId || !startTime || !endTime) {
       return res.status(400).json({
@@ -137,7 +154,7 @@ export const rescheduleAppointmentController = async (
     const start = new Date(startTime);
     const end = new Date(endTime);
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
       return res.status(400).json({
         success: false,
         message: "Invalid date format",
@@ -151,7 +168,8 @@ export const rescheduleAppointmentController = async (
       });
     }
 
-    const updated = await rescheduleAppointment(
+    const appointment = await rescheduleAppointment(
+      businessId,
       appointmentId,
       start,
       end
@@ -159,26 +177,41 @@ export const rescheduleAppointmentController = async (
 
     return res.status(200).json({
       success: true,
-      appointment: updated,
+      data: {
+        appointment,
+      },
     });
   } catch (error: any) {
     console.error("RESCHEDULE ERROR:", error);
 
-    return res.status(500).json({
+    const statusCode =
+      error?.message === "Appointment not found"
+        ? 404
+        : error?.message === "New slot not available"
+          ? 409
+          : 500;
+
+    return res.status(statusCode).json({
       success: false,
       message: error.message || "Failed to reschedule",
     });
   }
 };
 
-/*
-=====================================================
-CANCEL APPOINTMENT
-=====================================================
-*/
-export const cancelAppointment = async (req: Request, res: Response) => {
+export const cancelAppointment = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
+    const businessId = req.user?.businessId || null;
     const appointmentId = req.params.appointmentId as string;
+
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!appointmentId) {
       return res.status(400).json({
@@ -187,18 +220,68 @@ export const cancelAppointment = async (req: Request, res: Response) => {
       });
     }
 
-    const appointment = await cancelExistingAppointment(appointmentId);
+    const appointment = await cancelExistingAppointment(businessId, appointmentId);
 
     return res.status(200).json({
       success: true,
-      appointment,
+      data: {
+        appointment,
+      },
     });
   } catch (error: any) {
     console.error("CANCEL APPOINTMENT ERROR:", error);
 
-    return res.status(500).json({
+    return res.status(error?.message === "Appointment not found" ? 404 : 500).json({
       success: false,
       message: error.message || "Failed to cancel appointment",
+    });
+  }
+};
+
+export const listAppointments = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const businessId = req.user?.businessId || null;
+
+    if (!businessId) {
+      return res.status(400).json({
+        success: false,
+        message: "Business ID missing",
+      });
+    }
+
+    const bookings = await prisma.appointment.findMany({
+      where: { businessId },
+      orderBy: { startTime: "asc" },
+      select: {
+        id: true,
+        name: true,
+        startTime: true,
+        status: true,
+      },
+    });
+
+    const formattedBookings = bookings.map((booking) => ({
+      id: booking.id,
+      name: booking.name,
+      startTime: booking.startTime.toISOString(),
+      status: booking.status,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        bookings: formattedBookings,
+      },
+    });
+  } catch (error: any) {
+    console.error("GET BOOKINGS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch bookings",
     });
   }
 };

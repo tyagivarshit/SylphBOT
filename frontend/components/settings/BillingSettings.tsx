@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { buildApiUrl, buildAppUrl } from "@/lib/userApi";
+import { apiFetch } from "@/lib/apiClient";
+import { buildAppUrl } from "@/lib/userApi";
 
 type BillingResponse = {
   subscription?: {
@@ -29,16 +30,16 @@ export default function BillingSettings() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["billing"],
     queryFn: async () => {
-      const res = await fetch(buildApiUrl("/api/billing"), {
+      const response = await apiFetch<BillingResponse>("/api/billing", {
         credentials: "include",
         cache: "no-store",
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to load billing");
+      if (!response.success || !response.data) {
+        throw new Error(response.message || "Failed to load billing");
       }
 
-      return (await res.json()) as BillingResponse;
+      return response.data;
     },
   });
 
@@ -48,18 +49,16 @@ export default function BillingSettings() {
 
   const portalMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(buildApiUrl("/api/billing/portal"), {
+      const response = await apiFetch<{ url?: string }>("/api/billing/portal", {
         method: "POST",
         credentials: "include",
       });
 
-      const payload = await res.json().catch(() => null);
-
-      if (!res.ok || !payload?.url) {
-        throw new Error(payload?.message || "Portal failed");
+      if (!response.success || !response.data?.url) {
+        throw new Error(response.message || "Portal failed");
       }
 
-      return payload.url as string;
+      return response.data.url as string;
     },
     onSuccess: (url) => {
       window.location.assign(url);
@@ -68,18 +67,16 @@ export default function BillingSettings() {
 
   const cancelMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(buildApiUrl("/api/billing/cancel"), {
+      const response = await apiFetch("/api/billing/cancel", {
         method: "POST",
         credentials: "include",
       });
 
-      const payload = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        throw new Error(payload?.message || "Cancel failed");
+      if (!response.success) {
+        throw new Error(response.message || "Cancel failed");
       }
 
-      return payload;
+      return response.data;
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["billing"] });

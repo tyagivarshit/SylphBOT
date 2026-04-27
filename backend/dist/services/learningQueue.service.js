@@ -1,12 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.enqueueLearning = void 0;
+exports.shutdownLearningQueue = exports.initLearningQueue = exports.enqueueLearning = void 0;
 const learningFilter_service_1 = require("./learningFilter.service");
 const knowledgeIngestion_service_1 = require("./knowledgeIngestion.service");
 const queue = [];
 let processing = false;
+const globalForLearningQueue = globalThis;
 const enqueueLearning = async (data) => {
     queue.push(data);
+    (0, exports.initLearningQueue)();
 };
 exports.enqueueLearning = enqueueLearning;
 const processQueue = async () => {
@@ -26,5 +28,17 @@ const processQueue = async () => {
     }
     processing = false;
 };
-/* auto runner */
-setInterval(processQueue, 3000);
+const initLearningQueue = () => {
+    if (!globalForLearningQueue.__sylphLearningQueueInterval) {
+        globalForLearningQueue.__sylphLearningQueueInterval = setInterval(processQueue, 3000);
+    }
+    return globalForLearningQueue.__sylphLearningQueueInterval;
+};
+exports.initLearningQueue = initLearningQueue;
+const shutdownLearningQueue = () => {
+    if (globalForLearningQueue.__sylphLearningQueueInterval) {
+        clearInterval(globalForLearningQueue.__sylphLearningQueueInterval);
+        globalForLearningQueue.__sylphLearningQueueInterval = undefined;
+    }
+};
+exports.shutdownLearningQueue = shutdownLearningQueue;

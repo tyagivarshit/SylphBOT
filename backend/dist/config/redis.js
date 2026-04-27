@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getSharedRedisConnection = exports.redis = void 0;
+exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getSharedRedisConnection = exports.initRedis = void 0;
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
 const redisSafety_1 = require("../redis/redisSafety");
@@ -153,34 +153,52 @@ const createSafeRedisProxy = (client, label) => new Proxy(client, {
         });
     },
 });
-const sharedRedisClient = globalForRedis.__sylphRedis || createRedisClient("shared");
-if (!globalForRedis.__sylphRedis) {
-    globalForRedis.__sylphRedis = sharedRedisClient;
-}
-const bullConnections = globalForRedis.__sylphBullConnections || new Set();
-if (!globalForRedis.__sylphBullConnections) {
-    globalForRedis.__sylphBullConnections = bullConnections;
-}
+const getBullConnections = () => {
+    if (!globalForRedis.__sylphBullConnections) {
+        globalForRedis.__sylphBullConnections = new Set();
+    }
+    return globalForRedis.__sylphBullConnections;
+};
 const trackBullConnection = (client) => {
-    bullConnections.add(client);
+    getBullConnections().add(client);
     return client;
 };
 const untrackBullConnection = (client) => {
     if (!client) {
         return;
     }
-    bullConnections.delete(client);
+    getBullConnections().delete(client);
 };
-const queueRedisClient = globalForRedis.__sylphQueueRedis ||
-    trackBullConnection(createRedisClient("queue"));
-if (!globalForRedis.__sylphQueueRedis) {
-    globalForRedis.__sylphQueueRedis = queueRedisClient;
-}
+const ensureSharedRedisClient = () => {
+    if (!globalForRedis.__sylphRedis) {
+        globalForRedis.__sylphRedis = createRedisClient("shared");
+    }
+    return globalForRedis.__sylphRedis;
+};
+const ensureQueueRedisClient = () => {
+    if (!globalForRedis.__sylphQueueRedis) {
+        globalForRedis.__sylphQueueRedis = trackBullConnection(createRedisClient("queue"));
+    }
+    return globalForRedis.__sylphQueueRedis;
+};
+const ensureSharedRedisProxy = () => {
+    const client = ensureSharedRedisClient();
+    if (!globalForRedis.__sylphRedisProxy ||
+        globalForRedis.__sylphRedisProxyClient !== client) {
+        globalForRedis.__sylphRedisProxy = createSafeRedisProxy(client, "redis");
+        globalForRedis.__sylphRedisProxyClient = client;
+    }
+    return globalForRedis.__sylphRedisProxy;
+};
 let workerConnectionCounter = 0;
-exports.redis = createSafeRedisProxy(sharedRedisClient, "redis");
-const getSharedRedisConnection = () => sharedRedisClient;
+const initRedis = () => ({
+    shared: ensureSharedRedisClient(),
+    queue: ensureQueueRedisClient(),
+});
+exports.initRedis = initRedis;
+const getSharedRedisConnection = () => ensureSharedRedisClient();
 exports.getSharedRedisConnection = getSharedRedisConnection;
-const getQueueRedisConnection = () => queueRedisClient;
+const getQueueRedisConnection = () => ensureQueueRedisClient();
 exports.getQueueRedisConnection = getQueueRedisConnection;
 const getWorkerRedisConnection = () => trackBullConnection(createRedisClient(`worker:${++workerConnectionCounter}`));
 exports.getWorkerRedisConnection = getWorkerRedisConnection;
@@ -193,6 +211,10 @@ const closeClient = async (client) => {
         if (client.status === "end") {
             return;
         }
+        if (client.status === "wait") {
+            client.disconnect(false);
+            return;
+        }
         await client.quit();
     }
     catch {
@@ -203,7 +225,7 @@ const closeRedisConnection = async () => {
     const clients = Array.from(new Set([
         globalForRedis.__sylphRedis,
         globalForRedis.__sylphQueueRedis,
-        ...Array.from(bullConnections.values()),
+        ...Array.from(getBullConnections().values()),
     ].filter(Boolean)));
     for (const client of clients) {
         await closeClient(client);
@@ -211,9 +233,16 @@ const closeRedisConnection = async () => {
     }
     globalForRedis.__sylphRedis = undefined;
     globalForRedis.__sylphQueueRedis = undefined;
+    globalForRedis.__sylphRedisProxy = undefined;
+    globalForRedis.__sylphRedisProxyClient = undefined;
     globalForRedis.__sylphBullConnections = undefined;
 };
 exports.closeRedisConnection = closeRedisConnection;
+const redis = new Proxy({}, {
+    get(_target, property) {
+        return Reflect.get(ensureSharedRedisProxy(), property);
+    },
+});
 var redisSafety_2 = require("../redis/redisSafety");
 Object.defineProperty(exports, "isRedisHealthy", { enumerable: true, get: function () { return redisSafety_2.isRedisHealthy; } });
-exports.default = exports.redis;
+exports.default = redis;

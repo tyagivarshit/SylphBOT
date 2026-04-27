@@ -1,10 +1,8 @@
 import prisma from "../config/prisma";
-
-/*
-=========================================================
-LEAD INTELLIGENCE ENGINE (BRAIN OF SALES SYSTEM)
-=========================================================
-*/
+import {
+  buildLeadIntelligenceProfile,
+  refreshLeadIntelligenceProfile,
+} from "./crm/leadIntelligence.service";
 
 interface IntelligenceInput {
   leadId: string;
@@ -17,62 +15,7 @@ interface IntelligenceOutput {
   stage: string;
 }
 
-/* =====================================================
-🔥 SCORING RULES (ADVANCED)
-===================================================== */
-
-const calculateScore = (message: string): number => {
-
-  const msg = message.toLowerCase();
-
-  let score = 0;
-
-  /* 🔥 HIGH INTENT */
-  if (/buy|purchase|start|book now/.test(msg)) score += 10;
-
-  /* 💰 MONEY SIGNAL */
-  if (/price|cost|pricing|fees/.test(msg)) score += 4;
-
-  /* 📞 CALL INTENT */
-  if (/call|demo|meeting/.test(msg)) score += 6;
-
-  /* 🤔 INTEREST */
-  if (/interested|tell me|details|info/.test(msg)) score += 3;
-
-  /* ❌ NEGATIVE */
-  if (/not interested|later|busy/.test(msg)) score -= 3;
-
-  return score;
-};
-
-/* =====================================================
-🔥 TEMPERATURE DETECTION
-===================================================== */
-
-const getTemperature = (score: number) => {
-
-  if (score >= 8) return "HOT";
-  if (score >= 4) return "WARM";
-  return "COLD";
-};
-
-/* =====================================================
-🔥 STAGE MAPPING
-===================================================== */
-
-const getStage = (temperature: string) => {
-
-  if (temperature === "HOT") return "READY_TO_BUY";
-  if (temperature === "WARM") return "INTERESTED";
-  return "NEW";
-};
-
-/* =====================================================
-🔥 BEHAVIOR LOGIC (IMPORTANT)
-===================================================== */
-
 export const getBehaviorConfig = (temperature: string) => {
-
   if (temperature === "HOT") {
     return {
       tone: "aggressive",
@@ -96,59 +39,68 @@ export const getBehaviorConfig = (temperature: string) => {
   };
 };
 
-/*
-=========================================================
-MAIN FUNCTION
-=========================================================
-*/
-
 export const processLeadIntelligence = async ({
   leadId,
   message,
 }: IntelligenceInput): Promise<IntelligenceOutput | null> => {
-
   try {
+    if (!leadId || !message) {
+      return null;
+    }
 
-    if (!leadId || !message) return null;
-
-    /* 🔥 SCORE */
-    const score = calculateScore(message);
-
-    /* 🔥 TEMPERATURE */
-    const temperature = getTemperature(score);
-
-    /* 🔥 STAGE */
-    const stage = getStage(temperature);
-
-    /* 🔥 UPDATE DB */
-
-    await prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        leadScore: { increment: score },
-        aiStage: temperature,
-        stage,
+    const lead = await prisma.lead.findUnique({
+      where: {
+        id: leadId,
+      },
+      select: {
+        businessId: true,
       },
     });
 
-    console.log("🧠 Lead Intelligence:", {
-      score,
-      temperature,
-      stage,
+    if (!lead?.businessId) {
+      return null;
+    }
+
+    const profile = await refreshLeadIntelligenceProfile({
+      businessId: lead.businessId,
+      leadId,
+      inputMessage: message,
+      source: "LEGACY_LEAD_INTELLIGENCE",
     });
 
     return {
-      score,
-      temperature,
-      stage,
+      score: profile.scorecard.compositeScore,
+      temperature:
+        profile.lifecycle.nextAIStage === "HOT"
+          ? "HOT"
+          : profile.lifecycle.nextAIStage === "WARM"
+            ? "WARM"
+            : "COLD",
+      stage: profile.lifecycle.nextLeadStage,
     };
-
   } catch (error) {
-
     console.error("LEAD INTELLIGENCE ERROR:", error);
-
     return null;
+  }
+};
 
+export const getLeadIntelligenceProfile = async (leadId: string) => {
+  const lead = await prisma.lead.findUnique({
+    where: {
+      id: leadId,
+    },
+    select: {
+      businessId: true,
+    },
+  });
+
+  if (!lead?.businessId) {
+    return null;
   }
 
+  return buildLeadIntelligenceProfile({
+    businessId: lead.businessId,
+    leadId,
+    source: "LEGACY_LEAD_INTELLIGENCE_READ",
+  });
 };

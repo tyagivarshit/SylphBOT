@@ -1,11 +1,11 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
 import { useSearchParams } from "next/navigation";
 import ChatSidebar from "@/components/conversations/ChatSidebar";
 import ChatWindow from "@/components/conversations/ChatWindow";
-import { buildApiUrl, getAbsoluteApiOrigin } from "@/lib/url";
+import { apiFetch } from "@/lib/apiClient";
+import { socket } from "@/lib/socket";
 import { SkeletonCard } from "@/components/ui/feedback";
 
 export interface Lead {
@@ -323,19 +323,17 @@ function ConversationsPageContent() {
       setLeadsLoading(true);
       setLeadsError(null);
 
-      const res = await fetch(buildApiUrl("/conversations"), {
+      const response = await apiFetch<{ conversations?: Lead[] }>("/api/conversations", {
         credentials: "include",
       });
 
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        throw new Error("We couldn't load your conversations.");
+      if (!response.success) {
+        throw new Error(response.message || "We couldn't load your conversations.");
       }
 
       const persistedSeenState = readSeenConversationState();
       const nextLeads = applySeenState(
-        data?.conversations || [],
+        response.data?.conversations || [],
         persistedSeenState
       );
 
@@ -383,20 +381,18 @@ function ConversationsPageContent() {
         const activeRawUnreadCount = lead.rawUnreadCount || 0;
         const activeLastMessageTime = lead.lastMessageTime;
 
-        const res = await fetch(
-          buildApiUrl(`/conversations/${activeLeadId}/messages`),
+        const response = await apiFetch<{ messages?: unknown[] }>(
+          `/api/conversations/${activeLeadId}/messages`,
           {
             credentials: "include",
           }
         );
 
-        const data = await res.json().catch(() => null);
-
-        if (!res.ok) {
-          throw new Error("We couldn't load this conversation yet.");
+        if (!response.success) {
+          throw new Error(response.message || "We couldn't load this conversation yet.");
         }
 
-        const fetchedMessages = (data?.messages || []).map((message: unknown) =>
+        const fetchedMessages = (response.data?.messages || []).map((message: unknown) =>
           normalizeMessage(message)
         );
         const latestSeenAt =
@@ -440,11 +436,6 @@ function ConversationsPageContent() {
     if (!activeLeadId) {
       return;
     }
-
-    const socket = io(getAbsoluteApiOrigin(), {
-      transports: ["websocket"],
-      withCredentials: true,
-    });
 
     socket.emit("join_conversation", activeLeadId);
 
@@ -493,7 +484,7 @@ function ConversationsPageContent() {
     });
 
     return () => {
-      socket.disconnect();
+      socket.off("new_message");
     };
   }, [persistSeenState, selectedLead?.id]);
 

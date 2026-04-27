@@ -1,5 +1,9 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import {
+  getLeadControlAuthority,
+  markLeadHumanTakeover,
+} from "../services/leadControlState.service";
 
 /* ======================================================
 TOGGLE HUMAN CONTROL (AI ↔ HUMAN SWITCH)
@@ -61,6 +65,13 @@ export const toggleHumanControl = async (req: Request, res: Response) => {
         isHumanActive: nextState,
       },
     });
+
+    if (nextState) {
+      await markLeadHumanTakeover({
+        leadId: String(leadId),
+        businessId: String(businessId),
+      }).catch(() => undefined);
+    }
 
     /* ======================================================
     SOCKET BROADCAST (REAL-TIME UI UPDATE)
@@ -125,10 +136,18 @@ export const getLeadControlState = async (req: Request, res: Response) => {
       });
     }
 
+    const controlState = await getLeadControlAuthority({
+      leadId: String(leadId),
+      businessId: String(businessId),
+    });
+
     return res.json({
       success: true,
       isHumanActive: lead.isHumanActive,
       mode: lead.isHumanActive ? "HUMAN" : "AI",
+      cancelTokenVersion: controlState?.cancelTokenVersion ?? 0,
+      lastManualOutboundAt: controlState?.lastManualOutboundAt || null,
+      lastHumanTakeoverAt: controlState?.lastHumanTakeoverAt || null,
     });
 
   } catch (error) {

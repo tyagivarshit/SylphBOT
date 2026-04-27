@@ -1,10 +1,5 @@
 import prisma from "../config/prisma";
-
-/*
-=========================================================
-LEAD BEHAVIOR ENGINE (AUTO-CLOSING AI BRAIN)
-=========================================================
-*/
+import { buildLeadIntelligenceProfile } from "./crm/leadIntelligence.service";
 
 interface BehaviorInput {
   leadId: string;
@@ -17,52 +12,52 @@ interface BehaviorOutput {
   urgency: boolean;
 }
 
-/* =====================================================
-🔥 MAIN ENGINE
-===================================================== */
+const fallbackBehavior: BehaviorOutput = {
+  tone: "soft",
+  goal: "educate",
+  pushBooking: false,
+  urgency: false,
+};
 
 export const getLeadBehavior = async ({
   leadId,
 }: BehaviorInput): Promise<BehaviorOutput> => {
-
   try {
-
     const lead = await prisma.lead.findUnique({
-      where: { id: leadId },
+      where: {
+        id: leadId,
+      },
       select: {
-        aiStage: true,
-        leadScore: true,
-        stage: true,
+        businessId: true,
       },
     });
 
-    if (!lead) {
-      return {
-        tone: "soft",
-        goal: "educate",
-        pushBooking: false,
-        urgency: false,
-      };
+    if (!lead?.businessId) {
+      return fallbackBehavior;
     }
 
-    const { aiStage, leadScore } = lead;
+    const profile = await buildLeadIntelligenceProfile({
+      businessId: lead.businessId,
+      leadId,
+      source: "LEGACY_BEHAVIOR_ENGINE",
+    });
 
-    /* =====================================================
-    🔥 HOT LEADS (CLOSE FAST)
-    ===================================================== */
-    if (aiStage === "HOT" || (leadScore ?? 0) >= 8) {
+    if (
+      profile.behavior.predictedBehavior === "BOOKING_READY" ||
+      profile.behavior.predictedBehavior === "CLOSE_READY"
+    ) {
       return {
         tone: "aggressive",
         goal: "close",
         pushBooking: true,
-        urgency: true,
+        urgency: profile.behavior.urgency === "HIGH",
       };
     }
 
-    /* =====================================================
-    🌤️ WARM LEADS (CONVERT)
-    ===================================================== */
-    if (aiStage === "WARM" || (leadScore ?? 0) >= 4) {
+    if (
+      profile.behavior.predictedBehavior === "PRICE_EVALUATION" ||
+      profile.behavior.predictedBehavior === "NEEDS_NURTURE"
+    ) {
       return {
         tone: "persuasive",
         goal: "nurture",
@@ -71,27 +66,14 @@ export const getLeadBehavior = async ({
       };
     }
 
-    /* =====================================================
-    ❄️ COLD LEADS (EDUCATE)
-    ===================================================== */
     return {
       tone: "soft",
       goal: "educate",
-      pushBooking: false,
+      pushBooking: profile.behavior.nextBestAction === "SHORT_PROOF_FOLLOWUP",
       urgency: false,
     };
-
   } catch (error) {
-
     console.error("BEHAVIOR ENGINE ERROR:", error);
-
-    return {
-      tone: "soft",
-      goal: "educate",
-      pushBooking: false,
-      urgency: false,
-    };
-
+    return fallbackBehavior;
   }
-
 };

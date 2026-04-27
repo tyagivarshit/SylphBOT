@@ -5,6 +5,17 @@ import {
   updateAvailability,
   deleteAvailability,
 } from "../models/availability.model";
+import type { AuthenticatedRequest } from "../types/request";
+
+type AvailabilityBody = {
+  dayOfWeek?: number;
+  startTime?: string;
+  endTime?: string;
+  slotDuration?: number;
+  bufferTime?: number;
+  timezone?: string;
+  isActive?: boolean;
+};
 
 /*
 =====================================================
@@ -12,7 +23,7 @@ CREATE AVAILABILITY
 =====================================================
 */
 export const createAvailabilityController = async (
-  req: any,
+  req: AuthenticatedRequest<AvailabilityBody>,
   res: Response
 ) => {
   try {
@@ -60,7 +71,9 @@ export const createAvailabilityController = async (
 
     return res.status(201).json({
       success: true,
-      availability,
+      data: {
+        availability,
+      },
     });
   } catch (error: any) {
     console.error("CREATE AVAILABILITY ERROR:", error);
@@ -78,16 +91,24 @@ export const createAvailabilityController = async (
 =====================================================
 */
 export const getAvailabilityController = async (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response
 ) => {
   try {
-    const businessId = req.params.businessId as string;
+    const requestedBusinessId = req.params.businessId as string;
+    const businessId = req.user?.businessId || null;
 
     if (!businessId) {
-      return res.status(400).json({
+      return res.status(401).json({
         success: false,
-        message: "businessId param required",
+        message: "Unauthorized",
+      });
+    }
+
+    if (requestedBusinessId && requestedBusinessId !== businessId) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden",
       });
     }
 
@@ -95,7 +116,9 @@ export const getAvailabilityController = async (
 
     return res.status(200).json({
       success: true,
-      availability,
+      data: {
+        availability,
+      },
     });
   } catch (error: any) {
     console.error("GET AVAILABILITY ERROR:", error);
@@ -113,11 +136,19 @@ UPDATE AVAILABILITY
 =====================================================
 */
 export const updateAvailabilityController = async (
-  req: Request,
+  req: AuthenticatedRequest<AvailabilityBody>,
   res: Response
 ) => {
   try {
     const id = req.params.id as string;
+    const businessId = req.user?.businessId || null;
+
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!id) {
       return res.status(400).json({
@@ -135,11 +166,20 @@ export const updateAvailabilityController = async (
       }
     }
 
-    const availability = await updateAvailability(id, req.body);
+    const availability = await updateAvailability(businessId, id, req.body);
+
+    if (!availability) {
+      return res.status(404).json({
+        success: false,
+        message: "Availability not found",
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      availability,
+      data: {
+        availability,
+      },
     });
   } catch (error: any) {
     console.error("UPDATE AVAILABILITY ERROR:", error);
@@ -157,11 +197,19 @@ DELETE AVAILABILITY
 =====================================================
 */
 export const deleteAvailabilityController = async (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response
 ) => {
   try {
     const id = req.params.id as string;
+    const businessId = req.user?.businessId || null;
+
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!id) {
       return res.status(400).json({
@@ -170,11 +218,20 @@ export const deleteAvailabilityController = async (
       });
     }
 
-    await deleteAvailability(id);
+    const deleted = await deleteAvailability(businessId, id);
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Availability not found",
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: "Availability deleted",
+      data: {
+        id,
+      },
     });
   } catch (error: any) {
     console.error("DELETE AVAILABILITY ERROR:", error);

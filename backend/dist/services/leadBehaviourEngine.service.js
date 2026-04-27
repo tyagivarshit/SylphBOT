@@ -5,43 +5,42 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getLeadBehavior = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-/* =====================================================
-🔥 MAIN ENGINE
-===================================================== */
+const leadIntelligence_service_1 = require("./crm/leadIntelligence.service");
+const fallbackBehavior = {
+    tone: "soft",
+    goal: "educate",
+    pushBooking: false,
+    urgency: false,
+};
 const getLeadBehavior = async ({ leadId, }) => {
     try {
         const lead = await prisma_1.default.lead.findUnique({
-            where: { id: leadId },
+            where: {
+                id: leadId,
+            },
             select: {
-                aiStage: true,
-                leadScore: true,
-                stage: true,
+                businessId: true,
             },
         });
-        if (!lead) {
-            return {
-                tone: "soft",
-                goal: "educate",
-                pushBooking: false,
-                urgency: false,
-            };
+        if (!lead?.businessId) {
+            return fallbackBehavior;
         }
-        const { aiStage, leadScore } = lead;
-        /* =====================================================
-        🔥 HOT LEADS (CLOSE FAST)
-        ===================================================== */
-        if (aiStage === "HOT" || (leadScore ?? 0) >= 8) {
+        const profile = await (0, leadIntelligence_service_1.buildLeadIntelligenceProfile)({
+            businessId: lead.businessId,
+            leadId,
+            source: "LEGACY_BEHAVIOR_ENGINE",
+        });
+        if (profile.behavior.predictedBehavior === "BOOKING_READY" ||
+            profile.behavior.predictedBehavior === "CLOSE_READY") {
             return {
                 tone: "aggressive",
                 goal: "close",
                 pushBooking: true,
-                urgency: true,
+                urgency: profile.behavior.urgency === "HIGH",
             };
         }
-        /* =====================================================
-        🌤️ WARM LEADS (CONVERT)
-        ===================================================== */
-        if (aiStage === "WARM" || (leadScore ?? 0) >= 4) {
+        if (profile.behavior.predictedBehavior === "PRICE_EVALUATION" ||
+            profile.behavior.predictedBehavior === "NEEDS_NURTURE") {
             return {
                 tone: "persuasive",
                 goal: "nurture",
@@ -49,24 +48,16 @@ const getLeadBehavior = async ({ leadId, }) => {
                 urgency: false,
             };
         }
-        /* =====================================================
-        ❄️ COLD LEADS (EDUCATE)
-        ===================================================== */
         return {
             tone: "soft",
             goal: "educate",
-            pushBooking: false,
+            pushBooking: profile.behavior.nextBestAction === "SHORT_PROOF_FOLLOWUP",
             urgency: false,
         };
     }
     catch (error) {
         console.error("BEHAVIOR ENGINE ERROR:", error);
-        return {
-            tone: "soft",
-            goal: "educate",
-            pushBooking: false,
-            urgency: false,
-        };
+        return fallbackBehavior;
     }
 };
 exports.getLeadBehavior = getLeadBehavior;

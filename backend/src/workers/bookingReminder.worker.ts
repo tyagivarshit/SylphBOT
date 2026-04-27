@@ -3,129 +3,133 @@ import prisma from "../config/prisma";
 import { getWorkerRedisConnection } from "../config/redis";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import { sendWhatsAppMessage } from "../services/whatsapp.service";
-import { BOOKING_REMINDER_QUEUE_NAME } from "../queues/bookingReminder.queue";
-
-type ReminderJob = {
-  type: "CONFIRMATION" | "MORNING" | "BEFORE_30_MIN";
-  appointmentId: string;
-};
+import {
+  BOOKING_REMINDER_QUEUE_NAME,
+  type BookingReminderJobData,
+} from "../queues/bookingReminder.queue";
 
 const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
   process.env.RUN_WORKER === undefined;
 
-export const bookingReminderWorker =
-  shouldRunWorker
-    ? new Worker<ReminderJob>(
-        BOOKING_REMINDER_QUEUE_NAME,
-        withRedisWorkerFailSafe(BOOKING_REMINDER_QUEUE_NAME, async (job) => {
-          const { type, appointmentId } = job.data;
+const globalForBookingReminderWorker = globalThis as typeof globalThis & {
+  __sylphBookingReminderWorker?: Worker<BookingReminderJobData> | null;
+};
 
-          try {
-            console.log(`Processing ${type} for ${appointmentId}`);
+export const initBookingReminderWorker = () => {
+  if (!shouldRunWorker) {
+    console.log("[bookingReminder.worker] RUN_WORKER disabled, worker not started");
+    return null;
+  }
 
-            const appointment = await prisma.appointment.findUnique({
-              where: { id: appointmentId },
-              include: { lead: true },
-            });
+  if (globalForBookingReminderWorker.__sylphBookingReminderWorker) {
+    return globalForBookingReminderWorker.__sylphBookingReminderWorker;
+  }
 
-            if (!appointment) {
-              console.log("Appointment not found:", appointmentId);
-              return;
-            }
+  const worker = new Worker<BookingReminderJobData>(
+    BOOKING_REMINDER_QUEUE_NAME,
+    withRedisWorkerFailSafe(BOOKING_REMINDER_QUEUE_NAME, async (job) => {
+      const { type, appointmentId, businessId } = job.data;
 
-            if (appointment.status !== "BOOKED") {
-              console.log("Skipping reminder because booking is not active");
-              return;
-            }
+      try {
+        console.log(`Processing ${type} for ${appointmentId}`);
 
-            if (new Date(appointment.startTime).getTime() < Date.now()) {
-              console.log("Skipping reminder because appointment is in the past");
-              return;
-            }
+        const appointment = await prisma.appointment.findFirst({
+          where: {
+            id: appointmentId,
+            businessId,
+          },
+          include: { lead: true },
+        });
 
-            const lead = appointment.lead;
-
-            if (!lead?.phone) {
-              console.log("No phone number available for reminder");
-              return;
-            }
-
-            const existing = await prisma.reminderLog.findFirst({
-              where: {
-                appointmentId,
-                type,
-              },
-            });
-
-            if (existing) {
-              console.log("Reminder already sent, skipping");
-              return;
-            }
-
-            const rawPhone = lead.phone.replace(/\D/g, "");
-            const finalPhone =
-              rawPhone.startsWith("91") ? rawPhone : `91${rawPhone}`;
-            const formattedTime = new Date(appointment.startTime).toLocaleString();
-
-            let message = "";
-
-            switch (type) {
-              case "CONFIRMATION":
-                message = `✅ Your meeting is confirmed!
-
-📅 ${formattedTime}
-
-We’ll connect with you soon 🚀`;
-                break;
-              case "MORNING":
-                message = `🌄 Good morning!
-
-Reminder: You have a meeting today.
-
-📅 ${formattedTime}
-
-See you soon 👍`;
-                break;
-              case "BEFORE_30_MIN":
-                message = `⏰ Your meeting starts in 30 minutes.
-
-📅 ${formattedTime}
-
-Please be ready 🚀`;
-                break;
-              default:
-                console.log("Unknown reminder type:", type);
-                return;
-            }
-
-            const sent = await sendWhatsAppMessage({
-              to: finalPhone,
-              message,
-            });
-
-            if (!sent) {
-              throw new Error("WhatsApp send failed");
-            }
-
-            await prisma.reminderLog.create({
-              data: {
-                appointmentId,
-                type,
-              },
-            });
-          } catch (error) {
-            console.error("REMINDER WORKER ERROR:", error);
-            throw error;
-          }
-        }),
-        {
-          connection: getWorkerRedisConnection(),
-          concurrency: 5,
+        if (!appointment) {
+          console.log("Appointment not found:", appointmentId);
+          return;
         }
-      )
-    : null;
 
-if (!shouldRunWorker) {
-  console.log("[bookingReminder.worker] RUN_WORKER disabled, worker not started");
-}
+        if (appointment.status !== "CONFIRMED") {
+          console.log("Skipping reminder because booking is not confirmed");
+          return;
+        }
+
+        if (new Date(appointment.startTime).getTime() < Date.now()) {
+          console.log("Skipping reminder because appointment is in the past");
+          return;
+        }
+
+        const lead = appointment.lead;
+
+        if (!lead?.phone) {
+          console.log("No phone number available for reminder");
+          return;
+        }
+
+        const existing = await prisma.reminderLog.findFirst({
+          where: {
+            appointmentId,
+            type,
+          },
+        });
+
+        if (existing) {
+          console.log("Reminder already sent, skipping");
+          return;
+        }
+
+        const rawPhone = lead.phone.replace(/\D/g, "");
+        const finalPhone =
+          rawPhone.startsWith("91") ? rawPhone : `91${rawPhone}`;
+        const formattedTime = new Date(appointment.startTime).toLocaleString();
+
+        let message = "";
+
+        switch (type) {
+          case "CONFIRMATION":
+            message = `Your meeting is confirmed.\n\n${formattedTime}`;
+            break;
+          case "MORNING":
+            message = `Reminder: you have a meeting today.\n\n${formattedTime}`;
+            break;
+          case "BEFORE_30_MIN":
+            message = `Your meeting starts in 30 minutes.\n\n${formattedTime}`;
+            break;
+          default:
+            return;
+        }
+
+        const sent = await sendWhatsAppMessage({
+          to: finalPhone,
+          message,
+        });
+
+        if (!sent) {
+          throw new Error("WhatsApp send failed");
+        }
+
+        await prisma.reminderLog.create({
+          data: {
+            appointmentId,
+            type,
+          },
+        });
+      } catch (error) {
+        console.error("REMINDER WORKER ERROR:", error);
+        throw error;
+      }
+    }),
+    {
+      connection: getWorkerRedisConnection(),
+      concurrency: 5,
+    }
+  );
+
+  globalForBookingReminderWorker.__sylphBookingReminderWorker = worker;
+  return worker;
+};
+
+export const closeBookingReminderWorker = async () => {
+  await globalForBookingReminderWorker.__sylphBookingReminderWorker
+    ?.close()
+    .catch(() => undefined);
+  globalForBookingReminderWorker.__sylphBookingReminderWorker = undefined;
+};

@@ -70,10 +70,10 @@ export const getSalesAgentBlueprint = () => ({
   ],
   promptStructure: {
     system: [
-      "Identity as a high-converting closer, not a chatbot.",
+      "Identity as Automexia AI, a high-converting closer and not a casual chatbot.",
       "Plan constraints and allowed CTAs.",
       "Lead temperature, intent, objection, and missing qualification data.",
-      "Rules for brevity, human tone, and conversion-first behavior.",
+      "Rules for discovery, qualification, objection handling, and conversion-first behavior.",
     ],
     grounding: [
       "Business info, pricing, FAQ knowledge, and custom sales instructions at client scope first, then shared scope.",
@@ -82,7 +82,15 @@ export const getSalesAgentBlueprint = () => ({
     ],
     output: {
       format: "JSON",
-      fields: ["message", "cta", "angle", "reason"],
+      fields: [
+        "message",
+        "intent",
+        "stage",
+        "leadType",
+        "cta",
+        "confidence",
+        "reason",
+      ],
     },
   },
   integrationApi: {

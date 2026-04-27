@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { buildApiUrl } from "@/lib/url";
+import { apiFetch } from "@/lib/apiClient";
 
 type Currency = "INR" | "USD";
 
@@ -54,19 +54,18 @@ export default function PricingPage() {
 
     const loadPlans = async () => {
       try {
-        const res = await fetch(buildApiUrl("/api/billing/plans"), {
+        const response = await apiFetch<PricingResponse>("/api/billing/plans", {
           cache: "no-store",
         });
-        const payload = await res.json().catch(() => null);
 
-        if (!mounted || !res.ok || !payload?.plans) {
+        if (!mounted || !response.success || !response.data?.plans) {
           return;
         }
 
         setPricing({
-          plans: payload.plans,
-          addons: payload.addons || [],
-          trialDays: payload.trialDays || 7,
+          plans: response.data.plans,
+          addons: response.data.addons || [],
+          trialDays: response.data.trialDays || 7,
         });
       } finally {
         if (mounted) {

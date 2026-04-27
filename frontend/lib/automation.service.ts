@@ -1,11 +1,11 @@
 import { apiClient } from "@/lib/apiClient";
 
 export type AutomationStepConfig = {
-  message?: string;
-  condition?: string;
+  message?: string | null;
+  condition?: string | null;
   delay?: number;
   replyMode?: "AI" | "TEMPLATE";
-  aiPrompt?: string;
+  aiPrompt?: string | null;
 };
 
 export type AutomationFlowStep = {
@@ -70,6 +70,29 @@ export async function createAutomationFlow(payload: CreateAutomationFlowInput) {
     flow?: AutomationFlow;
     message?: string;
   }>("/automation/flows", payload);
+
+  return response.data;
+}
+
+export async function updateAutomationFlow(
+  id: string,
+  payload: CreateAutomationFlowInput & { status?: string }
+) {
+  const response = await apiClient.patch<{
+    success?: boolean;
+    flow?: AutomationFlow;
+    message?: string;
+  }>(`/automation/flows/${id}`, payload);
+
+  return response.data;
+}
+
+export async function deleteAutomationFlow(id: string) {
+  const response = await apiClient.delete<{
+    success?: boolean;
+    id?: string;
+    message?: string;
+  }>(`/automation/flows/${id}`);
 
   return response.data;
 }

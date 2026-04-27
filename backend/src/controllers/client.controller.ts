@@ -184,13 +184,27 @@ const upsertConnectedClient = async ({
   const normalizedPhoneNumberId = normalizeOptionalString(phoneNumberId);
   const normalizedPageId = normalizeOptionalString(pageId);
   const normalizedAccessToken = String(accessToken || "").trim();
-  const uniqueWhere = normalizedPageId
-    ? { pageId: normalizedPageId }
-    : normalizedPhoneNumberId
-      ? { phoneNumberId: normalizedPhoneNumberId }
-      : null;
+  const sameBusinessClientFilters = [
+    normalizedPageId
+      ? {
+          pageId: normalizedPageId,
+        }
+      : null,
+    normalizedPhoneNumberId
+      ? {
+          phoneNumberId: normalizedPhoneNumberId,
+        }
+      : null,
+  ].filter(Boolean) as Array<
+    | {
+        pageId: string;
+      }
+    | {
+        phoneNumberId: string;
+      }
+  >;
 
-  if (!uniqueWhere) {
+  if (!sameBusinessClientFilters.length) {
     throw createClientControllerError(
       "pageId or phoneNumberId is required",
       "CLIENT_UNIQUE_KEY_REQUIRED"
@@ -207,16 +221,21 @@ const upsertConnectedClient = async ({
   });
 
   if (normalizedPageId) {
-    const existingPageClient = await prisma.client.findUnique({
+    const conflictingPageClient = await prisma.client.findFirst({
       where: {
         pageId: normalizedPageId,
+        NOT: {
+          businessId,
+        },
+      },
+      select: {
+        id: true,
       },
     });
 
     if (
-      existingPageClient &&
-      existingPageClient.businessId !== businessId &&
-      existingPageClient.id !== existingPlatformClient?.id
+      conflictingPageClient &&
+      conflictingPageClient.id !== existingPlatformClient?.id
     ) {
       throw createClientControllerError(
         "This connected account already exists for another business",
@@ -226,16 +245,21 @@ const upsertConnectedClient = async ({
   }
 
   if (normalizedPhoneNumberId) {
-    const existingPhoneClient = await prisma.client.findUnique({
+    const conflictingPhoneClient = await prisma.client.findFirst({
       where: {
         phoneNumberId: normalizedPhoneNumberId,
+        NOT: {
+          businessId,
+        },
+      },
+      select: {
+        id: true,
       },
     });
 
     if (
-      existingPhoneClient &&
-      existingPhoneClient.businessId !== businessId &&
-      existingPhoneClient.id !== existingPlatformClient?.id
+      conflictingPhoneClient &&
+      conflictingPhoneClient.id !== existingPlatformClient?.id
     ) {
       throw createClientControllerError(
         "This connected account already exists for another business",
@@ -270,45 +294,37 @@ const upsertConnectedClient = async ({
     deletedAt: null,
   };
 
-  if (existingPlatformClient) {
-    const client = await prisma.client.update({
-      where: { id: existingPlatformClient.id },
+  const sameBusinessClient = existingPlatformClient
+    ? existingPlatformClient
+    : await prisma.client.findFirst({
+        where: {
+          businessId,
+          OR: sameBusinessClientFilters,
+        },
+      });
+
+  if (sameBusinessClient) {
+    await prisma.client.updateMany({
+      where: {
+        id: sameBusinessClient.id,
+        businessId,
+      },
       data: updateData,
     });
 
-    console.log("CLIENT UPSERT SUCCESS", {
-      businessId: client.businessId,
-      platform: client.platform,
-      pageId: client.pageId,
-      phoneNumberId: client.phoneNumberId,
+    const client = await prisma.client.findFirst({
+      where: {
+        id: sameBusinessClient.id,
+        businessId,
+      },
     });
 
-    return client;
-  }
-
-  if (normalizedPhoneNumberId) {
-    const client = await prisma.client.upsert({
-      where: { phoneNumberId: normalizedPhoneNumberId },
-      update: updateData,
-      create: updateData,
-    });
-
-    console.log("CLIENT UPSERT SUCCESS", {
-      businessId: client.businessId,
-      platform: client.platform,
-      pageId: client.pageId,
-      phoneNumberId: client.phoneNumberId,
-    });
-
-    return client;
-  }
-
-  if (normalizedPageId) {
-    const client = await prisma.client.upsert({
-      where: { pageId: normalizedPageId },
-      update: updateData,
-      create: updateData,
-    });
+    if (!client) {
+      throw createClientControllerError(
+        "Client update failed",
+        "CLIENT_UPDATE_FAILED"
+      );
+    }
 
     console.log("CLIENT UPSERT SUCCESS", {
       businessId: client.businessId,
@@ -320,43 +336,18 @@ const upsertConnectedClient = async ({
     return client;
   }
 
-  const client = await prisma.client.upsert({
-    where: uniqueWhere,
-    update: updateData,
-    create: updateData,
+  const client = await prisma.client.create({
+    data: updateData,
   });
 
   console.log("CLIENT UPSERT SUCCESS", {
     businessId: client.businessId,
+    platform: client.platform,
     pageId: client.pageId,
     phoneNumberId: client.phoneNumberId,
   });
 
   return client;
-};
-
-const getBusinessByOwner = async (userId: string) => {
-  return prisma.business.findFirst({
-    where: { ownerId: userId },
-    select: { id: true },
-  });
-};
-
-const resolveBusinessIdForRequest = async (req: Request) => {
-  const requestBusinessId = getRequestBusinessId(req) || req.businessId;
-
-  if (requestBusinessId) {
-    return requestBusinessId;
-  }
-
-  const userId = (req as any).user?.id;
-
-  if (!userId) {
-    return null;
-  }
-
-  const business = await getBusinessByOwner(userId);
-  return business?.id || null;
 };
 
 const getSubscription = async (businessId: string) => {
@@ -421,9 +412,14 @@ export const createClient = async (req: Request, res: Response) => {
   try {
 
     const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId || !businessId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
     }
 
     let {
@@ -443,39 +439,41 @@ export const createClient = async (req: Request, res: Response) => {
 
     if (!platform || !accessToken) {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "platform and accessToken required",
       });
     }
 
     platform = platform.toUpperCase();
 
-    const business = await getBusinessByOwner(userId);
-
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
-    }
-
-    const subscription = await getSubscription(business.id);
+    const subscription = await getSubscription(businessId);
 
     if (!subscription) {
       return res.status(403).json({
+        success: false,
+        data: null,
         message: "No active subscription found",
       });
     }
 
     const allowedPlatforms = await getAllowedPlatforms(
-      business.id,
+      businessId,
       subscription
     );
 
     if (!allowedPlatforms.length) {
       return res.status(403).json({
+        success: false,
+        data: null,
         message: "Your current plan does not allow new integrations",
       });
     }
 
     if (!allowedPlatforms.includes(platform)) {
       return res.status(403).json({
+        success: false,
+        data: null,
         message: `${platform} integration not allowed in your plan`,
       });
     }
@@ -496,12 +494,16 @@ export const createClient = async (req: Request, res: Response) => {
 
     if (platform === "WHATSAPP" && !resolvedPhoneNumberId) {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "Unable to resolve WhatsApp phone number ID",
       });
     }
 
     if (platform === "INSTAGRAM" && !resolvedPageId) {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "Unable to resolve Instagram page ID",
       });
     }
@@ -509,7 +511,7 @@ export const createClient = async (req: Request, res: Response) => {
     const encryptedToken = encrypt(accessToken);
 
     const client = await upsertConnectedClient({
-      businessId: business.id,
+      businessId,
       platform,
       phoneNumberId: resolvedPhoneNumberId,
       pageId: resolvedPageId,
@@ -521,35 +523,46 @@ export const createClient = async (req: Request, res: Response) => {
       salesInstructions,
     });
 
-    await queueOnboardingDemoForClient(business.id, client);
+    await queueOnboardingDemoForClient(businessId, client);
 
     return res.status(201).json({
+      success: true,
+      data: {
+        client,
+      },
       message: "Client created successfully",
-      client,
     });
 
   } catch (error: any) {
 
     if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "phoneNumberId or pageId required",
       });
     }
 
     if (error.code === "CLIENT_OWNERSHIP_CONFLICT") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "This connected account already exists for another business",
       });
     }
 
     if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "This connected account already exists for your business",
       });
     }
 
     if (error.code === "P2002") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "This connected account already exists for your business",
       });
     }
@@ -557,6 +570,8 @@ export const createClient = async (req: Request, res: Response) => {
     console.error("Create client error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "Client creation failed",
     });
 
@@ -574,6 +589,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
   try {
 
     const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
 
     const {
       code,
@@ -587,35 +603,33 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     } = req.body;
 
-    if (!userId || !code) {
+    if (!userId || !businessId || !code) {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "Invalid request",
       });
     }
 
-    const business = await getBusinessByOwner(userId);
-
-    if (!business) {
-      return res.status(404).json({
-        message: "Business not found",
-      });
-    }
-
-    const subscription = await getSubscription(business.id);
+    const subscription = await getSubscription(businessId);
 
     if (!subscription) {
       return res.status(403).json({
+        success: false,
+        data: null,
         message: "No active subscription found",
       });
     }
 
     const allowedPlatforms = await getAllowedPlatforms(
-      business.id,
+      businessId,
       subscription
     );
 
     if (!allowedPlatforms.includes("INSTAGRAM")) {
       return res.status(403).json({
+        success: false,
+        data: null,
         message: "Instagram integration not allowed in your plan",
       });
     }
@@ -652,6 +666,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     if (!instagramConnection.pageId) {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "No Instagram page found",
       });
     }
@@ -661,7 +677,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     const encryptedInstagramToken = encrypt(instagramAccessToken);
 
     const client = await upsertConnectedClient({
-      businessId: business.id,
+      businessId,
       platform: "INSTAGRAM",
       pageId: instagramConnection.pageId,
       accessToken: encryptedInstagramToken,
@@ -677,48 +693,59 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       const encryptedWhatsAppToken = encrypt(longToken);
 
       await upsertConnectedClient({
-        businessId: business.id,
+        businessId,
         platform: "WHATSAPP",
         phoneNumberId,
         accessToken: encryptedWhatsAppToken,
       }).catch((error) => {
         console.log("WHATSAPP CLIENT UPSERT FAILED", {
-          businessId: business.id,
+          businessId,
           phoneNumberId,
           message: getAxiosErrorMessage(error),
         });
       });
     }
 
-    await queueOnboardingDemoForClient(business.id, client);
+    await queueOnboardingDemoForClient(businessId, client);
 
     return res.json({
+      success: true,
+      data: {
+        client,
+      },
       message: "Instagram connected successfully",
-      client,
     });
 
 } catch (error: any) {
 
     if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "phoneNumberId or pageId required",
       });
     }
 
     if (error.code === "CLIENT_OWNERSHIP_CONFLICT") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "This connected account already exists for another business",
       });
     }
 
     if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "This connected account already exists for your business",
       });
     }
 
     if (error.code === "P2002") {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "This connected account already exists for your business",
       });
     }
@@ -726,6 +753,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     console.error("Meta OAuth error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "Instagram connection failed",
     });
 
@@ -741,22 +770,20 @@ CLIENT CONNECTION STATUS
 
 export const getClientStatus = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const business = await getBusinessByOwner(userId);
-
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
     }
 
     const [instagramClient, whatsappClient] = await Promise.all([
       prisma.client.findFirst({
         where: {
-          businessId: business.id,
+          businessId,
           platform: "INSTAGRAM",
           deletedAt: null,
         },
@@ -770,7 +797,7 @@ export const getClientStatus = async (req: Request, res: Response) => {
       }),
       prisma.client.findFirst({
         where: {
-          businessId: business.id,
+          businessId,
           platform: "WHATSAPP",
           deletedAt: null,
         },
@@ -794,21 +821,26 @@ export const getClientStatus = async (req: Request, res: Response) => {
     ]);
 
     return res.json({
-      instagram: {
-        connected: Boolean(instagramClient?.pageId),
-        pageId: instagramClient?.pageId || null,
-        healthy: instagramHealthy,
-      },
-      whatsapp: {
-        connected: Boolean(whatsappClient?.phoneNumberId),
-        phoneNumberId: whatsappClient?.phoneNumberId || null,
-        healthy: whatsappHealthy,
+      success: true,
+      data: {
+        instagram: {
+          connected: Boolean(instagramClient?.pageId),
+          pageId: instagramClient?.pageId || null,
+          healthy: instagramHealthy,
+        },
+        whatsapp: {
+          connected: Boolean(whatsappClient?.phoneNumberId),
+          phoneNumberId: whatsappClient?.phoneNumberId || null,
+          healthy: whatsappHealthy,
+        },
       },
     });
   } catch (error) {
     console.error("Client status error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "Failed to load client status",
     });
   }
@@ -824,11 +856,15 @@ export const updateAITraining = async (req: Request, res: Response) => {
 
   try {
 
-    const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
     const id = req.params.id as string;
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
     }
 
     const {
@@ -839,40 +875,62 @@ export const updateAITraining = async (req: Request, res: Response) => {
       salesInstructions
     } = req.body;
 
-    const business = await getBusinessByOwner(userId);
-
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
-    }
-
     const client = await prisma.client.findFirst({
       where: {
         id,
-        businessId: business.id,
-        isActive: true
-      }
+        businessId,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
     });
 
     if (!client) {
       return res.status(404).json({
-        message: "Client not found"
+        success: false,
+        data: null,
+        message: "Client not found",
       });
     }
 
-    const updatedClient = await prisma.client.update({
-      where: { id },
+    await prisma.client.updateMany({
+      where: {
+        id: client.id,
+        businessId,
+      },
       data: {
         businessInfo,
         pricingInfo,
         aiTone,
         faqKnowledge,
         salesInstructions
-      }
+      },
     });
 
+    const updatedClient = await prisma.client.findFirst({
+      where: {
+        id: client.id,
+        businessId,
+        deletedAt: null,
+      },
+    });
+
+    if (!updatedClient) {
+      return res.status(404).json({
+        success: false,
+        data: null,
+        message: "Client not found",
+      });
+    }
+
     return res.json({
+      success: true,
+      data: {
+        client: updatedClient,
+      },
       message: "AI training updated successfully",
-      client: updatedClient
     });
 
   } catch (error) {
@@ -880,6 +938,8 @@ export const updateAITraining = async (req: Request, res: Response) => {
     console.error("AI training update error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "AI training update failed"
     });
 
@@ -907,7 +967,7 @@ export const getClients = async (req: Request, res: Response) => {
       });
     }
 
-    const businessId = await resolveBusinessIdForRequest(req);
+    const businessId = getRequestBusinessId(req);
 
     console.log("GET /clients hit", {
       userId,
@@ -915,10 +975,10 @@ export const getClients = async (req: Request, res: Response) => {
     });
 
     if (!businessId) {
-      return res.json({
-        success: true,
+      return res.status(401).json({
+        success: false,
         data: [],
-        clients: [],
+        message: "Unauthorized",
       });
     }
 
@@ -964,50 +1024,60 @@ export const updateClient = async (req: Request, res: Response) => {
 
   try {
 
-    const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
     const id = req.params.id as string;
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
     }
 
     const { accessToken } = req.body;
 
     if (!accessToken) {
       return res.status(400).json({
+        success: false,
+        data: null,
         message: "Access token required",
       });
-    }
-
-    const business = await getBusinessByOwner(userId);
-
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
     }
 
     const client = await prisma.client.findFirst({
       where: {
         id,
-        businessId: business.id,
+        businessId,
         isActive: true,
+        deletedAt: null,
       },
       select: { id: true },
     });
 
     if (!client) {
       return res.status(404).json({
+        success: false,
+        data: null,
         message: "Client not found",
       });
     }
 
     const encryptedToken = encrypt(accessToken);
 
-    await prisma.client.update({
-      where: { id },
+    await prisma.client.updateMany({
+      where: {
+        id,
+        businessId,
+      },
       data: { accessToken: encryptedToken },
     });
 
     return res.json({
+      success: true,
+      data: {
+        id,
+      },
       message: "Client updated successfully",
     });
 
@@ -1016,6 +1086,8 @@ export const updateClient = async (req: Request, res: Response) => {
     console.error("Update client error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "Update failed",
     });
 
@@ -1033,36 +1105,40 @@ export const deleteClient = async (req: Request, res: Response) => {
 
   try {
 
-    const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
     const id = req.params.id as string;
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const business = await getBusinessByOwner(userId);
-
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
     }
 
     const client = await prisma.client.findFirst({
       where: {
         id,
-        businessId: business.id,
+        businessId,
         isActive: true,
+        deletedAt: null,
       },
       select: { id: true },
     });
 
     if (!client) {
       return res.status(404).json({
+        success: false,
+        data: null,
         message: "Client not found",
       });
     }
 
-    await prisma.client.update({
-      where: { id },
+    await prisma.client.updateMany({
+      where: {
+        id,
+        businessId,
+      },
       data: {
         isActive: false,
         deletedAt: new Date(),
@@ -1070,6 +1146,10 @@ export const deleteClient = async (req: Request, res: Response) => {
     });
 
     return res.json({
+      success: true,
+      data: {
+        id,
+      },
       message: "Client deleted successfully",
     });
 
@@ -1078,6 +1158,8 @@ export const deleteClient = async (req: Request, res: Response) => {
     console.error("Delete client error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "Delete failed",
     });
 
@@ -1095,40 +1177,46 @@ export const getSingleClient = async (req: Request, res: Response) => {
 
   try {
 
-    const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
     const id = req.params.id as string;
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const business = await getBusinessByOwner(userId);
-
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
     }
 
     const client = await prisma.client.findFirst({
       where: {
         id,
-        businessId: business.id,
+        businessId,
         isActive: true,
+        deletedAt: null,
       },
     });
 
     if (!client) {
       return res.status(404).json({
+        success: false,
+        data: null,
         message: "Client not found",
       });
     }
 
-    return res.json(client);
+    return res.json({
+      success: true,
+      data: client,
+    });
 
   } catch (error: any) {
 
     console.error("Fetch client error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "Fetch failed",
     });
 
@@ -1142,9 +1230,14 @@ export const getSingleClient = async (req: Request, res: Response) => {
 export const startMetaOAuth = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.id;
+    const businessId = getRequestBusinessId(req);
 
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId || !businessId) {
+      return res.status(401).json({
+        success: false,
+        data: null,
+        message: "Unauthorized",
+      });
     }
 
     const mode = String(req.query.mode || "").trim().toLowerCase();
@@ -1162,12 +1255,19 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
 
     const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${process.env.META_APP_ID}&redirect_uri=${redirectUri}&scope=pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_messages,whatsapp_business_management&response_type=code&state=${userId}`;
 
-    return res.json({ url });
+    return res.json({
+      success: true,
+      data: {
+        url,
+      },
+    });
 
   } catch (error) {
     console.error("Start OAuth error:", error);
 
     return res.status(500).json({
+      success: false,
+      data: null,
       message: "Failed to start OAuth",
     });
   }

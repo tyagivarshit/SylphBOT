@@ -131,6 +131,16 @@ model Business {
   salesMessageVariants SalesMessageVariant[]
   salesOptimizationInsights SalesOptimizationInsight[]
   leadStateHistories LeadStateHistory[]
+  leadIntelligenceProfiles LeadIntelligenceProfile[]
+  customerRelationships CustomerRelationship[]
+  autonomousOpportunities AutonomousOpportunity[]
+  autonomousCampaigns AutonomousCampaign[]
+  eventOutbox EventOutbox[]
+  revenueTouchLedgerEntries RevenueTouchLedger[]
+  consentLedgerEntries ConsentLedger[]
+  capReservations AutonomousCapReservation[]
+  channelHealthEntries ChannelHealth[]
+  leadControlStates LeadControlState[]
 
   createdAt     DateTime @default(now())
   deletedAt DateTime?
@@ -171,6 +181,8 @@ model Client {
   conversionEvents ConversionEvent[]
   salesMessageVariants SalesMessageVariant[]
   salesOptimizationInsights SalesOptimizationInsight[]
+  leadIntelligenceProfiles LeadIntelligenceProfile[]
+  revenueTouchLedgerEntries RevenueTouchLedger[]
 
   isActive      Boolean  @default(true)
   deletedAt     DateTime?
@@ -273,6 +285,8 @@ model Lead {
   lastClickedAt  DateTime?
   lastBookedAt   DateTime?
   lastConvertedAt DateTime?
+  lastLifecycleAt DateTime?
+  intelligenceUpdatedAt DateTime?
 
   messages       Message[]
   memories       Memory[]
@@ -280,6 +294,15 @@ model Lead {
   salesMessageTrackings SalesMessageTracking[]
   conversionEvents ConversionEvent[]
   leadStateHistories LeadStateHistory[]
+  intelligenceProfile LeadIntelligenceProfile?
+  customerRelationships CustomerRelationship[]
+  autonomousOpportunities AutonomousOpportunity[]
+  autonomousCampaigns AutonomousCampaign[]
+  revenueTouchLedgerEntries RevenueTouchLedger[]
+  consentLedgerEntries ConsentLedger[]
+  capReservations AutonomousCapReservation[]
+  channelHealthEntries ChannelHealth[]
+  leadControlState LeadControlState?
 
   lastMessageAt  DateTime?
 
@@ -294,6 +317,9 @@ model Lead {
   @@index([phone])
   @@index([instagramId])
   @@index([clientId])
+  @@index([businessId, lastBookedAt])
+  @@index([businessId, lastConvertedAt])
+  @@index([businessId, intelligenceUpdatedAt])
 }
 
 /* =====================================================
@@ -314,6 +340,7 @@ model Message {
   createdAt DateTime @default(now())
   salesTracking SalesMessageTracking?
   conversionEvents ConversionEvent[]
+  revenueTouchLedgerEntries RevenueTouchLedger[]
 
   @@index([leadId])
   @@index([createdAt])
@@ -421,10 +448,13 @@ model ConversionEvent {
   variantId   String?  @db.ObjectId
   variant     SalesMessageVariant? @relation(fields: [variantId], references: [id])
 
+  touchLedgerId String? @db.ObjectId
+  touchLedger   RevenueTouchLedger? @relation(fields: [touchLedgerId], references: [id])
+
   outcome     String
   value       Float?
   source      String?
-  idempotencyKey String?
+  idempotencyKey String? @unique
   metadata    Json?
 
   occurredAt  DateTime @default(now())
@@ -435,9 +465,9 @@ model ConversionEvent {
   @@index([clientId])
   @@index([messageId])
   @@index([trackingId])
+  @@index([touchLedgerId])
   @@index([variantId])
   @@index([outcome])
-  @@index([idempotencyKey])
 }
 
 model SalesOptimizationInsight {
@@ -491,6 +521,367 @@ model LeadStateHistory {
   @@index([nextState])
 }
 
+model LeadIntelligenceProfile {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  leadId      String   @unique @db.ObjectId
+  lead        Lead     @relation(fields: [leadId], references: [id])
+
+  clientId    String?  @db.ObjectId
+  client      Client?  @relation(fields: [clientId], references: [id])
+
+  intelligenceVersion String @default("phase2")
+  profileCompleteness Float  @default(0)
+  identityConfidence  Float  @default(0)
+  relationshipHealth  Float  @default(0)
+
+  engagementScore     Int    @default(0)
+  qualificationScore  Int    @default(0)
+  buyingIntentScore   Int    @default(0)
+  lifecycleScore      Int    @default(0)
+  behaviorScore       Int    @default(0)
+  valueScore          Int    @default(0)
+  churnScore          Int    @default(0)
+  relationshipScore   Int    @default(0)
+  compositeScore      Int    @default(0)
+
+  lifecycleStage      String
+  lifecycleStatus     String
+  predictedBehavior   String
+  nextBestAction      String
+  valueTier           String
+  churnRisk           String
+
+  segmentKeys         String[]
+  primarySegment      String?
+  relationshipSummary String?
+
+  enrichment      Json?
+  metrics         Json?
+  behavior        Json?
+  valueModel      Json?
+  lifecycle       Json?
+  relationshipMap Json?
+
+  lastLifecycleAt DateTime?
+  lastActivityAt  DateTime?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([businessId, lifecycleStage])
+  @@index([businessId, compositeScore])
+  @@index([clientId])
+  @@index([businessId, lastSyncedAt])
+}
+
+model CustomerRelationship {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  leadId      String   @db.ObjectId
+  lead        Lead     @relation(fields: [leadId], references: [id])
+
+  targetType        String
+  targetId          String
+  targetLabel       String?
+  relationshipType  String
+  strength          Int      @default(0)
+  score             Int      @default(0)
+  lifecycleStage    String?
+  metadata          Json?
+  lastObservedAt    DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([leadId, targetType, targetId])
+  @@index([businessId, targetType])
+  @@index([leadId, targetType])
+  @@index([businessId, leadId, targetType, targetId])
+  @@index([businessId, relationshipType])
+}
+
+model AutonomousOpportunity {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId     String   @db.ObjectId
+  business       Business @relation(fields: [businessId], references: [id])
+
+  leadId         String   @db.ObjectId
+  lead           Lead     @relation(fields: [leadId], references: [id])
+
+  opportunityKey String   @unique
+  fingerprintVersion String @default("opp_fp_v1")
+  fingerprintKey String   @default("")
+  fingerprint    Json?
+  snapshotVersion Int     @default(1)
+  engine         String
+  status         String   @default("PENDING")
+  score          Int      @default(0)
+  priority       String   @default("medium")
+  title          String
+  objective      String
+  summary        String
+  reason         String
+  prompt         String?
+  blockedReasons String[]
+  guardrail      Json?
+  context        Json?
+  metrics        Json?
+  recommendedAt  DateTime
+  nextEligibleAt DateTime?
+  lastEvaluatedAt DateTime @default(now())
+  dispatchedAt   DateTime?
+  closedAt       DateTime?
+  supersededBy   String?  @db.ObjectId
+  supersededAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([businessId, opportunityKey])
+  @@index([businessId, engine])
+  @@index([businessId, status])
+  @@index([businessId, recommendedAt])
+  @@index([businessId, leadId, engine, fingerprintVersion, fingerprintKey])
+  @@index([businessId, leadId, engine, supersededBy])
+  @@index([leadId, status])
+}
+
+model AutonomousCampaign {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId     String   @db.ObjectId
+  business       Business @relation(fields: [businessId], references: [id])
+
+  leadId         String   @db.ObjectId
+  lead           Lead     @relation(fields: [leadId], references: [id])
+
+  opportunityId  String?  @db.ObjectId
+  engine         String
+  status         String   @default("QUEUED")
+  title          String
+  objective      String
+  prompt         String
+  outreachMode   String   @default("DIRECT_MESSAGE")
+  idempotencyKey String   @unique
+  channel        String?
+  traceId        String?
+  aiJobId        String?
+  cancelTokenVersion Int  @default(0)
+  guardrail      Json?
+  analytics      Json?
+  metadata       Json?
+  queuedAt       DateTime?
+  dispatchedAt   DateTime?
+  blockedAt      DateTime?
+  failedAt       DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([businessId, engine, status])
+  @@index([businessId, queuedAt])
+  @@index([leadId, createdAt])
+  @@index([opportunityId])
+}
+
+model EventOutbox {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String?  @db.ObjectId
+  business      Business? @relation(fields: [businessId], references: [id])
+
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  payload       Json
+  dedupeKey     String?  @unique
+
+  createdAt     DateTime @default(now())
+  publishedAt   DateTime?
+  failedAt      DateTime?
+  retries       Int      @default(0)
+  lastError     String?
+
+  consumerCheckpoints EventConsumerCheckpoint[]
+
+  @@index([eventType, createdAt])
+  @@index([publishedAt, failedAt, createdAt])
+  @@index([aggregateType, aggregateId, createdAt])
+}
+
+model EventConsumerCheckpoint {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  eventOutboxId String  @db.ObjectId
+  eventOutbox   EventOutbox @relation(fields: [eventOutboxId], references: [id])
+
+  consumerKey  String
+  processedAt  DateTime @default(now())
+
+  @@unique([eventOutboxId, consumerKey])
+  @@index([consumerKey, processedAt])
+}
+
+model RevenueTouchLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId     String   @db.ObjectId
+  business       Business @relation(fields: [businessId], references: [id])
+
+  leadId         String   @db.ObjectId
+  lead           Lead     @relation(fields: [leadId], references: [id])
+
+  clientId       String?  @db.ObjectId
+  client         Client?  @relation(fields: [clientId], references: [id])
+
+  messageId      String?  @db.ObjectId
+  message        Message? @relation(fields: [messageId], references: [id])
+
+  touchType      String
+  touchReason    String
+  channel        String
+  actor          String
+  source         String
+  traceId        String?
+  providerMessageId String? @unique
+  outboundKey    String   @unique
+  deliveryState  String   @default("RESERVED")
+  campaignId     String?
+  conversionWindowEndsAt DateTime?
+  providerAcceptedAt DateTime?
+  providerMessagePersistedAt DateTime?
+  confirmedAt    DateTime?
+  deliveredAt    DateTime?
+  failedAt       DateTime?
+  cta            String?
+  angle          String?
+  leadState      String?
+  messageType    String?
+  metadata       Json?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversionEvents ConversionEvent[]
+
+  @@index([businessId, leadId, createdAt])
+  @@index([messageId])
+  @@index([leadId, confirmedAt])
+  @@index([traceId])
+  @@index([campaignId])
+  @@index([deliveryState, createdAt])
+}
+
+model ConsentLedger {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId  String   @db.ObjectId
+  business    Business @relation(fields: [businessId], references: [id])
+
+  leadId      String   @db.ObjectId
+  lead        Lead     @relation(fields: [leadId], references: [id])
+
+  channel     String
+  scope       String
+  source      String
+  legalBasis  String
+  actor       String?
+  grantedAt   DateTime?
+  revokedAt   DateTime?
+  evidence    Json?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([businessId, leadId, channel, scope, createdAt])
+  @@index([businessId, leadId, channel, scope, revokedAt])
+  @@index([leadId, channel, revokedAt])
+}
+
+model AutonomousCapReservation {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  leadId        String   @db.ObjectId
+  lead          Lead     @relation(fields: [leadId], references: [id])
+
+  opportunityId String?  @db.ObjectId
+  campaignId    String?  @db.ObjectId
+  reservationKey String  @unique
+  channel       String
+  windowKey     String
+  ruleKey       String
+  status        String   @default("RESERVED")
+  reason        String
+  reservedAt    DateTime @default(now())
+  consumedAt    DateTime?
+  releasedAt    DateTime?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([businessId, leadId, status])
+  @@index([businessId, leadId, ruleKey, status, reservedAt])
+  @@index([windowKey, ruleKey, status])
+  @@index([campaignId])
+}
+
+model ChannelHealth {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId     String   @db.ObjectId
+  business       Business @relation(fields: [businessId], references: [id])
+
+  leadId         String   @db.ObjectId
+  lead           Lead     @relation(fields: [leadId], references: [id])
+
+  channel        String
+  deliverability Float    @default(0)
+  responseRate   Float    @default(0)
+  conversionRate Float    @default(0)
+  fatigueRisk    Float    @default(0)
+  recencyScore   Float    @default(0)
+  confidence     Float    @default(0)
+  recentConfirmed Int     @default(0)
+  recentFailed   Int      @default(0)
+  state          String   @default("UNKNOWN")
+  quarantinedUntil DateTime?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([businessId, leadId, channel])
+  @@index([leadId, channel])
+}
+
+model LeadControlState {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId        String   @db.ObjectId
+  business          Business @relation(fields: [businessId], references: [id])
+
+  leadId            String   @unique @db.ObjectId
+  lead              Lead     @relation(fields: [leadId], references: [id])
+
+  manualSuppressUntil DateTime?
+  cancelTokenVersion Int      @default(0)
+  lastManualOutboundAt DateTime?
+  lastHumanTakeoverAt DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, updatedAt])
+}
+
 /* =====================================================
 AI MEMORY ENGINE
 ===================================================== */
@@ -503,6 +894,10 @@ model Memory {
 
   key       String
   value     String
+  confidence Float?  @default(0.5)
+  source     String?
+  lastObservedAt DateTime?
+  updatedAt  DateTime? @updatedAt
 
   createdAt DateTime @default(now())
 
@@ -850,7 +1245,7 @@ model Appointment {
   startTime  DateTime
   endTime    DateTime
 
-  status     String   @default("BOOKED")
+  status     String   @default("CONFIRMED")
 
   meetingLink String?
 
@@ -902,6 +1297,11 @@ model KnowledgeBase {
   sourceType  String
   sourceUrl   String?
   priority String @default("MEDIUM")
+  reinforcementScore Float  @default(0)
+  retrievalCount Int @default(0)
+  successCount Int @default(0)
+  lastRetrievedAt DateTime?
+  lastReinforcedAt DateTime?
 
   isActive    Boolean  @default(true)
 

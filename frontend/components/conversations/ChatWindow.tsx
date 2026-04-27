@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -14,7 +15,6 @@ import { useUpgrade } from "@/app/(dashboard)/layout";
 import {
   previewAIReply,
   sendConversationMessage,
-  startBookingForLead,
 } from "@/lib/message.service";
 import { getUsageOverview, type UsageOverviewData } from "@/lib/usage.service";
 import { getUsagePresentation } from "@/lib/usagePresentation";
@@ -224,6 +224,7 @@ export default function ChatWindow({
   error = null,
   onRetry,
 }: Props) {
+  const router = useRouter();
   const { openUpgrade } = useUpgrade();
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -592,7 +593,7 @@ export default function ChatWindow({
       return;
     }
 
-    await startBookingForLead(selectedLead.id);
+    router.push(`/booking?leadId=${encodeURIComponent(selectedLead.id)}`);
   };
 
   const isSendDisabled =

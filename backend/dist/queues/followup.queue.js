@@ -3,37 +3,65 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cancelFollowups = exports.scheduleFollowups = exports.legacyFollowupQueue = exports.followupQueue = exports.LEGACY_FOLLOWUP_QUEUE_NAME = exports.FOLLOWUP_QUEUE_NAME = void 0;
+exports.closeFollowupQueue = exports.cancelFollowups = exports.scheduleFollowups = exports.getFollowupQueues = exports.getLegacyFollowupQueue = exports.getFollowupQueue = exports.initFollowupQueues = exports.LEGACY_FOLLOWUP_QUEUE_NAME = exports.FOLLOWUP_QUEUE_NAME = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = require("../config/redis");
 const queue_defaults_1 = require("./queue.defaults");
+const leadControlState_service_1 = require("../services/leadControlState.service");
 const followup_service_1 = require("../services/salesAgent/followup.service");
 exports.FOLLOWUP_QUEUE_NAME = "ai-low";
 exports.LEGACY_FOLLOWUP_QUEUE_NAME = "followupQueue";
-const queueConnection = (0, redis_1.getQueueRedisConnection)();
+const globalForFollowupQueue = globalThis;
 const defaultJobOptions = (0, queue_defaults_1.buildQueueJobOptions)({
     backoff: {
         type: "exponential",
         delay: 5000,
     },
 });
-exports.followupQueue = (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.FOLLOWUP_QUEUE_NAME, {
-    connection: queueConnection,
-    prefix: "sylph",
-    defaultJobOptions,
-}), exports.FOLLOWUP_QUEUE_NAME);
-exports.legacyFollowupQueue = exports.LEGACY_FOLLOWUP_QUEUE_NAME === exports.FOLLOWUP_QUEUE_NAME
-    ? exports.followupQueue
-    : (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.LEGACY_FOLLOWUP_QUEUE_NAME, {
-        connection: queueConnection,
-        prefix: "sylph",
-        defaultJobOptions,
-    }), exports.LEGACY_FOLLOWUP_QUEUE_NAME);
+const initFollowupQueues = () => {
+    if (!globalForFollowupQueue.__sylphFollowupQueue) {
+        globalForFollowupQueue.__sylphFollowupQueue = (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.FOLLOWUP_QUEUE_NAME, {
+            connection: (0, redis_1.getQueueRedisConnection)(),
+            prefix: "sylph",
+            defaultJobOptions,
+        }), exports.FOLLOWUP_QUEUE_NAME);
+    }
+    if (exports.LEGACY_FOLLOWUP_QUEUE_NAME !== exports.FOLLOWUP_QUEUE_NAME &&
+        !globalForFollowupQueue.__sylphLegacyFollowupQueue) {
+        globalForFollowupQueue.__sylphLegacyFollowupQueue = (0, queue_defaults_1.createResilientQueue)(new bullmq_1.Queue(exports.LEGACY_FOLLOWUP_QUEUE_NAME, {
+            connection: (0, redis_1.getQueueRedisConnection)(),
+            prefix: "sylph",
+            defaultJobOptions,
+        }), exports.LEGACY_FOLLOWUP_QUEUE_NAME);
+    }
+    return (0, exports.getFollowupQueues)();
+};
+exports.initFollowupQueues = initFollowupQueues;
+const getFollowupQueue = () => {
+    if (!globalForFollowupQueue.__sylphFollowupQueue) {
+        (0, exports.initFollowupQueues)();
+    }
+    return globalForFollowupQueue.__sylphFollowupQueue;
+};
+exports.getFollowupQueue = getFollowupQueue;
+const getLegacyFollowupQueue = () => {
+    if (exports.LEGACY_FOLLOWUP_QUEUE_NAME === exports.FOLLOWUP_QUEUE_NAME) {
+        return (0, exports.getFollowupQueue)();
+    }
+    if (!globalForFollowupQueue.__sylphLegacyFollowupQueue) {
+        (0, exports.initFollowupQueues)();
+    }
+    return globalForFollowupQueue.__sylphLegacyFollowupQueue;
+};
+exports.getLegacyFollowupQueue = getLegacyFollowupQueue;
+const getFollowupQueues = () => exports.LEGACY_FOLLOWUP_QUEUE_NAME === exports.FOLLOWUP_QUEUE_NAME
+    ? [(0, exports.getFollowupQueue)()]
+    : [(0, exports.getFollowupQueue)(), (0, exports.getLegacyFollowupQueue)()];
+exports.getFollowupQueues = getFollowupQueues;
 const scheduleFollowups = async (leadId, options) => {
     if (!leadId)
         return;
-    /* 🔥 CHECK LEAD STATUS */
     const lead = await prisma_1.default.lead.findUnique({
         where: { id: leadId },
         select: { stage: true },
@@ -41,19 +69,24 @@ const scheduleFollowups = async (leadId, options) => {
     if (!lead || lead.stage === "CLOSED")
         return;
     const schedule = await (0, followup_service_1.getSalesFollowupSchedule)(leadId, options);
+    const controlState = await (0, leadControlState_service_1.getLeadControlAuthority)({
+        leadId,
+    });
+    const queue = (0, exports.getFollowupQueue)();
+    const legacyQueue = (0, exports.getLegacyFollowupQueue)();
     for (const item of schedule) {
         const jobId = `followup:${leadId}:${item.step}`;
-        /* 🔥 REMOVE EXISTING (avoid duplicates) */
-        const existingJob = (await exports.followupQueue.getJob(jobId)) ||
-            (await exports.legacyFollowupQueue.getJob(jobId));
+        const existingJob = (await queue.getJob(jobId)) ||
+            (await legacyQueue.getJob(jobId));
         if (existingJob) {
             await existingJob.remove().catch(() => undefined);
         }
-        await exports.followupQueue.add("sendFollowup", {
+        await queue.add("sendFollowup", {
             leadId,
             type: item.step,
             trigger: item.trigger,
             scheduledFor: new Date(Date.now() + item.delayMs).toISOString(),
+            cancelTokenVersion: controlState?.cancelTokenVersion ?? 0,
         }, {
             jobId,
             ...(0, queue_defaults_1.buildQueueJobOptions)({
@@ -61,7 +94,7 @@ const scheduleFollowups = async (leadId, options) => {
             }),
         });
     }
-    console.log(`📅 Followups scheduled for lead ${leadId}`);
+    console.log("Followups scheduled for lead", leadId);
 };
 exports.scheduleFollowups = scheduleFollowups;
 const cancelFollowups = async (leadId) => {
@@ -80,9 +113,11 @@ const cancelFollowups = async (leadId) => {
         `followup:${leadId}:12hr`,
         `followup:${leadId}:24hr`,
     ];
+    const queue = (0, exports.getFollowupQueue)();
+    const legacyQueue = (0, exports.getLegacyFollowupQueue)();
     for (const jobId of jobIds) {
         try {
-            const job = (await exports.followupQueue.getJob(jobId)) || (await exports.legacyFollowupQueue.getJob(jobId));
+            const job = (await queue.getJob(jobId)) || (await legacyQueue.getJob(jobId));
             if (job) {
                 await job.remove().catch(() => undefined);
             }
@@ -91,6 +126,17 @@ const cancelFollowups = async (leadId) => {
             console.log("Followup removal error", err);
         }
     }
-    console.log(`🛑 Followups cancelled for lead ${leadId}`);
+    console.log("Followups cancelled for lead", leadId);
 };
 exports.cancelFollowups = cancelFollowups;
+const closeFollowupQueue = async () => {
+    await Promise.allSettled([
+        globalForFollowupQueue.__sylphFollowupQueue,
+        globalForFollowupQueue.__sylphLegacyFollowupQueue,
+    ]
+        .filter(Boolean)
+        .map((queue) => queue.close()));
+    globalForFollowupQueue.__sylphFollowupQueue = undefined;
+    globalForFollowupQueue.__sylphLegacyFollowupQueue = undefined;
+};
+exports.closeFollowupQueue = closeFollowupQueue;

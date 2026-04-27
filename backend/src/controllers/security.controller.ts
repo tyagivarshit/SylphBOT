@@ -8,7 +8,6 @@ import {
 } from "../services/audit.service";
 import {
   createApiKey,
-  ensureWorkspaceApiKey,
   listApiKeys,
   revokeApiKey,
   rotateApiKey,
@@ -80,7 +79,10 @@ export const getSessions = async (req: Request, res: Response) => {
     },
   });
 
-  res.json(sessions);
+  res.json({
+    success: true,
+    data: sessions,
+  });
 };
 
 export const logoutAllSessions = async (req: Request, res: Response) => {
@@ -257,27 +259,6 @@ export const rotateWorkspaceApiKey = async (req: Request, res: Response) => {
   res.json({
     success: true,
     apiKey,
-  });
-};
-
-export const getLegacyWorkspaceApiKey = async (
-  req: Request,
-  res: Response
-) => {
-  const businessId = getRequestBusinessId(req);
-  const userId = req.user?.id || null;
-
-  if (!businessId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const apiKey = await ensureWorkspaceApiKey({
-    businessId,
-    createdByUserId: userId,
-  });
-
-  res.json({
-    apiKey: apiKey.rawKey,
   });
 };
 

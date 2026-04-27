@@ -7,7 +7,7 @@ exports.startTrialExpiryCron = void 0;
 const node_cron_1 = __importDefault(require("node-cron"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const startTrialExpiryCron = () => {
-    node_cron_1.default.schedule("0 2 * * *", async () => {
+    return node_cron_1.default.schedule("0 2 * * *", async () => {
         console.log("⏳ Running trial expiry check...");
         try {
             const now = new Date();

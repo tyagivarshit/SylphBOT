@@ -4,12 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
+import { apiFetch } from "@/lib/apiClient";
 import {
-  buildApiUrl,
   buildAppUrl,
   fetchClientConnectionStatus,
   fetchWorkspaceApiKey,
 } from "@/lib/userApi";
+import { getClients } from "@/lib/clients";
 
 type ClientConnection = {
   id: string;
@@ -35,19 +36,7 @@ export default function IntegrationsSettings() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["integrations"],
-    queryFn: async () => {
-      const res = await fetch(buildApiUrl("/api/clients"), {
-        credentials: "include",
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to load integrations");
-      }
-
-      const payload = await res.json().catch(() => null);
-
-      return Array.isArray(payload) ? (payload as ClientConnection[]) : [];
-    },
+    queryFn: async () => (await getClients()) as ClientConnection[],
   });
 
   const clients = Array.isArray(data) ? data : [];
@@ -106,16 +95,16 @@ export default function IntegrationsSettings() {
 
   const disconnect = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(buildApiUrl(`/api/clients/${id}`), {
+      const response = await apiFetch(`/api/clients/${id}`, {
         method: "DELETE",
         credentials: "include",
       });
 
-      if (!res.ok) {
-        throw new Error("Disconnect failed");
+      if (!response.success) {
+        throw new Error(response.message || "Disconnect failed");
       }
 
-      return res.json();
+      return response.data;
     },
     onSuccess: async () => {
       toast.success("Disconnected successfully");
@@ -140,20 +129,18 @@ export default function IntegrationsSettings() {
         platform: platformKey.toUpperCase(),
         mode,
       });
-      const res = await fetch(
-        buildApiUrl(`/api/clients/oauth/meta?${query.toString()}`),
+      const response = await apiFetch<{ url?: string }>(
+        `/api/clients/oauth/meta?${query.toString()}`,
         {
           credentials: "include",
         }
       );
 
-      const payload = await res.json().catch(() => null);
-
-      if (!res.ok || !payload?.url) {
-        throw new Error(payload?.message || "Failed to start connection");
+      if (!response.success || !response.data?.url) {
+        throw new Error(response.message || "Failed to start connection");
       }
 
-      window.location.assign(payload.url);
+      window.location.assign(response.data.url);
     } catch (err) {
       console.error(err);
       toast.error(err instanceof Error ? err.message : "Something went wrong");

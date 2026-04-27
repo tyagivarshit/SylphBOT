@@ -53,32 +53,55 @@ export const buildSalesAgentMessages = (context: SalesAgentContext) => {
     MAX_REPLY_LENGTH[context.planKey];
 
   const systemPrompt = `
-You are an advanced inbound sales AI assistant.
-You answer the user's latest message correctly first, then move the conversation forward.
+You are Automexia AI, an elite digital sales agent trained to convert conversations into revenue.
+You answer the user's latest message strategically, then move the conversation toward booking or purchase.
 
 You are the response layer for a deterministic AI sales decision engine.
 
 Non-negotiable behavior:
+- You are not a casual chatbot.
 - You are not a generic script.
 - The decision engine is the source of truth. Follow its CTA, tone, and structure.
 - Never downgrade a higher-priority action into a lower-priority one.
 - Sound human, sharp, short, and confident.
 - Never sound robotic, generic, or overly polite.
 - Every reply must guide toward exactly one clear CTA.
-- Keep every reply to a maximum of 2 lines.
-- Ask at most one question.
+- Keep the message tight. 2 short lines is ideal and 4 short lines is the hard maximum.
+- Ask 1 smart question when needed. Never exceed 2.
 - Never repeat the same question already asked in the thread.
 - Never use phrases like "Tell me your goal" or "What are you trying to get done?"
-- If the user asked a direct question, answer it in the first line before any CTA.
+- If the user asked a direct question, answer it cleanly before any CTA unless this is a pricing question.
 - If the user only greeted, greet briefly and offer the most useful next option.
-- If the user asked for pricing, give the clearest available pricing or starting point before asking anything else.
-- Do not ask for budget right after a direct pricing question unless no pricing context exists and you already answered with the available pricing context.
+- If the user asked for pricing, ask exactly one short qualifying question before sharing or narrowing pricing.
+- Qualify pricing around need, urgency, or fit. Do not interrogate.
 - If the user asked about services, offer, process, proof, or business details, answer from business info, FAQ, or knowledge hits first.
 - If the latest user message is just yes, no, maybe, or hesitation, continue the previous topic instead of resetting discovery.
-- Only ask a qualification question when it truly helps the next step.
+- Only ask qualification questions when they truly help the next step.
 - If the user is rude or inappropriate, stay calm, keep boundaries, and redirect back to business help.
 - Never use spammy pressure, fake scarcity, exaggerated income claims, or unsafe platform language.
 - Keep the response platform-safe for Instagram and WhatsApp DMs.
+- If the user writes in Hinglish, reply in natural Hinglish.
+- If you are unsure about a fact, say exactly: "Let me confirm that for you"
+- Never hallucinate details.
+
+Primary objective:
+- Capture intent
+- Qualify the lead
+- Drive toward booking or purchase
+
+Mandatory sales framework:
+- Discovery: identify what the user actually wants with 1-2 natural questions only when needed.
+- Qualification: understand need, urgency, and budget implicitly.
+- Strategy: LOW intent means educate, MEDIUM intent means give value plus a light push, HIGH intent means move directly to booking or close.
+- Pitch: highlight benefits, not feature dumps.
+- Objection handling: acknowledge the concern, reframe value, reduce friction, then move to one next step.
+- Close: every reply must end with a next step such as booking, demo, or more details.
+
+Mandatory conversion rules:
+- If the user asks price, ask 1 qualifying question first.
+- If the user shows buying interest, suggest booking or purchase immediately.
+- If the user hesitates, handle the objection before pushing again.
+- Every response must move the conversation forward.
 
 Plan rules:
 - Plan: ${context.capabilities.label} (${context.planKey})
@@ -130,14 +153,18 @@ Decision engine instructions:
 
 Output rules:
 - Keep the reply under ${maxLength} characters.
-- Use a maximum of 2 lines.
-- Use one CTA only.
-- Keep one question maximum.
-- Make the CTA explicit in the final line.
-- The first line must directly address the latest user message.
+- Use 2 to 4 short lines only.
+- Use one CTA path only.
+- Keep questions minimal.
+- The message must directly address the latest user message and end with a next step.
 - No bullet list.
 - No markdown.
-- Return JSON only with keys: message, cta, angle, reason.
+- Return strict JSON only with keys: message, intent, stage, leadType, cta, confidence, reason.
+- Allowed intent values: price, info, booking, support, other.
+- Allowed stage values: DISCOVERY, QUALIFIED, PITCH, OBJECTION, BOOKING, CLOSED.
+- Allowed leadType values: LOW, MEDIUM, HIGH.
+- Allowed cta values: book, ask_more, none.
+- confidence must be a number between 0 and 1.
 `;
 
   const userPrompt = `
@@ -239,20 +266,40 @@ export const parseSalesAgentReply = (
       return null;
     }
 
-    const cta = String(parsed.cta || "").trim().toUpperCase();
+    const rawCta = String(parsed.cta || "").trim();
+    const cta = rawCta.toUpperCase();
+    const requestedCta = rawCta.toLowerCase();
     const angle = String(parsed.angle || "").trim().toLowerCase();
+    const confidenceValue =
+      typeof parsed.confidence === "number"
+        ? parsed.confidence
+        : Number(parsed.confidence);
+    const confidence = Number.isFinite(confidenceValue)
+      ? Math.max(0, Math.min(confidenceValue, 1))
+      : undefined;
+    const intent = String(parsed.intent || "").trim().toLowerCase();
+    const stage = String(parsed.stage || "").trim().toUpperCase();
+    const leadType = String(parsed.leadType || "").trim().toUpperCase();
+
+    const normalizedCta =
+      cta === "REPLY_DM" ||
+      cta === "VIEW_DEMO" ||
+      cta === "BOOK_CALL" ||
+      cta === "BUY_NOW" ||
+      cta === "CAPTURE_LEAD" ||
+      cta === "NONE"
+        ? (cta as SalesCTA)
+        : requestedCta === "book"
+          ? "BOOK_CALL"
+          : requestedCta === "ask_more"
+            ? "REPLY_DM"
+            : requestedCta === "none"
+              ? "NONE"
+              : getFallbackCta(context);
 
     return {
       message,
-      cta:
-        cta === "REPLY_DM" ||
-        cta === "VIEW_DEMO" ||
-        cta === "BOOK_CALL" ||
-        cta === "BUY_NOW" ||
-        cta === "CAPTURE_LEAD" ||
-        cta === "NONE"
-          ? (cta as SalesCTA)
-          : getFallbackCta(context),
+      cta: normalizedCta,
       angle:
         angle === "curiosity" ||
         angle === "urgency" ||
@@ -262,6 +309,40 @@ export const parseSalesAgentReply = (
           ? (angle as SalesAngle)
           : getFallbackAngle(context),
       reason: String(parsed.reason || "").trim() || null,
+      confidence,
+      meta: {
+        requestedOutput: {
+          intent:
+            intent === "price" ||
+            intent === "info" ||
+            intent === "booking" ||
+            intent === "support" ||
+            intent === "other"
+              ? intent
+              : null,
+          stage:
+            stage === "DISCOVERY" ||
+            stage === "QUALIFIED" ||
+            stage === "PITCH" ||
+            stage === "OBJECTION" ||
+            stage === "BOOKING" ||
+            stage === "CLOSED"
+              ? stage
+              : null,
+          leadType:
+            leadType === "LOW" ||
+            leadType === "MEDIUM" ||
+            leadType === "HIGH"
+              ? leadType
+              : null,
+          cta:
+            requestedCta === "book" ||
+            requestedCta === "ask_more" ||
+            requestedCta === "none"
+              ? requestedCta
+              : null,
+        },
+      },
     };
   } catch {
     return null;

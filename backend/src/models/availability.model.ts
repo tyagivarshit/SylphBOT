@@ -1,6 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import prisma from "../config/prisma";
 
 /*
 =====================================================
@@ -51,6 +49,7 @@ UPDATE AVAILABILITY
 */
 
 export const updateAvailability = async (
+  businessId: string,
   id: string,
   data: Partial<{
     startTime: string;
@@ -61,9 +60,30 @@ export const updateAvailability = async (
     isActive: boolean;
   }>
 ) => {
-  return prisma.bookingSlot.update({
-    where: { id },
+  const availability = await prisma.bookingSlot.findFirst({
+    where: {
+      id,
+      businessId,
+    },
+  });
+
+  if (!availability) {
+    return null;
+  }
+
+  await prisma.bookingSlot.updateMany({
+    where: {
+      id: availability.id,
+      businessId,
+    },
     data,
+  });
+
+  return prisma.bookingSlot.findFirst({
+    where: {
+      id: availability.id,
+      businessId,
+    },
   });
 };
 
@@ -73,8 +93,27 @@ DELETE AVAILABILITY
 =====================================================
 */
 
-export const deleteAvailability = async (id: string) => {
-  return prisma.bookingSlot.delete({
-    where: { id },
+export const deleteAvailability = async (businessId: string, id: string) => {
+  const availability = await prisma.bookingSlot.findFirst({
+    where: {
+      id,
+      businessId,
+    },
+    select: {
+      id: true,
+    },
   });
+
+  if (!availability) {
+    return null;
+  }
+
+  await prisma.bookingSlot.deleteMany({
+    where: {
+      id: availability.id,
+      businessId,
+    },
+  });
+
+  return availability;
 };

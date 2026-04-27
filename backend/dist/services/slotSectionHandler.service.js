@@ -57,8 +57,8 @@ const handleSlotSelection = async ({ leadId, businessId, message, }) => {
         /* =====================================================
         🔒 SLOT LOCK
         ===================================================== */
-        const locked = await (0, slotLock_service_1.acquireSlotLock)(selectedSlotISO, leadId);
-        if (!locked) {
+        const slotLock = await (0, slotLock_service_1.acquireSlotLock)(selectedSlotISO, leadId);
+        if (!slotLock) {
             return "⚠️ This slot was just booked by someone else. Please choose another one.";
         }
         /* =====================================================
@@ -67,6 +67,7 @@ const handleSlotSelection = async ({ leadId, businessId, message, }) => {
         await (0, conversationState_service_1.setConversationState)(leadId, "BOOKING_CONFIRMATION", {
             context: {
                 slot: selectedSlotISO,
+                slotLockToken: slotLock.token,
             },
         });
         /* ---------------- RESPONSE ---------------- */

@@ -5,6 +5,7 @@ import {
   buildQueueJobOptions,
   createResilientQueue,
 } from "./queue.defaults";
+import { getLeadControlAuthority } from "../services/leadControlState.service";
 import { getSalesFollowupSchedule } from "../services/salesAgent/followup.service";
 import type { SalesFollowupTrigger } from "../services/salesAgent/types";
 
@@ -13,12 +14,17 @@ export type FollowupJobData = {
   type: string;
   trigger: string;
   scheduledFor: string;
+  cancelTokenVersion?: number | null;
 };
 
 export const FOLLOWUP_QUEUE_NAME: string = "ai-low";
 export const LEGACY_FOLLOWUP_QUEUE_NAME: string = "followupQueue";
 
-const queueConnection = getQueueRedisConnection();
+const globalForFollowupQueue = globalThis as typeof globalThis & {
+  __sylphFollowupQueue?: Queue<FollowupJobData>;
+  __sylphLegacyFollowupQueue?: Queue<FollowupJobData>;
+};
+
 const defaultJobOptions: JobsOptions = buildQueueJobOptions({
   backoff: {
     type: "exponential",
@@ -26,26 +32,59 @@ const defaultJobOptions: JobsOptions = buildQueueJobOptions({
   },
 });
 
-export const followupQueue = createResilientQueue(
-  new Queue<FollowupJobData>(FOLLOWUP_QUEUE_NAME, {
-    connection: queueConnection,
-    prefix: "sylph",
-    defaultJobOptions,
-  }),
-  FOLLOWUP_QUEUE_NAME
-);
+export const initFollowupQueues = () => {
+  if (!globalForFollowupQueue.__sylphFollowupQueue) {
+    globalForFollowupQueue.__sylphFollowupQueue = createResilientQueue(
+      new Queue<FollowupJobData>(FOLLOWUP_QUEUE_NAME, {
+        connection: getQueueRedisConnection(),
+        prefix: "sylph",
+        defaultJobOptions,
+      }),
+      FOLLOWUP_QUEUE_NAME
+    );
+  }
 
-export const legacyFollowupQueue =
+  if (
+    LEGACY_FOLLOWUP_QUEUE_NAME !== FOLLOWUP_QUEUE_NAME &&
+    !globalForFollowupQueue.__sylphLegacyFollowupQueue
+  ) {
+    globalForFollowupQueue.__sylphLegacyFollowupQueue = createResilientQueue(
+      new Queue<FollowupJobData>(LEGACY_FOLLOWUP_QUEUE_NAME, {
+        connection: getQueueRedisConnection(),
+        prefix: "sylph",
+        defaultJobOptions,
+      }),
+      LEGACY_FOLLOWUP_QUEUE_NAME
+    );
+  }
+
+  return getFollowupQueues();
+};
+
+export const getFollowupQueue = () => {
+  if (!globalForFollowupQueue.__sylphFollowupQueue) {
+    initFollowupQueues();
+  }
+
+  return globalForFollowupQueue.__sylphFollowupQueue!;
+};
+
+export const getLegacyFollowupQueue = () => {
+  if (LEGACY_FOLLOWUP_QUEUE_NAME === FOLLOWUP_QUEUE_NAME) {
+    return getFollowupQueue();
+  }
+
+  if (!globalForFollowupQueue.__sylphLegacyFollowupQueue) {
+    initFollowupQueues();
+  }
+
+  return globalForFollowupQueue.__sylphLegacyFollowupQueue!;
+};
+
+export const getFollowupQueues = () =>
   LEGACY_FOLLOWUP_QUEUE_NAME === FOLLOWUP_QUEUE_NAME
-    ? followupQueue
-    : createResilientQueue(
-        new Queue<FollowupJobData>(LEGACY_FOLLOWUP_QUEUE_NAME, {
-          connection: queueConnection,
-          prefix: "sylph",
-          defaultJobOptions,
-        }),
-        LEGACY_FOLLOWUP_QUEUE_NAME
-      );
+    ? [getFollowupQueue()]
+    : [getFollowupQueue(), getLegacyFollowupQueue()];
 
 export const scheduleFollowups = async (
   leadId: string,
@@ -55,7 +94,6 @@ export const scheduleFollowups = async (
 ) => {
   if (!leadId) return;
 
-  /* 🔥 CHECK LEAD STATUS */
   const lead = await prisma.lead.findUnique({
     where: { id: leadId },
     select: { stage: true },
@@ -64,26 +102,31 @@ export const scheduleFollowups = async (
   if (!lead || lead.stage === "CLOSED") return;
 
   const schedule = await getSalesFollowupSchedule(leadId, options);
+  const controlState = await getLeadControlAuthority({
+    leadId,
+  });
+  const queue = getFollowupQueue();
+  const legacyQueue = getLegacyFollowupQueue();
 
   for (const item of schedule) {
     const jobId = `followup:${leadId}:${item.step}`;
 
-    /* 🔥 REMOVE EXISTING (avoid duplicates) */
     const existingJob =
-      (await followupQueue.getJob(jobId)) ||
-      (await legacyFollowupQueue.getJob(jobId));
+      (await queue.getJob(jobId)) ||
+      (await legacyQueue.getJob(jobId));
 
     if (existingJob) {
       await existingJob.remove().catch(() => undefined);
     }
 
-    await followupQueue.add(
+    await queue.add(
       "sendFollowup",
       {
         leadId,
         type: item.step,
         trigger: item.trigger,
         scheduledFor: new Date(Date.now() + item.delayMs).toISOString(),
+        cancelTokenVersion: controlState?.cancelTokenVersion ?? 0,
       },
       {
         jobId,
@@ -94,7 +137,7 @@ export const scheduleFollowups = async (
     );
   }
 
-  console.log(`📅 Followups scheduled for lead ${leadId}`);
+  console.log("Followups scheduled for lead", leadId);
 };
 
 export const cancelFollowups = async (leadId: string) => {
@@ -114,9 +157,12 @@ export const cancelFollowups = async (leadId: string) => {
     `followup:${leadId}:24hr`,
   ];
 
+  const queue = getFollowupQueue();
+  const legacyQueue = getLegacyFollowupQueue();
+
   for (const jobId of jobIds) {
     try {
-      const job = (await followupQueue.getJob(jobId)) || (await legacyFollowupQueue.getJob(jobId));
+      const job = (await queue.getJob(jobId)) || (await legacyQueue.getJob(jobId));
 
       if (job) {
         await job.remove().catch(() => undefined);
@@ -126,5 +172,18 @@ export const cancelFollowups = async (leadId: string) => {
     }
   }
 
-  console.log(`🛑 Followups cancelled for lead ${leadId}`);
+  console.log("Followups cancelled for lead", leadId);
+};
+
+export const closeFollowupQueue = async () => {
+  await Promise.allSettled(
+    [
+      globalForFollowupQueue.__sylphFollowupQueue,
+      globalForFollowupQueue.__sylphLegacyFollowupQueue,
+    ]
+      .filter(Boolean)
+      .map((queue) => queue!.close())
+  );
+  globalForFollowupQueue.__sylphFollowupQueue = undefined;
+  globalForFollowupQueue.__sylphLegacyFollowupQueue = undefined;
 };

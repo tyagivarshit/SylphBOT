@@ -3,54 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processLeadIntelligence = exports.getBehaviorConfig = void 0;
+exports.getLeadIntelligenceProfile = exports.processLeadIntelligence = exports.getBehaviorConfig = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-/* =====================================================
-🔥 SCORING RULES (ADVANCED)
-===================================================== */
-const calculateScore = (message) => {
-    const msg = message.toLowerCase();
-    let score = 0;
-    /* 🔥 HIGH INTENT */
-    if (/buy|purchase|start|book now/.test(msg))
-        score += 10;
-    /* 💰 MONEY SIGNAL */
-    if (/price|cost|pricing|fees/.test(msg))
-        score += 4;
-    /* 📞 CALL INTENT */
-    if (/call|demo|meeting/.test(msg))
-        score += 6;
-    /* 🤔 INTEREST */
-    if (/interested|tell me|details|info/.test(msg))
-        score += 3;
-    /* ❌ NEGATIVE */
-    if (/not interested|later|busy/.test(msg))
-        score -= 3;
-    return score;
-};
-/* =====================================================
-🔥 TEMPERATURE DETECTION
-===================================================== */
-const getTemperature = (score) => {
-    if (score >= 8)
-        return "HOT";
-    if (score >= 4)
-        return "WARM";
-    return "COLD";
-};
-/* =====================================================
-🔥 STAGE MAPPING
-===================================================== */
-const getStage = (temperature) => {
-    if (temperature === "HOT")
-        return "READY_TO_BUY";
-    if (temperature === "WARM")
-        return "INTERESTED";
-    return "NEW";
-};
-/* =====================================================
-🔥 BEHAVIOR LOGIC (IMPORTANT)
-===================================================== */
+const leadIntelligence_service_1 = require("./crm/leadIntelligence.service");
 const getBehaviorConfig = (temperature) => {
     if (temperature === "HOT") {
         return {
@@ -73,39 +28,36 @@ const getBehaviorConfig = (temperature) => {
     };
 };
 exports.getBehaviorConfig = getBehaviorConfig;
-/*
-=========================================================
-MAIN FUNCTION
-=========================================================
-*/
 const processLeadIntelligence = async ({ leadId, message, }) => {
     try {
-        if (!leadId || !message)
+        if (!leadId || !message) {
             return null;
-        /* 🔥 SCORE */
-        const score = calculateScore(message);
-        /* 🔥 TEMPERATURE */
-        const temperature = getTemperature(score);
-        /* 🔥 STAGE */
-        const stage = getStage(temperature);
-        /* 🔥 UPDATE DB */
-        await prisma_1.default.lead.update({
-            where: { id: leadId },
-            data: {
-                leadScore: { increment: score },
-                aiStage: temperature,
-                stage,
+        }
+        const lead = await prisma_1.default.lead.findUnique({
+            where: {
+                id: leadId,
+            },
+            select: {
+                businessId: true,
             },
         });
-        console.log("🧠 Lead Intelligence:", {
-            score,
-            temperature,
-            stage,
+        if (!lead?.businessId) {
+            return null;
+        }
+        const profile = await (0, leadIntelligence_service_1.refreshLeadIntelligenceProfile)({
+            businessId: lead.businessId,
+            leadId,
+            inputMessage: message,
+            source: "LEGACY_LEAD_INTELLIGENCE",
         });
         return {
-            score,
-            temperature,
-            stage,
+            score: profile.scorecard.compositeScore,
+            temperature: profile.lifecycle.nextAIStage === "HOT"
+                ? "HOT"
+                : profile.lifecycle.nextAIStage === "WARM"
+                    ? "WARM"
+                    : "COLD",
+            stage: profile.lifecycle.nextLeadStage,
         };
     }
     catch (error) {
@@ -114,3 +66,22 @@ const processLeadIntelligence = async ({ leadId, message, }) => {
     }
 };
 exports.processLeadIntelligence = processLeadIntelligence;
+const getLeadIntelligenceProfile = async (leadId) => {
+    const lead = await prisma_1.default.lead.findUnique({
+        where: {
+            id: leadId,
+        },
+        select: {
+            businessId: true,
+        },
+    });
+    if (!lead?.businessId) {
+        return null;
+    }
+    return (0, leadIntelligence_service_1.buildLeadIntelligenceProfile)({
+        businessId: lead.businessId,
+        leadId,
+        source: "LEGACY_LEAD_INTELLIGENCE_READ",
+    });
+};
+exports.getLeadIntelligenceProfile = getLeadIntelligenceProfile;

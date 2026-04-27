@@ -1,5 +1,14 @@
 import prisma from "../../config/prisma";
 import logger from "../../utils/logger";
+import { publishCRMRefreshEvent } from "../crm/refreshEvents.service";
+import { reinforceKnowledgeHits } from "../knowledgeReinforcement.service";
+import {
+  buildRevenueTouchOutboundKey,
+  findRevenueTouchAttribution,
+  listRevenueTouchTrackingRows,
+  resolveTouchOutboundKeyFromMessageMetadata,
+  upsertRevenueTouchLedger,
+} from "../revenueTouchLedger.service";
 import {
   recordVariantImpression,
   recordVariantOutcome,
@@ -125,6 +134,20 @@ const revenueForOutcome = (outcome: string, value?: number | null) => {
   return 0.25;
 };
 
+const getKnowledgeHitIds = (metadata?: Record<string, unknown>) => {
+  if (!metadata) {
+    return [];
+  }
+
+  const rawIds = Array.isArray(metadata.knowledgeHitIds)
+    ? metadata.knowledgeHitIds
+    : [];
+
+  return rawIds
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+};
+
 const buildVariantStructure = (
   variantKey?: string | null,
   ctaStyle?: string | null,
@@ -139,6 +162,22 @@ const buildVariantStructure = (
   return `${left}-${right}`;
 };
 
+export const resolveTrackingLearningArmKey = ({
+  variantKey,
+  metadata,
+}: {
+  variantKey?: string | null;
+  metadata?: Record<string, unknown>;
+}) =>
+  String(
+    variantKey ||
+      metadata?.learningArmKey ||
+      metadata?.variantKey ||
+      metadata?.experimentVariantKey ||
+      metadata?.experimentArm ||
+      ""
+  ).trim() || null;
+
 const getLeadAttribution = async (leadId: string) =>
   prisma.lead.findUnique({
     where: {
@@ -148,13 +187,14 @@ const getLeadAttribution = async (leadId: string) =>
       id: true,
       businessId: true,
       clientId: true,
+      platform: true,
       revenueState: true,
       aiStage: true,
       stage: true,
     },
   });
 
-const findAttributionTracking = async ({
+const findLegacyAttributionTracking = async ({
   leadId,
   messageId,
   trackingId,
@@ -200,6 +240,56 @@ const findAttributionTracking = async ({
       sentAt: "desc",
     },
   });
+};
+
+const findAttributionTouch = async ({
+  leadId,
+  messageId,
+  trackingId,
+  occurredAt,
+}: {
+  leadId: string;
+  messageId?: string | null;
+  trackingId?: string | null;
+  occurredAt: Date;
+}) => {
+  if (trackingId) {
+    const touch = await prisma.revenueTouchLedger.findUnique({
+      where: {
+        id: trackingId,
+      },
+    });
+
+    if (touch) {
+      return {
+        touch,
+        legacy: null,
+      };
+    }
+  }
+
+  const touch = await findRevenueTouchAttribution({
+    leadId,
+    messageId: messageId || null,
+    occurredAt,
+  });
+
+  if (touch) {
+    return {
+      touch,
+      legacy: null,
+    };
+  }
+
+  return {
+    touch: null,
+    legacy: await findLegacyAttributionTracking({
+      leadId,
+      messageId,
+      trackingId,
+      occurredAt,
+    }),
+  };
 };
 
 const rankStats = <T extends { revenuePerMessage: number; conversionRate: number; replyRate: number; revenue: number; messages: number }>(
@@ -263,11 +353,20 @@ const buildAggregate = (
       String(
         metadata.decisionStructure ||
           buildVariantStructure(
-            tracking.variant?.variantKey,
+            resolveTrackingLearningArmKey({
+              variantKey: tracking.variant?.variantKey,
+              metadata,
+            }),
             tracking.variant?.ctaStyle,
             tracking.variant?.messageLength
           )
       ).trim() || "value_proof_cta";
+    const learningArmKey = resolveTrackingLearningArmKey({
+      variantKey: tracking.variant?.variantKey,
+      metadata,
+    });
+    const syntheticVariantLabel =
+      String(metadata.experimentArm || metadata.variantKey || "").trim() || null;
 
     replies += replyHit;
     conversions += conversionHit;
@@ -295,19 +394,32 @@ const buildAggregate = (
     updateMap(toneMap, tone);
     updateMap(structureMap, structure);
 
-    if (tracking.variant) {
-      const key = tracking.variant.id;
+    if (tracking.variant || learningArmKey) {
+      const key = tracking.variant?.id || learningArmKey!;
       const current = variantMap.get(key) || {
         key,
-        variantId: tracking.variant.id,
-        variantKey: tracking.variant.variantKey,
-        label: tracking.variant.label,
-        tone: tracking.variant.tone,
-        ctaStyle: tracking.variant.ctaStyle,
-        messageLength: tracking.variant.messageLength,
+        variantId: tracking.variant?.id || null,
+        variantKey: learningArmKey,
+        label: tracking.variant?.label || syntheticVariantLabel,
+        tone:
+          tracking.variant?.tone ||
+          String(metadata.decisionTone || metadata.variantTone || "").trim() ||
+          null,
+        ctaStyle:
+          tracking.variant?.ctaStyle ||
+          String(
+            metadata.variantCTAStyle || metadata.decisionCTAStyle || ""
+          ).trim() ||
+          null,
+        messageLength:
+          tracking.variant?.messageLength ||
+          String(
+            metadata.variantMessageLength || metadata.decisionMessageLength || ""
+          ).trim() ||
+          null,
         structure,
-        isPromoted: tracking.variant.isPromoted,
-        weight: tracking.variant.weight,
+        isPromoted: tracking.variant?.isPromoted || false,
+        weight: tracking.variant?.weight || 0,
         messages: 0,
         replies: 0,
         conversions: 0,
@@ -331,8 +443,8 @@ const buildAggregate = (
       angle: tracking.angle,
       leadState: tracking.leadState,
       variantId: tracking.variantId,
-      variantKey: tracking.variant?.variantKey || null,
-      variantLabel: tracking.variant?.label || null,
+      variantKey: learningArmKey,
+      variantLabel: tracking.variant?.label || syntheticVariantLabel,
       tone,
       structure,
       conversions: conversionHit,
@@ -476,24 +588,13 @@ export const getSalesPerformanceSnapshot = async ({
   limit = 1000,
 }: PerformanceInput): Promise<SalesPerformanceSnapshot> => {
   const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
-  const rows = await prisma.salesMessageTracking.findMany({
-    where: {
-      businessId,
-      ...(clientId !== undefined ? { clientId: clientId || null } : {}),
-      ...(messageType ? { messageType } : {}),
-      sentAt: {
-        gte: since,
-      },
-    },
-    include: {
-      message: true,
-      variant: true,
-      conversionEvents: true,
-    },
-    orderBy: {
-      sentAt: "desc",
-    },
-    take: limit,
+  const rows = await listRevenueTouchTrackingRows({
+    businessId,
+    ...(clientId !== undefined ? { clientId: clientId || null } : {}),
+    ...(messageType ? { messageType } : {}),
+    start: since,
+    end: new Date(),
+    limit,
   });
 
   const byState: Record<LeadRevenueState, SalesPerformanceAggregate> = {
@@ -562,47 +663,111 @@ export const trackAIMessage = async (input: TrackAIMessageInput) => {
   const clientId =
     input.clientId !== undefined ? input.clientId : lead?.clientId || null;
   const messageType = input.messageType || "AI_REPLY";
+  const persistedMessage = await prisma.message.findUnique({
+    where: {
+      id: input.messageId,
+    },
+    select: {
+      sender: true,
+      metadata: true,
+    },
+  });
+  const persistedMetadata =
+    (persistedMessage?.metadata || {}) as Record<string, unknown>;
+  const mergedMetadata = {
+    ...persistedMetadata,
+    ...(input.metadata || {}),
+  } as Record<string, unknown>;
+  const deliveryMetadata =
+    (mergedMetadata.delivery || {}) as Record<string, unknown>;
+  const outboundKey = resolveTouchOutboundKeyFromMessageMetadata(mergedMetadata, {
+    source: input.source || "AI_ROUTER",
+    leadId: input.leadId,
+    messageId: input.messageId,
+  });
+  const providerMessageId =
+    String(
+      input.metadata?.providerMessageId ||
+        deliveryMetadata.providerMessageId ||
+        mergedMetadata.providerMessageId ||
+        ""
+    ).trim() || null;
+  const deliveryMode = String(
+    input.metadata?.deliveryMode ||
+      mergedMetadata.deliveryMode ||
+      deliveryMetadata.mode ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+  const deliveryState =
+    String(deliveryMetadata.status || "").trim().toUpperCase() === "FAILED"
+      ? "FAILED"
+      : deliveryMode === "local_preview" || deliveryMode === "local_only"
+        ? "CONFIRMED"
+        : "DELIVERED";
+  const campaignId = String(
+    ((mergedMetadata.autonomous as Record<string, unknown> | undefined)?.campaignId as
+      | string
+      | undefined) ||
+      mergedMetadata.externalEventId ||
+      ""
+  ).trim() || null;
 
   if (!businessId) {
     throw new Error("businessId is required for AI message tracking");
   }
 
-  const existing = await prisma.salesMessageTracking.findUnique({
-    where: {
-      messageId: input.messageId,
-    },
-  });
-
-  const data = {
-    businessId,
-    leadId: input.leadId,
-    clientId: clientId || null,
-    variantId: input.variantId || null,
-    source: input.source || "AI_ROUTER",
-    cta: input.cta || null,
-    angle: input.angle || null,
-    leadState:
-      input.leadState || lead?.revenueState || lead?.aiStage || null,
-    messageType,
-    traceId: input.traceId || null,
-    metadata: input.metadata || {},
-    sentAt: input.timestamp || new Date(),
-  };
-
   try {
-    const tracking = existing
-      ? await prisma.salesMessageTracking.update({
-          where: {
-            id: existing.id,
-          },
-          data: data as any,
-        })
-      : await prisma.salesMessageTracking.create({
-          data: {
-            ...data,
-            messageId: input.messageId,
-          } as any,
-        });
+    const existing = await prisma.revenueTouchLedger.findUnique({
+      where: {
+        outboundKey,
+      },
+      select: {
+        id: true,
+      },
+    });
+    const tracking = await upsertRevenueTouchLedger({
+      businessId,
+      leadId: input.leadId,
+      clientId: clientId || null,
+      messageId: input.messageId,
+      touchType: messageType,
+      touchReason:
+        String(
+          mergedMetadata.trigger ||
+            mergedMetadata.reason ||
+            input.source ||
+            messageType
+        ).trim() || messageType,
+      channel:
+        String(mergedMetadata.platform || lead?.platform || "UNKNOWN").trim() ||
+        "UNKNOWN",
+      actor: persistedMessage?.sender || "AI",
+      source: input.source || "AI_ROUTER",
+      traceId: input.traceId || null,
+      providerMessageId,
+      outboundKey,
+      deliveryState,
+      campaignId,
+      providerAcceptedAt: input.timestamp || new Date(),
+      providerMessagePersistedAt: providerMessageId ? new Date() : null,
+      confirmedAt: input.timestamp || new Date(),
+      deliveredAt:
+        deliveryState === "DELIVERED" ? input.timestamp || new Date() : null,
+      failedAt: deliveryState === "FAILED" ? input.timestamp || new Date() : null,
+      cta: input.cta || null,
+      angle: input.angle || null,
+      leadState:
+        input.leadState || lead?.revenueState || lead?.aiStage || null,
+      messageType,
+      metadata: {
+        ...mergedMetadata,
+        outboundKey,
+        providerMessageId,
+        variantId: input.variantId || mergedMetadata.variantId || null,
+      },
+    });
 
     if (!existing && input.variantId) {
       await recordVariantImpression(input.variantId);
@@ -616,7 +781,7 @@ export const trackAIMessage = async (input: TrackAIMessageInput) => {
 
     logger.info(
       {
-        trackingId: tracking.id,
+        touchLedgerId: tracking.id,
         messageId: input.messageId,
         leadId: input.leadId,
         businessId,
@@ -624,7 +789,7 @@ export const trackAIMessage = async (input: TrackAIMessageInput) => {
         variantId: input.variantId || null,
         source: input.source || "AI_ROUTER",
       },
-      "AI message tracked for revenue attribution"
+      "AI message tracked in canonical revenue touch ledger"
     );
 
     return tracking;
@@ -636,7 +801,7 @@ export const trackAIMessage = async (input: TrackAIMessageInput) => {
         businessId,
         error,
       },
-      "AI message tracking failed"
+      "Canonical revenue touch ledger write failed"
     );
     throw error;
   }
@@ -664,22 +829,37 @@ export const recordConversionEvent = async (input: RecordConversionInput) => {
     throw new Error("Lead attribution not found");
   }
 
-  const tracking = await findAttributionTracking({
+  const attribution = await findAttributionTouch({
     leadId: input.leadId,
     messageId: input.messageId,
     trackingId: input.trackingId,
     occurredAt,
   });
+  const touch = attribution.touch;
+  const tracking = attribution.legacy;
   const businessId =
-    input.businessId || tracking?.businessId || lead?.businessId;
+    input.businessId || touch?.businessId || tracking?.businessId || lead?.businessId;
   const clientId =
     input.clientId !== undefined
       ? input.clientId
-      : tracking?.clientId || lead?.clientId || null;
-  const messageId = input.messageId || tracking?.messageId || null;
-  const variantId = input.variantId || tracking?.variantId || null;
+      : touch?.clientId || tracking?.clientId || lead?.clientId || null;
+  const touchMetadata = (touch?.metadata || {}) as Record<string, unknown>;
   const trackingMetadata = (tracking?.metadata || {}) as Record<string, unknown>;
-  const messageType = tracking?.messageType || null;
+  const attributionMetadata = touch
+    ? touchMetadata
+    : trackingMetadata;
+  const messageId = input.messageId || touch?.messageId || tracking?.messageId || null;
+  const variantId =
+    input.variantId ||
+    String(
+      attributionMetadata.variantId ||
+        attributionMetadata.experimentVariantId ||
+        tracking?.variantId ||
+        ""
+    ).trim() ||
+    null;
+  const knowledgeHitIds = getKnowledgeHitIds(attributionMetadata);
+  const messageType = touch?.messageType || tracking?.messageType || null;
 
   if (!businessId) {
     throw new Error("businessId is required for conversion tracking");
@@ -691,8 +871,9 @@ export const recordConversionEvent = async (input: RecordConversionInput) => {
       leadId: input.leadId,
       clientId: clientId || null,
       messageId,
-      trackingId: input.trackingId || tracking?.id || null,
+      trackingId: tracking?.id || null,
       variantId,
+      touchLedgerId: touch?.id || null,
       outcome,
       value: input.value ?? null,
       source: input.source || null,
@@ -700,16 +881,17 @@ export const recordConversionEvent = async (input: RecordConversionInput) => {
       metadata: {
         attributedMessageId: messageId,
         attributedVariantId: variantId,
-        trackingSource: tracking?.source || null,
-        trackingCta: tracking?.cta || null,
-        trackingAngle: tracking?.angle || null,
-        trackingLeadState: tracking?.leadState || null,
+        touchLedgerId: touch?.id || null,
+        trackingSource: touch?.source || tracking?.source || null,
+        trackingCta: touch?.cta || tracking?.cta || null,
+        trackingAngle: touch?.angle || tracking?.angle || null,
+        trackingLeadState: touch?.leadState || tracking?.leadState || null,
         trackingMessageType: messageType,
         trackingTone: String(
-          trackingMetadata.decisionTone || trackingMetadata.variantTone || ""
+          attributionMetadata.decisionTone || attributionMetadata.variantTone || ""
         ).trim() || null,
         trackingStructure:
-          String(trackingMetadata.decisionStructure || "").trim() || null,
+          String(attributionMetadata.decisionStructure || "").trim() || null,
         ...(input.metadata || {}),
       },
       occurredAt,
@@ -724,17 +906,35 @@ export const recordConversionEvent = async (input: RecordConversionInput) => {
     });
   }
 
+  if (knowledgeHitIds.length) {
+    await reinforceKnowledgeHits({
+      knowledgeIds: knowledgeHitIds,
+      outcome,
+    }).catch((error) => {
+      logger.warn(
+        {
+          leadId: input.leadId,
+          outcome,
+          knowledgeHitIds,
+          error,
+        },
+        "Knowledge reinforcement skipped after conversion event"
+      );
+    });
+  }
+
   await updateLeadState({
     businessId,
     leadId: input.leadId,
     outcome,
     source: input.source || "CONVERSION_TRACKER",
-    metadata: {
-      conversionEventId: event.id,
-      trackingId: tracking?.id || null,
-      messageId,
-      variantId,
-    },
+      metadata: {
+        conversionEventId: event.id,
+        touchLedgerId: touch?.id || null,
+        trackingId: tracking?.id || null,
+        messageId,
+        variantId,
+      },
   }).catch((error) => {
     logger.warn(
       {
@@ -745,6 +945,14 @@ export const recordConversionEvent = async (input: RecordConversionInput) => {
       "Lead state update skipped after conversion event"
     );
   });
+
+  if (outcome === "payment_completed") {
+    await publishCRMRefreshEvent({
+      businessId,
+      leadId: input.leadId,
+      event: "payment_completed",
+    });
+  }
 
   await invalidateDecisionCache({
     businessId,
@@ -776,6 +984,7 @@ export const recordConversionEvent = async (input: RecordConversionInput) => {
       outcome,
       messageId,
       variantId,
+      touchLedgerId: touch?.id || null,
       source: input.source || null,
     },
     "Conversion event recorded"

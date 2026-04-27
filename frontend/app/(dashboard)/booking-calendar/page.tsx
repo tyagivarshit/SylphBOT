@@ -5,32 +5,35 @@ import {
   getAvailableSlots,
   createAppointment,
 } from "@/lib/booking.api";
+import { useAuth } from "@/context/AuthContext";
 
 export default function BookingCalendarPage() {
+  const { user } = useAuth();
   const [date, setDate] = useState<string>("");
-  const [slots, setSlots] = useState<string[]>([]);
+  const [slots, setSlots] = useState<Array<{ value: string; label: string }>>([]);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const businessId = "YOUR_BUSINESS_ID"; // TODO: replace from auth/user
+  const businessId = user?.businessId || "";
 
   /* =====================================================
   FETCH SLOTS
   ===================================================== */
   const fetchSlots = async () => {
-    if (!date) return;
+    if (!businessId || !date) return;
 
     try {
       setLoading(true);
 
       const res = await getAvailableSlots(businessId, date);
 
-      const formatted = res.slots.map((s: string) =>
-        new Date(s).toLocaleTimeString([], {
+      const formatted = (res.slots || []).map((slot: string) => ({
+        value: slot,
+        label: new Date(slot).toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
-        })
-      );
+        }),
+      }));
 
       setSlots(formatted);
     } catch (err) {
@@ -42,16 +45,16 @@ export default function BookingCalendarPage() {
 
   useEffect(() => {
     fetchSlots();
-  }, [date]);
+  }, [businessId, date]);
 
   /* =====================================================
   BOOK SLOT
   ===================================================== */
   const handleBooking = async () => {
-    if (!selectedSlot || !date) return;
+    if (!businessId || !selectedSlot || !date) return;
 
     try {
-      const start = new Date(`${date} ${selectedSlot}`);
+      const start = new Date(selectedSlot);
       const end = new Date(start.getTime() + 30 * 60000);
 
       await createAppointment({
@@ -93,17 +96,17 @@ export default function BookingCalendarPage() {
         </p>
       ) : (
         <div className="grid grid-cols-3 gap-3">
-          {slots.map((slot, i) => (
+          {slots.map((slot) => (
             <button
-              key={i}
-              onClick={() => setSelectedSlot(slot)}
+              key={slot.value}
+              onClick={() => setSelectedSlot(slot.value)}
               className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${
-                selectedSlot === slot
+                selectedSlot === slot.value
                   ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white border-transparent shadow-md"
                   : "bg-white/70 border-blue-100 text-gray-700 hover:bg-blue-50"
               }`}
             >
-              {slot}
+              {slot.label}
             </button>
           ))}
         </div>

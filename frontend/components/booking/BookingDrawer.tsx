@@ -73,7 +73,7 @@ export default function BookingDrawer({
         </div>
 
         {/* 🔥 ACTIONS */}
-        {data.status === "BOOKED" && (
+        {data.status === "CONFIRMED" && (
           <div className="mt-auto pt-6 flex gap-3">
 
             <button

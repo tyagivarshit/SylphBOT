@@ -10,14 +10,44 @@ import {
   persistAndDispatchLeadMessage,
 } from "../services/sendMessage.service";
 
-/* ======================================
-GET MESSAGES
-====================================== */
+type AuthenticatedRequest = Request & {
+  user?: {
+    businessId?: string | null;
+  };
+};
 
-export const getMessages = async (req: Request, res: Response) => {
+const getScopedLead = async (businessId: string, leadId: string) =>
+  prisma.lead.findFirst({
+    where: {
+      id: leadId,
+      businessId,
+      deletedAt: null,
+    },
+    include: {
+      client: {
+        select: {
+          accessToken: true,
+          phoneNumberId: true,
+          platform: true,
+        },
+      },
+    },
+  });
+
+export const getMessages = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
-
+    const businessId = req.user?.businessId || null;
     const leadId = req.params.leadId as string;
+
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!leadId) {
       return res.status(400).json({
@@ -26,16 +56,41 @@ export const getMessages = async (req: Request, res: Response) => {
       });
     }
 
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        businessId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+    }
+
     const messages = await prisma.message.findMany({
-      where: { leadId },
+      where: {
+        leadId: lead.id,
+        lead: {
+          businessId,
+          deletedAt: null,
+        },
+      },
       orderBy: { createdAt: "asc" },
     });
 
     return res.json({
       success: true,
-      messages: messages.map((message) => formatConversationMessage(message)),
+      data: {
+        messages: messages.map((message) => formatConversationMessage(message)),
+      },
     });
-
   } catch (error) {
     console.error("Get messages error:", error);
     return res.status(500).json({
@@ -45,11 +100,10 @@ export const getMessages = async (req: Request, res: Response) => {
   }
 };
 
-/* ======================================
-SEND MESSAGE
-====================================== */
-
-export const sendManualMessage = async (req: Request, res: Response) => {
+export const sendManualMessage = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const leadId = typeof req.body?.leadId === "string" ? req.body.leadId : "";
     const content =
@@ -59,7 +113,14 @@ export const sendManualMessage = async (req: Request, res: Response) => {
       req.body.clientMessageId.trim()
         ? req.body.clientMessageId.trim()
         : null;
-    const businessId = req.user?.businessId;
+    const businessId = req.user?.businessId || null;
+
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!leadId || !content) {
       return res.status(400).json({
@@ -68,7 +129,7 @@ export const sendManualMessage = async (req: Request, res: Response) => {
       });
     }
 
-    const access = await getSubscriptionAccess(businessId || "");
+    const access = await getSubscriptionAccess(businessId);
 
     if (!access.allowed) {
       logSubscriptionLockedAction(
@@ -90,21 +151,7 @@ export const sendManualMessage = async (req: Request, res: Response) => {
       });
     }
 
-    const lead = await prisma.lead.findFirst({
-      where: {
-        id: leadId,
-        ...(businessId ? { businessId } : {}),
-      },
-      include: {
-        client: {
-          select: {
-            accessToken: true,
-            phoneNumberId: true,
-            platform: true,
-          },
-        },
-      },
-    });
+    const lead = await getScopedLead(businessId, leadId);
 
     if (!lead) {
       return res.status(404).json({
@@ -122,10 +169,11 @@ export const sendManualMessage = async (req: Request, res: Response) => {
 
     return res.json({
       success: result.delivery?.delivered ?? true,
-      message: result.message,
-      delivery: result.delivery,
+      data: {
+        message: result.message,
+        delivery: result.delivery,
+      },
     });
-
   } catch (error) {
     console.error("Send message error:", error);
     return res.status(500).json({
@@ -135,14 +183,20 @@ export const sendManualMessage = async (req: Request, res: Response) => {
   }
 };
 
-/* ======================================
-DELETE MESSAGE
-====================================== */
-
-export const deleteMessage = async (req: Request, res: Response) => {
+export const deleteMessage = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
-
+    const businessId = req.user?.businessId || null;
     const messageId = req.params.messageId as string;
+
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!messageId) {
       return res.status(400).json({
@@ -151,18 +205,52 @@ export const deleteMessage = async (req: Request, res: Response) => {
       });
     }
 
-    const message = await prisma.message.update({
-      where: { id: messageId },
+    const message = await prisma.message.findFirst({
+      where: {
+        id: messageId,
+        lead: {
+          businessId,
+          deletedAt: null,
+        },
+      },
+      select: {
+        id: true,
+        leadId: true,
+      },
+    });
+
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found",
+      });
+    }
+
+    await prisma.message.updateMany({
+      where: {
+        id: message.id,
+        lead: {
+          businessId,
+          deletedAt: null,
+        },
+      },
       data: {
         content: "This message was deleted",
       },
     });
 
     const io = getIO();
-    io.emit("message_deleted", message);
+    io.to(`lead_${message.leadId}`).emit("message_deleted", {
+      id: message.id,
+      leadId: message.leadId,
+    });
 
-    return res.json({ success: true });
-
+    return res.json({
+      success: true,
+      data: {
+        id: message.id,
+      },
+    });
   } catch (error) {
     console.error("Delete message error:", error);
     return res.status(500).json({
@@ -172,14 +260,20 @@ export const deleteMessage = async (req: Request, res: Response) => {
   }
 };
 
-/* ======================================
-MARK READ
-====================================== */
-
-export const markConversationRead = async (req: Request, res: Response) => {
+export const markConversationRead = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
+    const businessId = req.user?.businessId || null;
+    const leadId = typeof req.body?.leadId === "string" ? req.body.leadId : "";
 
-    const { leadId } = req.body;
+    if (!businessId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!leadId) {
       return res.status(400).json({
@@ -188,13 +282,39 @@ export const markConversationRead = async (req: Request, res: Response) => {
       });
     }
 
-    await prisma.lead.update({
-      where: { id: leadId },
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        businessId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+    }
+
+    await prisma.lead.updateMany({
+      where: {
+        id: lead.id,
+        businessId,
+        deletedAt: null,
+      },
       data: { unreadCount: 0 },
     });
 
-    return res.json({ success: true });
-
+    return res.json({
+      success: true,
+      data: {
+        leadId: lead.id,
+      },
+    });
   } catch (error) {
     console.error("Mark read error:", error);
     return res.status(500).json({

@@ -2,9 +2,8 @@
 
 import { Suspense, useEffect, useState } from "react"
 import { usePlan } from "@/hooks/usePlan"
-import axios from "axios"
 import { useSearchParams } from "next/navigation"
-import { buildApiUrl } from "@/lib/url"
+import { apiFetch } from "@/lib/apiClient"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
@@ -53,17 +52,30 @@ function LeadsPageContent(){
           return
         }
 
-        const res = await axios.get(buildApiUrl("/dashboard/leads"), {
-          withCredentials: true,
-          params:{
-            page,
-            limit:10,
-            stage: stage || undefined
-          }
-        })
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: "10",
+        });
 
-        setLeads(res.data.data.leads || [])
-        setTotalPages(res.data.data.pagination?.totalPages || 1)
+        if (stage) {
+          params.set("stage", stage);
+        }
+
+        const response = await apiFetch<{
+          leads?: LeadItem[];
+          pagination?: {
+            totalPages?: number;
+          };
+        }>(`/api/dashboard/leads?${params.toString()}`, {
+          credentials: "include",
+        });
+
+        if (!response.success || !response.data) {
+          throw new Error(response.message || "Failed to load leads");
+        }
+
+        setLeads(response.data.leads || [])
+        setTotalPages(response.data.pagination?.totalPages || 1)
 
       }catch(err){
         console.error("Leads load error",err)

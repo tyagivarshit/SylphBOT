@@ -1,13 +1,6 @@
-/* ======================================
-🔥 IMPORTS
-====================================== */
-
 import type { ApiResponse } from "./apiClient";
-import { buildAbsoluteApiUrl, buildApiUrl } from "./url";
-
-/* ======================================
-🔥 TYPES (STRICT)
-====================================== */
+import { apiFetch } from "./apiClient";
+import { buildAbsoluteApiUrl } from "./url";
 
 type User = {
   id: string;
@@ -20,131 +13,30 @@ type CurrentUserResponse = {
   user: User;
 };
 
-/* ======================================
-🔥 AUTH STATE (SAFE CACHE)
-====================================== */
-
 let currentUserCache: User | null = null;
 let fetchingPromise: Promise<ApiResponse<CurrentUserResponse>> | null = null;
-const AUTH_TIMEOUT_MS = 15000;
 const AUTH_RETRY_DELAY_MS = 300;
-
-/* ======================================
-🔥 UTILS
-====================================== */
 
 export function clearUserCache() {
   currentUserCache = null;
 }
 
-const toAuthUrl = (path: string) => {
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  return buildApiUrl(`/api${normalized}`);
-};
-
-const toAbsoluteAuthUrl = (path: string) => {
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  return buildAbsoluteApiUrl(`/api${normalized}`);
-};
-
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
-
-async function readJson<T>(res: Response): Promise<T | null> {
-  try {
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
-}
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
 
-async function authFetch<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<ApiResponse<T>> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
-
-  try {
-    const hasJsonBody =
-      options.body !== undefined &&
-      options.body !== null &&
-      !(options.body instanceof FormData);
-
-    const res = await fetch(toAuthUrl(path), {
-      ...options,
-      credentials: "include",
-      mode: "cors",
-      cache: options.cache ?? "no-store",
-      headers: {
-        ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
-        ...(options.headers || {}),
-      },
-      signal: controller.signal,
-    });
-
-    const data = await readJson<Record<string, unknown>>(res);
-    const payload =
-      data && "data" in data ? (data.data as T | null) : (data as T | null);
-
-    if (res.status === 401) {
-      return {
-        success: false,
-        data: null,
-        limited: false,
-        upgradeRequired: false,
-        unauthorized: true,
-        message:
-          typeof data?.message === "string" ? data.message : "Unauthorized",
-        code: typeof data?.code === "string" ? data.code : undefined,
-      };
-    }
-
-    if (!res.ok) {
-      return {
-        success: false,
-        data: null,
-        limited: false,
-        upgradeRequired: false,
-        unauthorized: false,
-        message:
-          typeof data?.message === "string" ? data.message : "Request failed",
-        code: typeof data?.code === "string" ? data.code : undefined,
-      };
-    }
-
-    return {
-      success: true,
-      data: payload ?? null,
-      limited: data?.limited === true,
-      upgradeRequired: data?.upgradeRequired === true,
-      unauthorized: false,
-    };
-  } catch (error: unknown) {
-    return {
-      success: false,
-      data: null,
-      limited: false,
-      upgradeRequired: false,
-      unauthorized: false,
-      networkError: true,
-      message:
-        error instanceof Error && error.name === "AbortError"
-          ? "Authentication request timed out"
-          : getErrorMessage(error, "Authentication request failed"),
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
+const authRequest = <T>(path: string, options: RequestInit = {}) =>
+  apiFetch<T>(`/api/auth${path.startsWith("/") ? path : `/${path}`}`, {
+    cache: "no-store",
+    ...options,
+  });
 
 export function buildGoogleAuthUrl(redirectTo?: string) {
-  const url = new URL(toAbsoluteAuthUrl("/auth/google"));
+  const url = new URL(buildAbsoluteApiUrl("/api/auth/google"));
 
   if (redirectTo) {
     url.searchParams.set("redirectTo", redirectTo);
@@ -158,32 +50,18 @@ const shouldRetryCurrentUser = (
 ) => response.unauthorized || response.networkError;
 
 const fetchCurrentUserWithRetry = async () => {
-  const firstAttempt = await authFetch<CurrentUserResponse>("auth/me", {
-    cache: "no-store",
-  });
+  const firstAttempt = await authRequest<CurrentUserResponse>("/me");
 
-  if (
-    firstAttempt.success ||
-    !shouldRetryCurrentUser(firstAttempt)
-  ) {
+  if (firstAttempt.success || !shouldRetryCurrentUser(firstAttempt)) {
     return firstAttempt;
   }
 
   await sleep(AUTH_RETRY_DELAY_MS);
 
-  return authFetch<CurrentUserResponse>("auth/me", {
-    cache: "no-store",
-  });
+  return authRequest<CurrentUserResponse>("/me");
 };
 
-/* ======================================
-🔥 CURRENT USER (FINAL FIXED)
-====================================== */
-
-export async function getCurrentUser(): Promise<
-  ApiResponse<CurrentUserResponse>
-> {
-  /* ✅ RETURN CACHE */
+export async function getCurrentUser(): Promise<ApiResponse<CurrentUserResponse>> {
   if (currentUserCache) {
     return {
       success: true,
@@ -194,24 +72,22 @@ export async function getCurrentUser(): Promise<
     };
   }
 
-  /* 🔥 PREVENT PARALLEL CALLS (PROMISE SHARING) */
   if (fetchingPromise) {
     return fetchingPromise;
   }
 
   fetchingPromise = (async () => {
     try {
-      const res = await fetchCurrentUserWithRetry();
+      const response = await fetchCurrentUserWithRetry();
 
-      if (res.unauthorized || !res.success) {
+      if (response.unauthorized || !response.success) {
         currentUserCache = null;
-        return res;
+        return response;
       }
-      currentUserCache = res.data?.user || null;
 
-      return res;
-
-    } catch (err: unknown) {
+      currentUserCache = response.data?.user || null;
+      return response;
+    } catch (error) {
       currentUserCache = null;
 
       return {
@@ -221,9 +97,8 @@ export async function getCurrentUser(): Promise<
         upgradeRequired: false,
         unauthorized: false,
         networkError: true,
-        message: getErrorMessage(err, "Auth fetch failed"),
+        message: getErrorMessage(error, "Auth fetch failed"),
       };
-
     } finally {
       fetchingPromise = null;
     }
@@ -232,16 +107,11 @@ export async function getCurrentUser(): Promise<
   return fetchingPromise;
 }
 
-/* ======================================
-🔥 LOGIN
-====================================== */
-
 export async function loginUser(
   email: string,
   password: string
 ): Promise<ApiResponse<{ user: User }>> {
-
-  const res = await authFetch<{ user: User }>("/auth/login", {
+  const response = await authRequest<{ user: User }>("/login", {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -249,26 +119,21 @@ export async function loginUser(
     }),
   });
 
-  /* 🔥 CLEAR CACHE AFTER LOGIN */
   clearUserCache();
 
-  if (typeof window !== "undefined" && res.success) {
+  if (typeof window !== "undefined" && response.success) {
     window.dispatchEvent(new Event("auth:refresh"));
   }
 
-  return res;
+  return response;
 }
-
-/* ======================================
-🔥 REGISTER
-====================================== */
 
 export async function registerUser(
   name: string,
   email: string,
   password: string
 ) {
-  return authFetch("/auth/register", {
+  return authRequest("/register", {
     method: "POST",
     body: JSON.stringify({
       name: name.trim(),
@@ -278,35 +143,21 @@ export async function registerUser(
   });
 }
 
-/* ======================================
-🔥 VERIFY EMAIL
-====================================== */
-
 export async function verifyEmail(token: string) {
-  return authFetch(
-    `/auth/verify-email?token=${encodeURIComponent(token)}`
-  );
+  return authRequest(`/verify-email?token=${encodeURIComponent(token)}`);
 }
-
-/* ======================================
-🔥 RESEND VERIFICATION
-====================================== */
 
 export async function resendVerification(email: string) {
-  return authFetch("/auth/resend-verification", {
+  return authRequest("/resend-verification", {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
     }),
   });
 }
-
-/* ======================================
-🔥 FORGOT PASSWORD
-====================================== */
 
 export async function forgotPassword(email: string) {
-  return authFetch("/auth/forgot-password", {
+  return authRequest("/forgot-password", {
     method: "POST",
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
@@ -314,15 +165,8 @@ export async function forgotPassword(email: string) {
   });
 }
 
-/* ======================================
-🔥 RESET PASSWORD
-====================================== */
-
-export async function resetPassword(
-  token: string,
-  password: string
-) {
-  return authFetch("/auth/reset-password", {
+export async function resetPassword(token: string, password: string) {
+  return authRequest("/reset-password", {
     method: "POST",
     body: JSON.stringify({
       token,
@@ -331,19 +175,14 @@ export async function resetPassword(
   });
 }
 
-/* ======================================
-🔥 LOGOUT
-====================================== */
-
 export async function logoutUser() {
-
   clearUserCache();
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("auth:refresh"));
   }
 
-  return authFetch("/auth/logout", {
+  return authRequest("/logout", {
     method: "POST",
   });
 }

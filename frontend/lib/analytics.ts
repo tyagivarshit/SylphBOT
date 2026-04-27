@@ -67,6 +67,38 @@ export type AnalyticsDashboard = {
     conversionFromTop: number;
     conversionFromPrevious: number;
   }>;
+  revenueBrain: {
+    summary: {
+      runs: number;
+      completed: number;
+      failed: number;
+      successRate: number;
+      toolSuccessRate: number;
+      avgLatencyMs: number;
+      avgKnowledgeHits: number;
+      memoryHitRate: number;
+      conversionRate: number;
+    };
+    routes: Array<{
+      route: string;
+      count: number;
+      share: number;
+    }>;
+    tools: Array<{
+      tool: string;
+      applied: number;
+      failed: number;
+      skipped: number;
+      successRate: number;
+    }>;
+    funnel: Array<{
+      key: string;
+      label: string;
+      count: number;
+      conversionFromTop: number;
+      conversionFromPrevious: number;
+    }>;
+  };
   sourcePerformance: Array<{
     source: string;
     leads: number;

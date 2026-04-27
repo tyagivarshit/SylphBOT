@@ -22,22 +22,33 @@ export type AuthEmailJobData =
       link: string;
     };
 
-export const authEmailQueue = createResilientQueue(
-  new Queue<AuthEmailJobData>(
-    "authEmail",
-    {
-      connection: getQueueRedisConnection(),
-      prefix: "sylph",
-      defaultJobOptions: buildQueueJobOptions({
-        backoff: {
-          type: "exponential",
-          delay: 15000,
-        },
+const AUTH_EMAIL_QUEUE_NAME = "authEmail";
+
+const globalForAuthEmailQueue = globalThis as typeof globalThis & {
+  __sylphAuthEmailQueue?: Queue<AuthEmailJobData>;
+};
+
+export const initAuthEmailQueue = () => {
+  if (!globalForAuthEmailQueue.__sylphAuthEmailQueue) {
+    globalForAuthEmailQueue.__sylphAuthEmailQueue = createResilientQueue(
+      new Queue<AuthEmailJobData>(AUTH_EMAIL_QUEUE_NAME, {
+        connection: getQueueRedisConnection(),
+        prefix: "sylph",
+        defaultJobOptions: buildQueueJobOptions({
+          backoff: {
+            type: "exponential",
+            delay: 15000,
+          },
+        }),
       }),
-    }
-  ),
-  "authEmail"
-);
+      AUTH_EMAIL_QUEUE_NAME
+    );
+  }
+
+  return globalForAuthEmailQueue.__sylphAuthEmailQueue;
+};
+
+export const getAuthEmailQueue = () => initAuthEmailQueue();
 
 const createJobId = (
   type: AuthEmailJobData["type"],
@@ -53,8 +64,8 @@ export const enqueueVerificationEmail = async (
   to: string,
   link: string
 ) => {
-  console.log("📩 Adding email job", { type: "verify", to });
-  return authEmailQueue.add(
+  console.log("[EMAIL_QUEUE] Adding email job", { type: "verify", to });
+  return getAuthEmailQueue().add(
     "verify-email",
     {
       type: "verify",
@@ -71,8 +82,8 @@ export const enqueuePasswordResetEmail = async (
   to: string,
   link: string
 ) => {
-  console.log("📩 Adding email job", { type: "reset", to });
-  return authEmailQueue.add(
+  console.log("[EMAIL_QUEUE] Adding email job", { type: "reset", to });
+  return getAuthEmailQueue().add(
     "reset-password",
     {
       type: "reset",
@@ -125,4 +136,9 @@ export const schedulePasswordResetEmail = async (
   }
 
   queuePasswordResetEmail(to, link);
+};
+
+export const closeAuthEmailQueue = async () => {
+  await globalForAuthEmailQueue.__sylphAuthEmailQueue?.close().catch(() => undefined);
+  globalForAuthEmailQueue.__sylphAuthEmailQueue = undefined;
 };

@@ -13,13 +13,26 @@ import {
   logSubscriptionLockedAction,
 } from "../middleware/subscriptionGuard.middleware";
 
-initializeSentry();
-
 const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
   process.env.RUN_WORKER === undefined;
 
-if (shouldRunWorker) {
+const globalForAutomationWorker = globalThis as typeof globalThis & {
+  __sylphAutomationWorker?: Worker | null;
+};
+
+export const initAutomationWorker = () => {
+  initializeSentry();
+
+  if (!shouldRunWorker) {
+    console.log("[automation.worker] RUN_WORKER disabled, worker not started");
+    return null;
+  }
+
+  if (globalForAutomationWorker.__sylphAutomationWorker) {
+    return globalForAutomationWorker.__sylphAutomationWorker;
+  }
+
   const worker = new Worker(
     "automation",
     withRedisWorkerFailSafe("automation", async (job: any) =>
@@ -65,7 +78,7 @@ if (shouldRunWorker) {
           );
 
           if (job.name === "comment" || job.name === "comment-reply") {
-            console.log("⚙️ Processing comment reply job", job.data);
+            console.log("Processing comment reply job", job.data);
             await handleCommentAutomation(job.data);
           }
 
@@ -130,6 +143,11 @@ if (shouldRunWorker) {
   });
 
   logger.info({ queueName: "automation" }, "Automation worker started");
-} else {
-  console.log("[automation.worker] RUN_WORKER disabled, worker not started");
-}
+  globalForAutomationWorker.__sylphAutomationWorker = worker;
+  return worker;
+};
+
+export const closeAutomationWorker = async () => {
+  await globalForAutomationWorker.__sylphAutomationWorker?.close().catch(() => undefined);
+  globalForAutomationWorker.__sylphAutomationWorker = undefined;
+};

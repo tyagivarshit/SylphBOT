@@ -1,23 +1,27 @@
-import axios from "axios";
-import { getApiBaseUrl } from "@/lib/url";
+import { apiFetch } from "@/lib/apiClient";
 
-const API = axios.create({
-  baseURL: getApiBaseUrl(),
-  withCredentials: true,
-});
+const requireData = <T>(data: T | null, fallback: string) => {
+  if (data == null) {
+    throw new Error(fallback);
+  }
 
-export const getAvailableSlots = async (
-  businessId: string,
-  date: string
-) => {
-  const res = await API.get(`/booking/slots/${businessId}`, {
-    params: { date },
-  });
-  return res.data;
+  return data;
+};
+
+export const getAvailableSlots = async (businessId: string, date: string) => {
+  const response = await apiFetch<{ slots?: string[] }>(
+    `/api/booking/slots/${businessId}?date=${encodeURIComponent(date)}`
+  );
+
+  if (!response.success) {
+    throw new Error(response.message || "Failed to fetch slots");
+  }
+
+  return requireData(response.data, "Failed to fetch slots");
 };
 
 export const createAppointment = async (data: {
-  businessId: string;
+  businessId?: string;
   leadId?: string;
   name: string;
   email?: string;
@@ -25,8 +29,16 @@ export const createAppointment = async (data: {
   startTime: string;
   endTime: string;
 }) => {
-  const res = await API.post(`/booking/appointment`, data);
-  return res.data;
+  const response = await apiFetch<{ appointment?: unknown }>("/api/booking/appointment", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+  if (!response.success) {
+    throw new Error(response.message || "Failed to create appointment");
+  }
+
+  return requireData(response.data, "Failed to create appointment");
 };
 
 export const rescheduleAppointment = async (
@@ -36,16 +48,32 @@ export const rescheduleAppointment = async (
     endTime: string;
   }
 ) => {
-  const res = await API.put(
-    `/booking/appointment/${appointmentId}/reschedule`,
-    data
+  const response = await apiFetch<{ appointment?: unknown }>(
+    `/api/booking/appointment/${appointmentId}/reschedule`,
+    {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }
   );
-  return res.data;
+
+  if (!response.success) {
+    throw new Error(response.message || "Failed to reschedule appointment");
+  }
+
+  return requireData(response.data, "Failed to reschedule appointment");
 };
 
 export const cancelAppointment = async (appointmentId: string) => {
-  const res = await API.delete(
-    `/booking/appointment/${appointmentId}`
+  const response = await apiFetch<{ appointment?: unknown }>(
+    `/api/booking/appointment/${appointmentId}`,
+    {
+      method: "DELETE",
+    }
   );
-  return res.data;
+
+  if (!response.success) {
+    throw new Error(response.message || "Failed to cancel appointment");
+  }
+
+  return requireData(response.data, "Failed to cancel appointment");
 };

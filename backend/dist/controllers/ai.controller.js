@@ -7,6 +7,7 @@ exports.testAI = exports.getSalesBlueprint = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const blueprint_service_1 = require("../services/salesAgent/blueprint.service");
 const reply_service_1 = require("../services/salesAgent/reply.service");
+const orchestrator_service_1 = require("../services/revenueBrain/orchestrator.service");
 const usage_service_1 = require("../services/usage.service");
 const normalizeMessage = (message) => message?.trim() || "";
 const getBusinessForUser = async (userId) => {
@@ -81,33 +82,51 @@ const testAI = async (req, res) => {
                 },
             }))).result;
         responseLeadId = lead.id;
-        aiReservation = await (0, usage_service_1.reserveAIUsageExecution)({
-            businessId: business.id,
-        });
-        const reply = await (0, reply_service_1.generateSalesAgentReply)({
+        const reply = await (0, orchestrator_service_1.runRevenueBrainOrchestrator)({
             businessId: business.id,
             leadId: lead.id,
             message,
             plan: business.subscription?.plan || null,
             source: "PREVIEW",
             preview: true,
+            beforeAIReply: async () => {
+                aiReservation = await (0, usage_service_1.reserveAIUsageExecution)({
+                    businessId: business.id,
+                });
+                return {
+                    finalize: async () => {
+                        if (!aiReservation) {
+                            return;
+                        }
+                        const activeReservation = aiReservation;
+                        aiReservation = null;
+                        await (0, usage_service_1.finalizeAIUsageExecution)(activeReservation);
+                    },
+                    release: async () => {
+                        if (!aiReservation) {
+                            return;
+                        }
+                        const activeReservation = aiReservation;
+                        aiReservation = null;
+                        await (0, usage_service_1.releaseAIUsageExecution)(activeReservation);
+                    },
+                };
+            },
         });
         if (!reply?.message) {
-            await (0, usage_service_1.releaseAIUsageExecution)(aiReservation);
-            aiReservation = null;
             return res.json({
                 success: true,
                 aiReply: null,
-                payload: reply,
+                payload: reply?.structured || null,
+                internalPayload: reply || null,
                 leadId: responseLeadId,
             });
         }
-        await (0, usage_service_1.finalizeAIUsageExecution)(aiReservation);
-        aiReservation = null;
         return res.json({
             success: true,
-            aiReply: reply?.message || null,
-            payload: reply,
+            aiReply: reply.message,
+            payload: reply.structured || null,
+            internalPayload: reply,
             leadId: responseLeadId,
         });
     }
@@ -127,7 +146,8 @@ const testAI = async (req, res) => {
             return res.json({
                 success: true,
                 aiReply: fallback.message,
-                payload: fallback,
+                payload: fallback.structured || null,
+                internalPayload: fallback,
                 leadId: responseLeadId,
             });
         }

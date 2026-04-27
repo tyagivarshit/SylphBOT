@@ -1,9 +1,7 @@
 import axios, {
-  AxiosHeaders,
   type AxiosError,
   type AxiosRequestConfig,
   type AxiosResponse,
-  type RawAxiosRequestHeaders,
 } from "axios";
 import { getApiBaseUrl } from "@/lib/url";
 
@@ -27,6 +25,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 const normalizeApiPath = (path: string) => {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
   const cleanPath = path.startsWith("/api") ? path.replace(/^\/api/, "") : path;
   return cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`;
 };
@@ -91,35 +93,6 @@ const handleServerErrorResponse = (
   maybeToastServerError();
 };
 
-const getAccessToken = () => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    return window.localStorage.getItem("accessToken");
-  } catch {
-    return null;
-  }
-};
-
-const setAuthHeader = (
-  headers: AxiosRequestConfig["headers"],
-  token: string
-): AxiosHeaders => {
-  const nextHeaders = headers instanceof AxiosHeaders ? headers : new AxiosHeaders();
-
-  if (headers && !(headers instanceof AxiosHeaders)) {
-    Object.entries(headers as RawAxiosRequestHeaders).forEach(([key, value]) => {
-      nextHeaders.set(key, value);
-    });
-  }
-
-  nextHeaders.set("Authorization", `Bearer ${token}`);
-
-  return nextHeaders;
-};
-
 export const apiClient = axios.create({
   baseURL: getApiBaseUrl(),
   withCredentials: true,
@@ -130,10 +103,8 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = getAccessToken();
-
-  if (token) {
-    config.headers = setAuthHeader(config.headers, token);
+  if (typeof config.url === "string" && config.url.trim()) {
+    config.url = normalizeApiPath(config.url);
   }
 
   return config;
@@ -142,6 +113,26 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => {
     handleServerErrorResponse(response);
+
+    if (
+      response.status >= 200 &&
+      response.status < 300 &&
+      isRecord(response.data) &&
+      typeof response.data.success === "boolean" &&
+      "data" in response.data
+    ) {
+      const { data, ...meta } = response.data;
+
+      if (isRecord(data)) {
+        response.data = {
+          ...data,
+          ...meta,
+        };
+      } else {
+        response.data = data;
+      }
+    }
+
     return response;
   },
   (error: AxiosError) => {

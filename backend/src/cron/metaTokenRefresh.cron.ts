@@ -17,7 +17,7 @@ export const startMetaTokenRefreshCron = () => {
   ---------------------------------------------------
   */
 
-  cron.schedule("0 3 * * *", async () => {
+  return cron.schedule("0 3 * * *", async () => {
 
     try {
 
@@ -87,5 +87,4 @@ export const startMetaTokenRefreshCron = () => {
     }
 
   });
-
 };

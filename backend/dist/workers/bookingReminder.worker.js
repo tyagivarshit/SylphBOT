@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bookingReminderWorker = void 0;
+exports.closeBookingReminderWorker = exports.initBookingReminderWorker = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = require("../config/redis");
@@ -12,21 +12,32 @@ const whatsapp_service_1 = require("../services/whatsapp.service");
 const bookingReminder_queue_1 = require("../queues/bookingReminder.queue");
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
     process.env.RUN_WORKER === undefined;
-exports.bookingReminderWorker = shouldRunWorker
-    ? new bullmq_1.Worker(bookingReminder_queue_1.BOOKING_REMINDER_QUEUE_NAME, (0, queue_defaults_1.withRedisWorkerFailSafe)(bookingReminder_queue_1.BOOKING_REMINDER_QUEUE_NAME, async (job) => {
-        const { type, appointmentId } = job.data;
+const globalForBookingReminderWorker = globalThis;
+const initBookingReminderWorker = () => {
+    if (!shouldRunWorker) {
+        console.log("[bookingReminder.worker] RUN_WORKER disabled, worker not started");
+        return null;
+    }
+    if (globalForBookingReminderWorker.__sylphBookingReminderWorker) {
+        return globalForBookingReminderWorker.__sylphBookingReminderWorker;
+    }
+    const worker = new bullmq_1.Worker(bookingReminder_queue_1.BOOKING_REMINDER_QUEUE_NAME, (0, queue_defaults_1.withRedisWorkerFailSafe)(bookingReminder_queue_1.BOOKING_REMINDER_QUEUE_NAME, async (job) => {
+        const { type, appointmentId, businessId } = job.data;
         try {
             console.log(`Processing ${type} for ${appointmentId}`);
-            const appointment = await prisma_1.default.appointment.findUnique({
-                where: { id: appointmentId },
+            const appointment = await prisma_1.default.appointment.findFirst({
+                where: {
+                    id: appointmentId,
+                    businessId,
+                },
                 include: { lead: true },
             });
             if (!appointment) {
                 console.log("Appointment not found:", appointmentId);
                 return;
             }
-            if (appointment.status !== "BOOKED") {
-                console.log("Skipping reminder because booking is not active");
+            if (appointment.status !== "CONFIRMED") {
+                console.log("Skipping reminder because booking is not confirmed");
                 return;
             }
             if (new Date(appointment.startTime).getTime() < Date.now()) {
@@ -54,30 +65,15 @@ exports.bookingReminderWorker = shouldRunWorker
             let message = "";
             switch (type) {
                 case "CONFIRMATION":
-                    message = `✅ Your meeting is confirmed!
-
-📅 ${formattedTime}
-
-We’ll connect with you soon 🚀`;
+                    message = `Your meeting is confirmed.\n\n${formattedTime}`;
                     break;
                 case "MORNING":
-                    message = `🌄 Good morning!
-
-Reminder: You have a meeting today.
-
-📅 ${formattedTime}
-
-See you soon 👍`;
+                    message = `Reminder: you have a meeting today.\n\n${formattedTime}`;
                     break;
                 case "BEFORE_30_MIN":
-                    message = `⏰ Your meeting starts in 30 minutes.
-
-📅 ${formattedTime}
-
-Please be ready 🚀`;
+                    message = `Your meeting starts in 30 minutes.\n\n${formattedTime}`;
                     break;
                 default:
-                    console.log("Unknown reminder type:", type);
                     return;
             }
             const sent = await (0, whatsapp_service_1.sendWhatsAppMessage)({
@@ -101,8 +97,15 @@ Please be ready 🚀`;
     }), {
         connection: (0, redis_1.getWorkerRedisConnection)(),
         concurrency: 5,
-    })
-    : null;
-if (!shouldRunWorker) {
-    console.log("[bookingReminder.worker] RUN_WORKER disabled, worker not started");
-}
+    });
+    globalForBookingReminderWorker.__sylphBookingReminderWorker = worker;
+    return worker;
+};
+exports.initBookingReminderWorker = initBookingReminderWorker;
+const closeBookingReminderWorker = async () => {
+    await globalForBookingReminderWorker.__sylphBookingReminderWorker
+        ?.close()
+        .catch(() => undefined);
+    globalForBookingReminderWorker.__sylphBookingReminderWorker = undefined;
+};
+exports.closeBookingReminderWorker = closeBookingReminderWorker;

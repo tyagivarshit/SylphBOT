@@ -10,6 +10,7 @@ import {
   AnalyticsConversionEventRecord,
   AnalyticsLeadRecord,
   AnalyticsMessageRecord,
+  AnalyticsRevenueBrainEventRecord,
   AnalyticsTrackedMessageRecord,
   getAllLeadAppointments,
   getAllLeads,
@@ -19,6 +20,7 @@ import {
   getConversionEventsInRange,
   getLeadsInRange,
   getMessagesInRange,
+  getRevenueBrainAnalyticsInRange,
   getTrackedMessagesInRange,
 } from "../analytics/analyticsDashboard.repository";
 import { getVariantPerformance } from "./salesAgent/abTesting.service";
@@ -64,7 +66,7 @@ const QUALIFIED_STAGES = new Set(["QUALIFIED", "READY_TO_BUY", "WON"]);
 const READY_STAGES = new Set(["READY_TO_BUY", "WON"]);
 const INBOUND_SENDERS = new Set(["USER"]);
 const OUTBOUND_SENDERS = new Set(["AI", "AGENT"]);
-const ACTIVE_BOOKING_STATUSES = new Set(["BOOKED", "RESCHEDULED", "CONFIRMED"]);
+const ACTIVE_BOOKING_STATUSES = new Set(["RESCHEDULED", "CONFIRMED"]);
 
 const RANGE_CONFIG: Record<
   string,
@@ -758,6 +760,214 @@ function buildRevenueEngineMetrics(
   };
 }
 
+const REVENUE_BRAIN_TRACKING_SOURCES = new Set([
+  "SALES",
+  "BOOKING",
+  "AUTOMATION",
+  "ESCALATE",
+]);
+
+const asMetaRecord = (value: unknown) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const asMetaString = (value: unknown) => {
+  const text = String(value || "").trim();
+  return text || null;
+};
+
+const asMetaNumber = (value: unknown) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+};
+
+function buildStageFunnel(
+  stages: Array<{
+    key: string;
+    label: string;
+    count: number;
+  }>
+) {
+  return stages.map((stage, index) => ({
+    ...stage,
+    conversionFromTop: percent(stage.count, stages[0]?.count || 0),
+    conversionFromPrevious:
+      index === 0 ? 100 : percent(stage.count, stages[index - 1]?.count || 0),
+  }));
+}
+
+function buildRevenueBrainMetrics(
+  analyticsEvents: AnalyticsRevenueBrainEventRecord[],
+  trackedMessages: AnalyticsTrackedMessageRecord[],
+  conversionEvents: AnalyticsConversionEventRecord[]
+) {
+  const completedEvents = analyticsEvents.filter(
+    (event) => event.type === "REVENUE_BRAIN_COMPLETED"
+  );
+  const failedEvents = analyticsEvents.filter(
+    (event) => event.type === "REVENUE_BRAIN_FAILED"
+  );
+  const toolEvents = analyticsEvents.filter(
+    (event) => event.type === "REVENUE_BRAIN_TOOL"
+  );
+  const revenueBrainTrackedMessages = trackedMessages.filter((message) =>
+    REVENUE_BRAIN_TRACKING_SOURCES.has(String(message.source || "").toUpperCase())
+  );
+  const revenueBrainMessageIds = new Set(
+    revenueBrainTrackedMessages.map((message) => message.messageId)
+  );
+  const attributedConversions = conversionEvents.filter(
+    (event) => event.messageId && revenueBrainMessageIds.has(event.messageId)
+  );
+  const engagedMessageIds = new Set(
+    attributedConversions
+      .filter((event) =>
+        ["replied", "opened", "link_clicked", "booked_call", "payment_completed"].includes(
+          String(event.outcome || "").toLowerCase()
+        )
+      )
+      .map((event) => event.messageId!)
+  );
+  const bookedMessageIds = new Set(
+    attributedConversions
+      .filter((event) =>
+        ["booked_call", "payment_completed"].includes(
+          String(event.outcome || "").toLowerCase()
+        )
+      )
+      .map((event) => event.messageId!)
+  );
+  const convertedMessageIds = new Set(
+    attributedConversions
+      .filter(
+        (event) => String(event.outcome || "").toLowerCase() === "payment_completed"
+      )
+      .map((event) => event.messageId!)
+  );
+  const routeCounts = new Map<string, number>();
+  const toolCounts = new Map<
+    string,
+    { applied: number; failed: number; skipped: number }
+  >();
+  let latencyTotal = 0;
+  let knowledgeHitTotal = 0;
+  let memoryHitCount = 0;
+
+  for (const event of completedEvents) {
+    const meta = asMetaRecord(event.meta);
+    const route = asMetaString(meta?.route) || "UNKNOWN";
+    routeCounts.set(route, (routeCounts.get(route) || 0) + 1);
+    latencyTotal += asMetaNumber(meta?.latencyMs);
+    knowledgeHitTotal += asMetaNumber(meta?.knowledgeHitCount);
+
+    if (asMetaNumber(meta?.freshMemoryFactCount) > 0) {
+      memoryHitCount += 1;
+    }
+  }
+
+  for (const event of toolEvents) {
+    const meta = asMetaRecord(event.meta);
+    const tool = asMetaString(meta?.tool) || "unknown";
+    const status = asMetaString(meta?.status) || "skipped";
+    const current = toolCounts.get(tool) || {
+      applied: 0,
+      failed: 0,
+      skipped: 0,
+    };
+
+    if (status === "applied") current.applied += 1;
+    else if (status === "failed") current.failed += 1;
+    else current.skipped += 1;
+
+    toolCounts.set(tool, current);
+  }
+
+  const actionableToolAttempts = Array.from(toolCounts.values()).reduce(
+    (sum, item) => sum + item.applied + item.failed,
+    0
+  );
+  const actionableToolSuccess = Array.from(toolCounts.values()).reduce(
+    (sum, item) => sum + item.applied,
+    0
+  );
+
+  return {
+    summary: {
+      runs: completedEvents.length + failedEvents.length,
+      completed: completedEvents.length,
+      failed: failedEvents.length,
+      successRate: percent(
+        completedEvents.length,
+        completedEvents.length + failedEvents.length
+      ),
+      toolSuccessRate: percent(actionableToolSuccess, actionableToolAttempts),
+      avgLatencyMs:
+        completedEvents.length > 0
+          ? round(latencyTotal / completedEvents.length, 1)
+          : 0,
+      avgKnowledgeHits:
+        completedEvents.length > 0
+          ? round(knowledgeHitTotal / completedEvents.length, 2)
+          : 0,
+      memoryHitRate: percent(memoryHitCount, completedEvents.length),
+      conversionRate: percent(
+        bookedMessageIds.size,
+        revenueBrainTrackedMessages.length
+      ),
+    },
+    routes: Array.from(routeCounts.entries())
+      .map(([route, count]) => ({
+        route,
+        count,
+        share: percent(count, completedEvents.length),
+      }))
+      .sort((left, right) => right.count - left.count),
+    tools: Array.from(toolCounts.entries())
+      .map(([tool, counts]) => ({
+        tool,
+        applied: counts.applied,
+        failed: counts.failed,
+        skipped: counts.skipped,
+        successRate: percent(counts.applied, counts.applied + counts.failed),
+      }))
+      .sort((left, right) => {
+        if (right.applied !== left.applied) {
+          return right.applied - left.applied;
+        }
+
+        return right.failed - left.failed;
+      }),
+    funnel: buildStageFunnel([
+      {
+        key: "runs",
+        label: "Runs",
+        count: completedEvents.length,
+      },
+      {
+        key: "replies",
+        label: "Replies Sent",
+        count: revenueBrainTrackedMessages.length,
+      },
+      {
+        key: "engaged",
+        label: "Engaged",
+        count: engagedMessageIds.size,
+      },
+      {
+        key: "booked",
+        label: "Booked",
+        count: bookedMessageIds.size,
+      },
+      {
+        key: "converted",
+        label: "Converted",
+        count: convertedMessageIds.size,
+      },
+    ]),
+  };
+}
+
 function getHealthScore(params: {
   leadToBookingRate: number;
   qualificationRate: number;
@@ -842,6 +1052,7 @@ export async function getAnalyticsDashboard(
     previousAppointments,
     allLeadAppointments,
     currentConversionEvents,
+    currentRevenueBrainEvents,
     currentTrackedMessages,
     variantPerformance,
   ] = await Promise.all([
@@ -855,6 +1066,11 @@ export async function getAnalyticsDashboard(
     getAppointmentsInRange(businessId, window.previous.start, window.previous.end),
     getAllLeadAppointments(businessId),
     getConversionEventsInRange(businessId, window.current.start, window.current.end),
+    getRevenueBrainAnalyticsInRange(
+      businessId,
+      window.current.start,
+      window.current.end
+    ),
     getTrackedMessagesInRange(businessId, window.current.start, window.current.end),
     getVariantPerformance({ businessId }),
   ]);
@@ -872,6 +1088,11 @@ export async function getAnalyticsDashboard(
     currentConversionEvents,
     currentLeads,
     currentLeadBookedIds
+  );
+  const revenueBrain = buildRevenueBrainMetrics(
+    currentRevenueBrainEvents,
+    currentTrackedMessages,
+    currentConversionEvents
   );
 
   if (currentTrackedMessages.length >= 10) {
@@ -1066,6 +1287,7 @@ export async function getAnalyticsDashboard(
       variantPerformance,
       funnelBreakdown: buildFunnel(allLeads, allBookedLeadIds),
     },
+    revenueBrain,
     sourcePerformance,
     deepDive,
   };

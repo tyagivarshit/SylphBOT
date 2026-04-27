@@ -1,5 +1,6 @@
 import prisma from "../config/prisma";
 import { isHumanActive } from "./humanTakeoverManager.service";
+import { estimateSalesIntentConfidence } from "./salesAgent/output.service";
 import { buildSalesAgentContext } from "./salesAgent/intelligence.service";
 import {
   buildSalesAgentRecoveryReply,
@@ -68,67 +69,6 @@ const buildSpamGuardrailReply = (): SalesAgentReply => ({
   reason: "spam_guardrail",
 });
 
-const estimateIntentConfidence = (
-  message: string,
-  intent: SalesIntent
-): number => {
-  const text = normalizeMessage(message).toLowerCase();
-
-  if (!text) {
-    return 0.35;
-  }
-
-  if (
-    intent === "GREETING" &&
-    /^(hi|hello|hey|hii|yo|namaste|hola|hello there|hey there)$/i.test(text)
-  ) {
-    return 0.98;
-  }
-
-  if (
-    intent === "PRICING" &&
-    /price|pricing|cost|fees|package|packages|plan|plans|investment|charges/.test(
-      text
-    )
-  ) {
-    return 0.96;
-  }
-
-  if (
-    intent === "BOOKING" &&
-    /book|booking|schedule|slot|call|meeting|demo/.test(text)
-  ) {
-    return 0.96;
-  }
-
-  if (
-    intent === "PURCHASE" &&
-    /buy|purchase|pay|payment|checkout|invoice|link/.test(text)
-  ) {
-    return 0.97;
-  }
-
-  if (
-    intent === "OBJECTION" &&
-    /expensive|trust|proof|review|later|not sure|skeptical|worth it/.test(text)
-  ) {
-    return 0.92;
-  }
-
-  if (intent === "QUALIFICATION" || intent === "ENGAGEMENT") {
-    return 0.84;
-  }
-
-  if (
-    intent === "GENERAL" &&
-    (text.includes("?") || text.split(/\s+/).length > 4)
-  ) {
-    return 0.78;
-  }
-
-  return 0.7;
-};
-
 export const generateUnifiedAIReply = async (
   input: UnifiedAIInput
 ): Promise<SalesAgentReply | null> => {
@@ -194,7 +134,7 @@ export const analyzeUnifiedSalesIntent = async (
 
     return {
       intent: context.profile.intent,
-      confidence: estimateIntentConfidence(message, context.profile.intent),
+      confidence: estimateSalesIntentConfidence(message, context.profile.intent),
       stage: context.profile.stage,
       temperature: context.profile.temperature,
       leadScore: context.profile.leadScore,

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getLeadControlState = exports.toggleHumanControl = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
+const leadControlState_service_1 = require("../services/leadControlState.service");
 /* ======================================================
 TOGGLE HUMAN CONTROL (AI ↔ HUMAN SWITCH)
 ====================================================== */
@@ -56,6 +57,12 @@ const toggleHumanControl = async (req, res) => {
                 isHumanActive: nextState,
             },
         });
+        if (nextState) {
+            await (0, leadControlState_service_1.markLeadHumanTakeover)({
+                leadId: String(leadId),
+                businessId: String(businessId),
+            }).catch(() => undefined);
+        }
         /* ======================================================
         SOCKET BROADCAST (REAL-TIME UI UPDATE)
         ====================================================== */
@@ -110,10 +117,17 @@ const getLeadControlState = async (req, res) => {
                 message: "Lead not found",
             });
         }
+        const controlState = await (0, leadControlState_service_1.getLeadControlAuthority)({
+            leadId: String(leadId),
+            businessId: String(businessId),
+        });
         return res.json({
             success: true,
             isHumanActive: lead.isHumanActive,
             mode: lead.isHumanActive ? "HUMAN" : "AI",
+            cancelTokenVersion: controlState?.cancelTokenVersion ?? 0,
+            lastManualOutboundAt: controlState?.lastManualOutboundAt || null,
+            lastHumanTakeoverAt: controlState?.lastHumanTakeoverAt || null,
         });
     }
     catch (error) {

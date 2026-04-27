@@ -25,10 +25,8 @@ export const buildQueueJobOptions = (
 
 const getQueueMethodFallback = (methodName: string) => {
   switch (methodName) {
-    case "add":
     case "getJob":
       return null;
-    case "addBulk":
     case "getJobs":
       return [];
     case "count":
@@ -38,6 +36,10 @@ const getQueueMethodFallback = (methodName: string) => {
     default:
       return null;
   }
+};
+
+const throwQueueWriteUnavailable = (queueName: string, methodName: string) => {
+  throw new Error(`queue_unavailable:${queueName}.${methodName}`);
 };
 
 export const createResilientQueue = <T extends Queue<any>>(
@@ -54,18 +56,34 @@ export const createResilientQueue = <T extends Queue<any>>(
 
       if (
         property === "add" ||
-        property === "addBulk" ||
         property === "getJob" ||
         property === "getJobs" ||
         property === "count" ||
         property === "getJobCounts"
       ) {
+        const methodName = String(property);
+
         return (...args: unknown[]) =>
           safeRedisCall(
             () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
-            getQueueMethodFallback(String(property)),
+            property === "add"
+              ? () => throwQueueWriteUnavailable(queueName, methodName)
+              : getQueueMethodFallback(methodName),
             {
-              operation: `queue.${queueName}.${String(property)}`,
+              operation: `queue.${queueName}.${methodName}`,
+            }
+          );
+      }
+
+      if (property === "addBulk") {
+        const methodName = String(property);
+
+        return (...args: unknown[]) =>
+          safeRedisCall(
+            () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
+            () => throwQueueWriteUnavailable(queueName, methodName),
+            {
+              operation: `queue.${queueName}.${methodName}`,
             }
           );
       }
@@ -96,7 +114,7 @@ export const withRedisWorkerFailSafe = <
         );
       }
 
-      return;
+      throw new Error(`redis_circuit_open:${queueName}`);
     }
 
     return handler(job);

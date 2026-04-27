@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useUpgrade } from "@/app/(dashboard)/layout";
-import { buildApiUrl } from "@/lib/url";
+import { getUsageOverview } from "@/lib/usage.service";
 import { notify } from "@/lib/toast";
 import AutomationStep from "./AutomationStep";
 
@@ -185,14 +185,9 @@ export default function AutomationBuilder({
 
     const loadUsage = async () => {
       try {
-        const response = await fetch(buildApiUrl("/api/usage"), {
-          credentials: "include",
-          cache: "no-store",
-        });
+        const data = await getUsageOverview();
 
-        const data = await response.json().catch(() => null);
-
-        if (!mounted || !response.ok || !data || data.success === false) {
+        if (!mounted || !data) {
           return;
         }
 

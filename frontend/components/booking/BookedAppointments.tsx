@@ -33,7 +33,7 @@ export default function BookedAppointments({
       let data = res.data.bookings || [];
 
       if (filter === "UPCOMING") {
-        data = data.filter((b: Booking) => b.status === "BOOKED");
+        data = data.filter((b: Booking) => b.status === "CONFIRMED");
       } else if (filter === "CANCELLED") {
         data = data.filter((b: Booking) => b.status === "CANCELLED");
       } else if (filter === "RESCHEDULED") {

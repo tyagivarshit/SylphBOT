@@ -1,4 +1,9 @@
-import { buildApiUrl } from "@/lib/url";
+import {
+  apiClient,
+  getApiErrorData,
+  getApiErrorMessage,
+  getApiErrorStatus,
+} from "@/lib/apiClient";
 
 export type ApiKeyScope = "READ_ONLY" | "WRITE" | "ADMIN";
 
@@ -190,6 +195,22 @@ const normalizeJsonHeaders = (headers?: HeadersInit) => {
   return nextHeaders;
 };
 
+const headersToObject = (headers?: HeadersInit) => {
+  if (!headers) {
+    return undefined;
+  }
+
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return headers;
+};
+
 const toBoundaryIso = (value: string, boundary: "start" | "end") => {
   if (!value.trim()) {
     return "";
@@ -210,23 +231,24 @@ const requestJson = async (
   options: RequestInit = {},
   fallbackMessage = "Request failed"
 ) => {
-  const response = await fetch(buildApiUrl(path), {
-    ...options,
-    credentials: "include",
-    cache: "no-store",
-  });
+  try {
+    const response = await apiClient.request({
+      url: path,
+      method: options.method || "GET",
+      data: options.body,
+      headers: headersToObject(options.headers),
+    });
 
-  const payload = await readJson<unknown>(response);
+    return response.data;
+  } catch (error) {
+    const payload = getApiErrorData(error);
 
-  if (!response.ok) {
     throw new SecurityRequestError(
-      getErrorMessage(payload, fallbackMessage),
-      response.status,
+      getApiErrorMessage(error, fallbackMessage),
+      getApiErrorStatus(error) ?? 500,
       payload
     );
   }
-
-  return payload;
 };
 
 export const isSecurityRequestError = (
@@ -354,30 +376,8 @@ export async function fetchAuditLogs(
 }
 
 export async function fetchSecurityAlerts(): Promise<SecurityAlertsResponse> {
-  const response = await fetch(buildApiUrl("/security/alerts"), {
-    credentials: "include",
-    cache: "no-store",
-  });
-
-  const payload = await readJson<unknown>(response);
-
-  if (response.status === 404) {
-    return {
-      alerts: [],
-      unsupported: true,
-    };
-  }
-
-  if (!response.ok) {
-    throw new SecurityRequestError(
-      getErrorMessage(payload, "Failed to load security alerts"),
-      response.status,
-      payload
-    );
-  }
-
   return {
-    alerts: extractArray<SecurityAlertRecord>(payload, "alerts"),
-    unsupported: false,
+    alerts: [],
+    unsupported: true,
   };
 }

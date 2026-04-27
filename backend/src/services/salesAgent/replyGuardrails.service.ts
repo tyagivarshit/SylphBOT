@@ -670,15 +670,12 @@ const buildActionDrivenReplyMessage = (
 
   if (action === "SHOW_PRICING") {
     const line1 =
-      extractPricingSnippetFromContext(context)
-        ? alternate
-          ? `Quick pricing view: ${extractPricingSnippetFromContext(context)}`
-          : extractPricingSnippetFromContext(context)
-        : alternate
-          ? "I don't have the exact pricing loaded right now, so I won't guess."
-          : "I don't have the exact pricing loaded right now, so I won't guess.";
+      "Quick question before I share pricing: is this mainly for leads, support, or booking?";
+    const line2 = extractPricingSnippetFromContext(context)
+      ? "Once I know that, I'll point you to the closest-fit price range fast."
+      : "If I need the exact number, let me confirm that for you.";
 
-    return normalizeReplyLines([line1, buildCtaLine(context, cta)].join("\n"))
+    return normalizeReplyLines([line1, line2].join("\n"))
       .slice(0, 2)
       .join("\n");
   }
@@ -969,7 +966,7 @@ export const buildRecoverySalesReply = (
   if (/price|pricing|cost|fees|package|plan/.test(text)) {
     return {
       message:
-        "I can help with pricing, but I don't want to guess details I don't have.\nTell me your use case and I'll guide the closest fit fast.",
+        "Quick question before I share pricing: is this mainly for leads, support, or booking?\nIf I need the exact number, let me confirm that for you.",
       cta: "REPLY_DM",
       angle: "value",
       reason: "recovery",

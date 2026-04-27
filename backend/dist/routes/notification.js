@@ -27,7 +27,13 @@ router.get("/", async (req, res) => {
             where: { userId, read: false },
         }),
     ]);
-    res.json({ notifications, unreadCount });
+    res.json({
+        success: true,
+        data: {
+            notifications,
+            unreadCount,
+        },
+    });
 });
 /* ======================================================
 🔥 GET NOTIFICATION SETTINGS
@@ -46,7 +52,10 @@ router.get("/settings", async (req, res) => {
             data: { userId },
         });
     }
-    res.json(settings);
+    res.json({
+        success: true,
+        data: settings,
+    });
 });
 /* ======================================================
 🔥 UPDATE NOTIFICATION SETTINGS
@@ -62,7 +71,10 @@ router.patch("/settings", async (req, res) => {
         update: { email, whatsapp, leads },
         create: { userId, email, whatsapp, leads },
     });
-    res.json(updated);
+    res.json({
+        success: true,
+        data: updated,
+    });
 });
 /* ======================================================
 🔥 MARK SINGLE READ (SECURE)
@@ -86,7 +98,12 @@ router.patch("/:id/read", async (req, res) => {
         io.to(`user_${userId}`).emit("notification_read", { id });
     }
     catch { }
-    res.json({ success: true });
+    res.json({
+        success: true,
+        data: {
+            id,
+        },
+    });
 });
 /* ======================================================
 🔥 MARK ALL READ
@@ -103,6 +120,11 @@ router.patch("/read-all", async (req, res) => {
         io.to(`user_${userId}`).emit("notifications_cleared");
     }
     catch { }
-    res.json({ success: true });
+    res.json({
+        success: true,
+        data: {
+            userId,
+        },
+    });
 });
 exports.default = router;

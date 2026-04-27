@@ -6,7 +6,7 @@ import { ShieldCheck, Sparkles } from "lucide-react";
 import { createCheckoutSession } from "@/lib/billing";
 import { notify } from "@/lib/toast";
 import PaymentHistory from "@/components/billing/PaymentHistory";
-import { buildApiUrl } from "@/lib/userApi";
+import { apiFetch } from "@/lib/apiClient";
 import LoadingButton from "@/components/ui/LoadingButton";
 import {
   RetryState,
@@ -112,18 +112,16 @@ const isCurrentPlan = (
 };
 
 async function fetchJson<T>(url: string) {
-  const res = await fetch(url, {
+  const response = await apiFetch<T>(url, {
     credentials: "include",
     cache: "no-store",
   });
 
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    throw new Error(data?.message || "Request failed");
+  if (!response.success || !response.data) {
+    throw new Error(response.message || "Request failed");
   }
 
-  return data as T;
+  return response.data as T;
 }
 
 function BillingPageContent() {
@@ -149,8 +147,8 @@ function BillingPageContent() {
       setError(null);
 
       const [billingData, plansData] = await Promise.all([
-        fetchJson<BillingApiResponse>(buildApiUrl("/api/billing")),
-        fetchJson<PlansResponse>(buildApiUrl("/api/billing/plans")),
+        fetchJson<BillingApiResponse>("/api/billing"),
+        fetchJson<PlansResponse>("/api/billing/plans"),
       ]);
 
       setSubscription(billingData.subscription || null);

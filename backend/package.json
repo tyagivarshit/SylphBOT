@@ -4,10 +4,13 @@
   "description": "",
   "main": "dist/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run build && node dist/tests/run-tests.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "dev:worker": "ts-node-dev --respawn --transpile-only src/workers/ai.partition.worker.ts",
+    "dev:worker": "ts-node-dev --respawn --transpile-only src/workers/ai.worker.ts",
     "build": "tsc",
+    "prisma:generate": "npx prisma generate",
+    "prisma:db:push": "npx prisma db push",
+    "prisma:rollout:phase2b": "npm run prisma:generate && npm run prisma:db:push",
     "start": "node dist/server.js",
     "start:worker": "node dist/workers/ai.worker.js"
   },

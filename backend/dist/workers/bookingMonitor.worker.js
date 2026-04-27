@@ -36,126 +36,115 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bookingMonitorWorker = void 0;
+exports.closeBookingMonitorWorker = exports.initBookingMonitorWorker = void 0;
 const bullmq_1 = require("bullmq");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = require("../config/redis");
 const queue_defaults_1 = require("../queues/queue.defaults");
+const refreshEvents_service_1 = require("../services/crm/refreshEvents.service");
 const whatsapp_service_1 = require("../services/whatsapp.service");
 const aiFollowup_service_1 = require("../services/aiFollowup.service");
-/*
-=========================================================
-MISSED BOOKING MONITOR (PRODUCTION SAFE)
-=========================================================
-*/
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
     process.env.RUN_WORKER === undefined;
-exports.bookingMonitorWorker = shouldRunWorker
-    ? new bullmq_1.Worker("booking-monitor", (0, queue_defaults_1.withRedisWorkerFailSafe)("booking-monitor", async () => {
+const globalForBookingMonitorWorker = globalThis;
+const initBookingMonitorWorker = () => {
+    if (!shouldRunWorker) {
+        console.log("[bookingMonitor.worker] RUN_WORKER disabled, worker not started");
+        return null;
+    }
+    if (globalForBookingMonitorWorker.__sylphBookingMonitorWorker) {
+        return globalForBookingMonitorWorker.__sylphBookingMonitorWorker;
+    }
+    const worker = new bullmq_1.Worker("booking-monitor", (0, queue_defaults_1.withRedisWorkerFailSafe)("booking-monitor", async () => {
         try {
             const now = new Date();
-            console.log("🧠 Running booking monitor...");
-            /* =================================================
-            🔥 LIMIT QUERY (SCALABLE)
-            ================================================= */
             const missedAppointments = await prisma_1.default.appointment.findMany({
                 where: {
-                    status: "BOOKED",
+                    status: "CONFIRMED",
                     startTime: {
                         lt: new Date(now.getTime() - 10 * 60 * 1000),
                     },
                 },
                 include: { lead: true },
-                take: 50, // 🔥 IMPORTANT (batch processing)
+                take: 50,
             });
-            for (const appt of missedAppointments) {
+            for (const appointment of missedAppointments) {
                 try {
-                    /* =================================================
-                    🔒 DOUBLE CHECK (ANTI DUPLICATE)
-                    ================================================= */
-                    if (appt.status !== "BOOKED")
+                    if (appointment.status !== "CONFIRMED") {
                         continue;
-                    /* =================================================
-                    🔥 MARK MISSED
-                    ================================================= */
+                    }
                     await prisma_1.default.appointment.update({
-                        where: { id: appt.id },
+                        where: { id: appointment.id },
                         data: { status: "MISSED" },
                     });
-                    /* =================================================
-          🧠 SET RESCHEDULE STATE (NEW)
-          ================================================= */
+                    if (appointment.leadId) {
+                        await (0, refreshEvents_service_1.publishCRMRefreshEvent)({
+                            businessId: appointment.businessId,
+                            leadId: appointment.leadId,
+                            event: "booking_missed",
+                        });
+                    }
                     try {
                         const { setConversationState } = await Promise.resolve().then(() => __importStar(require("../services/conversationState.service")));
-                        if (appt.lead?.id) {
-                            await setConversationState(appt.lead.id, "RESCHEDULE_FLOW", {
+                        if (appointment.lead?.id) {
+                            await setConversationState(appointment.lead.id, "RESCHEDULE_FLOW", {
                                 context: { from: "MISSED_BOOKING" },
                             });
-                            console.log("🧠 RESCHEDULE STATE SET:", appt.lead.id);
                         }
-                        console.log("🧠 RESCHEDULE STATE SET:", appt.leadId);
                     }
-                    catch (err) {
-                        console.error("❌ STATE SET ERROR:", err);
+                    catch (error) {
+                        console.error("STATE SET ERROR:", error);
                     }
-                    console.log("⚠️ Marked MISSED:", appt.id);
-                    /* =================================================
-                    📞 FORMAT PHONE
-                    ================================================= */
                     let finalPhone = null;
-                    if (appt.lead?.phone) {
-                        const raw = appt.lead.phone.replace(/\D/g, "");
+                    if (appointment.lead?.phone) {
+                        const raw = appointment.lead.phone.replace(/\D/g, "");
                         finalPhone = raw.startsWith("91") ? raw : `91${raw}`;
                     }
-                    /* =================================================
-                    📲 SEND WHATSAPP
-                    ================================================= */
                     if (finalPhone) {
                         await (0, whatsapp_service_1.sendWhatsAppMessage)({
                             to: finalPhone,
-                            message: `😔 We missed you today.
-
-Would you like to reschedule your appointment?
-
-Reply YES and we’ll set it up again 👍`,
+                            message: "We missed you today.\n\nWould you like to reschedule your appointment?",
                         });
                     }
-                    /* =================================================
-                    🤖 AI FOLLOWUP (NON BLOCKING)
-                    ================================================= */
-                    if (appt.lead?.id) {
-                        (0, aiFollowup_service_1.sendAIFollowup)(appt.lead.id).catch((err) => {
-                            console.error("❌ AI FOLLOWUP ERROR:", err);
+                    if (appointment.lead?.id) {
+                        (0, aiFollowup_service_1.sendAIFollowup)(appointment.lead.id).catch((error) => {
+                            console.error("AI FOLLOWUP ERROR:", error);
                         });
                     }
-                    /* =================================================
-                    📊 ANALYTICS (SAFE)
-                    ================================================= */
-                    prisma_1.default.analytics.create({
+                    prisma_1.default.analytics
+                        .create({
                         data: {
-                            businessId: appt.businessId,
+                            businessId: appointment.businessId,
                             type: "BOOKING_MISSED",
                             meta: {
-                                appointmentId: appt.id,
-                                leadId: appt.leadId,
+                                appointmentId: appointment.id,
+                                leadId: appointment.leadId,
                                 time: new Date(),
                             },
                         },
-                    }).catch(() => { });
+                    })
+                        .catch(() => undefined);
                 }
-                catch (err) {
-                    console.error("❌ ERROR PROCESSING APPT:", appt.id, err);
+                catch (error) {
+                    console.error("ERROR PROCESSING APPOINTMENT:", appointment.id, error);
                 }
             }
         }
         catch (error) {
-            console.error("❌ BOOKING MONITOR ERROR:", error);
+            console.error("BOOKING MONITOR ERROR:", error);
         }
     }), {
         connection: (0, redis_1.getWorkerRedisConnection)(),
-        concurrency: 1, // 🔥 IMPORTANT (avoid race condition)
-    })
-    : null;
-if (!shouldRunWorker) {
-    console.log("[bookingMonitor.worker] RUN_WORKER disabled, worker not started");
-}
+        concurrency: 1,
+    });
+    globalForBookingMonitorWorker.__sylphBookingMonitorWorker = worker;
+    return worker;
+};
+exports.initBookingMonitorWorker = initBookingMonitorWorker;
+const closeBookingMonitorWorker = async () => {
+    await globalForBookingMonitorWorker.__sylphBookingMonitorWorker
+        ?.close()
+        .catch(() => undefined);
+    globalForBookingMonitorWorker.__sylphBookingMonitorWorker = undefined;
+};
+exports.closeBookingMonitorWorker = closeBookingMonitorWorker;

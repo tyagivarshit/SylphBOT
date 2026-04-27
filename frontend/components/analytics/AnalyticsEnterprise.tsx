@@ -172,6 +172,117 @@ function TrendSection({ dashboard }: { dashboard: AnalyticsDashboard }) {
   );
 }
 
+function RevenueBrainOps({ dashboard }: { dashboard: AnalyticsDashboard }) {
+  return (
+    <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+      <div className="rounded-[30px] border border-slate-200/80 bg-white/84 p-5 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+          Revenue Brain Ops
+        </p>
+        <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">
+          Runtime health, tool reliability, and memory quality
+        </h3>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricChip label="Runs" value={String(dashboard.revenueBrain.summary.runs)} />
+          <MetricChip label="Success" value={`${dashboard.revenueBrain.summary.successRate}%`} />
+          <MetricChip label="Tool success" value={`${dashboard.revenueBrain.summary.toolSuccessRate}%`} />
+          <MetricChip label="Memory hit" value={`${dashboard.revenueBrain.summary.memoryHitRate}%`} />
+          <MetricChip label="Avg latency" value={`${dashboard.revenueBrain.summary.avgLatencyMs} ms`} />
+          <MetricChip label="Avg knowledge" value={String(dashboard.revenueBrain.summary.avgKnowledgeHits)} />
+          <MetricChip label="Replies->booked" value={`${dashboard.revenueBrain.summary.conversionRate}%`} />
+          <MetricChip label="Failures" value={String(dashboard.revenueBrain.summary.failed)} />
+        </div>
+
+        <div className="mt-6 space-y-3">
+          {dashboard.revenueBrain.routes.length === 0 ? (
+            <p className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+              Revenue Brain activity is not available for this range yet.
+            </p>
+          ) : (
+            dashboard.revenueBrain.routes.map((route, index) => (
+              <div key={route.route} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-semibold text-slate-900">{route.route}</span>
+                  <span className="text-slate-500">{route.count} runs • {route.share}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${Math.max(route.share, 4)}%`, backgroundColor: COLORS[index % COLORS.length] }}
+                  />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        <div className="rounded-[30px] border border-slate-200/80 bg-white/84 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Tool Reliability
+          </p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">
+            Applied vs failed tool executions
+          </h3>
+          <div className="mt-5 space-y-3">
+            {dashboard.revenueBrain.tools.length === 0 ? (
+              <p className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                No Revenue Brain tools were executed in this range.
+              </p>
+            ) : (
+              dashboard.revenueBrain.tools.map((tool) => (
+                <div key={tool.tool} className="rounded-[22px] border border-slate-200/80 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">{tool.tool}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {tool.applied} applied • {tool.failed} failed • {tool.skipped} skipped
+                      </p>
+                    </div>
+                    <MetricChip label="Success" value={`${tool.successRate}%`} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-[30px] border border-slate-200/80 bg-white/84 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Revenue Brain Funnel
+          </p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">
+            Run to conversion progression
+          </h3>
+          <div className="mt-5 space-y-4">
+            {dashboard.revenueBrain.funnel.map((stage) => (
+              <div key={stage.key} className="space-y-2">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <div>
+                    <p className="font-semibold text-slate-900">{stage.label}</p>
+                    <p className="text-xs text-slate-500">{stage.conversionFromPrevious}% from previous</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-slate-900">{stage.count}</p>
+                    <p className="text-xs text-slate-500">{stage.conversionFromTop}% of runs</p>
+                  </div>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#081223] via-[#1E5EFF] to-[#14B8A6]"
+                    style={{ width: `${Math.max(stage.conversionFromTop, 4)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeepDive({ dashboard }: { dashboard: AnalyticsDashboard }) {
   return (
     <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
@@ -409,6 +520,7 @@ export default function AnalyticsEnterprise() {
 
       <SummaryCards dashboard={dashboard} />
       <TrendSection dashboard={dashboard} />
+      <RevenueBrainOps dashboard={dashboard} />
       <DeepDive dashboard={dashboard} />
     </div>
   );

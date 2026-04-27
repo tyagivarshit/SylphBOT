@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import { selectBestAction } from "./decisionEngine.service";
 import { buildSalesAgentContext } from "./intelligence.service";
+import {
+  buildFallbackStructuredSalesOutput,
+  buildStructuredSalesOutput,
+} from "./output.service";
 import { recordSalesReplyEvent } from "./optimizer.service";
 import { persistSalesProgressionState } from "./progression.service";
 import { cacheSalesReplyState } from "./replyCache.service";
@@ -141,14 +145,26 @@ const buildReplyResult = ({
     reply,
   });
   const replyMeta = getReplyMetaRecord(reply);
+  const structuredContext = {
+    ...context,
+    decision: effectiveDecision,
+    progression: effectiveProgression,
+  };
+  const structured = buildStructuredSalesOutput({
+    context: structuredContext,
+    reply,
+  });
 
   return {
     effectiveDecision,
     effectiveProgression,
     finalReply: {
       ...reply,
+      confidence: structured.confidence,
+      structured,
       meta: {
         ...replyMeta,
+        structuredOutput: structured,
         planKey: context.planKey,
         temperature: context.profile.temperature,
         stage: context.profile.stage,
@@ -368,7 +384,7 @@ const buildMissingInfoReply = (
   if (kind === "pricing") {
     return {
       message:
-        "I don't have the exact pricing loaded right now, so I won't guess.\nTell me your use case and I'll guide the closest fit fast.",
+        "Quick question before I share pricing: is this mainly for leads, support, or booking?\nIf I need the exact number, let me confirm that for you.",
       cta: "REPLY_DM",
       angle: "value",
       reason: "instant_missing_pricing",
@@ -378,7 +394,7 @@ const buildMissingInfoReply = (
   if (kind === "business") {
     return {
       message:
-        "I don't have that exact business detail loaded right now.\nIf you want services, pricing, or booking help, tell me which one and I'll help fast.",
+        "Let me confirm that for you.\nIf you want services, pricing, or booking help first, tell me which one.",
       cta: "REPLY_DM",
       angle: getFallbackAngle(context),
       reason: "instant_missing_business",
@@ -387,7 +403,7 @@ const buildMissingInfoReply = (
 
   return {
     message:
-      "I don't have that specific info loaded right now.\nIf you tell me what you need, I'll guide the closest fit fast.",
+      "Let me confirm that for you.\nTell me if you want pricing, services, or booking help first.",
     cta: "REPLY_DM",
     angle: getFallbackAngle(context),
     reason: "instant_missing_general",
@@ -442,7 +458,8 @@ const buildInstantSalesReply = (
 
     if (action === "SHOW_PRICING") {
       return {
-        message: `${pricingSnippet}\nWant the best-fit option for your use case?`,
+        message:
+          "Quick question before I share pricing: is this mainly for leads, support, or booking?\nOnce I know that, I'll point you to the closest-fit price range fast.",
         cta: "REPLY_DM",
         angle: "value",
         reason: "instant_pricing",
@@ -651,4 +668,13 @@ export const buildSalesAgentRecoveryReply = (
     previousIntent?: string | null;
     lastAction?: string | null;
   }
-) => buildRecoverySalesReply(message, options);
+) => {
+  const recovery = buildRecoverySalesReply(message, options);
+
+  return {
+    ...recovery,
+    confidence: recovery.confidence ?? 0.35,
+    structured:
+      recovery.structured || buildFallbackStructuredSalesOutput(recovery),
+  };
+};

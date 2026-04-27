@@ -1,40 +1,51 @@
-import { buildApiUrl } from "@/lib/url"
+import { apiFetch } from "@/lib/apiClient";
+
+type ClientRecord = {
+  id: string;
+  platform: string;
+  [key: string]: unknown;
+};
+
+const normalizeClients = (payload: unknown): ClientRecord[] => {
+  if (Array.isArray(payload)) {
+    return payload as ClientRecord[];
+  }
+
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray((payload as { clients?: unknown[] }).clients)
+  ) {
+    return (payload as { clients: ClientRecord[] }).clients;
+  }
+
+  return [];
+};
 
 export async function getClients() {
-  const res = await fetch(buildApiUrl("/clients"), {
-    credentials: "include",
-  })
+  const response = await apiFetch<ClientRecord[] | { clients?: ClientRecord[] }>(
+    "/api/clients"
+  );
 
-  if (!res.ok) {
-    let errorMsg = "Failed to fetch clients"
-    try {
-      const err = await res.json()
-      errorMsg = err.message || errorMsg
-    } catch {}
-    throw new Error(errorMsg)
+  if (!response.success) {
+    throw new Error(response.message || "Failed to fetch clients");
   }
 
-  return res.json()
+  return normalizeClients(response.data);
 }
 
-export async function createClient(data: any) {
-  const res = await fetch(buildApiUrl("/clients"), {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data),
-  })
+export async function createClient(data: unknown) {
+  const response = await apiFetch<ClientRecord | { client?: ClientRecord }>(
+    "/api/clients",
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    }
+  );
 
-  if (!res.ok) {
-    let errorMsg = "Failed to create client"
-    try {
-      const err = await res.json()
-      errorMsg = err.message || errorMsg
-    } catch {}
-    throw new Error(errorMsg)
+  if (!response.success) {
+    throw new Error(response.message || "Failed to create client");
   }
 
-  return res.json()
+  return response.data;
 }

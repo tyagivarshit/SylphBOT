@@ -22,7 +22,6 @@ router.post("/api-keys", (0, rbac_middleware_1.requirePermission)("api_keys:mana
 router.post("/api-keys/:id/rotate", (0, rbac_middleware_1.requirePermission)("api_keys:manage"), (0, asyncHandler_1.asyncHandler)(security_controller_1.rotateWorkspaceApiKey));
 router.post("/api-keys/:id/revoke", (0, rbac_middleware_1.requirePermission)("api_keys:manage"), (0, asyncHandler_1.asyncHandler)(security_controller_1.revokeWorkspaceApiKey));
 router.delete("/api-keys/:id", (0, rbac_middleware_1.requirePermission)("api_keys:manage"), (0, asyncHandler_1.asyncHandler)(security_controller_1.revokeWorkspaceApiKey));
-router.get("/legacy-api-key", (0, rbac_middleware_1.requirePermission)("api_keys:manage"), (0, asyncHandler_1.asyncHandler)(security_controller_1.getLegacyWorkspaceApiKey));
 router.get("/data-export", (0, rbac_middleware_1.requirePermission)("compliance:export"), (0, asyncHandler_1.asyncHandler)(security_controller_1.exportTenantData));
 router.post("/data-delete", (0, rbac_middleware_1.requirePermission)("compliance:delete"), (0, asyncHandler_1.asyncHandler)(security_controller_1.deleteTenantWorkspace));
 router.get("/backup", (0, rbac_middleware_1.requirePermission)("security:manage"), (0, asyncHandler_1.asyncHandler)(security_controller_1.getBackupConfiguration));

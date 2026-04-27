@@ -40,7 +40,9 @@ const createAvailabilityController = async (req, res) => {
         });
         return res.status(201).json({
             success: true,
-            availability,
+            data: {
+                availability,
+            },
         });
     }
     catch (error) {
@@ -59,17 +61,26 @@ exports.createAvailabilityController = createAvailabilityController;
 */
 const getAvailabilityController = async (req, res) => {
     try {
-        const businessId = req.params.businessId;
+        const requestedBusinessId = req.params.businessId;
+        const businessId = req.user?.businessId || null;
         if (!businessId) {
-            return res.status(400).json({
+            return res.status(401).json({
                 success: false,
-                message: "businessId param required",
+                message: "Unauthorized",
+            });
+        }
+        if (requestedBusinessId && requestedBusinessId !== businessId) {
+            return res.status(403).json({
+                success: false,
+                message: "Forbidden",
             });
         }
         const availability = await (0, availability_model_1.getAvailability)(businessId);
         return res.status(200).json({
             success: true,
-            availability,
+            data: {
+                availability,
+            },
         });
     }
     catch (error) {
@@ -89,6 +100,13 @@ UPDATE AVAILABILITY
 const updateAvailabilityController = async (req, res) => {
     try {
         const id = req.params.id;
+        const businessId = req.user?.businessId || null;
+        if (!businessId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
         if (!id) {
             return res.status(400).json({
                 success: false,
@@ -103,10 +121,18 @@ const updateAvailabilityController = async (req, res) => {
                 });
             }
         }
-        const availability = await (0, availability_model_1.updateAvailability)(id, req.body);
+        const availability = await (0, availability_model_1.updateAvailability)(businessId, id, req.body);
+        if (!availability) {
+            return res.status(404).json({
+                success: false,
+                message: "Availability not found",
+            });
+        }
         return res.status(200).json({
             success: true,
-            availability,
+            data: {
+                availability,
+            },
         });
     }
     catch (error) {
@@ -126,16 +152,31 @@ DELETE AVAILABILITY
 const deleteAvailabilityController = async (req, res) => {
     try {
         const id = req.params.id;
+        const businessId = req.user?.businessId || null;
+        if (!businessId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
         if (!id) {
             return res.status(400).json({
                 success: false,
                 message: "Availability ID required",
             });
         }
-        await (0, availability_model_1.deleteAvailability)(id);
+        const deleted = await (0, availability_model_1.deleteAvailability)(businessId, id);
+        if (!deleted) {
+            return res.status(404).json({
+                success: false,
+                message: "Availability not found",
+            });
+        }
         return res.status(200).json({
             success: true,
-            message: "Availability deleted",
+            data: {
+                id,
+            },
         });
     }
     catch (error) {

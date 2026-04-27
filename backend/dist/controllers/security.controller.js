@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.triggerBackupRun = exports.getBackupConfiguration = exports.restoreTenantWorkspace = exports.deleteTenantWorkspace = exports.exportTenantData = exports.revokeWorkspaceApiKey = exports.getLegacyWorkspaceApiKey = exports.rotateWorkspaceApiKey = exports.createWorkspaceApiKey = exports.getAuditLogEntries = exports.getApiKeys = exports.logoutAllSessions = exports.getSessions = void 0;
+exports.triggerBackupRun = exports.getBackupConfiguration = exports.restoreTenantWorkspace = exports.deleteTenantWorkspace = exports.exportTenantData = exports.revokeWorkspaceApiKey = exports.rotateWorkspaceApiKey = exports.createWorkspaceApiKey = exports.getAuditLogEntries = exports.getApiKeys = exports.logoutAllSessions = exports.getSessions = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const authCookies_1 = require("../utils/authCookies");
 const AppError_1 = require("../utils/AppError");
@@ -55,7 +55,10 @@ const getSessions = async (req, res) => {
             createdAt: "desc",
         },
     });
-    res.json(sessions);
+    res.json({
+        success: true,
+        data: sessions,
+    });
 };
 exports.getSessions = getSessions;
 const logoutAllSessions = async (req, res) => {
@@ -203,21 +206,6 @@ const rotateWorkspaceApiKey = async (req, res) => {
     });
 };
 exports.rotateWorkspaceApiKey = rotateWorkspaceApiKey;
-const getLegacyWorkspaceApiKey = async (req, res) => {
-    const businessId = (0, tenant_service_1.getRequestBusinessId)(req);
-    const userId = req.user?.id || null;
-    if (!businessId) {
-        return res.status(401).json({ error: "Unauthorized" });
-    }
-    const apiKey = await (0, apiKey_service_1.ensureWorkspaceApiKey)({
-        businessId,
-        createdByUserId: userId,
-    });
-    res.json({
-        apiKey: apiKey.rawKey,
-    });
-};
-exports.getLegacyWorkspaceApiKey = getLegacyWorkspaceApiKey;
 const revokeWorkspaceApiKey = async (req, res) => {
     const businessId = (0, tenant_service_1.getRequestBusinessId)(req);
     const userId = req.user?.id || null;

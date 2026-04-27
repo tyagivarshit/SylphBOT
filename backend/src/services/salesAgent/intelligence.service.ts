@@ -83,7 +83,11 @@ const detectIntent = (message: string): SalesIntent => {
 const detectObjection = (message: string): SalesObjectionProfile => {
   const text = normalizeText(message);
 
-  if (/too expensive|expensive|costly|price high|out of budget/.test(text)) {
+  if (
+    /too expensive|expensive|costly|price high|out of budget|pricey|hard to justify|bit much|stretch(?:ing)? the budget/.test(
+      text
+    )
+  ) {
     return {
       type: "PRICE",
       label: "price objection",
@@ -92,7 +96,11 @@ const detectObjection = (message: string): SalesObjectionProfile => {
     };
   }
 
-  if (/trust|proof|review|legit|real/.test(text)) {
+  if (
+    /trust|proof|review|legit|real|too good to be true|how do i know|any examples|any results|why should i trust/.test(
+      text
+    )
+  ) {
     return {
       type: "TRUST",
       label: "trust objection",
@@ -101,7 +109,7 @@ const detectObjection = (message: string): SalesObjectionProfile => {
     };
   }
 
-  if (/busy|no time|later today|later this week|timing/.test(text)) {
+  if (/busy|no time|later today|later this week|timing|swamped/.test(text)) {
     return {
       type: "TIME",
       label: "time objection",
@@ -110,12 +118,23 @@ const detectObjection = (message: string): SalesObjectionProfile => {
     };
   }
 
-  if (/think later|will think|later|not now|maybe later/.test(text)) {
+  if (
+    /think later|will think|later|not now|maybe later|need to think|let me think|circle back|not ready yet|need to check with|run this by|talk to my|ask my partner|ask my wife|ask my husband|need approval|team needs to approve|boss needs to approve/.test(
+      text
+    )
+  ) {
+    const authoritySignal =
+      /need to check with|run this by|talk to my|ask my partner|ask my wife|ask my husband|need approval|team needs to approve|boss needs to approve/.test(
+        text
+      );
+
     return {
       type: "LATER",
-      label: "delay objection",
+      label: authoritySignal ? "authority objection" : "delay objection",
       strategy:
-        "Keep momentum, create a light urgency cue, and make the next action feel easy.",
+        authoritySignal
+          ? "Support the lead with an easy shareable next step instead of pushing for a solo yes."
+          : "Keep momentum, create a light urgency cue, and make the next action feel easy.",
     };
   }
 
@@ -395,9 +414,10 @@ const buildIntentDirective = ({
 
   if (intent === "PRICING") {
     return {
-      primaryGoal: "Share concrete pricing context and move to a clear next step.",
+      primaryGoal:
+        "Qualify the pricing request quickly and move to the best-fit commercial next step.",
       responseRule:
-        "Answer the pricing question first with the clearest available pricing or starting point, then guide to one next step.",
+        "Ask one short qualifying question before sharing or narrowing pricing, then guide to one clear next step.",
       cta: pricingCta,
       angle: "value",
       qualificationCue,
@@ -579,13 +599,8 @@ export const buildSalesAgentContext = async ({
   message: string;
   plan?: unknown;
 }): Promise<SalesAgentContext> => {
-  const [
-    leadRecord,
-    systemClient,
-    memoryContext,
-    optimization,
-    messageCount,
-  ] = await Promise.all([
+  const [leadRecord, systemClient, optimization, messageCount] =
+    await Promise.all([
     prisma.lead.findUnique({
       where: {
         id: leadId,
@@ -604,7 +619,6 @@ export const buildSalesAgentContext = async ({
       },
     }),
     getSystemClient(businessId),
-    buildMemoryContext(leadId),
     getSalesOptimizationInsights(businessId),
     prisma.message.count({
       where: {
@@ -612,6 +626,11 @@ export const buildSalesAgentContext = async ({
       },
     }),
   ]);
+
+  await updateMemory(leadId, message).catch(() => []);
+  const memoryContext = await buildMemoryContext(leadId, {
+    message,
+  });
 
   const leadClient = leadRecord?.client?.isActive ? leadRecord.client : null;
   const knowledgeResults = await searchKnowledge(businessId, message, {
@@ -728,8 +747,6 @@ export const buildSalesAgentContext = async ({
   profile.stage = leadState.stage;
   profile.leadScore = leadState.leadScore;
 
-  void updateMemory(leadId, message).catch(() => {});
-
   if (messageCount > 0 && messageCount % 10 === 0) {
     void generateConversationSummary(leadId).catch(() => {});
   }
@@ -786,8 +803,10 @@ export const buildSalesAgentContext = async ({
         role: item.role === "assistant" ? "assistant" : "user",
         content: item.content,
       })),
+      facts: memoryContext.facts || [],
     },
     knowledge: knowledgeResults.map((item) => item.content).slice(0, 4),
+    knowledgeHits: knowledgeResults,
     profile,
     progression,
     optimization,

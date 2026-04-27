@@ -8,6 +8,9 @@ const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const followup_queue_1 = require("../queues/followup.queue");
 const socket_server_1 = require("../sockets/socket.server");
+const consentAuthority_service_1 = require("./consentAuthority.service");
+const leadControlState_service_1 = require("./leadControlState.service");
+const revenueTouchLedger_service_1 = require("./revenueTouchLedger.service");
 const encrypt_1 = require("../utils/encrypt");
 const logger_1 = __importDefault(require("../utils/logger"));
 const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -46,6 +49,21 @@ const getDeliveryErrorMessage = (error) => {
     }
     return "Unknown delivery error";
 };
+const extractProviderMessageId = (value) => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (typeof value.message_id === "string" && value.message_id.trim()) {
+        return value.message_id.trim();
+    }
+    if (Array.isArray(value.messages)) {
+        const first = value.messages.find((message) => isRecord(message) && typeof message.id === "string");
+        if (typeof first?.id === "string" && first.id.trim()) {
+            return first.id.trim();
+        }
+    }
+    return null;
+};
 const formatConversationMessage = (message) => {
     const metadata = getMessageMetadata(message.metadata);
     const cta = typeof metadata.cta === "string" ? metadata.cta : null;
@@ -57,7 +75,7 @@ const formatConversationMessage = (message) => {
 };
 exports.formatConversationMessage = formatConversationMessage;
 const sendInstagramMessage = async ({ recipientId, message, accessToken, }) => {
-    await axios_1.default.post("https://graph.facebook.com/v19.0/me/messages", {
+    const response = await axios_1.default.post("https://graph.facebook.com/v19.0/me/messages", {
         recipient: { id: recipientId },
         message: { text: message },
     }, {
@@ -67,10 +85,13 @@ const sendInstagramMessage = async ({ recipientId, message, accessToken, }) => {
             "Content-Type": "application/json",
         },
     });
+    return {
+        providerMessageId: extractProviderMessageId(response.data),
+    };
 };
 exports.sendInstagramMessage = sendInstagramMessage;
 const sendWhatsAppMessage = async ({ phoneNumberId, to, message, accessToken, }) => {
-    await axios_1.default.post(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+    const response = await axios_1.default.post(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
         messaging_product: "whatsapp",
         to,
         type: "text",
@@ -82,6 +103,9 @@ const sendWhatsAppMessage = async ({ phoneNumberId, to, message, accessToken, })
             "Content-Type": "application/json",
         },
     });
+    return {
+        providerMessageId: extractProviderMessageId(response.data),
+    };
 };
 exports.sendWhatsAppMessage = sendWhatsAppMessage;
 const deliverLeadMessage = async ({ lead, message, }) => {
@@ -111,6 +135,20 @@ const deliverLeadMessage = async ({ lead, message, }) => {
             error: "Unable to decrypt channel access token",
         };
     }
+    if (lead.businessId &&
+        (await (0, consentAuthority_service_1.isConsentRevoked)({
+            businessId: lead.businessId,
+            leadId: lead.id,
+            channel: platform,
+            scope: "CONVERSATIONAL_OUTBOUND",
+        }))) {
+        return {
+            delivered: false,
+            platform,
+            reason: "CONSENT_REVOKED",
+            error: "Outbound consent is revoked for this channel",
+        };
+    }
     try {
         if (platform === "INSTAGRAM") {
             if (!lead.instagramId) {
@@ -121,7 +159,7 @@ const deliverLeadMessage = async ({ lead, message, }) => {
                     error: "Lead Instagram recipient id is missing",
                 };
             }
-            await (0, exports.sendInstagramMessage)({
+            const result = await (0, exports.sendInstagramMessage)({
                 recipientId: lead.instagramId,
                 message,
                 accessToken,
@@ -129,6 +167,8 @@ const deliverLeadMessage = async ({ lead, message, }) => {
             return {
                 delivered: true,
                 platform,
+                providerMessageId: result.providerMessageId || null,
+                acceptedAt: new Date().toISOString(),
             };
         }
         if (!lead.client.phoneNumberId || !lead.phone) {
@@ -139,7 +179,7 @@ const deliverLeadMessage = async ({ lead, message, }) => {
                 error: "Lead WhatsApp delivery details are missing",
             };
         }
-        await (0, exports.sendWhatsAppMessage)({
+        const result = await (0, exports.sendWhatsAppMessage)({
             phoneNumberId: lead.client.phoneNumberId,
             to: lead.phone,
             message,
@@ -148,6 +188,8 @@ const deliverLeadMessage = async ({ lead, message, }) => {
         return {
             delivered: true,
             platform,
+            providerMessageId: result.providerMessageId || null,
+            acceptedAt: new Date().toISOString(),
         };
     }
     catch (error) {
@@ -166,7 +208,7 @@ const deliverLeadMessage = async ({ lead, message, }) => {
     }
 };
 exports.deliverLeadMessage = deliverLeadMessage;
-const buildMessageMetadata = ({ existingMetadata, clientMessageId, platform, delivery, }) => {
+const buildMessageMetadata = ({ existingMetadata, clientMessageId, platform, delivery, outboundKey, }) => {
     const metadata = {
         ...getMessageMetadata(existingMetadata),
     };
@@ -176,13 +218,17 @@ const buildMessageMetadata = ({ existingMetadata, clientMessageId, platform, del
     if (platform) {
         metadata.platform = platform;
     }
+    if (outboundKey) {
+        metadata.outboundKey = outboundKey;
+    }
     if (delivery) {
         metadata.delivery = {
             status: delivery.delivered ? "DELIVERED" : "FAILED",
             platform: delivery.platform,
+            providerMessageId: delivery.providerMessageId || null,
             reason: delivery.reason || null,
             error: delivery.error || null,
-            attemptedAt: new Date().toISOString(),
+            attemptedAt: delivery.acceptedAt || new Date().toISOString(),
         };
     }
     return Object.keys(metadata).length > 0 ? metadata : undefined;
@@ -209,7 +255,29 @@ const persistAndDispatchLeadMessage = async ({ lead, content, sender, clientMess
     });
     let delivery = null;
     let persistedMessage = createdMessage;
+    const outboundKey = sender === "USER"
+        ? null
+        : (0, revenueTouchLedger_service_1.buildRevenueTouchOutboundKey)({
+            source: sender === "AGENT" ? "MANUAL" : sender,
+            leadId: lead.id,
+            clientMessageId,
+            messageId: createdMessage.id,
+        });
     if (sender === "AGENT") {
+        await (0, leadControlState_service_1.bumpLeadCancelToken)({
+            leadId: lead.id,
+            businessId: lead.businessId || null,
+            lastManualOutboundAt: new Date(),
+            metadata: {
+                reason: "manual_send",
+                outboundKey,
+            },
+        }).catch((error) => {
+            logger_1.default.warn({
+                leadId: lead.id,
+                error,
+            }, "Lead cancel token bump failed before manual outbound send");
+        });
         delivery = await (0, exports.deliverLeadMessage)({
             lead,
             message: content,
@@ -219,6 +287,7 @@ const persistAndDispatchLeadMessage = async ({ lead, content, sender, clientMess
             clientMessageId,
             platform,
             delivery,
+            outboundKey,
         });
         persistedMessage = await prisma_1.default.message.update({
             where: { id: createdMessage.id },
@@ -231,6 +300,50 @@ const persistAndDispatchLeadMessage = async ({ lead, content, sender, clientMess
                 leadId: lead.id,
                 error,
             }, "Follow-up cancellation failed after manual message");
+        });
+    }
+    if (sender !== "USER" && outboundKey) {
+        const touchState = sender === "AGENT"
+            ? delivery?.delivered
+                ? "DELIVERED"
+                : "FAILED"
+            : "CONFIRMED";
+        await (0, revenueTouchLedger_service_1.upsertRevenueTouchLedger)({
+            businessId: lead.businessId || "",
+            leadId: lead.id,
+            clientId: lead.clientId || null,
+            messageId: persistedMessage.id,
+            touchType: sender === "AGENT" ? "MANUAL_OUTBOUND" : "AI_REPLY",
+            touchReason: sender === "AGENT" ? "manual_send" : "conversation_send",
+            channel: platform || "UNKNOWN",
+            actor: sender,
+            source: sender === "AGENT" ? "MANUAL" : "API",
+            traceId: clientMessageId || null,
+            providerMessageId: delivery?.providerMessageId || null,
+            outboundKey,
+            deliveryState: touchState,
+            providerAcceptedAt: delivery?.acceptedAt ? new Date(delivery.acceptedAt) : null,
+            providerMessagePersistedAt: delivery?.providerMessageId ? new Date() : null,
+            confirmedAt: new Date(),
+            deliveredAt: delivery?.delivered && delivery.acceptedAt
+                ? new Date(delivery.acceptedAt)
+                : null,
+            failedAt: sender === "AGENT" && delivery && !delivery.delivered ? new Date() : null,
+            cta: typeof getMessageMetadata(persistedMessage.metadata).cta === "string"
+                ? String(getMessageMetadata(persistedMessage.metadata).cta)
+                : null,
+            angle: null,
+            leadState: null,
+            messageType: sender === "AGENT" ? "MANUAL_OUTBOUND" : "AI_REPLY",
+            metadata: getMessageMetadata(persistedMessage.metadata),
+        }).catch((error) => {
+            logger_1.default.error({
+                leadId: lead.id,
+                messageId: persistedMessage.id,
+                outboundKey,
+                error,
+            }, "Canonical touch ledger write failed after manual conversation send");
+            throw error;
         });
     }
     await prisma_1.default.lead.update({

@@ -10,7 +10,6 @@ const compression_1 = __importDefault(require("compression"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const passport_1 = __importDefault(require("passport"));
 const env_1 = require("./config/env");
-const passport_2 = require("./config/passport");
 const auth_middleware_1 = require("./middleware/auth.middleware");
 const subscription_middleware_1 = require("./middleware/subscription.middleware");
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
@@ -30,6 +29,7 @@ const knowledge_routes_1 = __importDefault(require("./routes/knowledge.routes"))
 const training_routes_1 = __importDefault(require("./routes/training.routes"));
 const lead_routes_1 = __importDefault(require("./routes/lead.routes"));
 const analytics_routes_1 = __importDefault(require("./routes/analytics.routes"));
+const autonomous_routes_1 = __importDefault(require("./routes/autonomous.routes"));
 const search_routes_1 = __importDefault(require("./routes/search.routes"));
 const notification_1 = __importDefault(require("./routes/notification"));
 const user_routes_1 = __importDefault(require("./routes/user.routes"));
@@ -50,17 +50,44 @@ const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
 const requestContext_middleware_1 = require("./middleware/requestContext.middleware");
 const apiKey_middleware_1 = require("./middleware/apiKey.middleware");
 const rbac_service_1 = require("./services/rbac.service");
-const trial_cron_1 = require("./cron/trial.cron");
-const metaTokenRefresh_cron_1 = require("./cron/metaTokenRefresh.cron");
-const resetUsage_cron_1 = require("./cron/resetUsage.cron");
-const connectionHealth_cron_1 = require("./cron/connectionHealth.cron");
 const AppError_1 = require("./utils/AppError");
 const asyncHandler_1 = require("./utils/asyncHandler");
-const logger_1 = __importDefault(require("./utils/logger"));
 const sentry_1 = require("./observability/sentry");
-(0, sentry_1.initializeSentry)();
 const app = (0, express_1.default)();
-(0, passport_2.configurePassport)();
+const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const normalizeJsonResponseBody = (body, statusCode) => {
+    const success = statusCode < 400;
+    if (body === undefined) {
+        return {
+            success,
+            data: null,
+        };
+    }
+    if (!isPlainRecord(body)) {
+        return {
+            success,
+            data: body,
+        };
+    }
+    const hasSuccess = typeof body.success === "boolean";
+    const hasData = Object.prototype.hasOwnProperty.call(body, "data");
+    if (hasSuccess && hasData) {
+        return body;
+    }
+    if (!success) {
+        return {
+            ...body,
+            success: false,
+            data: hasData ? (body.data ?? null) : null,
+        };
+    }
+    const { success: _ignoredSuccess, ...rest } = body;
+    return {
+        ...rest,
+        success: hasSuccess ? Boolean(body.success) : true,
+        data: hasData ? (body.data ?? null) : Object.keys(rest).length ? rest : null,
+    };
+};
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 const allowedOrigins = new Set(env_1.env.ALLOWED_FRONTEND_ORIGINS);
@@ -151,6 +178,11 @@ app.options(/.*/, (0, cors_1.default)(corsOptions));
 app.use(rateLimit_middleware_1.globalLimiter);
 app.use((0, cookie_parser_1.default)());
 app.use(passport_1.default.initialize());
+app.use((req, res, next) => {
+    const originalJson = res.json.bind(res);
+    res.json = ((body) => originalJson(normalizeJsonResponseBody(body, res.statusCode)));
+    next();
+});
 app.use(monitoring_middleware_1.monitoringMiddleware);
 app.use((req, res, next) => {
     res.setTimeout(15000, () => {
@@ -304,6 +336,7 @@ app.use("/api/knowledge", auth_middleware_1.protect, knowledge_routes_1.default)
 app.use("/api/training", auth_middleware_1.protect, training_routes_1.default);
 app.use("/api/leads", auth_middleware_1.protect, lead_routes_1.default);
 app.use("/api/analytics", auth_middleware_1.protect, analytics_routes_1.default);
+app.use("/api/autonomous", auth_middleware_1.protect, autonomous_routes_1.default);
 app.use("/api/audit", auth_middleware_1.protect, audit_routes_1.default);
 app.use("/api/search", auth_middleware_1.protect, search_routes_1.default);
 app.use("/api/security", auth_middleware_1.protect, security_routes_1.default);
@@ -355,30 +388,6 @@ app.use((err, req, res, _next) => {
         success: false,
         message: env_1.env.IS_PROD ? "Internal server error" : err.message,
         requestId: req.requestId,
-    });
-});
-if (process.env.ENABLE_CRON === "true") {
-    (0, trial_cron_1.startTrialExpiryCron)();
-    (0, metaTokenRefresh_cron_1.startMetaTokenRefreshCron)();
-    (0, resetUsage_cron_1.startUsageResetCron)();
-    (0, connectionHealth_cron_1.startConnectionHealthCron)();
-}
-process.on("uncaughtException", (err) => {
-    logger_1.default.error({ err }, "Unhandled uncaught exception in app");
-    (0, sentry_1.captureExceptionWithContext)(err, {
-        tags: {
-            layer: "process",
-            event: "uncaughtException",
-        },
-    });
-});
-process.on("unhandledRejection", (err) => {
-    logger_1.default.error({ err }, "Unhandled rejection in app");
-    (0, sentry_1.captureExceptionWithContext)(err, {
-        tags: {
-            layer: "process",
-            event: "unhandledRejection",
-        },
     });
 });
 exports.default = app;

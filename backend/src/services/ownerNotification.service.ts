@@ -7,7 +7,7 @@ export interface OwnerNotificationPayload {
   businessId: string;
   leadId: string;
   slot?: Date;
-  type?: "BOOKED" | "CANCELLED" | "RESCHEDULED";
+  type?: "CONFIRMED" | "CANCELLED" | "RESCHEDULED";
 }
 
 /* ===================================================== */
@@ -64,8 +64,11 @@ export const sendOwnerWhatsAppNotification = async (
     /* =====================================================
     LEAD DATA
     ===================================================== */
-    const lead = await prisma.lead.findUnique({
-      where: { id: leadId },
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        businessId,
+      },
     });
 
     /* =====================================================
@@ -73,7 +76,7 @@ export const sendOwnerWhatsAppNotification = async (
     ===================================================== */
     let messageText = "";
 
-    if (type === "BOOKED") {
+    if (type === "CONFIRMED") {
       messageText = `📅 New Booking!\n\n👤 ${lead?.name || "Customer"}\n📞 ${
         lead?.phone || "N/A"
       }\n🕒 ${slot?.toLocaleString()}`;

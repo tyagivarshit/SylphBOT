@@ -1,10 +1,21 @@
 import EventEmitter from "events";
+export {
+  publishRevenueBrainEvent,
+  registerRevenueBrainSubscriber,
+  revenueBrainEventBus,
+  subscribeRevenueBrainEvent,
+} from "./revenueBrain/eventBus.service";
 
-class SylphEventBus extends EventEmitter {}
+const globalForLegacyEventBus = globalThis as typeof globalThis & {
+  __automexiaLegacyEventBus?: EventEmitter;
+};
 
-export const eventBus = new SylphEventBus();
+export const eventBus =
+  globalForLegacyEventBus.__automexiaLegacyEventBus || new EventEmitter();
 
-/* EVENTS */
+if (!globalForLegacyEventBus.__automexiaLegacyEventBus) {
+  globalForLegacyEventBus.__automexiaLegacyEventBus = eventBus;
+}
 
 export const emitLeadCreated = (leadId: string) => {
   eventBus.emit("lead.created", { leadId });

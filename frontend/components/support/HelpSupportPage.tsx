@@ -8,7 +8,7 @@ import {
   SendHorizonal,
   ShieldCheck,
 } from "lucide-react";
-import { buildApiUrl } from "@/lib/url";
+import { apiFetch } from "@/lib/apiClient";
 import { LoadingSpinner, TrustSignals } from "@/components/ui/feedback";
 
 type ChatRole = "assistant" | "user";
@@ -128,21 +128,16 @@ export default function HelpSupportPage() {
     let reply = BACKEND_FALLBACK_REPLY;
 
     try {
-      const response = await fetch(buildApiUrl("/api/help-ai"), {
+      const response = await apiFetch<{ reply?: string }>("/api/help-ai", {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
           message: question,
         }),
       });
 
-      const data = await response.json().catch(() => null);
-
-      if (response.ok && typeof data?.reply === "string" && data.reply.trim()) {
-        reply = data.reply.trim();
+      if (response.success && typeof response.data?.reply === "string") {
+        reply = response.data.reply.trim() || BACKEND_FALLBACK_REPLY;
       }
     } catch {
       reply = BACKEND_FALLBACK_REPLY;

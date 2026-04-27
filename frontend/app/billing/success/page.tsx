@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { confirmCheckout } from "@/lib/billing";
-import { buildApiUrl } from "@/lib/userApi";
+import { apiFetch } from "@/lib/apiClient";
 
 type BillingPayload = {
   success?: boolean;
@@ -72,16 +72,16 @@ const getSuccessMessage = (payload: BillingPayload | null) => {
 
 const fetchBilling = async (): Promise<BillingPayload | null> => {
   try {
-    const res = await fetch(buildApiUrl("/api/billing"), {
+    const response = await apiFetch<BillingPayload>("/api/billing", {
       credentials: "include",
       cache: "no-store",
     });
 
-    if (!res.ok) {
+    if (!response.success || !response.data) {
       return null;
     }
 
-    return res.json();
+    return response.data;
   } catch {
     return null;
   }

@@ -18,7 +18,7 @@ const startMetaTokenRefreshCron = () => {
     RUN EVERY DAY AT 3 AM
     ---------------------------------------------------
     */
-    node_cron_1.default.schedule("0 3 * * *", async () => {
+    return node_cron_1.default.schedule("0 3 * * *", async () => {
         try {
             log("Checking Instagram tokens...");
             const clients = await prisma_1.default.client.findMany({

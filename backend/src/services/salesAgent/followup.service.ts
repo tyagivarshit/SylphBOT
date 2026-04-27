@@ -144,7 +144,7 @@ const getLatestLeadSignals = async (leadId: string) => {
         where: {
           leadId,
           status: {
-            in: ["BOOKED", "CONFIRMED", "RESCHEDULED"],
+            in: ["CONFIRMED", "RESCHEDULED"],
           },
         },
       }),

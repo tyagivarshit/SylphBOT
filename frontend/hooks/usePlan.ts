@@ -1,23 +1,35 @@
 "use client"
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { buildApiUrl } from "@/lib/userApi"
+import { apiFetch } from "@/lib/apiClient"
 import { normalizePlan } from "@/lib/featureGuard"
 
 /* ================= FETCH ================= */
 
 const fetchBilling = async () => {
-  const res = await fetch(buildApiUrl("/api/billing"), {
+  const response = await apiFetch<{
+    billing?: {
+      status?: string;
+      planKey?: string;
+    };
+    subscription?: {
+      status?: string;
+      plan?: {
+        type?: string;
+        name?: string;
+      };
+    };
+  }>("/api/billing", {
     credentials: "include",
     cache: "no-store",
-  })
+  });
 
-  if (!res.ok) {
-    throw new Error("Failed to fetch billing")
+  if (!response.success || !response.data) {
+    throw new Error(response.message || "Failed to fetch billing");
   }
 
-  return res.json()
-}
+  return response.data;
+};
 
 /* ================= HOOK ================= */
 

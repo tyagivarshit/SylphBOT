@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
-import { buildApiUrl, buildAppUrl } from "@/lib/userApi";
+import { apiFetch } from "@/lib/apiClient";
+import { buildAppUrl } from "@/lib/userApi";
 
 export default function DeleteAccount() {
   const [confirm, setConfirm] = useState(false);
@@ -21,15 +22,13 @@ export default function DeleteAccount() {
       setLoading(true);
       setError("");
 
-      const res = await fetch(buildApiUrl("/api/user/delete-account"), {
+      const response = await apiFetch("/api/user/delete-account", {
         method: "DELETE",
         credentials: "include",
       });
 
-      const payload = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        throw new Error(payload?.error || "Delete failed");
+      if (!response.success) {
+        throw new Error(response.message || "Delete failed");
       }
 
       window.location.assign(buildAppUrl("/auth/login"));

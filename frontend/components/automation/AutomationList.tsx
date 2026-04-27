@@ -12,6 +12,11 @@ import { usePlan } from "@/hooks/usePlan";
 import { useDebounce } from "@/hooks/useDebounce";
 import { notify } from "@/lib/toast";
 import {
+  deleteAutomationFlow,
+  getAutomationFlows,
+  updateAutomationFlow,
+} from "@/lib/automation.service";
+import {
   EmptyState,
   RetryState,
   SkeletonCard,
@@ -187,21 +192,7 @@ export default function AutomationList() {
       setLoading(true);
       setError("");
 
-      const response = await fetch("/api/automation/flows", {
-        cache: "no-store",
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(data?.message || "We couldn't load your automations.");
-      }
-
-      const items = Array.isArray(data)
-        ? (data as AutomationFlow[])
-        : Array.isArray(data?.flows)
-          ? (data.flows as AutomationFlow[])
-          : [];
+      const items = await getAutomationFlows();
 
       setAutomations(sortAutomations(items));
     } catch (fetchError) {
@@ -286,17 +277,11 @@ export default function AutomationList() {
     try {
       setTogglingId(automation.id);
 
-      const response = await fetch(`/api/automation/flows/${automation.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const data = await updateAutomationFlow(automation.id, payload);
 
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
+      if (data?.success === false) {
         throw new Error(
-          data?.message ||
+          data.message ||
             (nextStatus === "ACTIVE"
               ? "We couldn't activate this automation."
               : "We couldn't pause this automation.")
@@ -333,13 +318,9 @@ export default function AutomationList() {
     try {
       setDeletingId(pendingDelete.id);
 
-      const response = await fetch(`/api/automation/flows/${pendingDelete.id}`, {
-        method: "DELETE",
-      });
+      const data = await deleteAutomationFlow(pendingDelete.id);
 
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
+      if (data?.success === false) {
         throw new Error(data?.message || "We couldn't delete this automation.");
       }
 

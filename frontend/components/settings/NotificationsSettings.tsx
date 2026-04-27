@@ -6,7 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { buildApiUrl } from "@/lib/userApi";
+import { apiFetch } from "@/lib/apiClient";
 
 export default function NotificationSettings() {
   const queryClient = useQueryClient();
@@ -19,17 +19,15 @@ export default function NotificationSettings() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["notification-settings"],
     queryFn: async () => {
-      const res = await fetch(buildApiUrl("/api/notifications/settings"), {
+      const response = await apiFetch<Partial<typeof settings>>("/api/notifications/settings", {
         credentials: "include",
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to load notification settings");
+      if (!response.success) {
+        throw new Error(response.message || "Failed to load notification settings");
       }
 
-      return (await res.json().catch(() => null)) as
-        | Partial<typeof settings>
-        | null;
+      return response.data;
     },
   });
 
@@ -45,18 +43,17 @@ export default function NotificationSettings() {
 
   const mutation = useMutation({
     mutationFn: async (body: typeof settings) => {
-      const res = await fetch(buildApiUrl("/api/notifications/settings"), {
+      const response = await apiFetch("/api/notifications/settings", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to update notification settings");
+      if (!response.success) {
+        throw new Error(response.message || "Failed to update notification settings");
       }
 
-      return res.json();
+      return response.data;
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({

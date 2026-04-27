@@ -6,22 +6,18 @@ import {
   createResilientQueue,
 } from "./queue.defaults";
 
-/*
-=========================================================
-BOOKING REMINDER QUEUE (SAAS LEVEL)
-=========================================================
-*/
-
 export type BookingReminderJobData = {
   type: "CONFIRMATION" | "MORNING" | "BEFORE_30_MIN";
   appointmentId: string;
+  businessId: string;
 };
 
-export const BOOKING_REMINDER_QUEUE_NAME: string = "booking";
-export const LEGACY_BOOKING_REMINDER_QUEUE_NAME: string =
-  "booking-reminder-queue";
+export const BOOKING_REMINDER_QUEUE_NAME = "booking";
 
-const queueConnection = getQueueRedisConnection();
+const globalForBookingReminderQueue = globalThis as typeof globalThis & {
+  __sylphBookingReminderQueue?: Queue<BookingReminderJobData>;
+};
+
 const defaultJobOptions: JobsOptions = buildQueueJobOptions({
   backoff: {
     type: "exponential",
@@ -29,38 +25,35 @@ const defaultJobOptions: JobsOptions = buildQueueJobOptions({
   },
 });
 
-export const bookingReminderQueue = createResilientQueue(
-  new Queue<BookingReminderJobData>(
-    BOOKING_REMINDER_QUEUE_NAME,
-    {
-      connection: queueConnection,
-      defaultJobOptions,
-    }
-  ),
-  BOOKING_REMINDER_QUEUE_NAME
-);
+export const initBookingReminderQueue = () => {
+  if (!globalForBookingReminderQueue.__sylphBookingReminderQueue) {
+    globalForBookingReminderQueue.__sylphBookingReminderQueue = createResilientQueue(
+      new Queue<BookingReminderJobData>(BOOKING_REMINDER_QUEUE_NAME, {
+        connection: getQueueRedisConnection(),
+        defaultJobOptions,
+      }),
+      BOOKING_REMINDER_QUEUE_NAME
+    );
+  }
 
-export const legacyBookingReminderQueue =
-  LEGACY_BOOKING_REMINDER_QUEUE_NAME === BOOKING_REMINDER_QUEUE_NAME
-    ? bookingReminderQueue
-    : createResilientQueue(
-        new Queue<BookingReminderJobData>(LEGACY_BOOKING_REMINDER_QUEUE_NAME, {
-          connection: queueConnection,
-          defaultJobOptions,
-        }),
-        LEGACY_BOOKING_REMINDER_QUEUE_NAME
-      );
+  return globalForBookingReminderQueue.__sylphBookingReminderQueue;
+};
 
-/*
-=========================================================
-CORE: SCHEDULE ALL REMINDERS (IMPORTANT)
-=========================================================
-*/
+export const getBookingReminderQueue = () => initBookingReminderQueue();
 
-export const scheduleReminderJobs = async (appointmentId: string) => {
+export const scheduleReminderJobs = async ({
+  appointmentId,
+  businessId,
+}: {
+  appointmentId: string;
+  businessId: string;
+}) => {
   try {
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: appointmentId },
+    const appointment = await prisma.appointment.findFirst({
+      where: {
+        id: appointmentId,
+        businessId,
+      },
     });
 
     if (!appointment) {
@@ -73,20 +66,20 @@ export const scheduleReminderJobs = async (appointmentId: string) => {
       type: "CONFIRMATION" | "MORNING" | "BEFORE_30_MIN",
       delay = 0
     ) => {
-      const jobId = `booking:${appointmentId}:${type}`;
-      const existing =
-        (await bookingReminderQueue.getJob(jobId)) ||
-        (await legacyBookingReminderQueue.getJob(jobId));
+      const queue = getBookingReminderQueue();
+      const jobId = `booking:${businessId}:${appointmentId}:${type}`;
+      const existing = await queue.getJob(jobId);
 
       if (existing) {
         await existing.remove().catch(() => undefined);
       }
 
-      await bookingReminderQueue.add(
+      await queue.add(
         name,
         {
           type,
           appointmentId,
+          businessId,
         },
         buildQueueJobOptions({
           jobId,
@@ -120,4 +113,11 @@ export const scheduleReminderJobs = async (appointmentId: string) => {
   } catch (error) {
     console.error("REMINDER SCHEDULER ERROR:", error);
   }
+};
+
+export const closeBookingReminderQueue = async () => {
+  await globalForBookingReminderQueue.__sylphBookingReminderQueue
+    ?.close()
+    .catch(() => undefined);
+  globalForBookingReminderQueue.__sylphBookingReminderQueue = undefined;
 };

@@ -1,10 +1,10 @@
 import type { Queue } from "bullmq";
 import { getAIQueues } from "../queues/ai.queue";
-import { authEmailQueue } from "../queues/authEmail.queue";
-import { automationQueue } from "../queues/automation.queue";
-import { bookingReminderQueue } from "../queues/bookingReminder.queue";
-import { followupQueue } from "../queues/followup.queue";
-import { funnelQueue } from "../queues/funnel.queue";
+import { getAuthEmailQueue } from "../queues/authEmail.queue";
+import { getAutomationQueue } from "../queues/automation.queue";
+import { getBookingReminderQueue } from "../queues/bookingReminder.queue";
+import { getFollowupQueue } from "../queues/followup.queue";
+import { getFunnelQueue } from "../queues/funnel.queue";
 
 export type QueueHealthSnapshot = {
   name: string;
@@ -42,11 +42,11 @@ const getQueueSnapshot = async (
 
 const getAllQueues = () => [
   ...getAIQueues(),
-  followupQueue,
-  automationQueue,
-  bookingReminderQueue,
-  authEmailQueue,
-  funnelQueue,
+  getFollowupQueue(),
+  getAutomationQueue(),
+  getBookingReminderQueue(),
+  getAuthEmailQueue(),
+  getFunnelQueue(),
 ];
 
 const loadQueueHealth = async () =>

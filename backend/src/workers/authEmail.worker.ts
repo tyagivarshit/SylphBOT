@@ -11,34 +11,40 @@ const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
   process.env.RUN_WORKER === undefined;
 
-const authEmailWorker =
-  shouldRunWorker
-    ? new Worker<AuthEmailJobData>(
-        "authEmail",
-        withRedisWorkerFailSafe("authEmail", async (job) => {
-          console.log("[EMAIL_QUEUE] received", job.name, job.data);
+const globalForAuthEmailWorker = globalThis as typeof globalThis & {
+  __sylphAuthEmailWorker?: Worker<AuthEmailJobData> | null;
+};
 
-          if (job.data.type === "verify") {
-            await sendVerificationEmail(job.data.to, job.data.link);
-            return;
-          }
+export const initAuthEmailWorker = () => {
+  if (!shouldRunWorker) {
+    console.log("[authEmail.worker] RUN_WORKER disabled, worker not started");
+    return null;
+  }
 
-          await sendPasswordResetEmail(job.data.to, job.data.link);
-        }),
-        {
-          connection: getWorkerRedisConnection(),
-          prefix: "sylph",
-          concurrency: 2,
-        }
-      )
-    : null;
+  if (globalForAuthEmailWorker.__sylphAuthEmailWorker) {
+    return globalForAuthEmailWorker.__sylphAuthEmailWorker;
+  }
 
-if (!shouldRunWorker) {
-  console.log("[authEmail.worker] RUN_WORKER disabled, worker not started");
-}
+  const worker = new Worker<AuthEmailJobData>(
+    "authEmail",
+    withRedisWorkerFailSafe("authEmail", async (job) => {
+      console.log("[EMAIL_QUEUE] received", job.name, job.data);
 
-if (authEmailWorker) {
-  authEmailWorker.on("completed", (job) => {
+      if (job.data.type === "verify") {
+        await sendVerificationEmail(job.data.to, job.data.link);
+        return;
+      }
+
+      await sendPasswordResetEmail(job.data.to, job.data.link);
+    }),
+    {
+      connection: getWorkerRedisConnection(),
+      prefix: "sylph",
+      concurrency: 2,
+    }
+  );
+
+  worker.on("completed", (job) => {
     console.log("[EMAIL_QUEUE] completed", {
       id: job.id,
       name: job.name,
@@ -47,7 +53,7 @@ if (authEmailWorker) {
     });
   });
 
-  authEmailWorker.on("failed", (job, error) => {
+  worker.on("failed", (job, error) => {
     console.error("[EMAIL_QUEUE] failed", {
       id: job?.id,
       name: job?.name,
@@ -56,6 +62,12 @@ if (authEmailWorker) {
       error: error.message,
     });
   });
-}
 
-export default authEmailWorker;
+  globalForAuthEmailWorker.__sylphAuthEmailWorker = worker;
+  return worker;
+};
+
+export const closeAuthEmailWorker = async () => {
+  await globalForAuthEmailWorker.__sylphAuthEmailWorker?.close().catch(() => undefined);
+  globalForAuthEmailWorker.__sylphAuthEmailWorker = undefined;
+};

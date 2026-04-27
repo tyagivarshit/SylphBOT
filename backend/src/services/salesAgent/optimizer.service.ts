@@ -1,9 +1,11 @@
 import prisma from "../../config/prisma";
 import logger from "../../utils/logger";
+import { listRevenueTouchTrackingRows } from "../revenueTouchLedger.service";
 import { autoPromoteBestVariant } from "./abTesting.service";
 import {
   getSalesPerformanceSnapshot,
   recordConversionEvent,
+  resolveTrackingLearningArmKey,
 } from "./conversionTracker.service";
 import type {
   SalesAngle,
@@ -63,16 +65,32 @@ const toCTA = (value: unknown): SalesCTA | null => {
 
 const rankEntries = <TKey extends string>(
   usageMap: Map<TKey, number>,
-  conversionMap: Map<TKey, number>
+  conversionMap: Map<TKey, number>,
+  failureMap?: Map<TKey, number>
 ) =>
   Array.from(usageMap.entries())
     .map(([key, usage]) => ({
       key,
       usage,
       conversions: conversionMap.get(key) || 0,
+      failures: failureMap?.get(key) || 0,
       rate: usage > 0 ? (conversionMap.get(key) || 0) / usage : 0,
+      failureRate: usage > 0 ? (failureMap?.get(key) || 0) / usage : 0,
+      score:
+        usage > 0
+          ? ((conversionMap.get(key) || 0) - (failureMap?.get(key) || 0) * 0.75) /
+            usage
+          : 0,
     }))
     .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      if (left.failureRate !== right.failureRate) {
+        return left.failureRate - right.failureRate;
+      }
+
       if (right.rate !== left.rate) {
         return right.rate - left.rate;
       }
@@ -143,7 +161,11 @@ export const getSalesOptimizationInsights = async (
       where: {
         businessId,
         type: {
-          in: ["SALES_AGENT_REPLY", "SALES_AGENT_CONVERSION"],
+          in: [
+            "SALES_AGENT_REPLY",
+            "SALES_AGENT_CONVERSION",
+            "SALES_AGENT_REPLY_FAILED",
+          ],
         },
         createdAt: {
           gte: since,
@@ -176,8 +198,10 @@ export const getSalesOptimizationInsights = async (
 
     const angleUsage = new Map<SalesAngle, number>();
     const angleConversions = new Map<SalesAngle, number>();
+    const angleFailures = new Map<SalesAngle, number>();
     const ctaUsage = new Map<SalesCTA, number>();
     const ctaConversions = new Map<SalesCTA, number>();
+    const ctaFailures = new Map<SalesCTA, number>();
 
     for (const event of events) {
       const meta = (event.meta || {}) as Record<string, unknown>;
@@ -203,10 +227,30 @@ export const getSalesOptimizationInsights = async (
           ctaConversions.set(cta, (ctaConversions.get(cta) || 0) + 1);
         }
       }
+
+      if (event.type === "SALES_AGENT_REPLY_FAILED") {
+        if (angle) {
+          angleUsage.set(angle, (angleUsage.get(angle) || 0) + 1);
+          angleFailures.set(angle, (angleFailures.get(angle) || 0) + 1);
+        }
+
+        if (cta) {
+          ctaUsage.set(cta, (ctaUsage.get(cta) || 0) + 1);
+          ctaFailures.set(cta, (ctaFailures.get(cta) || 0) + 1);
+        }
+      }
     }
 
-    const bestAngles = rankEntries(angleUsage, angleConversions).slice(0, 3);
-    const bestCtas = rankEntries(ctaUsage, ctaConversions).slice(0, 3);
+    const bestAngles = rankEntries(
+      angleUsage,
+      angleConversions,
+      angleFailures
+    ).slice(0, 3);
+    const bestCtas = rankEntries(
+      ctaUsage,
+      ctaConversions,
+      ctaFailures
+    ).slice(0, 3);
 
     return {
       recommendedAngle: bestAngles[0]?.key || DEFAULT_INSIGHTS.recommendedAngle,
@@ -267,10 +311,29 @@ type ReplyEventInput = {
   decisionStrategy?: string | null;
   decisionTone?: string | null;
   decisionStructure?: string | null;
+  conversionScore?: number | null;
+  conversionBucket?: string | null;
+  trustLevel?: string | null;
+  urgencyLevel?: string | null;
+  negotiationMode?: string | null;
+  offerType?: string | null;
+  closeMotion?: string | null;
+  experimentArm?: string | null;
   leadState?: string | null;
   action?: string | null;
   actionPriority?: number | null;
   funnelPosition?: string | null;
+};
+
+type ReplyFailureEventInput = ReplyEventInput & {
+  route: string;
+  failureReason: string;
+  failureStage: string;
+  currentAttempt: number;
+  maxAttempts: number;
+  willRetry: boolean;
+  terminal: boolean;
+  deliveryMode?: string | null;
 };
 
 export const recordSalesReplyEvent = async ({
@@ -296,6 +359,14 @@ export const recordSalesReplyEvent = async ({
   decisionStrategy,
   decisionTone,
   decisionStructure,
+  conversionScore,
+  conversionBucket,
+  trustLevel,
+  urgencyLevel,
+  negotiationMode,
+  offerType,
+  closeMotion,
+  experimentArm,
   leadState,
   action,
   actionPriority,
@@ -328,11 +399,119 @@ export const recordSalesReplyEvent = async ({
           decisionStrategy: decisionStrategy || null,
           decisionTone: decisionTone || null,
           decisionStructure: decisionStructure || null,
+          conversionScore:
+            typeof conversionScore === "number" ? conversionScore : null,
+          conversionBucket: conversionBucket || null,
+          trustLevel: trustLevel || null,
+          urgencyLevel: urgencyLevel || null,
+          negotiationMode: negotiationMode || null,
+          offerType: offerType || null,
+          closeMotion: closeMotion || null,
+          experimentArm: experimentArm || null,
           leadState: leadState || null,
           action: action || null,
           actionPriority:
             typeof actionPriority === "number" ? actionPriority : null,
           funnelPosition: funnelPosition || null,
+        },
+      },
+    });
+  } catch {}
+};
+
+export const recordSalesReplyFailureEvent = async ({
+  businessId,
+  leadId,
+  planKey,
+  cta,
+  angle,
+  stage,
+  temperature,
+  intent,
+  decisionIntent,
+  emotion,
+  userSignal,
+  objection,
+  platform,
+  source,
+  variantId,
+  variantKey,
+  variantTone,
+  variantCTAStyle,
+  variantMessageLength,
+  decisionStrategy,
+  decisionTone,
+  decisionStructure,
+  conversionScore,
+  conversionBucket,
+  trustLevel,
+  urgencyLevel,
+  negotiationMode,
+  offerType,
+  closeMotion,
+  experimentArm,
+  leadState,
+  action,
+  actionPriority,
+  funnelPosition,
+  route,
+  failureReason,
+  failureStage,
+  currentAttempt,
+  maxAttempts,
+  willRetry,
+  terminal,
+  deliveryMode,
+}: ReplyFailureEventInput) => {
+  try {
+    await prisma.analytics.create({
+      data: {
+        businessId,
+        type: "SALES_AGENT_REPLY_FAILED",
+        meta: {
+          leadId,
+          route,
+          planKey,
+          cta,
+          angle,
+          stage,
+          temperature,
+          intent,
+          decisionIntent: decisionIntent || null,
+          emotion: emotion || null,
+          userSignal: userSignal || null,
+          objection,
+          platform: platform || null,
+          source: source || "AI_ROUTER",
+          variantId: variantId || null,
+          variantKey: variantKey || null,
+          variantTone: variantTone || null,
+          variantCTAStyle: variantCTAStyle || null,
+          variantMessageLength: variantMessageLength || null,
+          decisionStrategy: decisionStrategy || null,
+          decisionTone: decisionTone || null,
+          decisionStructure: decisionStructure || null,
+          conversionScore:
+            typeof conversionScore === "number" ? conversionScore : null,
+          conversionBucket: conversionBucket || null,
+          trustLevel: trustLevel || null,
+          urgencyLevel: urgencyLevel || null,
+          negotiationMode: negotiationMode || null,
+          offerType: offerType || null,
+          closeMotion: closeMotion || null,
+          experimentArm: experimentArm || null,
+          leadState: leadState || null,
+          action: action || null,
+          actionPriority:
+            typeof actionPriority === "number" ? actionPriority : null,
+          funnelPosition: funnelPosition || null,
+          failureReason,
+          failureStage,
+          currentAttempt,
+          maxAttempts,
+          willRetry,
+          terminal,
+          deliveryMode: deliveryMode || null,
         },
       },
     });
@@ -538,27 +717,20 @@ export const runSalesOptimizer = async ({
     lookbackDays: 30,
   });
 
-  const trackings = await prisma.salesMessageTracking.findMany({
-    where: {
-      businessId,
-      ...(clientId !== undefined ? { clientId: clientId || null } : {}),
-      sentAt: {
-        gte: since,
-      },
-    },
-    include: {
-      message: true,
-      variant: true,
-      conversionEvents: true,
-    },
-    orderBy: {
-      sentAt: "desc",
-    },
-    take: 1000,
+  const trackings = await listRevenueTouchTrackingRows({
+    businessId,
+    ...(clientId !== undefined ? { clientId: clientId || null } : {}),
+    start: since,
+    end: new Date(),
+    limit: 1000,
   });
 
   const rows = trackings.map((tracking) => {
     const metadata = (tracking.metadata || {}) as Record<string, unknown>;
+    const learningArmKey = resolveTrackingLearningArmKey({
+      variantKey: tracking.variant?.variantKey || null,
+      metadata,
+    });
     const conversionValue = tracking.conversionEvents.reduce((sum, event) => {
       if (event.outcome === "payment_completed") return sum + (event.value || 8);
       if (event.outcome === "booked_call") return sum + 5;
@@ -573,7 +745,7 @@ export const runSalesOptimizer = async ({
       cta: tracking.cta,
       angle: tracking.angle,
       variantId: tracking.variantId,
-      variantKey: tracking.variant?.variantKey || null,
+      variantKey: learningArmKey,
       variantTone:
         String(metadata.decisionTone || tracking.variant?.tone || "").trim() || null,
       variantCTAStyle:

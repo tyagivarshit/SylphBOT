@@ -679,14 +679,26 @@ const getActiveEntitlement = (input: {
   tenantKey: string;
   featureKey: FeatureEntitlementKey;
   environment: ConnectEnvironment;
-}) =>
-  Array.from(getStore().featureEntitlementLedger.values()).find(
+}) => {
+  const candidates = Array.from(getStore().featureEntitlementLedger.values()).filter(
     (row) =>
       row.tenantKey === input.tenantKey &&
       row.featureKey === input.featureKey &&
       row.environment === input.environment &&
       row.isActive
-  ) || null;
+  );
+  candidates.sort((left, right) => {
+    const versionDelta = toNumber(right.version, 0) - toNumber(left.version, 0);
+    if (versionDelta !== 0) {
+      return versionDelta;
+    }
+    return (
+      new Date(right.updatedAt || right.createdAt || 0).getTime() -
+      new Date(left.updatedAt || left.createdAt || 0).getTime()
+    );
+  });
+  return candidates[0] || null;
+};
 
 const getWizardByTenant = (tenantKey: string) =>
   Array.from(getStore().setupWizardLedger.values()).find(
@@ -729,6 +741,61 @@ const getIntegrationHealth = (integrationKey: string) =>
       }
       return latest;
     }, null)?.row || null;
+
+const CONNECT_STATUS_PRIORITY: Record<ConnectStatus, number> = {
+  CONNECTED: 900,
+  VERIFYING: 700,
+  LIMITED: 600,
+  RATE_LIMITED: 500,
+  NEEDS_ACTION: 400,
+  WEBHOOK_FAILED: 300,
+  PERMISSION_MISSING: 250,
+  TOKEN_EXPIRED: 200,
+  DISCONNECTED: 100,
+};
+
+const getCanonicalIntegrationForProvider = (input: {
+  tenantKey: string;
+  provider: ConnectProvider;
+  environment: ConnectEnvironment;
+}) => {
+  const candidates = listIntegrations(input);
+  if (!candidates.length) {
+    return null;
+  }
+  const scored = candidates.map((integration) => {
+    const health = getIntegrationHealth(integration.integrationKey);
+    const status = normalizeStatus(
+      integration.status || health?.status || "DISCONNECTED",
+      "DISCONNECTED"
+    );
+    return {
+      integration,
+      health,
+      statusScore: CONNECT_STATUS_PRIORITY[status] || 0,
+      healthScore: toNumber(health?.healthScore, 0),
+      freshnessScore: Math.max(
+        new Date(integration.lastVerifiedAt || 0).getTime(),
+        new Date(integration.updatedAt || integration.createdAt || 0).getTime(),
+        new Date(health?.updatedAt || health?.createdAt || 0).getTime()
+      ),
+      slot: toNumber(integration.slot, 1),
+    };
+  });
+  scored.sort((left, right) => {
+    if (right.statusScore !== left.statusScore) {
+      return right.statusScore - left.statusScore;
+    }
+    if (right.healthScore !== left.healthScore) {
+      return right.healthScore - left.healthScore;
+    }
+    if (right.freshnessScore !== left.freshnessScore) {
+      return right.freshnessScore - left.freshnessScore;
+    }
+    return left.slot - right.slot;
+  });
+  return scored[0] || null;
+};
 
 const getProviderWebhookRow = (integrationKey: string) =>
   Array.from(getStore().providerWebhookLedger.values()).find(
@@ -842,6 +909,12 @@ const ensureTenantLedgerRow = async (input: {
   const tenantKey = makeTenantKey(tenantId);
   const existing = getTenantByKey(tenantKey);
   if (existing) {
+    await ensureEnvironmentRows(tenantKey);
+    await ensureSetupWizardRow(tenantKey);
+    await ensureTenantConfigRow({
+      tenantKey,
+      timezone: existing.timezone || "UTC",
+    });
     return existing;
   }
   const tenantRow = await upsertLedgerRecord({
@@ -870,6 +943,76 @@ const ensureTenantLedgerRow = async (input: {
   return tenantRow;
 };
 
+const ensurePlanLedgerArtifacts = async (input: {
+  tenantKey: string;
+  plan: SaaSPlanTier;
+  version: number;
+}) => {
+  const featureQuota = PLAN_MATRIX[input.plan].featureQuota;
+  const limits = PLAN_MATRIX[input.plan].integrationLimits;
+  const timestamp = now();
+
+  for (const environment of CONNECT_HUB_ENVIRONMENTS) {
+    for (const featureKey of FEATURE_ENTITLEMENT_KEYS) {
+      const entitlementKey = `entitlement:${input.tenantKey}:${environment}:${featureKey}:v${input.version}`;
+      await upsertLedgerRecord({
+        authority: "FeatureEntitlementLedger",
+        storeMap: getStore().featureEntitlementLedger,
+        keyField: "entitlementKey",
+        keyValue: entitlementKey,
+        row: {
+          entitlementKey,
+          tenantKey: input.tenantKey,
+          featureKey,
+          environment,
+          quota:
+            featureKey === "sandbox_access" && environment === "LIVE"
+              ? 1
+              : featureQuota[featureKey],
+          isEnabled:
+            featureKey === "sandbox_access"
+              ? featureQuota.sandbox_access > 0
+              : featureQuota[featureKey] !== 0,
+          source: "PLAN",
+          version: input.version,
+          isActive: true,
+          effectiveFrom: timestamp,
+          effectiveTo: null,
+        },
+        dbLedgers: ["featureEntitlementLedger"],
+      });
+    }
+  }
+
+  for (const provider of CONNECT_HUB_PROVIDERS) {
+    for (const environment of CONNECT_HUB_ENVIRONMENTS) {
+      const category = getProviderCategory(provider);
+      const policyKey = `integration_policy:${input.tenantKey}:${provider}:${environment}:v${input.version}`;
+      await upsertLedgerRecord({
+        authority: "IntegrationPolicyLedger",
+        storeMap: getStore().integrationPolicyLedger,
+        keyField: "policyKey",
+        keyValue: policyKey,
+        row: {
+          policyKey,
+          tenantKey: input.tenantKey,
+          provider,
+          environment,
+          maxLiveConnections: limits.live[category],
+          maxSandboxConnections: limits.sandbox[category],
+          allowMultiConnect: limits.allowMultiConnect,
+          tokenRefreshMinutes: 45,
+          rateLimitPerMinute:
+            input.plan === "ENTERPRISE" ? 500 : input.plan === "PRO" ? 240 : 120,
+          version: input.version,
+          isActive: true,
+        },
+        dbLedgers: ["integrationPolicyLedger"],
+      });
+    }
+  }
+};
+
 const setActivePlan = async (input: {
   tenantKey: string;
   plan: SaaSPlanTier;
@@ -881,6 +1024,19 @@ const setActivePlan = async (input: {
     if (row.isActive) {
       row.isActive = false;
       row.effectiveTo = now();
+      row.updatedAt = now();
+    }
+  }
+  for (const row of Array.from(getStore().featureEntitlementLedger.values())) {
+    if (row.tenantKey === input.tenantKey && row.isActive) {
+      row.isActive = false;
+      row.effectiveTo = now();
+      row.updatedAt = now();
+    }
+  }
+  for (const row of Array.from(getStore().integrationPolicyLedger.values())) {
+    if (row.tenantKey === input.tenantKey && row.isActive) {
+      row.isActive = false;
       row.updatedAt = now();
     }
   }
@@ -913,66 +1069,11 @@ const setActivePlan = async (input: {
     },
     dbLedgers: ["tenantPlanLedger"],
   });
-
-  const featureQuota = PLAN_MATRIX[input.plan].featureQuota;
-  for (const environment of CONNECT_HUB_ENVIRONMENTS) {
-    for (const featureKey of FEATURE_ENTITLEMENT_KEYS) {
-      const entitlementKey = `entitlement:${input.tenantKey}:${environment}:${featureKey}:v${version}`;
-      await upsertLedgerRecord({
-        authority: "FeatureEntitlementLedger",
-        storeMap: getStore().featureEntitlementLedger,
-        keyField: "entitlementKey",
-        keyValue: entitlementKey,
-        row: {
-          entitlementKey,
-          tenantKey: input.tenantKey,
-          featureKey,
-          environment,
-          quota:
-            featureKey === "sandbox_access" && environment === "LIVE"
-              ? 1
-              : featureQuota[featureKey],
-          isEnabled:
-            featureKey === "sandbox_access"
-              ? featureQuota.sandbox_access > 0
-              : featureQuota[featureKey] !== 0,
-          source: "PLAN",
-          version,
-          isActive: true,
-          effectiveFrom: timestamp,
-        },
-        dbLedgers: ["featureEntitlementLedger"],
-      });
-    }
-  }
-
-  for (const provider of CONNECT_HUB_PROVIDERS) {
-    for (const environment of CONNECT_HUB_ENVIRONMENTS) {
-      const category = getProviderCategory(provider);
-      const limits = PLAN_MATRIX[input.plan].integrationLimits;
-      const policyKey = `integration_policy:${input.tenantKey}:${provider}:${environment}:v${version}`;
-      await upsertLedgerRecord({
-        authority: "IntegrationPolicyLedger",
-        storeMap: getStore().integrationPolicyLedger,
-        keyField: "policyKey",
-        keyValue: policyKey,
-        row: {
-          policyKey,
-          tenantKey: input.tenantKey,
-          provider,
-          environment,
-          maxLiveConnections: limits.live[category],
-          maxSandboxConnections: limits.sandbox[category],
-          allowMultiConnect: limits.allowMultiConnect,
-          tokenRefreshMinutes: 45,
-          rateLimitPerMinute: input.plan === "ENTERPRISE" ? 500 : input.plan === "PRO" ? 240 : 120,
-          version,
-          isActive: true,
-        },
-        dbLedgers: ["integrationPolicyLedger"],
-      });
-    }
-  }
+  await ensurePlanLedgerArtifacts({
+    tenantKey: input.tenantKey,
+    plan: input.plan,
+    version,
+  });
 
   return planRow;
 };
@@ -980,6 +1081,11 @@ const setActivePlan = async (input: {
 const ensureDefaultPlan = async (tenantKey: string) => {
   const activePlan = getActiveTenantPlan(tenantKey);
   if (activePlan) {
+    await ensurePlanLedgerArtifacts({
+      tenantKey,
+      plan: normalizePlanTier(activePlan.planCode || "STARTER"),
+      version: Math.max(1, Math.floor(toNumber(activePlan.version, 1))),
+    });
     return activePlan;
   }
   return setActivePlan({
@@ -1342,7 +1448,11 @@ const resolveOrCreateIntegration = async (input: {
       ? candidates[0].integrationKey
       : `integration:${input.tenantKey}:${input.provider}:${input.environment}:slot${slot}`;
   const tokenValue = normalizeIdentifier(input.tokenValue || "");
-  const encryptedRef = tokenValue ? `enc::${encrypt(tokenValue)}` : null;
+  const encryptedRef = tokenValue
+    ? tokenValue.startsWith("enc::")
+      ? tokenValue
+      : `enc::${encrypt(tokenValue)}`
+    : null;
 
   const integrationRow = await upsertLedgerRecord({
     authority: "IntegrationLedger",
@@ -1569,9 +1679,11 @@ const markConnectionFailure = async (input: {
     fixAction: input.fixAction,
     metadata: toRecord(input.metadata),
   });
+  const scopedTenantId =
+    normalizeIdentifier(input.tenantKey).replace(/^tenant:/i, "") || input.tenantKey;
   await callReliabilityInfluence({
-    tenantId: input.tenantKey,
-    businessId: input.tenantKey,
+    tenantId: scopedTenantId,
+    businessId: scopedTenantId,
     severity: input.status === "WEBHOOK_FAILED" ? "P1" : "P2",
     provider: input.provider,
     reason: input.message,
@@ -2801,8 +2913,11 @@ export const runWhatsAppConnectDoctor = async (input: {
   );
   const fixableCodes = new Set([
     "WA_WEBHOOK_FAIL",
+    "WHATSAPP_WEBHOOK_FAIL",
     "WA_TOKEN_ISSUE",
+    "WHATSAPP_TOKEN_EXPIRED",
     "WA_RATE_LIMITED",
+    "WHATSAPP_RATE_LIMITED",
     "WA_TEMPLATE_FAILURE",
     "WA_QUALITY_ISSUE",
     "WA_SCOPE_MISSING",
@@ -2835,6 +2950,14 @@ export const runWhatsAppConnectDoctor = async (input: {
     }
   }
 
+  const openDiagnostics = Array.from(getStore().connectionDiagnosticLedger.values()).filter(
+    (row) =>
+      row.tenantKey === tenantKey &&
+      row.provider === "WHATSAPP" &&
+      row.environment === environment &&
+      !row.resolvedAt
+  );
+
   const integration = listIntegrations({
     tenantKey,
     provider: "WHATSAPP",
@@ -2844,9 +2967,10 @@ export const runWhatsAppConnectDoctor = async (input: {
   return {
     provider: "WHATSAPP",
     environment,
-    doctorStatus: diagnostics.length ? "NEEDS_ACTION" : "CLEAR",
+    doctorStatus: openDiagnostics.length ? "NEEDS_ACTION" : "CLEAR",
     issueCount: diagnostics.length,
-    diagnostics: diagnostics.map((diagnostic) => ({
+    openIssueCount: openDiagnostics.length,
+    diagnostics: openDiagnostics.map((diagnostic) => ({
       diagnosticKey: diagnostic.diagnosticKey,
       code: diagnostic.code,
       message: diagnostic.message,
@@ -2854,7 +2978,7 @@ export const runWhatsAppConnectDoctor = async (input: {
       retryToken: diagnostic.retryToken,
       exactFix: diagnostic.fixPayload || { action: diagnostic.fixAction },
     })),
-    healthScore: toNumber(latestHealth?.healthScore, diagnostics.length ? 45 : 100),
+    healthScore: toNumber(latestHealth?.healthScore, openDiagnostics.length ? 45 : 100),
     autoResolveResults: results,
   };
 };
@@ -2892,8 +3016,19 @@ export const retryConnectionDiagnostic = async (input: {
   let resolutionStatus = "FAILED";
   const provider = normalizeProvider(diagnostic.provider);
   const environment = normalizeEnvironment(diagnostic.environment);
+  const diagnosticCode = normalizeIdentifier(diagnostic.code).toUpperCase();
+  const isWebhookFailureCode =
+    ["WA_WEBHOOK_FAIL", "IG_WEBHOOK_FAIL"].includes(diagnosticCode) ||
+    diagnosticCode.endsWith("_WEBHOOK_FAIL");
+  const isTokenIssueCode =
+    ["WA_TOKEN_ISSUE", "IG_TOKEN_EXPIRED", "INSTAGRAM_TOKEN_EXPIRED"].includes(
+      diagnosticCode
+    ) || diagnosticCode.endsWith("_TOKEN_EXPIRED");
+  const isRateLimitedCode =
+    ["WA_RATE_LIMITED", "IG_RATE_LIMITED"].includes(diagnosticCode) ||
+    diagnosticCode.endsWith("_RATE_LIMITED");
 
-  if (["WA_WEBHOOK_FAIL", "IG_WEBHOOK_FAIL"].includes(diagnostic.code)) {
+  if (isWebhookFailureCode) {
     await recoverProviderWebhook({
       businessId: tenantId,
       tenantId,
@@ -2902,11 +3037,7 @@ export const retryConnectionDiagnostic = async (input: {
     });
     resolved = true;
     resolutionStatus = "RECOVERED";
-  } else if (
-    ["WA_TOKEN_ISSUE", "IG_TOKEN_EXPIRED", "INSTAGRAM_TOKEN_EXPIRED"].includes(
-      diagnostic.code
-    )
-  ) {
+  } else if (isTokenIssueCode) {
     const refresh = await refreshIntegrationToken({
       businessId: tenantId,
       tenantId,
@@ -2915,7 +3046,7 @@ export const retryConnectionDiagnostic = async (input: {
     });
     resolved = refresh?.status === "SUCCESS";
     resolutionStatus = resolved ? "RECOVERED" : "FAILED";
-  } else if (["WA_RATE_LIMITED", "IG_RATE_LIMITED"].includes(diagnostic.code)) {
+  } else if (isRateLimitedCode) {
     const integration = listIntegrations({
       tenantKey,
       provider,
@@ -3909,36 +4040,49 @@ export const getConnectHubProjection = async (input: {
   }
   const tenantKey = makeTenantKey(tenantId);
   const byProvider = CONNECT_HUB_PROVIDERS.map((provider) => {
-    const liveIntegration = listIntegrations({
+    const liveSelection = getCanonicalIntegrationForProvider({
       tenantKey,
       provider,
       environment: "LIVE",
-    })[0];
-    const sandboxIntegration = listIntegrations({
+    });
+    const sandboxSelection = getCanonicalIntegrationForProvider({
       tenantKey,
       provider,
       environment: "SANDBOX",
-    })[0];
-    const liveHealth = liveIntegration
-      ? getIntegrationHealth(liveIntegration.integrationKey)
-      : null;
-    const sandboxHealth = sandboxIntegration
-      ? getIntegrationHealth(sandboxIntegration.integrationKey)
-      : null;
+    });
+    const liveConnections = listIntegrations({
+      tenantKey,
+      provider,
+      environment: "LIVE",
+    }).filter((row) => row.status !== "DISCONNECTED").length;
+    const sandboxConnections = listIntegrations({
+      tenantKey,
+      provider,
+      environment: "SANDBOX",
+    }).filter((row) => row.status !== "DISCONNECTED").length;
     return {
       provider,
       live: {
-        status: normalizeStatus(liveHealth?.status || liveIntegration?.status || "DISCONNECTED", "DISCONNECTED"),
-        healthScore: toNumber(liveHealth?.healthScore, 0),
-        integrationKey: liveIntegration?.integrationKey || null,
+        status: normalizeStatus(
+          liveSelection?.health?.status ||
+            liveSelection?.integration?.status ||
+            "DISCONNECTED",
+          "DISCONNECTED"
+        ),
+        healthScore: toNumber(liveSelection?.health?.healthScore, 0),
+        integrationKey: liveSelection?.integration?.integrationKey || null,
+        connectionCount: liveConnections,
       },
       sandbox: {
         status: normalizeStatus(
-          sandboxHealth?.status || sandboxIntegration?.status || "DISCONNECTED",
+          sandboxSelection?.health?.status ||
+            sandboxSelection?.integration?.status ||
+            "DISCONNECTED",
           "DISCONNECTED"
         ),
-        healthScore: toNumber(sandboxHealth?.healthScore, 0),
-        integrationKey: sandboxIntegration?.integrationKey || null,
+        healthScore: toNumber(sandboxSelection?.health?.healthScore, 0),
+        integrationKey: sandboxSelection?.integration?.integrationKey || null,
+        connectionCount: sandboxConnections,
       },
       diagnostics: Array.from(getStore().connectionDiagnosticLedger.values())
         .filter(
@@ -4004,6 +4148,17 @@ export const getIntegrationDiagnosticsProjection = async (input: {
       row.environment === environment &&
       (!provider || row.provider === provider)
   );
+  diagnostics.sort((left, right) => {
+    const leftResolved = Boolean(left.resolvedAt);
+    const rightResolved = Boolean(right.resolvedAt);
+    if (leftResolved !== rightResolved) {
+      return leftResolved ? 1 : -1;
+    }
+    return (
+      new Date(right.updatedAt || right.createdAt || 0).getTime() -
+      new Date(left.updatedAt || left.createdAt || 0).getTime()
+    );
+  });
   return diagnostics.map((row) => ({
     diagnosticKey: row.diagnosticKey,
     provider: row.provider,

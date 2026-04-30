@@ -328,6 +328,79 @@ export const saasPackagingPhase6DTests: TestCase[] = [
     },
   },
   {
+    name: "phase6d entitlement usage follows active upgraded plan version",
+    run: async () => {
+      await reset();
+      await seedTenant();
+      const starterUsage = await meterFeatureEntitlementUsage({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        featureKey: "channels",
+        units: 2,
+        replayToken: "channels_starter_usage",
+      });
+      assert.equal(starterUsage.metadata?.allowed, true);
+      await processPlanUpgrade({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        toPlan: "GROWTH",
+        replayToken: "upgrade_for_entitlement_version",
+      });
+      const growthUsage = await meterFeatureEntitlementUsage({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        featureKey: "channels",
+        units: 3,
+        replayToken: "channels_growth_usage",
+      });
+      assert.equal(growthUsage.metadata?.allowed, true);
+    },
+  },
+  {
+    name: "phase6d provider-prefixed webhook diagnostics retry through reconnect flow",
+    run: async () => {
+      await reset();
+      await seedTenant();
+      await connectInstagramOneClick({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        replayToken: "ig_webhook_retry_seed",
+      });
+      const failed = await markProviderWebhookFailure({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        provider: "INSTAGRAM",
+      });
+      const recovered = await retryConnectionDiagnostic({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        diagnosticKey: failed.diagnostic?.diagnosticKey,
+      });
+      assert.equal(recovered.resolutionStatus, "RECOVERED");
+      assert.ok(recovered.resolvedAt);
+    },
+  },
+  {
+    name: "phase6d whatsapp doctor reports clear status after auto-resolution",
+    run: async () => {
+      await reset();
+      await seedTenant();
+      await connectWhatsAppGuidedWizard({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        replayToken: "wa_doctor_clear_seed",
+        scenario: "WEBHOOK_FAIL",
+      });
+      const doctor = await runWhatsAppConnectDoctor({
+        businessId: BUSINESS_ID,
+        tenantId: TENANT_ID,
+        autoResolve: true,
+      });
+      assert.equal(doctor.doctorStatus, "CLEAR");
+      assert.equal(doctor.openIssueCount, 0);
+    },
+  },
+  {
     name: "phase6d sandbox and live integrations stay isolated by authority",
     run: async () => {
       await reset();

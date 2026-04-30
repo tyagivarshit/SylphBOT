@@ -66,6 +66,8 @@ import { reliabilityPhase6ATests } from "./reliability.phase6a.test";
 import { securityPhase6BTests } from "./security.phase6b.test";
 import { infrastructurePhase6CTests } from "./infrastructure.phase6c.test";
 import { saasPackagingPhase6DTests } from "./saasPackaging.phase6d.test";
+import { developerPlatformPhase6ETests } from "./developerPlatform.phase6e.test";
+import { growthPhase6FTests } from "./growth.phase6f.test";
 
 type TestCase = {
   name: string;
@@ -875,6 +877,8 @@ const tests: TestCase[] = [
   ...reliabilityPhase6ATests,
   ...securityPhase6BTests,
   ...saasPackagingPhase6DTests,
+  ...developerPlatformPhase6ETests,
+  ...growthPhase6FTests,
   ...infrastructurePhase6CTests,
   ...autonomousPhase4Tests,
   ...revenueBrainPhase3BTests,

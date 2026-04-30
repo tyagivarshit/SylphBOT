@@ -10,6 +10,10 @@ import {
   upsertRevenueTouchLedger,
 } from "../revenueTouchLedger.service";
 import {
+  applyGrowthRuntimeInfluence,
+  recordGrowthConversion,
+} from "../growthExpansionOS.service";
+import {
   recordVariantImpression,
   recordVariantOutcome,
 } from "./abTesting.service";
@@ -76,6 +80,9 @@ const CONVERSION_OUTCOME_SET = new Set<ConversionOutcome>([
   "booked_call",
   "payment_completed",
 ]);
+const growthRuntimeWiringEnabled = !process.argv.some((value) =>
+  value.includes("run-tests")
+);
 
 const EMPTY_AGGREGATE = (): SalesPerformanceAggregate => ({
   messages: 0,
@@ -770,6 +777,18 @@ export const trackAIMessage = async (input: TrackAIMessageInput) => {
       await recordVariantImpression(input.variantId);
     }
 
+    if (growthRuntimeWiringEnabled) {
+      await applyGrowthRuntimeInfluence({
+        businessId,
+        leadId: input.leadId,
+        channel: String(mergedMetadata.platform || lead?.platform || "UNKNOWN"),
+        metadata: {
+          source: "sales_conversion_tracker.track_ai_message",
+          messageType,
+        },
+      }).catch(() => undefined);
+    }
+
     void invalidateDecisionCache({
       businessId,
       clientId: clientId || null,
@@ -971,6 +990,34 @@ export const recordConversionEvent = async (input: RecordConversionInput) => {
       businessId,
       clientId: clientId || null,
     });
+  }
+
+  if (growthRuntimeWiringEnabled) {
+    await recordGrowthConversion({
+      businessId,
+      leadId: input.leadId,
+      channel:
+        String(
+          input.metadata?.platform ||
+            touch?.channel ||
+            tracking?.source ||
+            lead?.platform ||
+            "UNKNOWN"
+        ).trim() || "UNKNOWN",
+      revenueMinor: Math.round(revenueForOutcome(outcome, input.value) * 100),
+      costMinor: 0,
+      campaignKey: String(touch?.campaignId || "").trim() || null,
+      attributionKey: touch?.id || tracking?.id || null,
+      conversionEventId: event.id,
+      dedupeKey: `growth_conversion:${event.id}`,
+      metadata: {
+        source: input.source || null,
+        outcome,
+        variantId,
+        touchLedgerId: touch?.id || null,
+        trackingId: tracking?.id || null,
+      },
+    }).catch(() => undefined);
   }
 
   logger.info(

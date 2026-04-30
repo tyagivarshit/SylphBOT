@@ -4620,6 +4620,846 @@ model PackagingOverrideLedger {
   @@index([tenantKey, scope, targetType, isActive, priority])
 }
 
+model DeveloperNamespaceLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  namespaceKey String   @unique
+  tenantKey    String
+  businessId   String?  @db.ObjectId
+  namespace    String
+  displayName  String
+  ownerUserId  String?
+  status       String   @default("ACTIVE")
+  version      Int      @default(1)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantKey, status, updatedAt])
+  @@index([businessId, status, updatedAt])
+}
+
+model ExtensionPackageLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  packageKey       String   @unique
+  namespaceKey     String
+  tenantKey        String
+  businessId       String?  @db.ObjectId
+  packageType      String
+  slug             String
+  displayName      String
+  visibility       String   @default("PRIVATE")
+  latestReleaseKey String?
+  latestVersionTag String?
+  installCount     Int      @default(0)
+  status           String   @default("ACTIVE")
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantKey, packageType, status, updatedAt])
+  @@index([namespaceKey, status, updatedAt])
+}
+
+model ExtensionReleaseLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  releaseKey     String   @unique
+  packageKey     String
+  tenantKey      String
+  businessId     String?  @db.ObjectId
+  versionTag     String
+  versionInt     Int      @default(1)
+  changelog      String?
+  manifest       Json
+  artifactDigest String
+  status         String   @default("PUBLISHED")
+  isActive       Boolean  @default(true)
+  replayToken    String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([packageKey, status, versionInt])
+  @@index([tenantKey, packageKey, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model ExtensionInstallLedger {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  installKey  String   @unique
+  tenantKey   String
+  businessId  String?  @db.ObjectId
+  packageKey  String
+  releaseKey  String
+  environment String   @default("LIVE")
+  status      String   @default("INSTALLED")
+  installedBy String?
+  installedAt DateTime @default(now())
+  replayToken String?
+  permissions Json?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantKey, packageKey, environment, status, updatedAt])
+  @@index([releaseKey, status, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model ExtensionSubscriptionLedger {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  subscriptionKey String   @unique
+  tenantKey       String
+  installKey      String
+  packageKey      String
+  eventType       String
+  handler         String
+  status          String   @default("ACTIVE")
+  version         Int      @default(1)
+  replayToken     String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantKey, packageKey, eventType, status, updatedAt])
+  @@index([installKey, status, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model ExtensionSecretBindingLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  secretBindingKey String   @unique
+  tenantKey        String
+  installKey       String
+  packageKey       String
+  secretName       String
+  secretRef        String
+  status           String   @default("ACTIVE")
+  rotatedAt        DateTime?
+  replayToken      String?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantKey, packageKey, status, updatedAt])
+  @@index([installKey, status, updatedAt])
+  @@index([replayToken, createdAt])
+}
+
+model ExtensionExecutionLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  executionKey String   @unique
+  tenantKey    String
+  businessId   String?  @db.ObjectId
+  installKey   String
+  packageKey   String
+  releaseKey   String
+  action       String
+  trigger      String
+  status       String
+  dedupeKey    String
+  replayToken  String?
+  durationMs   Float    @default(0)
+  output       Json?
+  errorCode    String?
+  errorMessage String?
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantKey, packageKey, action, createdAt])
+  @@index([installKey, status, createdAt])
+  @@index([dedupeKey, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model ExtensionPolicyLedger {
+  id                     String   @id @default(auto()) @map("_id") @db.ObjectId
+  policyKey              String   @unique
+  tenantKey              String
+  businessId             String?  @db.ObjectId
+  scope                  String
+  targetType             String
+  targetKey              String?
+  maxExecutionsPerMinute Int      @default(120)
+  timeoutMs              Int      @default(15000)
+  requiresApproval       Boolean  @default(false)
+  allowedTriggers        String[]
+  version                Int      @default(1)
+  isActive               Boolean  @default(true)
+  metadata               Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([tenantKey, scope, targetType, isActive, version])
+}
+
+model ExtensionOverrideLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  overrideKey   String   @unique
+  tenantKey     String
+  businessId    String?  @db.ObjectId
+  scope         String
+  targetType    String
+  targetKey     String?
+  action        String
+  reason        String
+  priority      Int      @default(100)
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  expiresAt     DateTime?
+  createdBy     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, scope, targetType, isActive, priority])
+}
+
+model ExtensionAuditLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  auditKey     String   @unique
+  tenantKey    String
+  businessId   String?  @db.ObjectId
+  action       String
+  resourceType String
+  resourceKey  String
+  actorId      String?
+  previousHash String
+  auditHash    String
+  metadata     Json?
+  occurredAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantKey, action, occurredAt])
+  @@index([resourceType, resourceKey, occurredAt])
+}
+
+model DeveloperPortalApiKeyLedger {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  apiKeyRef  String   @unique
+  tenantKey  String
+  businessId String?  @db.ObjectId
+  scope      String
+  hashedKey  String
+  status     String   @default("ACTIVE")
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  rotatedFrom String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantKey, scope, status, updatedAt])
+}
+
+model GrowthCampaignLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  campaignKey           String   @unique
+  tenantKey             String
+  businessId            String?  @db.ObjectId
+  channel               String
+  funnelType            String
+  campaignType          String
+  status                String   @default("DRAFT")
+  objective             String?
+  budgetMinor           Int      @default(0)
+  currency              String   @default("INR")
+  attributionWindowDays Int      @default(30)
+  startAt               DateTime?
+  endAt                 DateTime?
+  version               Int      @default(1)
+  replayToken           String?
+  dedupeKey             String?
+  canonicalHash         String?
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantKey, status, createdAt])
+  @@index([tenantKey, channel, funnelType, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model CampaignExecutionLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  executionKey String   @unique
+  campaignKey  String
+  tenantKey    String
+  businessId   String?  @db.ObjectId
+  engine       String
+  status       String
+  trigger      String
+  action       String
+  dedupeKey    String
+  replayToken  String?
+  durationMs   Float    @default(0)
+  output       Json?
+  errorCode    String?
+  errorMessage String?
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([campaignKey, status, createdAt])
+  @@index([tenantKey, engine, createdAt])
+  @@index([dedupeKey, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model AttributionLedger {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  attributionKey      String   @unique
+  tenantKey           String
+  businessId          String?  @db.ObjectId
+  leadId              String?  @db.ObjectId
+  campaignKey         String?
+  touchKey            String?
+  conversionEventId   String?
+  channel             String
+  attributionModel    String   @default("LINEAR")
+  status              String   @default("ATTRIBUTED")
+  creditWeight        Float    @default(1)
+  creditedRevenueMinor Int     @default(0)
+  creditedCostMinor   Int      @default(0)
+  occurredAt          DateTime @default(now())
+  replayToken         String?
+  dedupeKey           String?
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantKey, leadId, occurredAt])
+  @@index([tenantKey, campaignKey, occurredAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model AcquisitionLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  acquisitionKey String   @unique
+  tenantKey      String
+  businessId     String?  @db.ObjectId
+  leadId         String?  @db.ObjectId
+  channel        String
+  funnelType     String
+  sourceRef      String?
+  campaignKey    String?
+  isPaid         Boolean  @default(false)
+  costMinor      Int      @default(0)
+  converted      Boolean  @default(false)
+  cohortKey      String
+  qualityScore   Int      @default(0)
+  paybackDays    Int?
+  status         String   @default("CAPTURED")
+  replayToken    String?
+  dedupeKey      String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantKey, channel, createdAt])
+  @@index([tenantKey, cohortKey, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model ReferralLedger {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  referralKey     String   @unique
+  tenantKey       String
+  businessId      String?  @db.ObjectId
+  referrerLeadId  String?  @db.ObjectId
+  referredLeadId  String?  @db.ObjectId
+  code            String
+  tier            Int      @default(1)
+  status          String   @default("ISSUED")
+  doubleSided     Boolean  @default(true)
+  rewardMinor     Int      @default(0)
+  rewardCurrency  String   @default("INR")
+  fraudStatus     String   @default("CLEAR")
+  rewardGrantedAt DateTime?
+  replayToken     String?
+  dedupeKey       String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantKey, code, createdAt])
+  @@index([tenantKey, referrerLeadId, createdAt])
+  @@index([tenantKey, referredLeadId, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model AffiliateLedger {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  affiliateKey    String   @unique
+  tenantKey       String
+  businessId      String?  @db.ObjectId
+  partnerKey      String
+  leadId          String?  @db.ObjectId
+  attributionKey  String?
+  commissionMinor Int      @default(0)
+  commissionRate  Float    @default(0)
+  status          String   @default("ATTRIBUTED")
+  fraudStatus     String   @default("CLEAR")
+  payoutKey       String?
+  replayToken     String?
+  dedupeKey       String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantKey, partnerKey, status, createdAt])
+  @@index([tenantKey, leadId, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model PartnerLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  partnerKey        String   @unique
+  tenantKey         String
+  businessId        String?  @db.ObjectId
+  partnerType       String
+  name              String
+  status            String   @default("ACTIVE")
+  tier              String   @default("T1")
+  performanceScore  Float    @default(0)
+  fraudRisk         Float    @default(0)
+  onboardedAt       DateTime @default(now())
+  payoutLedgerRef   String?
+  replayToken       String?
+  dedupeKey         String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantKey, partnerType, status, createdAt])
+  @@index([tenantKey, tier, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model LifecycleJourneyLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  journeyKey   String   @unique
+  tenantKey    String
+  businessId   String?  @db.ObjectId
+  leadId       String?  @db.ObjectId
+  journeyType  String
+  currentState String
+  nextState    String
+  status       String   @default("ADVANCED")
+  channel      String?
+  trigger      String?
+  reason       String?
+  replayToken  String?
+  dedupeKey    String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantKey, leadId, journeyType, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model CustomerHealthLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  healthKey        String   @unique
+  tenantKey        String
+  businessId       String?  @db.ObjectId
+  leadId           String?  @db.ObjectId
+  healthScore      Int      @default(0)
+  roiScore         Int      @default(0)
+  usageScore       Int      @default(0)
+  sentimentScore   Int      @default(0)
+  paymentRiskScore Int      @default(0)
+  inactivityDays   Int      @default(0)
+  status           String   @default("MONITORED")
+  snapshotAt       DateTime @default(now())
+  replayToken      String?
+  dedupeKey        String?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantKey, leadId, snapshotAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model ChurnRiskLedger {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  churnRiskKey       String   @unique
+  tenantKey          String
+  businessId         String?  @db.ObjectId
+  leadId             String?  @db.ObjectId
+  riskScore          Int      @default(0)
+  riskLevel          String   @default("LOW")
+  status             String   @default("OPEN")
+  interventionType   String?
+  interventionStatus String?
+  predictedAt        DateTime @default(now())
+  replayToken        String?
+  dedupeKey          String?
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantKey, leadId, riskLevel, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model ExpansionOpportunityLedger {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  expansionKey        String   @unique
+  tenantKey           String
+  businessId          String?  @db.ObjectId
+  leadId              String?  @db.ObjectId
+  opportunityType     String
+  score               Int      @default(0)
+  status              String   @default("OPEN")
+  bestOfferKey        String?
+  timingWindow        String?
+  reason              String?
+  expectedRevenueMinor Int     @default(0)
+  replayToken         String?
+  dedupeKey           String?
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantKey, leadId, opportunityType, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model PricingExperimentLedger {
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  pricingExperimentKey String   @unique
+  tenantKey            String
+  businessId           String?  @db.ObjectId
+  experimentKey        String
+  status               String   @default("RUNNING")
+  arm                  String
+  assignmentVersion    Int      @default(1)
+  metricPrimary        String
+  winnerArm            String?
+  rollbackOf           String?
+  replayToken          String?
+  dedupeKey            String?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantKey, experimentKey, status, createdAt])
+  @@index([tenantKey, assignmentVersion, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model OfferLedger {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  offerKey        String   @unique
+  tenantKey       String
+  businessId      String?  @db.ObjectId
+  leadId          String?  @db.ObjectId
+  offerType       String
+  status          String   @default("ACTIVE")
+  priceMinor      Int      @default(0)
+  discountPercent Float    @default(0)
+  expiresAt       DateTime?
+  replayToken     String?
+  dedupeKey       String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantKey, leadId, offerType, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model PromotionLedger {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  promotionKey    String   @unique
+  tenantKey       String
+  businessId      String?  @db.ObjectId
+  code            String
+  status          String   @default("ACTIVE")
+  promotionType   String
+  discountPercent Float    @default(0)
+  maxRedemptions  Int      @default(0)
+  redeemedCount   Int      @default(0)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  replayToken     String?
+  dedupeKey       String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantKey, code, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model ContentEngineLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  contentKey       String   @unique
+  tenantKey        String
+  businessId       String?  @db.ObjectId
+  campaignKey      String?
+  channel          String
+  contentType      String
+  status           String   @default("GENERATED")
+  promptVersion    String
+  variantKey       String?
+  performanceScore Float    @default(0)
+  replayToken      String?
+  dedupeKey        String?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantKey, campaignKey, channel, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model ChannelPerformanceLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  channelPerformanceKey String   @unique
+  tenantKey             String
+  businessId            String?  @db.ObjectId
+  channel               String
+  windowStart           DateTime
+  windowEnd             DateTime
+  spendMinor            Int      @default(0)
+  revenueMinor          Int      @default(0)
+  cacMinor              Int      @default(0)
+  ltvMinor              Int      @default(0)
+  paybackDays           Int      @default(0)
+  conversionRate        Float    @default(0)
+  saturationScore       Float    @default(0)
+  healthState           String   @default("HEALTHY")
+  replayToken           String?
+  dedupeKey             String?
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantKey, channel, windowStart])
+  @@index([tenantKey, healthState, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model CACLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  cacKey           String   @unique
+  tenantKey        String
+  businessId       String?  @db.ObjectId
+  channel          String
+  cohortKey        String
+  customersAcquired Int     @default(0)
+  spendMinor       Int      @default(0)
+  cacMinor         Int      @default(0)
+  windowStart      DateTime
+  windowEnd        DateTime
+  replayToken      String?
+  dedupeKey        String?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantKey, channel, cohortKey, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model LTVLedger {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  ltvKey             String   @unique
+  tenantKey          String
+  businessId         String?  @db.ObjectId
+  leadId             String?  @db.ObjectId
+  channel            String?
+  cohortKey          String
+  ltvMinor           Int      @default(0)
+  grossMarginPercent Float    @default(0)
+  horizonDays        Int      @default(365)
+  windowStart        DateTime
+  windowEnd          DateTime
+  replayToken        String?
+  dedupeKey          String?
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantKey, leadId, createdAt])
+  @@index([tenantKey, channel, cohortKey, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model PaybackLedger {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  paybackKey  String   @unique
+  tenantKey   String
+  businessId  String?  @db.ObjectId
+  channel     String
+  cohortKey   String
+  cacMinor    Int      @default(0)
+  ltvMinor    Int      @default(0)
+  paybackDays Int      @default(0)
+  status      String   @default("TRACKING")
+  windowStart DateTime
+  windowEnd   DateTime
+  replayToken String?
+  dedupeKey   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantKey, channel, cohortKey, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model AdvocacyLedger {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  advocacyKey String   @unique
+  tenantKey   String
+  businessId  String?  @db.ObjectId
+  leadId      String?  @db.ObjectId
+  advocacyType String
+  status      String   @default("OPEN")
+  rewardMinor Int      @default(0)
+  eventRef    String?
+  replayToken String?
+  dedupeKey   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantKey, leadId, advocacyType, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model ReviewRequestLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  reviewRequestKey String   @unique
+  tenantKey        String
+  businessId       String?  @db.ObjectId
+  leadId           String?  @db.ObjectId
+  channel          String
+  status           String   @default("REQUESTED")
+  rewardMinor      Int      @default(0)
+  rewardGrantedAt  DateTime?
+  reviewUrl        String?
+  replayToken      String?
+  dedupeKey        String?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantKey, leadId, channel, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model CommunityLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  communityKey  String   @unique
+  tenantKey     String
+  businessId    String?  @db.ObjectId
+  leadId        String?  @db.ObjectId
+  programType   String
+  status        String   @default("ACTIVE")
+  level         Int      @default(1)
+  points        Int      @default(0)
+  replayToken   String?
+  dedupeKey     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, leadId, programType, createdAt])
+  @@index([tenantKey, status, createdAt])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model GrowthPolicyLedger {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  policyKey  String   @unique
+  tenantKey  String
+  businessId String?  @db.ObjectId
+  scope      String
+  targetType String
+  targetKey  String?
+  status     String   @default("APPROVED")
+  version    Int      @default(1)
+  isActive   Boolean  @default(true)
+  rules      Json?
+  replayToken String?
+  dedupeKey  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantKey, scope, targetType, isActive, version])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
+model GrowthOverrideLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  overrideKey   String   @unique
+  tenantKey     String
+  businessId    String?  @db.ObjectId
+  scope         String
+  targetType    String
+  targetKey     String?
+  action        String
+  reason        String
+  priority      Int      @default(100)
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  expiresAt     DateTime?
+  createdBy     String?
+  replayToken   String?
+  dedupeKey     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, scope, targetType, isActive, priority])
+  @@index([replayToken, createdAt])
+  @@index([dedupeKey, createdAt])
+}
+
 model Analytics {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   businessId String

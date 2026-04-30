@@ -7,6 +7,10 @@ import {
   runIntelligenceLoop,
   runIntelligenceSimulation,
 } from "../services/intelligence/intelligenceOS.service";
+import {
+  getGrowthExpansionProjection,
+  runGrowthExpansionSelfAudit,
+} from "../services/growthExpansionOS.service";
 
 type AutonomousRequest = Request & {
   user?: {
@@ -298,6 +302,70 @@ export const rollbackIntelligenceDecisionController = async (
     });
   } catch (error) {
     console.error("Intelligence rollback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+export const getGrowthOSProjectionController = async (
+  req: AutonomousRequest,
+  res: Response
+) => {
+  try {
+    const businessId = getBusinessId(req);
+
+    if (!businessId) {
+      return res.status(403).json({
+        success: false,
+        message: "Business context is required",
+      });
+    }
+
+    const data = await getGrowthExpansionProjection({
+      businessId,
+      tenantId: businessId,
+    });
+
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error("Growth projection error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+export const runGrowthSelfAuditController = async (
+  req: AutonomousRequest,
+  res: Response
+) => {
+  try {
+    const businessId = getBusinessId(req);
+
+    if (!businessId) {
+      return res.status(403).json({
+        success: false,
+        message: "Business context is required",
+      });
+    }
+
+    const data = await runGrowthExpansionSelfAudit({
+      businessId,
+      tenantId: businessId,
+    });
+
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error("Growth self audit error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",

@@ -1,8 +1,10 @@
 import { Router } from "express";
 import {
   applyIntelligenceOverrideController,
+  getGrowthOSProjectionController,
   getAutonomousDashboardController,
   rollbackIntelligenceDecisionController,
+  runGrowthSelfAuditController,
   runAutonomousSchedulerController,
   runIntelligenceLoopController,
   runIntelligenceSimulationController,
@@ -19,6 +21,8 @@ router.use(requirePermission("analytics:view"));
 router.use(attachBillingContext);
 
 router.get("/dashboard", getAutonomousDashboardController);
+router.get("/growth/projection", getGrowthOSProjectionController);
+router.get("/growth/self-audit", runGrowthSelfAuditController);
 router.post(
   "/run",
   auditRequest("autonomous.scheduler_run"),

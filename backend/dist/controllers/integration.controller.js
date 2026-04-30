@@ -3,13 +3,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
+exports.runDeveloperPlatformExtensibilitySelfAudit = exports.revokeDeveloperPlatformApiKey = exports.createDeveloperPlatformApiKey = exports.applyDeveloperPlatformOverride = exports.applyDeveloperPlatformPolicy = exports.invokeDeveloperPlatformPackageAction = exports.subscribeDeveloperPlatformEvent = exports.bindDeveloperPlatformSecret = exports.installDeveloperPlatformPackage = exports.publishDeveloperPlatformRelease = exports.publishDeveloperPlatformPackage = exports.registerDeveloperPlatformNamespace = exports.getDeveloperPlatformDashboard = exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
 const onboarding_service_1 = require("../services/onboarding.service");
 const instagramProfile_service_1 = require("../services/instagramProfile.service");
 const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
+const developerPlatformExtensibilityOS_service_1 = require("../services/developerPlatformExtensibilityOS.service");
 const normalizeOptionalString = (value) => {
     const normalized = String(value || "").trim();
     return normalized || null;
@@ -826,3 +827,422 @@ const applyConnectHubOverride = async (req, res) => {
     }
 };
 exports.applyConnectHubOverride = applyConnectHubOverride;
+const getDeveloperPlatformDashboard = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const projection = await (0, developerPlatformExtensibilityOS_service_1.getDeveloperPlatformProjection)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+        });
+        return res.json({
+            success: true,
+            data: projection,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to load developer platform projection",
+            error: String(error?.message || "developer_platform_projection_failed"),
+        });
+    }
+};
+exports.getDeveloperPlatformDashboard = getDeveloperPlatformDashboard;
+const registerDeveloperPlatformNamespace = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const row = await (0, developerPlatformExtensibilityOS_service_1.registerDeveloperNamespace)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            namespace: normalizeOptionalString(req.body?.namespace) || "automexia.default",
+            displayName: normalizeOptionalString(req.body?.displayName),
+            ownerUserId: normalizeOptionalString(req.body?.ownerUserId) || req.user?.id || "SYSTEM",
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: row,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Namespace registration failed",
+            error: String(error?.message || "namespace_registration_failed"),
+        });
+    }
+};
+exports.registerDeveloperPlatformNamespace = registerDeveloperPlatformNamespace;
+const publishDeveloperPlatformPackage = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.publishExtensionPackage)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            namespace: normalizeOptionalString(req.body?.namespace),
+            slug: normalizeOptionalString(req.body?.slug) || "default-extension",
+            displayName: normalizeOptionalString(req.body?.displayName),
+            packageType: normalizeOptionalString(req.body?.packageType) || "APP",
+            visibility: normalizeOptionalString(req.body?.visibility) || "PRIVATE",
+            packageKey: normalizeOptionalString(req.body?.packageKey),
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Package publish failed",
+            error: String(error?.message || "package_publish_failed"),
+        });
+    }
+};
+exports.publishDeveloperPlatformPackage = publishDeveloperPlatformPackage;
+const publishDeveloperPlatformRelease = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.publishExtensionRelease)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            packageKey: normalizeOptionalString(req.body?.packageKey) || "",
+            versionTag: normalizeOptionalString(req.body?.versionTag),
+            changelog: normalizeOptionalString(req.body?.changelog),
+            manifest: req.body?.manifest || {},
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Release publish failed",
+            error: String(error?.message || "release_publish_failed"),
+        });
+    }
+};
+exports.publishDeveloperPlatformRelease = publishDeveloperPlatformRelease;
+const installDeveloperPlatformPackage = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.installExtensionForTenant)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            packageKey: normalizeOptionalString(req.body?.packageKey) || "",
+            releaseKey: normalizeOptionalString(req.body?.releaseKey),
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            installedBy: normalizeOptionalString(req.body?.installedBy) || req.user?.id || "SYSTEM",
+            permissions: Array.isArray(req.body?.permissions) ? req.body.permissions : [],
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Package install failed",
+            error: String(error?.message || "package_install_failed"),
+        });
+    }
+};
+exports.installDeveloperPlatformPackage = installDeveloperPlatformPackage;
+const bindDeveloperPlatformSecret = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.setExtensionSecretBinding)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            installKey: normalizeOptionalString(req.body?.installKey) || "",
+            secretName: normalizeOptionalString(req.body?.secretName) || "EXTENSION_SECRET",
+            secretValue: normalizeOptionalString(req.body?.secretValue) || "",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Secret binding failed",
+            error: String(error?.message || "secret_binding_failed"),
+        });
+    }
+};
+exports.bindDeveloperPlatformSecret = bindDeveloperPlatformSecret;
+const subscribeDeveloperPlatformEvent = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.subscribeExtensionEvent)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            installKey: normalizeOptionalString(req.body?.installKey) || "",
+            eventType: normalizeOptionalString(req.body?.eventType) || "event.default",
+            handler: normalizeOptionalString(req.body?.handler) || "handler.default",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Event subscription failed",
+            error: String(error?.message || "event_subscription_failed"),
+        });
+    }
+};
+exports.subscribeDeveloperPlatformEvent = subscribeDeveloperPlatformEvent;
+const invokeDeveloperPlatformPackageAction = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.invokeExtensionAction)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            installKey: normalizeOptionalString(req.body?.installKey) || "",
+            action: normalizeOptionalString(req.body?.action) || "run",
+            trigger: normalizeOptionalString(req.body?.trigger) || "MANUAL",
+            payload: req.body?.payload || {},
+            dedupeKey: normalizeOptionalString(req.body?.dedupeKey),
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            forceFail: Boolean(req.body?.forceFail),
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Extension execution failed",
+            error: String(error?.message || "extension_execution_failed"),
+        });
+    }
+};
+exports.invokeDeveloperPlatformPackageAction = invokeDeveloperPlatformPackageAction;
+const applyDeveloperPlatformPolicy = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.applyExtensionPolicy)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            scope: normalizeOptionalString(req.body?.scope) || "EXECUTION",
+            targetType: normalizeOptionalString(req.body?.targetType) || "TENANT",
+            targetKey: normalizeOptionalString(req.body?.targetKey),
+            maxExecutionsPerMinute: Number(req.body?.maxExecutionsPerMinute || 120),
+            timeoutMs: Number(req.body?.timeoutMs || 15000),
+            requiresApproval: Boolean(req.body?.requiresApproval),
+            allowedTriggers: Array.isArray(req.body?.allowedTriggers)
+                ? req.body.allowedTriggers
+                : ["MANUAL", "WEBHOOK", "EVENT", "SCHEDULE"],
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Policy update failed",
+            error: String(error?.message || "policy_update_failed"),
+        });
+    }
+};
+exports.applyDeveloperPlatformPolicy = applyDeveloperPlatformPolicy;
+const applyDeveloperPlatformOverride = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.applyExtensionOverride)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            scope: normalizeOptionalString(req.body?.scope) || "EXECUTION",
+            targetType: normalizeOptionalString(req.body?.targetType) || "TENANT",
+            targetKey: normalizeOptionalString(req.body?.targetKey),
+            action: normalizeOptionalString(req.body?.action) || "ALLOW",
+            reason: normalizeOptionalString(req.body?.reason) || "manual_override",
+            priority: Number(req.body?.priority || 100),
+            expiresAt: req.body?.expiresAt ? new Date(req.body.expiresAt) : null,
+            createdBy: normalizeOptionalString(req.body?.createdBy) || req.user?.id || "SYSTEM",
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Override update failed",
+            error: String(error?.message || "override_update_failed"),
+        });
+    }
+};
+exports.applyDeveloperPlatformOverride = applyDeveloperPlatformOverride;
+const createDeveloperPlatformApiKey = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.createDeveloperPortalApiKey)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            scope: normalizeOptionalString(req.body?.scope) || "DEVELOPER_API",
+            expiresAt: req.body?.expiresAt ? new Date(req.body.expiresAt) : null,
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "API key create failed",
+            error: String(error?.message || "api_key_create_failed"),
+        });
+    }
+};
+exports.createDeveloperPlatformApiKey = createDeveloperPlatformApiKey;
+const revokeDeveloperPlatformApiKey = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, developerPlatformExtensibilityOS_service_1.revokeDeveloperPortalApiKey)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            apiKeyRef: normalizeOptionalString(req.body?.apiKeyRef) || "",
+            reason: normalizeOptionalString(req.body?.reason) || "manual_revoke",
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "API key revoke failed",
+            error: String(error?.message || "api_key_revoke_failed"),
+        });
+    }
+};
+exports.revokeDeveloperPlatformApiKey = revokeDeveloperPlatformApiKey;
+const runDeveloperPlatformExtensibilitySelfAudit = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const audit = await (0, developerPlatformExtensibilityOS_service_1.runDeveloperPlatformSelfAudit)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+        });
+        return res.json({
+            success: true,
+            data: audit,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Developer platform self audit failed",
+            error: String(error?.message || "developer_platform_self_audit_failed"),
+        });
+    }
+};
+exports.runDeveloperPlatformExtensibilitySelfAudit = runDeveloperPlatformExtensibilitySelfAudit;

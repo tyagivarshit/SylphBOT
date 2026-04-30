@@ -16,6 +16,10 @@ import {
   releaseAutonomousCapReservation,
   reserveAutonomousCap,
 } from "./capReservation.service";
+import {
+  createGrowthCampaign,
+  executeGrowthCampaign,
+} from "../growthExpansionOS.service";
 import type {
   AutonomousGuardrailDecision,
   AutonomousLeadSnapshot,
@@ -25,6 +29,9 @@ import { recordAutonomousEvent } from "./observability.service";
 
 const AUTONOMOUS_TOUCH_CAP = 3;
 const AUTONOMOUS_TOUCH_WINDOW_DAYS = 14;
+const growthRuntimeWiringEnabled = !process.argv.some((value) =>
+  value.includes("run-tests")
+);
 
 const toJsonSafe = (value: unknown) => {
   if (value === undefined) {
@@ -426,6 +433,25 @@ export const queueAutonomousCampaign = async ({
   if (toRecord(campaign.metadata).creationToken !== creationToken) {
     return campaign;
   }
+
+  if (growthRuntimeWiringEnabled) {
+    await createGrowthCampaign({
+      businessId: snapshot.businessId,
+      leadId: snapshot.leadId as any,
+      channel: arbitration.channel,
+      funnelType: "AUTONOMOUS",
+      campaignType: candidate.engine.toUpperCase(),
+      objective: candidate.objective,
+      dedupeKey: `autonomous_campaign:${campaign.id}`,
+      metadata: {
+        autonomousCampaignId: campaign.id,
+        opportunityId,
+        score: candidate.score,
+        engine: candidate.engine,
+      },
+    } as any).catch(() => undefined);
+  }
+
   const reservation = await reserveAutonomousCap({
     businessId: snapshot.businessId,
     leadId: snapshot.leadId,
@@ -551,6 +577,36 @@ export const queueAutonomousCampaign = async ({
       "Autonomous campaign queued"
     );
 
+    if (growthRuntimeWiringEnabled) {
+      await executeGrowthCampaign({
+        businessId: snapshot.businessId,
+        campaignKey: `growth_campaign:${crypto
+          .createHash("sha256")
+          .update(
+            JSON.stringify([
+              `tenant:${snapshot.businessId}`,
+              snapshot.businessId,
+              arbitration.channel,
+              "AUTONOMOUS",
+              candidate.engine.toUpperCase(),
+              candidate.objective || "objective",
+            ])
+          )
+          .digest("hex")
+          .slice(0, 32)}`,
+        leadId: snapshot.leadId,
+        channel: arbitration.channel,
+        action: "autonomous_queue",
+        trigger: "AUTONOMOUS_ENGINE",
+        dedupeKey: `autonomous_queue:${updatedCampaign.id}`,
+        metadata: {
+          autonomousCampaignId: updatedCampaign.id,
+          traceId,
+          aiJobId,
+        },
+      }).catch(() => undefined);
+    }
+
     return updatedCampaign;
   } catch (error) {
     await releaseAutonomousCapReservation({
@@ -626,6 +682,36 @@ export const registerAutonomousCampaignTrackers = () => {
             reservationKey,
           },
         }).catch(() => undefined);
+
+        if (growthRuntimeWiringEnabled) {
+          await executeGrowthCampaign({
+            businessId: event.businessId,
+            campaignKey: `growth_campaign:${crypto
+              .createHash("sha256")
+              .update(
+                JSON.stringify([
+                  `tenant:${event.businessId}`,
+                  event.businessId,
+                  campaign.channel || "UNKNOWN",
+                  "AUTONOMOUS",
+                  campaign.engine.toUpperCase(),
+                  campaign.objective || "objective",
+                ])
+              )
+              .digest("hex")
+              .slice(0, 32)}`,
+            leadId: event.leadId,
+            channel: campaign.channel || null,
+            action: "delivery_confirmed",
+            trigger: "REVENUE_BRAIN",
+            dedupeKey: `autonomous_delivery_confirmed:${campaign.id}:${event.traceId}`,
+            metadata: {
+              autonomousCampaignId: campaign.id,
+              traceId: event.traceId,
+              messageId: event.messageId,
+            },
+          }).catch(() => undefined);
+        }
       },
       {
         handlerId: "autonomous.delivery_confirmed",
@@ -692,6 +778,37 @@ export const registerAutonomousCampaignTrackers = () => {
             stage: event.failure.stage,
           },
         }).catch(() => undefined);
+
+        if (growthRuntimeWiringEnabled) {
+          await executeGrowthCampaign({
+            businessId: event.businessId,
+            campaignKey: `growth_campaign:${crypto
+              .createHash("sha256")
+              .update(
+                JSON.stringify([
+                  `tenant:${event.businessId}`,
+                  event.businessId,
+                  campaign.channel || "UNKNOWN",
+                  "AUTONOMOUS",
+                  campaign.engine.toUpperCase(),
+                  campaign.objective || "objective",
+                ])
+              )
+              .digest("hex")
+              .slice(0, 32)}`,
+            leadId: event.leadId,
+            channel: campaign.channel || null,
+            action: "delivery_failed",
+            trigger: "REVENUE_BRAIN",
+            dedupeKey: `autonomous_delivery_failed:${campaign.id}:${event.traceId}`,
+            metadata: {
+              autonomousCampaignId: campaign.id,
+              traceId: event.traceId,
+              reason: event.failure.reason,
+            },
+            forceFail: true,
+          }).catch(() => undefined);
+        }
       },
       {
         handlerId: "autonomous.delivery_failed",

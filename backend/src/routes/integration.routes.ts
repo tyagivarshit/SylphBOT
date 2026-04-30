@@ -2,27 +2,40 @@ import express from "express";
 import { protect } from "../middleware/auth.middleware";
 import { requirePermission } from "../middleware/rbac.middleware";
 import {
+  applyDeveloperPlatformOverride,
+  applyDeveloperPlatformPolicy,
   applyConnectHubOverride,
   assignConnectHubSeat,
+  bindDeveloperPlatformSecret,
   connectInstagramHub,
   connectWhatsAppHub,
+  createDeveloperPlatformApiKey,
   expireConnectHubToken,
+  getDeveloperPlatformDashboard,
   getConnectHubDashboard,
   getIntegrationDiagnostics,
   getIntegrations,
   getInstagramAccounts,
   getOnboarding,
+  installDeveloperPlatformPackage,
+  invokeDeveloperPlatformPackageAction,
   installConnectHubMarketplaceArtifact,
   meterConnectHubFeatureGate,
+  publishDeveloperPlatformPackage,
+  publishDeveloperPlatformRelease,
   promoteSandboxConnectHubIntegration,
   provisionConnectHubTenant,
+  registerDeveloperPlatformNamespace,
   recoverConnectHubWebhook,
+  revokeDeveloperPlatformApiKey,
   refreshConnectHubToken,
   retryConnectDiagnostic,
   rollbackConnectHubMarketplaceArtifact,
+  runDeveloperPlatformExtensibilitySelfAudit,
   runConnectHubSelfAudit,
   runWhatsAppDoctor,
   saveConnectHubWizardProgress,
+  subscribeDeveloperPlatformEvent,
   upsertConnectHubBranding,
   upgradeConnectHubPlan,
 } from "../controllers/integration.controller";
@@ -150,6 +163,84 @@ router.get(
   protect,
   requirePermission("settings:view"),
   runConnectHubSelfAudit
+);
+router.get(
+  "/connect-hub/developer-platform",
+  protect,
+  requirePermission("settings:view"),
+  getDeveloperPlatformDashboard
+);
+router.post(
+  "/connect-hub/developer-platform/namespaces",
+  protect,
+  requirePermission("settings:manage"),
+  registerDeveloperPlatformNamespace
+);
+router.post(
+  "/connect-hub/developer-platform/packages/publish",
+  protect,
+  requirePermission("settings:manage"),
+  publishDeveloperPlatformPackage
+);
+router.post(
+  "/connect-hub/developer-platform/releases/publish",
+  protect,
+  requirePermission("settings:manage"),
+  publishDeveloperPlatformRelease
+);
+router.post(
+  "/connect-hub/developer-platform/packages/install",
+  protect,
+  requirePermission("settings:manage"),
+  installDeveloperPlatformPackage
+);
+router.post(
+  "/connect-hub/developer-platform/secrets/bind",
+  protect,
+  requirePermission("settings:manage"),
+  bindDeveloperPlatformSecret
+);
+router.post(
+  "/connect-hub/developer-platform/subscriptions",
+  protect,
+  requirePermission("settings:manage"),
+  subscribeDeveloperPlatformEvent
+);
+router.post(
+  "/connect-hub/developer-platform/invoke",
+  protect,
+  requirePermission("settings:manage"),
+  invokeDeveloperPlatformPackageAction
+);
+router.post(
+  "/connect-hub/developer-platform/policies",
+  protect,
+  requirePermission("settings:manage"),
+  applyDeveloperPlatformPolicy
+);
+router.post(
+  "/connect-hub/developer-platform/overrides",
+  protect,
+  requirePermission("settings:manage"),
+  applyDeveloperPlatformOverride
+);
+router.post(
+  "/connect-hub/developer-platform/api-keys/create",
+  protect,
+  requirePermission("settings:manage"),
+  createDeveloperPlatformApiKey
+);
+router.post(
+  "/connect-hub/developer-platform/api-keys/revoke",
+  protect,
+  requirePermission("settings:manage"),
+  revokeDeveloperPlatformApiKey
+);
+router.get(
+  "/connect-hub/developer-platform/self-audit",
+  protect,
+  requirePermission("settings:view"),
+  runDeveloperPlatformExtensibilitySelfAudit
 );
 router.get("/", protect, requirePermission("settings:view"), getIntegrations);
 

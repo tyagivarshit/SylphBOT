@@ -5,7 +5,7 @@ nixPkgs = ["nodejs"]
 cmds = ["cd backend && npm install"]
 
 [phases.build]
-cmds = ["cd backend && npx prisma generate && npm run build"]
+cmds = ["cd backend && npm run prisma:schema:sync:safe && npm run build"]
 
 [start]
 cmd = "cd backend && npm run start"

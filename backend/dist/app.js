@@ -61,6 +61,7 @@ const reliabilityOS_service_1 = require("./services/reliability/reliabilityOS.se
 const infrastructureResilienceOS_service_1 = require("./services/reliability/infrastructureResilienceOS.service");
 const securityGovernanceOS_service_1 = require("./services/security/securityGovernanceOS.service");
 const saasPackagingConnectHubOS_service_1 = require("./services/saasPackagingConnectHubOS.service");
+const developerPlatformExtensibilityOS_service_1 = require("./services/developerPlatformExtensibilityOS.service");
 const app = (0, express_1.default)();
 void (0, reliabilityOS_service_1.bootstrapReliabilityOS)().catch((error) => {
     console.error("[RELIABILITY BOOTSTRAP FAILED]", error);
@@ -73,6 +74,9 @@ void (0, securityGovernanceOS_service_1.bootstrapSecurityGovernanceOS)().catch((
 });
 void (0, saasPackagingConnectHubOS_service_1.bootstrapSaaSPackagingConnectHubOS)().catch((error) => {
     console.error("[SAAS PACKAGING CONNECT HUB BOOTSTRAP FAILED]", error);
+});
+void (0, developerPlatformExtensibilityOS_service_1.bootstrapDeveloperPlatformExtensibilityOS)().catch((error) => {
+    console.error("[DEVELOPER PLATFORM EXTENSIBILITY BOOTSTRAP FAILED]", error);
 });
 const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const normalizeJsonResponseBody = (body, statusCode) => {

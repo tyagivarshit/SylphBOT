@@ -30,5 +30,18 @@ router.post("/connect-hub/marketplace/rollback", auth_middleware_1.protect, (0, 
 router.post("/connect-hub/seats/assign", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.assignConnectHubSeat);
 router.post("/connect-hub/overrides", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.applyConnectHubOverride);
 router.get("/connect-hub/self-audit", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.runConnectHubSelfAudit);
+router.get("/connect-hub/developer-platform", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getDeveloperPlatformDashboard);
+router.post("/connect-hub/developer-platform/namespaces", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.registerDeveloperPlatformNamespace);
+router.post("/connect-hub/developer-platform/packages/publish", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.publishDeveloperPlatformPackage);
+router.post("/connect-hub/developer-platform/releases/publish", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.publishDeveloperPlatformRelease);
+router.post("/connect-hub/developer-platform/packages/install", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.installDeveloperPlatformPackage);
+router.post("/connect-hub/developer-platform/secrets/bind", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.bindDeveloperPlatformSecret);
+router.post("/connect-hub/developer-platform/subscriptions", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.subscribeDeveloperPlatformEvent);
+router.post("/connect-hub/developer-platform/invoke", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.invokeDeveloperPlatformPackageAction);
+router.post("/connect-hub/developer-platform/policies", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.applyDeveloperPlatformPolicy);
+router.post("/connect-hub/developer-platform/overrides", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.applyDeveloperPlatformOverride);
+router.post("/connect-hub/developer-platform/api-keys/create", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.createDeveloperPlatformApiKey);
+router.post("/connect-hub/developer-platform/api-keys/revoke", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.revokeDeveloperPlatformApiKey);
+router.get("/connect-hub/developer-platform/self-audit", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.runDeveloperPlatformExtensibilitySelfAudit);
 router.get("/", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getIntegrations);
 exports.default = router;

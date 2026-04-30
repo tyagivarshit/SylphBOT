@@ -93,6 +93,8 @@ import {
 import { bootstrapReliabilityOS } from "../services/reliability/reliabilityOS.service";
 import { bootstrapInfrastructureResilienceOS } from "../services/reliability/infrastructureResilienceOS.service";
 import { bootstrapSaaSPackagingConnectHubOS } from "../services/saasPackagingConnectHubOS.service";
+import { bootstrapDeveloperPlatformExtensibilityOS } from "../services/developerPlatformExtensibilityOS.service";
+import { bootstrapGrowthExpansionOS } from "../services/growthExpansionOS.service";
 
 type CronTask = {
   stop?: () => void;
@@ -123,6 +125,8 @@ export const initQueues = () => {
   void bootstrapReliabilityOS().catch(() => undefined);
   void bootstrapInfrastructureResilienceOS().catch(() => undefined);
   void bootstrapSaaSPackagingConnectHubOS().catch(() => undefined);
+  void bootstrapDeveloperPlatformExtensibilityOS().catch(() => undefined);
+  void bootstrapGrowthExpansionOS().catch(() => undefined);
   initAIQueues();
   initFollowupQueues();
   initAuthEmailQueue();

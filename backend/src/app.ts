@@ -68,6 +68,7 @@ import { bootstrapReliabilityOS } from "./services/reliability/reliabilityOS.ser
 import { bootstrapInfrastructureResilienceOS } from "./services/reliability/infrastructureResilienceOS.service";
 import { bootstrapSecurityGovernanceOS } from "./services/security/securityGovernanceOS.service";
 import { bootstrapSaaSPackagingConnectHubOS } from "./services/saasPackagingConnectHubOS.service";
+import { bootstrapDeveloperPlatformExtensibilityOS } from "./services/developerPlatformExtensibilityOS.service";
 
 const app = express();
 
@@ -85,6 +86,10 @@ void bootstrapSecurityGovernanceOS().catch((error) => {
 
 void bootstrapSaaSPackagingConnectHubOS().catch((error) => {
   console.error("[SAAS PACKAGING CONNECT HUB BOOTSTRAP FAILED]", error);
+});
+
+void bootstrapDeveloperPlatformExtensibilityOS().catch((error) => {
+  console.error("[DEVELOPER PLATFORM EXTENSIBILITY BOOTSTRAP FAILED]", error);
 });
 
 const isPlainRecord = (

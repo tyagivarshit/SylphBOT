@@ -6,6 +6,10 @@ import {
   persistAutonomousOpportunity,
   queueAutonomousCampaign,
 } from "./campaign.service";
+import {
+  advanceLifecycleJourney,
+  applyGrowthRuntimeInfluence,
+} from "../growthExpansionOS.service";
 import { recordAutonomousEvent } from "./observability.service";
 import {
   buildAutonomousLeadSnapshot,
@@ -17,6 +21,9 @@ const MIN_AUTODISPATCH_SCORE = 68;
 const AUTONOMOUS_SCHEDULER_LEADER_KEY = "autonomous:scheduler:leader";
 const AUTONOMOUS_SCHEDULER_LEASE_MS = 90_000;
 const AUTONOMOUS_SCHEDULER_REFRESH_MS = 30_000;
+const growthRuntimeWiringEnabled = !process.argv.some((value) =>
+  value.includes("run-tests")
+);
 
 const globalForAutonomousScheduler = globalThis as typeof globalThis & {
   __sylphAutonomousSchedulerRun?: Promise<{
@@ -110,6 +117,15 @@ export const runAutonomousScheduler = async ({
   const results: AutonomousSchedulerLeadResult[] = [];
 
   for (const currentBusinessId of businessIds) {
+    if (growthRuntimeWiringEnabled) {
+      await applyGrowthRuntimeInfluence({
+        businessId: currentBusinessId,
+        metadata: {
+          source: "autonomous_scheduler",
+        },
+      }).catch(() => undefined);
+    }
+
     const runtime = await getIntelligenceRuntimeInfluence({
       businessId: currentBusinessId,
     }).catch(() => null);
@@ -201,6 +217,29 @@ export const runAutonomousScheduler = async ({
 
       results.push(leadResult);
       businessResults.push(leadResult);
+
+      const journeyByEngine: Record<string, string> = {
+        expansion: "upsell",
+        retention: "retention",
+        referral: "advocacy",
+        winback: "winback",
+        lead_revival: "reactivation",
+      };
+      const journeyType =
+        journeyByEngine[best.candidate.engine] || "engagement";
+      if (growthRuntimeWiringEnabled) {
+        await advanceLifecycleJourney({
+          businessId: currentBusinessId,
+          leadId,
+          journeyType,
+          currentState: leadResult.status === "BLOCKED" ? "WATCHED" : "ACTIVE",
+          signal: leadResult.status === "BLOCKED" ? "REGRESS" : "ADVANCE",
+          channel: snapshot.lead.platform || null,
+          trigger: "AUTONOMOUS_SCHEDULER",
+          reason: `engine:${best.candidate.engine}`,
+          dedupeKey: `scheduler:${currentBusinessId}:${leadId}:${best.candidate.engine}:${now.toISOString().slice(0, 10)}`,
+        }).catch(() => undefined);
+      }
     }
 
     await recordAutonomousEvent({

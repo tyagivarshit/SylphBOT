@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
+exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
@@ -517,3 +517,312 @@ const runConnectHubSelfAudit = async (req, res) => {
     }
 };
 exports.runConnectHubSelfAudit = runConnectHubSelfAudit;
+const runWhatsAppDoctor = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const doctor = await (0, saasPackagingConnectHubOS_service_1.runWhatsAppConnectDoctor)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            autoResolve: Boolean(req.body?.autoResolve),
+        });
+        return res.json({
+            success: true,
+            data: doctor,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "WhatsApp doctor failed",
+            error: String(error?.message || "whatsapp_doctor_failed"),
+        });
+    }
+};
+exports.runWhatsAppDoctor = runWhatsAppDoctor;
+const refreshConnectHubToken = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.refreshIntegrationToken)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.body?.provider) || "INSTAGRAM",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            forceFail: Boolean(req.body?.forceFail),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Token refresh failed",
+            error: String(error?.message || "token_refresh_failed"),
+        });
+    }
+};
+exports.refreshConnectHubToken = refreshConnectHubToken;
+const expireConnectHubToken = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.expireIntegrationToken)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.body?.provider) || "INSTAGRAM",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            reason: normalizeOptionalString(req.body?.reason),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Token expire simulation failed",
+            error: String(error?.message || "token_expire_failed"),
+        });
+    }
+};
+exports.expireConnectHubToken = expireConnectHubToken;
+const recoverConnectHubWebhook = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.recoverProviderWebhook)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.body?.provider) || "INSTAGRAM",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Webhook recovery failed",
+            error: String(error?.message || "webhook_recovery_failed"),
+        });
+    }
+};
+exports.recoverConnectHubWebhook = recoverConnectHubWebhook;
+const promoteSandboxConnectHubIntegration = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.promoteSandboxIntegrationToLive)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.body?.provider) || "INSTAGRAM",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Sandbox promotion failed",
+            error: String(error?.message || "sandbox_promotion_failed"),
+        });
+    }
+};
+exports.promoteSandboxConnectHubIntegration = promoteSandboxConnectHubIntegration;
+const upsertConnectHubBranding = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.upsertTenantBranding)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            logoRef: normalizeOptionalString(req.body?.logoRef),
+            domain: normalizeOptionalString(req.body?.domain),
+            theme: req.body?.theme || {},
+            emailBranding: req.body?.emailBranding || {},
+            whatsappIdentity: req.body?.whatsappIdentity || {},
+            proposalBranding: req.body?.proposalBranding || {},
+            invoiceBranding: req.body?.invoiceBranding || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Branding update failed",
+            error: String(error?.message || "branding_update_failed"),
+        });
+    }
+};
+exports.upsertConnectHubBranding = upsertConnectHubBranding;
+const installConnectHubMarketplaceArtifact = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.installMarketplaceArtifact)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            packageKey: normalizeOptionalString(req.body?.packageKey) || "default_connector",
+            packageType: (normalizeOptionalString(req.body?.packageType) || "CONNECTOR"),
+            version: normalizeOptionalString(req.body?.version) || "1.0.0",
+            permissionSet: Array.isArray(req.body?.permissionSet) ? req.body.permissionSet : [],
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Marketplace install failed",
+            error: String(error?.message || "marketplace_install_failed"),
+        });
+    }
+};
+exports.installConnectHubMarketplaceArtifact = installConnectHubMarketplaceArtifact;
+const rollbackConnectHubMarketplaceArtifact = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.rollbackMarketplaceArtifact)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            installKey: normalizeOptionalString(req.body?.installKey) || "",
+            reason: normalizeOptionalString(req.body?.reason),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Marketplace rollback failed",
+            error: String(error?.message || "marketplace_rollback_failed"),
+        });
+    }
+};
+exports.rollbackConnectHubMarketplaceArtifact = rollbackConnectHubMarketplaceArtifact;
+const assignConnectHubSeat = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.assignTenantSeat)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            userId: normalizeOptionalString(req.body?.userId) || "",
+            role: normalizeOptionalString(req.body?.role) || "MEMBER",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Seat assignment failed",
+            error: String(error?.message || "seat_assignment_failed"),
+        });
+    }
+};
+exports.assignConnectHubSeat = assignConnectHubSeat;
+const applyConnectHubOverride = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.applyPackagingOverride)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            scope: normalizeOptionalString(req.body?.scope) || "CONNECT_HUB",
+            targetType: normalizeOptionalString(req.body?.targetType) || "PROVIDER",
+            targetKey: normalizeOptionalString(req.body?.targetKey),
+            action: normalizeOptionalString(req.body?.action) || "ALLOW",
+            reason: normalizeOptionalString(req.body?.reason) || "manual_override",
+            priority: Number(req.body?.priority || 100),
+            expiresAt: req.body?.expiresAt ? new Date(req.body.expiresAt) : null,
+            metadata: req.body?.metadata || {},
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Override application failed",
+            error: String(error?.message || "override_apply_failed"),
+        });
+    }
+};
+exports.applyConnectHubOverride = applyConnectHubOverride;

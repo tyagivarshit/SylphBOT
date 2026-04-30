@@ -2,18 +2,28 @@ import express from "express";
 import { protect } from "../middleware/auth.middleware";
 import { requirePermission } from "../middleware/rbac.middleware";
 import {
+  applyConnectHubOverride,
+  assignConnectHubSeat,
   connectInstagramHub,
   connectWhatsAppHub,
+  expireConnectHubToken,
   getConnectHubDashboard,
   getIntegrationDiagnostics,
   getIntegrations,
   getInstagramAccounts,
   getOnboarding,
+  installConnectHubMarketplaceArtifact,
   meterConnectHubFeatureGate,
+  promoteSandboxConnectHubIntegration,
   provisionConnectHubTenant,
+  recoverConnectHubWebhook,
+  refreshConnectHubToken,
   retryConnectDiagnostic,
+  rollbackConnectHubMarketplaceArtifact,
   runConnectHubSelfAudit,
+  runWhatsAppDoctor,
   saveConnectHubWizardProgress,
+  upsertConnectHubBranding,
   upgradeConnectHubPlan,
 } from "../controllers/integration.controller";
 
@@ -45,6 +55,12 @@ router.post(
   requirePermission("settings:manage"),
   connectWhatsAppHub
 );
+router.post(
+  "/connect-hub/connect/whatsapp/doctor",
+  protect,
+  requirePermission("settings:manage"),
+  runWhatsAppDoctor
+);
 router.get(
   "/connect-hub/diagnostics/:provider",
   protect,
@@ -74,6 +90,60 @@ router.post(
   protect,
   requirePermission("settings:manage"),
   upgradeConnectHubPlan
+);
+router.post(
+  "/connect-hub/sandbox/promote",
+  protect,
+  requirePermission("settings:manage"),
+  promoteSandboxConnectHubIntegration
+);
+router.post(
+  "/connect-hub/token/refresh",
+  protect,
+  requirePermission("settings:manage"),
+  refreshConnectHubToken
+);
+router.post(
+  "/connect-hub/token/expire",
+  protect,
+  requirePermission("settings:manage"),
+  expireConnectHubToken
+);
+router.post(
+  "/connect-hub/webhook/recover",
+  protect,
+  requirePermission("settings:manage"),
+  recoverConnectHubWebhook
+);
+router.post(
+  "/connect-hub/branding",
+  protect,
+  requirePermission("settings:manage"),
+  upsertConnectHubBranding
+);
+router.post(
+  "/connect-hub/marketplace/install",
+  protect,
+  requirePermission("settings:manage"),
+  installConnectHubMarketplaceArtifact
+);
+router.post(
+  "/connect-hub/marketplace/rollback",
+  protect,
+  requirePermission("settings:manage"),
+  rollbackConnectHubMarketplaceArtifact
+);
+router.post(
+  "/connect-hub/seats/assign",
+  protect,
+  requirePermission("settings:manage"),
+  assignConnectHubSeat
+);
+router.post(
+  "/connect-hub/overrides",
+  protect,
+  requirePermission("settings:manage"),
+  applyConnectHubOverride
 );
 router.get(
   "/connect-hub/self-audit",

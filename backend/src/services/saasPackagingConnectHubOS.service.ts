@@ -701,10 +701,34 @@ const getEnvironmentRow = (tenantKey: string, environment: ConnectEnvironment) =
 const getIntegrationHealth = (integrationKey: string) =>
   Array.from(getStore().integrationHealthLedger.values())
     .filter((row) => row.integrationKey === integrationKey)
-    .sort(
-      (left, right) =>
-        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-    )[0] || null;
+    .reduce<{
+      row: any;
+      index: number;
+    } | null>((latest, row, index) => {
+      if (!latest) {
+        return {
+          row,
+          index,
+        };
+      }
+      const latestTime = new Date(
+        latest.row.updatedAt || latest.row.createdAt
+      ).getTime();
+      const currentTime = new Date(row.updatedAt || row.createdAt).getTime();
+      if (currentTime > latestTime) {
+        return {
+          row,
+          index,
+        };
+      }
+      if (currentTime === latestTime && index > latest.index) {
+        return {
+          row,
+          index,
+        };
+      }
+      return latest;
+    }, null)?.row || null;
 
 const getProviderWebhookRow = (integrationKey: string) =>
   Array.from(getStore().providerWebhookLedger.values()).find(
@@ -1660,6 +1684,11 @@ export const bootstrapSaaSPackagingConnectHubOS = async () => {
     "RELIABILITY",
     "SECURITY"
   );
+  for (const authority of CONNECT_HUB_AUTHORITIES) {
+    if (!store.authorities.has(authority)) {
+      store.authorities.set(authority, 0);
+    }
+  }
 
   store.bootstrappedAt = now();
   await recordObservabilityEvent({
@@ -2995,12 +3024,36 @@ export const recordInboundProviderWebhook = async (input: {
   const tenantKey = makeTenantKey(tenantId);
   const provider = normalizeProvider(input.provider);
   const environment = normalizeEnvironment(input.environment || "LIVE");
-  const integration = listIntegrations({
+  const providerIntegrations = listIntegrations({
     tenantKey,
     provider,
-    environment,
-  })[0];
+  }).filter((row) => row.status !== "DISCONNECTED");
+  const integration =
+    providerIntegrations.find((row) => row.environment === environment) || null;
   if (!integration) {
+    const activeEnvironments = Array.from(
+      new Set(providerIntegrations.map((row) => normalizeEnvironment(row.environment)))
+    );
+    const crossEnvironmentBleedBlocked = activeEnvironments.some(
+      (activeEnvironment) => activeEnvironment !== environment
+    );
+    if (crossEnvironmentBleedBlocked) {
+      await createDiagnostic({
+        tenantKey,
+        provider,
+        environment,
+        severity: "ERROR",
+        code: "CROSS_ENV_BLEED_BLOCKED",
+        message:
+          "Inbound webhook environment does not match connected integration environment.",
+        fixAction: "SYNC_ENVIRONMENT",
+        fixPayload: {
+          expectedEnvironment: environment,
+          activeEnvironments,
+        },
+      });
+      throw new Error("cross_env_bleed_blocked");
+    }
     await createDiagnostic({
       tenantKey,
       provider,
@@ -3986,11 +4039,23 @@ export const runSaaSPackagingConnectHubSelfAudit = async (input?: {
   const integrationRows = Array.from(store.integrationLedger.values()).filter(scopeFilter);
   const healthRows = Array.from(store.integrationHealthLedger.values()).filter(scopeFilter);
   const webhookRows = Array.from(store.providerWebhookLedger.values()).filter(scopeFilter);
+  const attemptRows = Array.from(store.connectionAttemptLedger.values()).filter(scopeFilter);
   const diagnostics = Array.from(store.connectionDiagnosticLedger.values()).filter(scopeFilter);
   const usageRows = Array.from(store.tenantUsageLedger.values()).filter(scopeFilter);
   const configRows = Array.from(store.tenantConfigLedger.values()).filter(scopeFilter);
   const wizardRows = Array.from(store.setupWizardLedger.values()).filter(scopeFilter);
   const overrideRows = Array.from(store.packagingOverrideLedger.values()).filter(scopeFilter);
+  const policyRows = Array.from(store.integrationPolicyLedger.values()).filter(scopeFilter);
+  const oauthRows = Array.from(store.oauthStateLedger.values()).filter(scopeFilter);
+  const tokenRefreshRows = Array.from(store.tokenRefreshLedger.values()).filter(scopeFilter);
+  const sandboxRows = Array.from(store.sandboxLedger.values()).filter(scopeFilter);
+  const brandingRows = Array.from(store.brandingLedger.values()).filter(scopeFilter);
+  const marketplaceRows = Array.from(store.marketplaceLedger.values()).filter(scopeFilter);
+  const environmentRows = Array.from(store.environmentLedger.values()).filter(scopeFilter);
+  const provisioningRows = Array.from(store.provisioningLedger.values()).filter(scopeFilter);
+  const upgradeRows = Array.from(store.upgradeLedger.values()).filter(scopeFilter);
+  const seatRows = Array.from(store.seatLedger.values()).filter(scopeFilter);
+  const roleAssignmentRows = Array.from(store.roleAssignmentLedger.values()).filter(scopeFilter);
 
   const existingResourceKeys = new Set<string>();
   for (const row of [
@@ -4000,11 +4065,23 @@ export const runSaaSPackagingConnectHubSelfAudit = async (input?: {
     ...integrationRows,
     ...healthRows,
     ...webhookRows,
+    ...attemptRows,
     ...diagnostics,
     ...usageRows,
     ...configRows,
     ...wizardRows,
     ...overrideRows,
+    ...policyRows,
+    ...oauthRows,
+    ...tokenRefreshRows,
+    ...sandboxRows,
+    ...brandingRows,
+    ...marketplaceRows,
+    ...environmentRows,
+    ...provisioningRows,
+    ...upgradeRows,
+    ...seatRows,
+    ...roleAssignmentRows,
   ]) {
     for (const keyField of [
       "tenantKey",
@@ -4018,6 +4095,18 @@ export const runSaaSPackagingConnectHubSelfAudit = async (input?: {
       "configKey",
       "wizardKey",
       "overrideKey",
+      "policyKey",
+      "oauthStateKey",
+      "refreshKey",
+      "sandboxKey",
+      "brandingKey",
+      "installKey",
+      "environmentKey",
+      "provisioningKey",
+      "upgradeKey",
+      "seatKey",
+      "assignmentKey",
+      "attemptKey",
     ]) {
       if (row[keyField]) {
         existingResourceKeys.add(String(row[keyField]));

@@ -19,6 +19,9 @@ import {
   type JsonRecord,
   type PriorityLevel,
 } from "./reception.shared";
+import { createAssignmentEngineService } from "./assignmentEngine.service";
+import { createEscalationLadderService } from "./escalationLadder.service";
+import { enforceSecurityGovernanceInfluence } from "./security/securityGovernanceOS.service";
 
 export type HumanQueueAssignmentDecision = {
   queueType: string;
@@ -307,9 +310,11 @@ export const createPrismaHumanQueueRepository = (): HumanQueueRepository => ({
 export const createHumanQueueService = ({
   repository = createPrismaHumanQueueRepository(),
   eventWriter = publishReceptionEvent,
+  deterministicAssignment = false,
 }: {
   repository?: HumanQueueRepository;
   eventWriter?: ReceptionEventWriter;
+  deterministicAssignment?: boolean;
 } = {}) => ({
   resolveAssignment: resolveHumanQueueAssignment,
   ensureAssignment: async (context: HumanQueueAssignmentContext) => {
@@ -319,6 +324,25 @@ export const createHumanQueueService = ({
       return null;
     }
 
+    await enforceSecurityGovernanceInfluence({
+      domain: "HUMAN",
+      action: "messages:enqueue",
+      businessId: context.interaction.businessId,
+      tenantId: context.interaction.businessId,
+      actorId: context.assignedHumanId || "human_queue_runtime",
+      actorType: "SERVICE",
+      role: "SERVICE",
+      permissions: ["messages:enqueue"],
+      scopes: ["WRITE"],
+      resourceType: "HUMAN_WORK_QUEUE",
+      resourceId: context.interaction.id,
+      resourceTenantId: context.interaction.businessId,
+      purpose: "HUMAN_ASSIGNMENT",
+      metadata: {
+        routeDecision: context.routing.routeDecision,
+      },
+    });
+
     const persisted = await repository.upsertAssignment({
       interactionId: context.interaction.id,
       leadId: context.interaction.leadId,
@@ -327,6 +351,39 @@ export const createHumanQueueService = ({
       assignedHumanId: context.assignedHumanId,
       metadata: context.metadata,
     });
+    let resolvedQueue = persisted.queue;
+
+    if (deterministicAssignment && !resolvedQueue.assignedHumanId) {
+      const escalationLadder = createEscalationLadderService();
+      const assignmentEngine = createAssignmentEngineService({
+        escalationAdapter: {
+          escalateForNoMatch: async ({ queueId, reason }) => {
+            await escalationLadder.escalateForNoMatch({
+              queueId,
+              reason,
+            });
+          },
+        },
+      });
+      const assignmentResult = await assignmentEngine.assignQueue({
+        queueId: resolvedQueue.id,
+      });
+
+      if (assignmentResult.assigned) {
+        resolvedQueue = {
+          ...resolvedQueue,
+          assignedHumanId: assignmentResult.assignedHumanId,
+          assignedRole: assignmentResult.assignedRole,
+          state: "ASSIGNED",
+          metadata: mergeJsonRecords(resolvedQueue.metadata, {
+            deterministicAssignment: {
+              score: assignmentResult.score.total,
+              reasons: assignmentResult.score.reasons,
+            },
+          }),
+        };
+      }
+    }
 
     await eventWriter({
       event: "human.assigned",
@@ -340,16 +397,16 @@ export const createHumanQueueService = ({
         businessId: persisted.interaction.businessId,
         leadId: persisted.interaction.leadId,
         routeDecision: context.routing.routeDecision,
-        queueType: persisted.queue.queueType,
-        assignedRole: persisted.queue.assignedRole,
-        assignedHumanId: persisted.queue.assignedHumanId,
-        state: persisted.queue.state,
-        priority: persisted.queue.priority,
-        slaDeadline: persisted.queue.slaDeadline
-          ? persisted.queue.slaDeadline.toISOString()
+        queueType: resolvedQueue.queueType,
+        assignedRole: resolvedQueue.assignedRole,
+        assignedHumanId: resolvedQueue.assignedHumanId,
+        state: resolvedQueue.state,
+        priority: resolvedQueue.priority,
+        slaDeadline: resolvedQueue.slaDeadline
+          ? resolvedQueue.slaDeadline.toISOString()
           : null,
-        escalationAt: persisted.queue.escalationAt
-          ? persisted.queue.escalationAt.toISOString()
+        escalationAt: resolvedQueue.escalationAt
+          ? resolvedQueue.escalationAt.toISOString()
           : null,
         traceId: persisted.interaction.traceId,
       },
@@ -357,7 +414,7 @@ export const createHumanQueueService = ({
 
     return {
       assignment,
-      queue: persisted.queue,
+      queue: resolvedQueue,
       interaction: persisted.interaction,
     };
   },

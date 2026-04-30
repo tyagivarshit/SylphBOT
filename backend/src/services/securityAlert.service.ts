@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import redis from "../config/redis";
 import logger from "../utils/logger";
 import { sanitizeMetadata } from "./audit.service";
+import { recordFraudSignal } from "./security/securityGovernanceOS.service";
 
 export type SecurityAlertType =
   | "MULTIPLE_FAILED_LOGIN_ATTEMPTS"
@@ -77,11 +78,32 @@ const emitThresholdAlert = async (input: {
       return null;
     }
 
-    return await createSecurityAlert({
+    const alert = await createSecurityAlert({
       businessId: input.businessId,
       type: input.type,
       metadata: input.metadata,
     });
+
+    const mappedSignalType =
+      input.type === "MULTIPLE_FAILED_LOGIN_ATTEMPTS"
+        ? "credential_stuffing"
+        : input.type === "INVALID_API_KEY_USAGE"
+          ? "token_theft"
+          : "tenant_abuse";
+
+    await recordFraudSignal({
+      businessId: input.businessId,
+      tenantId: input.businessId,
+      signalType: mappedSignalType,
+      actorId: String(input.metadata.userId || input.metadata.email || "unknown"),
+      severity: "MEDIUM",
+      score: Number(input.metadata.attempts || 1),
+      metadata: {
+        sourceAlertType: input.type,
+      },
+    }).catch(() => undefined);
+
+    return alert;
   } catch (error) {
     logger.warn(
       {

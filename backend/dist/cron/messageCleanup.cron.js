@@ -3,25 +3,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runMessageCleanup = void 0;
-const prisma_1 = __importDefault(require("../config/prisma"));
-const conversationSummary_service_1 = require("../services/conversationSummary.service");
+exports.startMessageCleanupCron = exports.runMessageCleanup = void 0;
+const node_cron_1 = __importDefault(require("node-cron"));
 const redis_1 = __importDefault(require("../config/redis"));
-/*
----------------------------------------------------
-CONFIG
----------------------------------------------------
-*/
+const prisma_1 = __importDefault(require("../config/prisma"));
+const logger_1 = __importDefault(require("../utils/logger"));
+const distributedLock_service_1 = require("../services/distributedLock.service");
+const conversationSummary_service_1 = require("../services/conversationSummary.service");
 const MESSAGE_LIMIT = 50;
 const CLEANUP_BATCH = 100;
 const INACTIVE_DAYS = 90;
-/*
----------------------------------------------------
-CLEAN OLD MESSAGES
----------------------------------------------------
-*/
+const MESSAGE_CLEANUP_LEADER_KEY = "message-cleanup:leader";
 const cleanupMessages = async () => {
-    console.log("🧹 Message cleanup started");
     const leads = await prisma_1.default.lead.findMany({
         select: { id: true },
         take: CLEANUP_BATCH,
@@ -32,26 +25,20 @@ const cleanupMessages = async () => {
             orderBy: { createdAt: "desc" },
             select: { id: true },
         });
-        if (messages.length <= MESSAGE_LIMIT)
+        if (messages.length <= MESSAGE_LIMIT) {
             continue;
-        const idsToDelete = messages
-            .slice(MESSAGE_LIMIT)
-            .map((m) => m.id);
+        }
+        const idsToDelete = messages.slice(MESSAGE_LIMIT).map((message) => message.id);
         await prisma_1.default.message.deleteMany({
             where: {
-                id: { in: idsToDelete },
+                id: {
+                    in: idsToDelete,
+                },
             },
         });
-        console.log(`🗑 Cleaned messages for lead ${lead.id}`);
     }
 };
-/*
----------------------------------------------------
-GENERATE CONVERSATION SUMMARIES
----------------------------------------------------
-*/
 const generateSummaries = async () => {
-    console.log("🧠 Generating conversation summaries");
     const leads = await prisma_1.default.lead.findMany({
         select: { id: true },
         take: CLEANUP_BATCH,
@@ -60,24 +47,13 @@ const generateSummaries = async () => {
         await (0, conversationSummary_service_1.generateConversationSummary)(lead.id);
     }
 };
-/*
----------------------------------------------------
-CLEAR REDIS CONVERSATION CACHE
----------------------------------------------------
-*/
-const clearRedisCache = async () => {
-    console.log("⚡ Clearing conversation cache");
+const clearRedisConversationCache = async () => {
     const keys = await redis_1.default.keys("conversation:*");
-    if (!keys.length)
+    if (!keys.length) {
         return;
-    await redis_1.default.del(keys);
-    console.log(`⚡ Cleared ${keys.length} cache keys`);
+    }
+    await redis_1.default.del(...keys);
 };
-/*
----------------------------------------------------
-INACTIVE LEAD CLEANUP
----------------------------------------------------
-*/
 const cleanupInactiveLeads = async () => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - INACTIVE_DAYS);
@@ -98,25 +74,35 @@ const cleanupInactiveLeads = async () => {
                 deletedAt: new Date(),
             },
         });
-        console.log(`📦 Archived inactive lead ${lead.id}`);
     }
 };
-/*
----------------------------------------------------
-MAIN CRON JOB
----------------------------------------------------
-*/
 const runMessageCleanup = async () => {
-    console.log("🚀 Message cleanup cron started");
-    try {
-        await cleanupMessages();
-        await generateSummaries();
-        await clearRedisCache();
-        await cleanupInactiveLeads();
-        console.log("✅ Message cleanup completed");
-    }
-    catch (error) {
-        console.error("🚨 Message cleanup failed:", error);
-    }
+    await cleanupMessages();
+    await generateSummaries();
+    await clearRedisConversationCache();
+    await cleanupInactiveLeads();
 };
 exports.runMessageCleanup = runMessageCleanup;
+const startMessageCleanupCron = () => node_cron_1.default.schedule("15 */2 * * *", async () => {
+    const lock = await (0, distributedLock_service_1.acquireDistributedLock)({
+        key: MESSAGE_CLEANUP_LEADER_KEY,
+        ttlMs: 10 * 60000,
+        refreshIntervalMs: 2 * 60000,
+        waitMs: 0,
+    });
+    if (!lock) {
+        return;
+    }
+    try {
+        await (0, exports.runMessageCleanup)();
+    }
+    catch (error) {
+        logger_1.default.error({
+            error,
+        }, "Message cleanup cron failed");
+    }
+    finally {
+        await lock.release().catch(() => undefined);
+    }
+});
+exports.startMessageCleanupCron = startMessageCleanupCron;

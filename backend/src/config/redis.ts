@@ -33,8 +33,15 @@ const isRetryableRedisError = (error: unknown) => {
 };
 
 const buildRedisOptions = (connectionName: string): RedisOptions => {
-  if (!env.REDIS_URL.startsWith("rediss://")) {
-    throw new Error("REDIS_URL must use rediss:// for Upstash TLS connections");
+  const isTlsRedisUrl = env.REDIS_URL.startsWith("rediss://");
+  const isPlainRedisUrl = env.REDIS_URL.startsWith("redis://");
+  const allowPlainRedis =
+    process.env.NODE_ENV === "integration" || process.env.NODE_ENV === "test";
+
+  if (!isTlsRedisUrl && !(allowPlainRedis && isPlainRedisUrl)) {
+    throw new Error(
+      "REDIS_URL must use rediss:// (or redis:// in integration/test mode)"
+    );
   }
 
   const isWorker = connectionName.startsWith("worker");
@@ -64,7 +71,7 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     reconnectOnError(error) {
       return isRetryableRedisError(error) ? 1 : false;
     },
-    tls: {},
+    tls: isTlsRedisUrl ? {} : undefined,
   };
 };
 

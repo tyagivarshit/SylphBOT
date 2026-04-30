@@ -81,20 +81,6 @@ router.post(
 );
 
 /* ======================================
-BILLING PORTAL
-====================================== */
-
-router.post(
-  "/portal",
-  protect,
-  requireBusinessContext,
-  requirePermission("billing:manage"),
-  attachBillingContext,
-  auditRequest("billing.portal_requested"),
-  BillingController.createPortal
-);
-
-/* ======================================
 CANCEL SUBSCRIPTION
 ====================================== */
 

@@ -18,8 +18,9 @@ const client_routes_1 = __importDefault(require("./routes/client.routes"));
 const ai_routes_1 = __importDefault(require("./routes/ai.routes"));
 const whatsapp_webhook_1 = __importDefault(require("./routes/whatsapp.webhook"));
 const instagram_webhook_1 = __importDefault(require("./routes/instagram.webhook"));
+const calendar_webhook_1 = __importDefault(require("./routes/calendar.webhook"));
 const billing_routes_1 = __importDefault(require("./routes/billing.routes"));
-const stripeWebhook_routes_1 = __importDefault(require("./routes/stripeWebhook.routes"));
+const commerceWebhook_routes_1 = __importDefault(require("./routes/commerceWebhook.routes"));
 const dashboard_routes_1 = __importDefault(require("./routes/dashboard.routes"));
 const commentTrigger_routes_1 = __importDefault(require("./routes/commentTrigger.routes"));
 const message_routes_1 = __importDefault(require("./routes/message.routes"));
@@ -43,6 +44,7 @@ const conversation_routes_1 = __importDefault(require("./routes/conversation.rou
 const health_routes_1 = __importDefault(require("./routes/health.routes"));
 const receptionIntake_routes_1 = __importDefault(require("./routes/receptionIntake.routes"));
 const usage_routes_1 = __importDefault(require("./routes/usage.routes"));
+const commerce_routes_1 = __importDefault(require("./routes/commerce.routes"));
 const client_controller_1 = require("./controllers/client.controller");
 const helpAi_routes_1 = __importDefault(require("./routes/helpAi.routes"));
 const ai_queue_1 = require("./queues/ai.queue");
@@ -55,7 +57,23 @@ const rbac_service_1 = require("./services/rbac.service");
 const AppError_1 = require("./utils/AppError");
 const asyncHandler_1 = require("./utils/asyncHandler");
 const sentry_1 = require("./observability/sentry");
+const reliabilityOS_service_1 = require("./services/reliability/reliabilityOS.service");
+const infrastructureResilienceOS_service_1 = require("./services/reliability/infrastructureResilienceOS.service");
+const securityGovernanceOS_service_1 = require("./services/security/securityGovernanceOS.service");
+const saasPackagingConnectHubOS_service_1 = require("./services/saasPackagingConnectHubOS.service");
 const app = (0, express_1.default)();
+void (0, reliabilityOS_service_1.bootstrapReliabilityOS)().catch((error) => {
+    console.error("[RELIABILITY BOOTSTRAP FAILED]", error);
+});
+void (0, infrastructureResilienceOS_service_1.bootstrapInfrastructureResilienceOS)().catch((error) => {
+    console.error("[INFRASTRUCTURE RESILIENCE BOOTSTRAP FAILED]", error);
+});
+void (0, securityGovernanceOS_service_1.bootstrapSecurityGovernanceOS)().catch((error) => {
+    console.error("[SECURITY GOVERNANCE BOOTSTRAP FAILED]", error);
+});
+void (0, saasPackagingConnectHubOS_service_1.bootstrapSaaSPackagingConnectHubOS)().catch((error) => {
+    console.error("[SAAS PACKAGING CONNECT HUB BOOTSTRAP FAILED]", error);
+});
 const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const normalizeJsonResponseBody = (body, statusCode) => {
     const success = statusCode < 400;
@@ -201,7 +219,7 @@ app.use((req, res, next) => {
     });
     next();
 });
-app.use("/api/webhooks/stripe", express_1.default.raw({ type: "application/json" }), stripeWebhook_routes_1.default);
+app.use("/api/webhooks/commerce", express_1.default.json({ limit: "1mb" }), commerceWebhook_routes_1.default);
 app.use("/api/webhook/whatsapp", express_1.default.raw({ type: "application/json" }), whatsapp_webhook_1.default);
 app.use("/api/webhook/instagram", express_1.default.raw({
     type: "application/json",
@@ -215,6 +233,7 @@ app.use("/webhook/instagram", express_1.default.raw({
         req.rawBody = buf;
     },
 }), instagram_webhook_1.default);
+app.use("/api/webhook/calendar", express_1.default.json({ limit: "1mb" }), calendar_webhook_1.default);
 app.use(express_1.default.json({ limit: "1mb" }));
 const normalizeIncomingMessage = (raw) => {
     const message = String(raw.message || "").trim();
@@ -327,6 +346,7 @@ app.use("/api/auth", auth_routes_1.default);
 app.use("/api/auth", googleAuth_routes_1.default);
 app.use("/api/dashboard", auth_middleware_1.protect, dashboard_routes_1.default);
 app.use("/api/billing", auth_middleware_1.protect, billing_routes_1.default);
+app.use("/api/commerce", commerce_routes_1.default);
 app.use("/api/usage", auth_middleware_1.protect, usage_routes_1.default);
 app.use("/api/help-ai", auth_middleware_1.protect, helpAi_routes_1.default);
 app.use("/api/user", auth_middleware_1.protect, user_routes_1.default);

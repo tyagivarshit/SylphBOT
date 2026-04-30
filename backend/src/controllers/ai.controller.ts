@@ -13,6 +13,7 @@ import {
   runWithContactUsageLimit,
 } from "../services/usage.service";
 import { isPhase5APreviewBypassEnabled } from "../services/runtimePolicy.service";
+import { getCanonicalPlanRef } from "../services/subscriptionAuthority.service";
 
 type TestAIBody = {
   message?: string;
@@ -30,13 +31,6 @@ const getBusinessForUser = async (userId?: string | null) => {
   return prisma.business.findFirst({
     where: {
       ownerId: userId,
-    },
-    include: {
-      subscription: {
-        include: {
-          plan: true,
-        },
-      },
     },
   });
 };
@@ -132,7 +126,7 @@ export const testAI = async (
       businessId: business.id,
       leadId: lead.id,
       message,
-      plan: business.subscription?.plan || null,
+      plan: await getCanonicalPlanRef(business.id),
       source: "PREVIEW",
       preview: true,
       beforeAIReply: async () => {

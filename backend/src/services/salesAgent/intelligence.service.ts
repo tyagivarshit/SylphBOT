@@ -2,6 +2,7 @@ import prisma from "../../config/prisma";
 import { buildMemoryContext, updateMemory } from "../aiMemoryEngine.service";
 import { getSystemClient } from "../clientScope.service";
 import { generateConversationSummary } from "../conversationSummary.service";
+import { getIntelligenceRuntimeInfluence } from "../intelligence/intelligenceRuntimeInfluence.service";
 import { searchKnowledge } from "../knowledgeSearch.service";
 import { getSalesOptimizationInsights } from "./optimizer.service";
 import { getSalesCapabilityProfile, resolveSalesPlanKey } from "./policy.service";
@@ -10,6 +11,7 @@ import {
   getLeadStateDirective,
   updateLeadState,
 } from "./leadState.service";
+import { getCanonicalPlanRef } from "../subscriptionAuthority.service";
 import type {
   SalesAgentContext,
   LeadRevenueState,
@@ -599,7 +601,7 @@ export const buildSalesAgentContext = async ({
   message: string;
   plan?: unknown;
 }): Promise<SalesAgentContext> => {
-  const [leadRecord, systemClient, optimization, messageCount] =
+  const [leadRecord, systemClient, optimization, messageCount, runtimeInfluence] =
     await Promise.all([
     prisma.lead.findUnique({
       where: {
@@ -607,12 +609,12 @@ export const buildSalesAgentContext = async ({
       },
       include: {
         business: {
-          include: {
-            subscription: {
-              include: {
-                plan: true,
-              },
-            },
+          select: {
+            id: true,
+            name: true,
+            industry: true,
+            website: true,
+            timezone: true,
           },
         },
         client: true,
@@ -625,6 +627,10 @@ export const buildSalesAgentContext = async ({
         leadId,
       },
     }),
+    getIntelligenceRuntimeInfluence({
+      businessId,
+      leadId,
+    }).catch(() => null),
   ]);
 
   await updateMemory(leadId, message).catch(() => []);
@@ -639,7 +645,7 @@ export const buildSalesAgentContext = async ({
   });
 
   const planKey = resolveSalesPlanKey(
-    plan || leadRecord?.business?.subscription?.plan || null
+    plan || (leadRecord ? await getCanonicalPlanRef(leadRecord.businessId) : null)
   );
   const capabilities = getSalesCapabilityProfile(planKey);
   const rawIntent = detectIntent(message);
@@ -675,25 +681,40 @@ export const buildSalesAgentContext = async ({
   });
 
   const currentScore = Number(leadRecord?.leadScore || 0);
-  const scoreDelta = computeScoreDelta({
+  const baseScoreDelta = computeScoreDelta({
     message,
     intent,
     objection,
     messageCount,
   });
+  const intelligenceLeadDelta =
+    Number(runtimeInfluence?.controls.crm.leadScoreDelta || 0);
+  const scoreDelta = baseScoreDelta + intelligenceLeadDelta;
   const leadScore = clamp(currentScore + scoreDelta, 0, 100);
   const temperature = getTemperature(leadScore);
-  const stage = getLeadStage({
+  let stage = getLeadStage({
     temperature,
     objection,
     qualification,
   });
+  let resolvedTemperature = temperature;
+
+  if (runtimeInfluence?.controls.crm.segmentShift === "hot_conversion") {
+    stage = "READY_TO_BUY";
+    resolvedTemperature = "HOT";
+  } else if (
+    runtimeInfluence?.controls.crm.segmentShift === "at_risk_recovery" &&
+    stage !== "WON"
+  ) {
+    stage = "AT_RISK";
+    resolvedTemperature = temperature === "COLD" ? "WARM" : temperature;
+  }
 
   const profile: SalesLeadProfile = {
     leadScore,
     scoreDelta,
-    temperature,
-    leadType: getLeadType(temperature),
+    temperature: resolvedTemperature,
+    leadType: getLeadType(resolvedTemperature),
     stage,
     intent,
     intentCategory,
@@ -713,7 +734,7 @@ export const buildSalesAgentContext = async ({
     },
     data: {
       leadScore,
-      aiStage: temperature,
+      aiStage: resolvedTemperature,
       stage,
       intent,
     },
@@ -726,7 +747,7 @@ export const buildSalesAgentContext = async ({
     intent,
     absoluteLeadScore: leadScore,
     preferredStage: stage,
-    preferredAiStage: temperature,
+    preferredAiStage: resolvedTemperature,
     source: "AI_INTELLIGENCE",
     metadata: {
       objection: objection.type,
@@ -735,15 +756,15 @@ export const buildSalesAgentContext = async ({
       qualificationMissing: qualification.missingFields,
     },
   }).catch(() => ({
-    state: temperature as LeadRevenueState,
-    previousState: temperature as LeadRevenueState,
+    state: resolvedTemperature as LeadRevenueState,
+    previousState: resolvedTemperature as LeadRevenueState,
     leadScore,
     stage,
-    aiStage: temperature,
-    directive: getLeadStateDirective(temperature as LeadRevenueState),
+    aiStage: resolvedTemperature,
+    directive: getLeadStateDirective(resolvedTemperature as LeadRevenueState),
   }));
 
-  profile.temperature = temperatureFromRevenueState(leadState.state);
+    profile.temperature = temperatureFromRevenueState(leadState.state);
   profile.stage = leadState.stage;
   profile.leadScore = leadState.leadScore;
 

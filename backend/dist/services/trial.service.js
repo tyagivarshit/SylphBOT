@@ -6,25 +6,32 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.expireTrials = exports.ensureTrialPlanExists = exports.startTrial = exports.getTrialStatus = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const pricing_config_1 = require("../config/pricing.config");
+const shared_1 = require("./commerce/shared");
 const normalizeBusinessId = (businessId) => String(businessId || "").trim();
-const getTrialPlan = async () => prisma_1.default.plan.findFirst({
-    where: {
-        OR: [{ name: pricing_config_1.TRIAL_PLAN_KEY }, { type: pricing_config_1.TRIAL_PLAN_KEY }],
-    },
-});
+const toRecord = (value) => value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+const hasTrialBeenUsed = (metadata) => Boolean(toRecord(metadata).trialUsed) || Boolean(toRecord(metadata).trialUsedAt);
 const getTrialStatus = async (businessId) => {
     const normalizedBusinessId = normalizeBusinessId(businessId);
     if (!normalizedBusinessId) {
         throw new Error("Invalid business id");
     }
-    const subscription = await prisma_1.default.subscription.findUnique({
-        where: { businessId: normalizedBusinessId },
+    const subscription = await prisma_1.default.subscriptionLedger.findFirst({
+        where: {
+            businessId: normalizedBusinessId,
+        },
+        orderBy: {
+            updatedAt: "desc",
+        },
         select: {
-            isTrial: true,
-            currentPeriodEnd: true,
+            status: true,
+            trialEndsAt: true,
         },
     });
-    if (!subscription?.isTrial || !subscription.currentPeriodEnd) {
+    if (!subscription ||
+        subscription.status !== "TRIALING" ||
+        !subscription.trialEndsAt) {
         return {
             trialActive: false,
             daysLeft: 0,
@@ -32,14 +39,12 @@ const getTrialStatus = async (businessId) => {
         };
     }
     const now = Date.now();
-    const expiresAt = subscription.currentPeriodEnd.getTime();
+    const expiresAt = subscription.trialEndsAt.getTime();
     const active = expiresAt >= now;
     return {
         trialActive: active,
-        daysLeft: active
-            ? Math.max(Math.ceil((expiresAt - now) / 86400000), 0)
-            : 0,
-        currentPeriodEnd: subscription.currentPeriodEnd,
+        daysLeft: active ? Math.max(Math.ceil((expiresAt - now) / 86400000), 0) : 0,
+        currentPeriodEnd: subscription.trialEndsAt,
     };
 };
 exports.getTrialStatus = getTrialStatus;
@@ -49,63 +54,88 @@ const startTrial = async (businessId) => {
         throw new Error("Invalid business id");
     }
     return prisma_1.default.$transaction(async (tx) => {
-        const existing = await tx.subscription.findUnique({
-            where: { businessId: normalizedBusinessId },
+        const existing = await tx.subscriptionLedger.findFirst({
+            where: {
+                businessId: normalizedBusinessId,
+            },
+            orderBy: {
+                updatedAt: "desc",
+            },
         });
-        if (existing?.trialUsed) {
+        if (existing && hasTrialBeenUsed(existing.metadata)) {
             throw new Error("Trial already used");
         }
-        const selectedPlan = await tx.plan.findFirst({
-            where: {
-                OR: [{ name: pricing_config_1.TRIAL_PLAN_KEY }, { type: pricing_config_1.TRIAL_PLAN_KEY }],
-            },
-        });
-        if (!selectedPlan) {
-            throw new Error("Default trial plan not found");
+        const now = new Date();
+        const trialEndsAt = new Date(now.getTime() + pricing_config_1.TRIAL_DAYS * 24 * 60 * 60 * 1000);
+        if (existing) {
+            return tx.subscriptionLedger.update({
+                where: {
+                    id: existing.id,
+                },
+                data: {
+                    status: "TRIALING",
+                    planCode: pricing_config_1.TRIAL_PLAN_KEY,
+                    trialEndsAt,
+                    currentPeriodStart: now,
+                    currentPeriodEnd: trialEndsAt,
+                    renewAt: trialEndsAt,
+                    metadata: (0, shared_1.mergeMetadata)(existing.metadata, {
+                        trialUsed: true,
+                        trialUsedAt: now.toISOString(),
+                        trialSource: "trial_service",
+                    }),
+                    version: {
+                        increment: 1,
+                    },
+                },
+            });
         }
-        const currentPeriodEnd = new Date();
-        currentPeriodEnd.setDate(currentPeriodEnd.getDate() + pricing_config_1.TRIAL_DAYS);
-        await tx.subscription.upsert({
-            where: { businessId: normalizedBusinessId },
-            update: {
-                planId: selectedPlan.id,
-                status: "ACTIVE",
-                isTrial: true,
-                trialUsed: true,
-                currentPeriodEnd,
-                graceUntil: null,
-            },
-            create: {
+        return tx.subscriptionLedger.create({
+            data: {
                 businessId: normalizedBusinessId,
-                planId: selectedPlan.id,
-                status: "ACTIVE",
-                isTrial: true,
-                trialUsed: true,
-                currentPeriodEnd,
+                subscriptionKey: (0, shared_1.buildLedgerKey)("subscription"),
+                status: "TRIALING",
+                provider: "INTERNAL",
+                planCode: pricing_config_1.TRIAL_PLAN_KEY,
+                billingCycle: "monthly",
+                currency: "INR",
+                quantity: 1,
+                unitPriceMinor: 0,
+                amountMinor: 0,
+                trialEndsAt,
+                currentPeriodStart: now,
+                currentPeriodEnd: trialEndsAt,
+                renewAt: trialEndsAt,
+                metadata: {
+                    trialUsed: true,
+                    trialUsedAt: now.toISOString(),
+                    trialSource: "trial_service",
+                },
+                idempotencyKey: `trial_start:${normalizedBusinessId}`,
             },
         });
     });
 };
 exports.startTrial = startTrial;
 const ensureTrialPlanExists = async () => {
-    const plan = await getTrialPlan();
-    if (!plan) {
-        throw new Error("Default trial plan not found");
-    }
-    return plan;
+    return {
+        key: pricing_config_1.TRIAL_PLAN_KEY,
+    };
 };
 exports.ensureTrialPlanExists = ensureTrialPlanExists;
 const expireTrials = async () => {
     const now = new Date();
-    await prisma_1.default.subscription.updateMany({
+    await prisma_1.default.subscriptionLedger.updateMany({
         where: {
-            isTrial: true,
-            currentPeriodEnd: { lt: now },
+            status: "TRIALING",
+            trialEndsAt: {
+                lt: now,
+            },
         },
         data: {
-            status: "INACTIVE",
-            isTrial: false,
-            graceUntil: null,
+            status: "EXPIRED",
+            renewAt: null,
+            trialEndsAt: now,
         },
     });
 };

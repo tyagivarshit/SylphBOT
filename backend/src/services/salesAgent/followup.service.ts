@@ -1,10 +1,12 @@
 import prisma from "../../config/prisma";
+import { getIntelligenceRuntimeInfluence } from "../intelligence/intelligenceRuntimeInfluence.service";
 import { selectBestAction } from "./decisionEngine.service";
 import { getSalesCapabilityProfile, resolveSalesPlanKey } from "./policy.service";
 import {
   getSalesOptimizationInsights,
   recordSalesFollowupEvent,
 } from "./optimizer.service";
+import { getCanonicalPlanRef } from "../subscriptionAuthority.service";
 import type {
   SalesAngle,
   SalesCTA,
@@ -403,12 +405,8 @@ export const getSalesFollowupSchedule = async (
     },
     include: {
       business: {
-        include: {
-          subscription: {
-            include: {
-              plan: true,
-            },
-          },
+        select: {
+          id: true,
         },
       },
     },
@@ -418,7 +416,9 @@ export const getSalesFollowupSchedule = async (
     return [];
   }
 
-  const planKey = resolveSalesPlanKey(lead.business?.subscription?.plan || null);
+  const planKey = resolveSalesPlanKey(
+    await getCanonicalPlanRef(lead.businessId)
+  );
   const capabilities = getSalesCapabilityProfile(planKey);
 
   if (!capabilities.enableFollowups) {
@@ -448,9 +448,46 @@ export const getSalesFollowupSchedule = async (
     return [];
   }
 
+  const runtime = await getIntelligenceRuntimeInfluence({
+    businessId: lead.businessId,
+    leadId,
+  }).catch(() => null);
+  const assignedVariant =
+    runtime?.experiments.winners.followup_timing ||
+    runtime?.experiments.assignments.followup_timing ||
+    null;
+  const variantDelayMultiplier =
+    assignedVariant === "A_2H"
+      ? 0.4
+      : assignedVariant === "B_6H"
+      ? 1
+      : assignedVariant === "C_12H"
+      ? 1.8
+      : 1;
+  const optimizationShift = Number(
+    runtime?.optimizations.followup_timing?.adjustedBy || 0
+  );
+  const offerShiftMultiplier =
+    Number(runtime?.controls.ai.offerTimingShiftMinutes || 0) < 0 ? 0.82 : 1;
+  const intelligenceSpeedMultiplier = Math.max(
+    0.35,
+    Math.min(
+      2.2,
+      variantDelayMultiplier * (1 - optimizationShift * 0.9) * offerShiftMultiplier
+    )
+  );
+
   return schedule.slice(0, remainingFollowups).map((item) => ({
     ...item,
-    delayMs: getAdaptiveDelay(item, temperature),
+    delayMs: Math.round(
+      Math.max(
+        5 * 60 * 1000,
+        Math.min(
+          72 * 60 * 60 * 1000,
+          getAdaptiveDelay(item, temperature) * intelligenceSpeedMultiplier
+        )
+      )
+    ),
   }));
 };
 
@@ -478,12 +515,9 @@ export const generateSalesFollowupMessage = async ({
     include: {
       client: true,
       business: {
-        include: {
-          subscription: {
-            include: {
-              plan: true,
-            },
-          },
+        select: {
+          id: true,
+          name: true,
         },
       },
     },
@@ -493,7 +527,9 @@ export const generateSalesFollowupMessage = async ({
     return null;
   }
 
-  const planKey = resolveSalesPlanKey(lead.business.subscription?.plan || null);
+  const planKey = resolveSalesPlanKey(
+    await getCanonicalPlanRef(lead.businessId)
+  );
   const capabilities = getSalesCapabilityProfile(planKey);
 
   if (!capabilities.enableFollowups) {

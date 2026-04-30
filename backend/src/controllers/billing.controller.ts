@@ -1,23 +1,19 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
-import { stripe } from "../services/stripe.service";
-import { createCheckoutSession } from "../services/checkout.service";
 import { env } from "../config/env";
-import { getInvoices } from "../services/invoice.service";
 import { resolveBillingCurrency } from "../services/billingGeo.service";
 import { loadBillingContext } from "../middleware/subscription.middleware";
-import { syncCheckoutSession } from "../services/billingSync.service";
+import { commerceProjectionService } from "../services/commerceProjection.service";
+import { paymentIntentService } from "../services/paymentIntent.service";
+import { proposalEngineService } from "../services/proposalEngine.service";
+import { subscriptionEngineService } from "../services/subscriptionEngine.service";
 import {
   getAddonCatalog,
+  getPricingPlanConfig,
   getPublicPricingPlans,
   TRIAL_DAYS,
 } from "../config/pricing.config";
 import { getUsageOverview } from "../services/usage.service";
-import {
-  getStandardStripePriceCatalog,
-  type PlanType as StripePlanType,
-  type PricingCurrency as StripePricingCurrency,
-} from "../config/stripe.price.map";
 
 /* ====================================== */
 /* USER CONTEXT */
@@ -50,101 +46,6 @@ async function getUserContext(req: Request) {
 /* CONTROLLER */
 /* ====================================== */
 
-type PublicPlanPriceSnapshot = Record<
-  StripePlanType,
-  {
-    monthlyPrice: Record<StripePricingCurrency, number>;
-    yearlyPrice: Record<StripePricingCurrency, number>;
-    priceIds: Partial<
-      Record<
-        StripePricingCurrency,
-        Partial<Record<"monthly" | "yearly", string>>
-      >
-    >;
-  }
->;
-
-let publicPricingCache:
-  | {
-      expiresAt: number;
-      value: PublicPlanPriceSnapshot;
-    }
-  | null = null;
-
-const buildEmptyPriceSnapshot = (): PublicPlanPriceSnapshot => ({
-  BASIC: {
-    monthlyPrice: { INR: 0, USD: 0 },
-    yearlyPrice: { INR: 0, USD: 0 },
-    priceIds: {},
-  },
-  PRO: {
-    monthlyPrice: { INR: 0, USD: 0 },
-    yearlyPrice: { INR: 0, USD: 0 },
-    priceIds: {},
-  },
-  ELITE: {
-    monthlyPrice: { INR: 0, USD: 0 },
-    yearlyPrice: { INR: 0, USD: 0 },
-    priceIds: {},
-  },
-});
-
-const getStripePublicPricing = async () => {
-  const cached = publicPricingCache;
-
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
-
-  const catalog = getStandardStripePriceCatalog();
-
-  if (!env.STRIPE_SECRET_KEY || !catalog.length) {
-    return null;
-  }
-
-  const prices = await Promise.all(
-    catalog.map(async (entry) => {
-      const price = await stripe.prices.retrieve(entry.priceId);
-
-      return {
-        entry,
-        price,
-      };
-    })
-  );
-
-  const snapshot = buildEmptyPriceSnapshot();
-
-  for (const { entry, price } of prices) {
-    const amount = typeof price.unit_amount === "number"
-      ? price.unit_amount / 100
-      : null;
-
-    if (amount === null) {
-      continue;
-    }
-
-    snapshot[entry.plan].priceIds[entry.currency] = {
-      ...(snapshot[entry.plan].priceIds[entry.currency] || {}),
-      [entry.billing]: entry.priceId,
-    };
-
-    if (entry.billing === "monthly") {
-      snapshot[entry.plan].monthlyPrice[entry.currency] = amount;
-      continue;
-    }
-
-    snapshot[entry.plan].yearlyPrice[entry.currency] = amount;
-  }
-
-  publicPricingCache = {
-    value: snapshot,
-    expiresAt: Date.now() + 5 * 60 * 1000,
-  };
-
-  return snapshot;
-};
-
 export class BillingController {
   private static async buildBillingResponse(
     businessId: string,
@@ -154,12 +55,29 @@ export class BillingController {
       loadBillingContext(businessId),
       getUsageOverview(businessId),
     ]);
-
-    let invoices: any[] = [];
-
-    if (subscription?.stripeCustomerId) {
-      invoices = await getInvoices(subscription.stripeCustomerId);
-    }
+    const invoices = await prisma.invoiceLedger.findMany({
+      where: {
+        businessId,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 20,
+      select: {
+        invoiceKey: true,
+        status: true,
+        currency: true,
+        subtotalMinor: true,
+        taxMinor: true,
+        totalMinor: true,
+        paidMinor: true,
+        dueAt: true,
+        issuedAt: true,
+        paidAt: true,
+        externalInvoiceId: true,
+        createdAt: true,
+      },
+    });
 
     return {
       success: true,
@@ -182,32 +100,86 @@ export class BillingController {
     res: Response
   ) {
     try {
-      const { plan, coupon } = req.body;
+      const { plan, coupon, quantity } = req.body;
       const billing = String(req.body?.billing || "monthly");
+      const normalizedPlan = String(plan || "").trim().toUpperCase();
+      const normalizedBilling =
+        billing === "yearly"
+          ? "yearly"
+          : billing === "monthly"
+          ? "monthly"
+          : null;
+      const allowedPlans = new Set(["BASIC", "PRO", "ELITE"]);
 
-      if (!plan) {
+      if (!normalizedPlan) {
         return res.status(400).json({
           success: false,
           message: "Plan is required",
         });
       }
 
-      const { businessId, email, userId } = await getUserContext(req);
+      if (!allowedPlans.has(normalizedPlan)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid plan selected",
+        });
+      }
 
-      const session = await createCheckoutSession(
-        email,
+      if (!normalizedBilling) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid billing cycle",
+        });
+      }
+
+      const { businessId } = await getUserContext(req);
+      const currency = resolveBillingCurrency(req);
+      const pricingPlan = getPricingPlanConfig(normalizedPlan);
+      const unitPrice = normalizedBilling === "yearly"
+        ? pricingPlan.yearlyPrice[currency]
+        : pricingPlan.monthlyPrice[currency];
+      const proposal = await proposalEngineService.createProposal({
         businessId,
-        userId,
-        plan,
-        billing,
-        req,
-        resolveBillingCurrency(req),
-        coupon
-      );
+        planCode: normalizedPlan,
+        billingCycle: normalizedBilling,
+        currency,
+        quantity: Math.max(1, Number(quantity || 1)),
+        customUnitPriceMinor: Math.round(Number(unitPrice || 0) * 100),
+        source: "SELF",
+        requestedBy: "SELF",
+        metadata: {
+          checkoutSource: "billing_controller",
+          coupon: coupon || null,
+        },
+        idempotencyKey: `checkout:proposal:${businessId}:${normalizedPlan}:${normalizedBilling}:${currency}`,
+      });
+      const readyProposal =
+        proposal.status === "APPROVED" || proposal.status === "SENT"
+          ? proposal
+          : await proposalEngineService.sendProposal({
+              businessId,
+              proposalKey: proposal.proposalKey,
+            });
+      const paymentIntent = await paymentIntentService.createCheckout({
+        businessId,
+        proposalKey: readyProposal.proposalKey,
+        provider: "STRIPE",
+        source: "SELF",
+        description: `${normalizedPlan} ${normalizedBilling} plan checkout`,
+        successUrl: `${env.FRONTEND_URL}/billing/success?proposal=${readyProposal.proposalKey}`,
+        cancelUrl: `${env.FRONTEND_URL}/billing/cancel?proposal=${readyProposal.proposalKey}`,
+        metadata: {
+          coupon: coupon || null,
+          origin: "billing_controller",
+        },
+        idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}`,
+      });
 
       return res.json({
         success: true,
-        url: session.url,
+        url: paymentIntent.checkoutUrl,
+        proposalKey: readyProposal.proposalKey,
+        paymentIntentKey: paymentIntent.paymentIntentKey,
       });
     } catch (error: any) {
       if (error.message === "Unauthorized") {
@@ -220,7 +192,8 @@ export class BillingController {
       if (
         error.message?.includes("Currency cannot be changed") ||
         error.message?.includes("Invalid plan") ||
-        error.message?.includes("Invalid billing")
+        error.message?.includes("Invalid billing") ||
+        error.message?.includes("proposal_not_checkout_ready")
       ) {
         return res.status(400).json({
           success: false,
@@ -253,10 +226,6 @@ export class BillingController {
           priceIdUSD: true,
         },
       });
-      const livePricing = await getStripePublicPricing().catch((error) => {
-        console.warn("Stripe pricing sync failed:", error);
-        return null;
-      });
 
       const planMap = new Map(
         plans.map((plan) => [String(plan.type || plan.name).toUpperCase(), plan])
@@ -269,36 +238,17 @@ export class BillingController {
         plans: getPublicPricingPlans().map((plan) => {
           const existing =
             planMap.get(plan.key) || planMap.get(plan.label.toUpperCase());
-          const livePlanPricing = livePricing?.[plan.key as StripePlanType];
-          const monthlyPrice = {
-            INR:
-              livePlanPricing?.monthlyPrice?.INR || plan.monthlyPrice.INR,
-            USD:
-              livePlanPricing?.monthlyPrice?.USD || plan.monthlyPrice.USD,
-          };
-          const yearlyPrice = {
-            INR:
-              livePlanPricing?.yearlyPrice?.INR || plan.yearlyPrice.INR,
-            USD:
-              livePlanPricing?.yearlyPrice?.USD || plan.yearlyPrice.USD,
-          };
 
           return {
             id: existing?.id || plan.key,
             name: plan.label,
             type: existing?.type || plan.key,
-            priceIdINR:
-              livePlanPricing?.priceIds?.INR?.monthly ||
-              existing?.priceIdINR ||
-              null,
-            priceIdUSD:
-              livePlanPricing?.priceIds?.USD?.monthly ||
-              existing?.priceIdUSD ||
-              null,
+            priceIdINR: existing?.priceIdINR || null,
+            priceIdUSD: existing?.priceIdUSD || null,
             description: plan.description,
             popular: Boolean(plan.popular),
-            monthlyPrice,
-            yearlyPrice,
+            monthlyPrice: plan.monthlyPrice,
+            yearlyPrice: plan.yearlyPrice,
             limits: plan.limits,
             features: plan.features,
           };
@@ -360,20 +310,42 @@ export class BillingController {
       }
 
       const { businessId } = await getUserContext(req);
+      const paymentIntent = await prisma.paymentIntentLedger.findFirst({
+        where: {
+          businessId,
+          provider: "STRIPE",
+          providerPaymentIntentId: sessionId,
+        },
+        select: {
+          paymentIntentKey: true,
+          providerPaymentIntentId: true,
+        },
+      });
 
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
-      const sessionBusinessId =
-        session.metadata?.businessId || session.client_reference_id;
-
-      if (!sessionBusinessId || sessionBusinessId !== businessId) {
+      if (!paymentIntent?.providerPaymentIntentId) {
         return res.status(403).json({
           success: false,
           message: "Checkout session does not belong to this user",
         });
       }
 
-      await syncCheckoutSession(session, {
+      await commerceProjectionService.reconcileProviderWebhook({
+        provider: "STRIPE",
         strictBusinessId: businessId,
+        body: {
+          id: `manual_confirm_${paymentIntent.providerPaymentIntentId}`,
+          type: "checkout.session.completed",
+          created: Math.floor(Date.now() / 1000),
+          data: {
+            object: {
+              id: paymentIntent.providerPaymentIntentId,
+              metadata: {
+                businessId,
+                paymentIntentKey: paymentIntent.paymentIntentKey,
+              },
+            },
+          },
+        },
       });
 
       res.setHeader("Cache-Control", "no-store");
@@ -395,82 +367,52 @@ export class BillingController {
   }
 
   static async createPortal(req: Request, res: Response) {
-    try {
-
-      const { businessId } = await getUserContext(req);
-
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
-      });
-
-      if (!subscription?.stripeCustomerId) {
-        return res.status(400).json({
-          success: false,
-          message: "No customer found",
-        });
-      }
-
-      const session = await stripe.billingPortal.sessions.create({
-        customer: subscription.stripeCustomerId,
-        return_url: `${env.FRONTEND_URL}/billing`,
-      });
-
-      return res.json({
-        success: true,
-        url: session.url,
-      });
-
-    } catch (error) {
-
-      console.error("Portal error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Portal failed",
-      });
-
-    }
+    return res.status(410).json({
+      success: false,
+      message: "billing_portal_deprecated_use_canonical_commerce",
+    });
   }
 
   static async cancelSubscription(req: Request, res: Response) {
     try {
-
       const { businessId } = await getUserContext(req);
-
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
+      const subscription = await prisma.subscriptionLedger.findFirst({
+        where: {
+          businessId,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
       });
 
-      if (!subscription?.stripeSubscriptionId) {
+      if (!subscription) {
         return res.status(400).json({
           success: false,
-          message: "No active paid subscription found",
+          message: "No active subscription found",
         });
       }
 
-      await stripe.subscriptions.update(
-        subscription.stripeSubscriptionId,
-        {
-          cancel_at_period_end: true,
-        }
-      );
-
-      /* ❌ DB update removed (webhook करेगा) */
+      await subscriptionEngineService.applyLifecycleAction({
+        businessId,
+        subscriptionKey: subscription.subscriptionKey,
+        action: "cancel",
+        metadata: {
+          source: "billing_controller",
+          requestedBy: "SELF",
+        },
+      });
 
       return res.json({
         success: true,
-        message: "Subscription will cancel at period end",
+        message: "Subscription cancellation submitted",
       });
-
     } catch (error) {
-
       console.error("Cancel error:", error);
 
       return res.status(500).json({
         success: false,
         message: "Cancel failed",
       });
-
     }
   }
 
@@ -479,3 +421,4 @@ export class BillingController {
   }
 
 }
+

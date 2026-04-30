@@ -10,6 +10,7 @@ const reply_service_1 = require("../services/salesAgent/reply.service");
 const orchestrator_service_1 = require("../services/revenueBrain/orchestrator.service");
 const usage_service_1 = require("../services/usage.service");
 const runtimePolicy_service_1 = require("../services/runtimePolicy.service");
+const subscriptionAuthority_service_1 = require("../services/subscriptionAuthority.service");
 const normalizeMessage = (message) => message?.trim() || "";
 const getBusinessForUser = async (userId) => {
     if (!userId) {
@@ -18,13 +19,6 @@ const getBusinessForUser = async (userId) => {
     return prisma_1.default.business.findFirst({
         where: {
             ownerId: userId,
-        },
-        include: {
-            subscription: {
-                include: {
-                    plan: true,
-                },
-            },
         },
     });
 };
@@ -93,7 +87,7 @@ const testAI = async (req, res) => {
             businessId: business.id,
             leadId: lead.id,
             message,
-            plan: business.subscription?.plan || null,
+            plan: await (0, subscriptionAuthority_service_1.getCanonicalPlanRef)(business.id),
             source: "PREVIEW",
             preview: true,
             beforeAIReply: async () => {

@@ -29,7 +29,10 @@ const startWorkerRuntime = async () => {
             revenueBrainEvents: true,
             aiPartition: true,
             followup: true,
+            appointmentOps: true,
+            calendarSync: true,
             receptionRuntime: true,
+            humanReminder: true,
         });
     }
     catch (error) {

@@ -1,6 +1,7 @@
 import os from "os";
 import prisma from "../config/prisma";
 import redis from "../config/redis";
+import { recordMetricSnapshot } from "./reliability/reliabilityOS.service";
 
 const getCpuUsagePercent = () => {
   const usage = process.cpuUsage();
@@ -68,7 +69,7 @@ export const getSystemHealth = async () => {
     getDatabaseStatus(),
   ]);
 
-  return {
+  const snapshot = {
     uptime: process.uptime(),
     memory: getMemoryUsage(),
     cpu: {
@@ -78,4 +79,28 @@ export const getSystemHealth = async () => {
     redis: redisStatus,
     database: databaseStatus,
   };
+
+  void recordMetricSnapshot({
+    subsystem: "SYSTEM",
+    throughput: 0,
+    queueLag: 0,
+    workerUtilization: 0,
+    dlqRate: 0,
+    retryRate: 0,
+    lockContention: 0,
+    providerErrorRate:
+      redisStatus.status === "ok" && databaseStatus.status === "ok" ? 0 : 1,
+    latencyP50Ms: Math.min(redisStatus.latencyMs, databaseStatus.latencyMs),
+    latencyP95Ms: Math.max(redisStatus.latencyMs, databaseStatus.latencyMs),
+    latencyP99Ms: Math.max(redisStatus.latencyMs, databaseStatus.latencyMs) * 1.2,
+    memoryUsage: snapshot.memory.heapUsed,
+    cpuUsage: snapshot.cpu.usagePercent,
+    storageGrowth: snapshot.memory.rss,
+    metadata: {
+      redis: redisStatus,
+      database: databaseStatus,
+    },
+  }).catch(() => undefined);
+
+  return snapshot;
 };

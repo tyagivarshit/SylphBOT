@@ -3,6 +3,8 @@ import {
   RECEPTION_EVENT_TYPES,
   type ReceptionEventEnvelope,
 } from "./receptionEvent.service";
+import { HUMAN_OPS_EVENT_TYPES } from "./humanOpsEvent.service";
+import { createHumanPerformanceService } from "./humanPerformance.service";
 
 type InteractionProjectionState = {
   routeDecision: string | null;
@@ -20,7 +22,10 @@ export const getInboxDashboardProjection = async ({
   const events = await prisma.eventOutbox.findMany({
     where: {
       eventType: {
-        in: [...RECEPTION_EVENT_TYPES],
+        in: [
+          ...RECEPTION_EVENT_TYPES,
+          ...HUMAN_OPS_EVENT_TYPES,
+        ],
       },
       ...(businessId ? { businessId } : {}),
     },
@@ -97,14 +102,44 @@ export const getInboxDashboardProjection = async ({
       resolvedCount += 1;
     }
 
-    if (row.eventType === "interaction.reopened" && interactionId) {
-      const current = interactionState.get(interactionId);
+    if (row.eventType === "human.resolved" && interactionId) {
+      const current = interactionState.get(interactionId) || {
+        routeDecision: "HUMAN_QUEUE",
+        priorityLevel: "MEDIUM",
+        resolved: false,
+        reopened: false,
+        vipWaiting: false,
+      };
+      current.resolved = true;
+      current.reopened = false;
+      interactionState.set(interactionId, current);
+      resolvedCount += 1;
+    }
 
-      if (current) {
-        current.reopened = true;
-        current.resolved = false;
-        interactionState.set(interactionId, current);
-      }
+    if (row.eventType === "handoff.closed" && interactionId) {
+      const current = interactionState.get(interactionId) || {
+        routeDecision: "HUMAN_QUEUE",
+        priorityLevel: "MEDIUM",
+        resolved: false,
+        reopened: false,
+        vipWaiting: false,
+      };
+      current.resolved = true;
+      current.reopened = false;
+      interactionState.set(interactionId, current);
+    }
+
+    if (row.eventType === "interaction.reopened" && interactionId) {
+      const current = interactionState.get(interactionId) || {
+        routeDecision: "HUMAN_QUEUE",
+        priorityLevel: "MEDIUM",
+        resolved: false,
+        reopened: false,
+        vipWaiting: false,
+      };
+      current.reopened = true;
+      current.resolved = false;
+      interactionState.set(interactionId, current);
 
       reopenedCount += 1;
     }
@@ -139,4 +174,18 @@ export const getInboxDashboardProjection = async ({
     reopenRate:
       resolvedCount > 0 ? reopenedCount / Math.max(1, resolvedCount) : 0,
   };
+};
+
+export const getOwnerCopilotProjection = async ({
+  businessId,
+  emitEvent = false,
+}: {
+  businessId: string;
+  emitEvent?: boolean;
+}) => {
+  const performance = createHumanPerformanceService();
+  return performance.buildOwnerCopilotFeed({
+    businessId,
+    emitEvent,
+  });
 };

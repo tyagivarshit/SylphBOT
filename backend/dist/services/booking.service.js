@@ -5,221 +5,141 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.rescheduleAppointment = exports.cancelExistingAppointment = exports.autoCompleteAppointments = exports.rescheduleByLead = exports.cancelAppointmentByLead = exports.getUpcomingAppointment = exports.createNewAppointment = exports.fetchAvailableSlots = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const bookingReminder_queue_1 = require("../queues/bookingReminder.queue");
-const refreshEvents_service_1 = require("./crm/refreshEvents.service");
-const ownerNotification_service_1 = require("./ownerNotification.service");
-const optimizer_service_1 = require("./salesAgent/optimizer.service");
-const distributedLock_service_1 = require("./distributedLock.service");
-const BOOKING_LOCK_TTL_MS = 15000;
-const BOOKING_LOCK_WAIT_MS = 2000;
-const buildBookingSlotLockKey = ({ businessId, startTime, endTime, }) => `booking:slot:${businessId}:${startTime.toISOString()}:${endTime.toISOString()}`;
-const buildBookingLeadLockKey = (businessId, leadId) => `booking:lead:${businessId}:${leadId}`;
-const buildBookingAppointmentLockKey = (businessId, appointmentId) => `booking:appointment:${businessId}:${appointmentId}`;
-const acquireBookingLock = async ({ key, unavailableMessage, }) => {
-    const lock = await (0, distributedLock_service_1.acquireDistributedLock)({
-        key,
-        ttlMs: BOOKING_LOCK_TTL_MS,
-        waitMs: BOOKING_LOCK_WAIT_MS,
+const availabilityPlanner_service_1 = require("./availabilityPlanner.service");
+const appointmentEngine_service_1 = require("./appointmentEngine.service");
+const appointmentReminder_service_1 = require("./appointmentReminder.service");
+const rescheduleEngine_service_1 = require("./rescheduleEngine.service");
+const appointmentOutcome_service_1 = require("./appointmentOutcome.service");
+const securityGovernanceOS_service_1 = require("./security/securityGovernanceOS.service");
+const availabilityPlanner = (0, availabilityPlanner_service_1.createAvailabilityPlannerService)();
+const resolveCanonicalByLegacy = async ({ businessId, legacyAppointmentId, }) => {
+    const legacy = await prisma_1.default.appointment.findFirst({
+        where: {
+            id: legacyAppointmentId,
+            businessId,
+        },
     });
-    if (!lock) {
-        throw new Error(unavailableMessage);
+    if (!legacy) {
+        return null;
     }
-    return lock;
+    const canonical = await prisma_1.default.appointmentLedger.findFirst({
+        where: {
+            businessId,
+            leadId: legacy.leadId || undefined,
+            startAt: legacy.startTime,
+            endAt: legacy.endTime,
+            status: {
+                in: [
+                    "REQUESTED",
+                    "PROPOSED",
+                    "HOLD",
+                    "CONFIRMED",
+                    "RESCHEDULED",
+                    "REMINDER_SENT",
+                    "CHECKED_IN",
+                    "LATE_JOIN",
+                    "IN_PROGRESS",
+                ],
+            },
+        },
+        orderBy: {
+            createdAt: "desc",
+        },
+    });
+    return canonical;
 };
-const releaseBookingLocks = async (locks) => {
-    await Promise.all(locks.map((lock) => lock.release().catch(() => undefined)));
-};
-const withBookingLocks = async ({ businessId, leadId, appointmentId, startTime, endTime, run, }) => {
-    const locks = [];
-    try {
-        if (leadId) {
-            locks.push(await acquireBookingLock({
-                key: buildBookingLeadLockKey(businessId, leadId),
-                unavailableMessage: "Another booking change is already in progress for this lead",
-            }));
-        }
-        if (appointmentId) {
-            locks.push(await acquireBookingLock({
-                key: buildBookingAppointmentLockKey(businessId, appointmentId),
-                unavailableMessage: "This appointment is already being updated",
-            }));
-        }
-        if (startTime && endTime) {
-            locks.push(await acquireBookingLock({
-                key: buildBookingSlotLockKey({
-                    businessId,
-                    startTime,
-                    endTime,
-                }),
-                unavailableMessage: "This slot is being booked right now",
-            }));
-        }
-        return await run();
-    }
-    finally {
-        await releaseBookingLocks(locks);
-    }
-};
+const resolveLegacyMirror = async ({ businessId, leadId, startAt, }) => prisma_1.default.appointment.findFirst({
+    where: {
+        businessId,
+        leadId,
+        startTime: startAt,
+    },
+    orderBy: {
+        updatedAt: "desc",
+    },
+});
 const fetchAvailableSlots = async (businessId, date) => {
-    const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayOfWeek = utcDate.getUTCDay();
-    const slots = await prisma_1.default.bookingSlot.findMany({
-        where: {
-            businessId,
-            dayOfWeek,
-            isActive: true,
-        },
-        orderBy: { startTime: "asc" },
+    const start = new Date(date);
+    start.setUTCHours(0, 0, 0, 0);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
+    const ranked = await availabilityPlanner.getRankedSlots({
+        businessId,
+        windowStart: start,
+        windowEnd: end,
+        timezone: "UTC",
+        maxResults: 200,
     });
-    if (!slots.length) {
-        return [];
-    }
-    const startOfDay = new Date(utcDate);
-    startOfDay.setUTCHours(0, 0, 0, 0);
-    const endOfDay = new Date(utcDate);
-    endOfDay.setUTCHours(23, 59, 59, 999);
-    const appointments = await prisma_1.default.appointment.findMany({
-        where: {
-            businessId,
-            startTime: { gte: startOfDay, lte: endOfDay },
-            status: "CONFIRMED",
-        },
-        select: {
-            startTime: true,
-            endTime: true,
-        },
-    });
-    const appointmentRanges = appointments.map((appointment) => ({
-        start: appointment.startTime.getTime(),
-        end: appointment.endTime.getTime(),
-    }));
-    const now = new Date();
-    const availableSlots = [];
-    for (const slot of slots) {
-        const [startHour, startMinute] = slot.startTime.split(":").map(Number);
-        const [endHour, endMinute] = slot.endTime.split(":").map(Number);
-        const slotDuration = slot.slotDuration || 30;
-        const bufferTime = slot.bufferTime || 0;
-        let current = new Date(utcDate);
-        current.setUTCHours(startHour, startMinute, 0, 0);
-        const end = new Date(utcDate);
-        end.setUTCHours(endHour, endMinute, 0, 0);
-        while (current < end) {
-            const slotStart = new Date(current);
-            const slotEnd = new Date(current.getTime() + slotDuration * 60000);
-            const hasConflict = appointmentRanges.some((appointment) => slotStart.getTime() < appointment.end &&
-                slotEnd.getTime() > appointment.start);
-            if (!hasConflict && slotStart.getTime() > now.getTime()) {
-                availableSlots.push(new Date(slotStart));
-            }
-            current = new Date(current.getTime() + (slotDuration + bufferTime) * 60000);
-        }
-    }
-    return availableSlots;
+    return ranked.map((slot) => slot.startAt);
 };
 exports.fetchAvailableSlots = fetchAvailableSlots;
 const createNewAppointment = async (data) => {
-    const { businessId, leadId, name, email, phone, startTime, endTime } = data;
-    return withBookingLocks({
+    const { businessId, leadId, startTime, endTime } = data;
+    await (0, securityGovernanceOS_service_1.enforceSecurityGovernanceInfluence)({
+        domain: "BOOKING",
+        action: "messages:enqueue",
         businessId,
-        leadId: leadId || null,
-        startTime,
-        endTime,
-        run: async () => {
-            const appointment = await prisma_1.default.$transaction(async (tx) => {
-                let scopedLead = null;
-                if (leadId) {
-                    scopedLead = await tx.lead.findFirst({
-                        where: {
-                            id: leadId,
-                            businessId,
-                            deletedAt: null,
-                        },
-                        select: {
-                            id: true,
-                            name: true,
-                            email: true,
-                            phone: true,
-                        },
-                    });
-                    if (!scopedLead) {
-                        throw new Error("Lead not found for this business");
-                    }
-                    const existingUserBooking = await tx.appointment.findFirst({
-                        where: {
-                            businessId,
-                            leadId: scopedLead.id,
-                            status: "CONFIRMED",
-                        },
-                    });
-                    if (existingUserBooking) {
-                        throw new Error("User already has active booking");
-                    }
-                }
-                const existing = await tx.appointment.findFirst({
-                    where: {
-                        businessId,
-                        status: "CONFIRMED",
-                        AND: [{ startTime: { lt: endTime } }, { endTime: { gt: startTime } }],
-                    },
-                });
-                if (existing) {
-                    throw new Error("Slot already booked");
-                }
-                const appointment = await tx.appointment.create({
-                    data: {
-                        businessId,
-                        leadId: scopedLead?.id || leadId,
-                        name: scopedLead?.name || name,
-                        email: scopedLead?.email || email,
-                        phone: scopedLead?.phone || phone,
-                        startTime,
-                        endTime,
-                        status: "CONFIRMED",
-                    },
-                });
-                if (scopedLead) {
-                    await tx.lead.updateMany({
-                        where: {
-                            id: scopedLead.id,
-                            businessId,
-                            deletedAt: null,
-                        },
-                        data: {
-                            stage: "BOOKED_CALL",
-                            aiStage: "HOT",
-                            revenueState: "HOT",
-                            lastBookedAt: startTime,
-                        },
-                    });
-                }
-                return appointment;
-            });
-            await (0, bookingReminder_queue_1.scheduleReminderJobs)({
-                appointmentId: appointment.id,
-                businessId,
-            }).catch(() => undefined);
-            if (leadId) {
-                void (0, ownerNotification_service_1.sendOwnerWhatsAppNotification)({
-                    businessId,
-                    leadId,
-                    slot: startTime,
-                    type: "CONFIRMED",
-                }).catch(() => undefined);
-                await (0, optimizer_service_1.recordSalesConversionEvent)({
-                    businessId,
-                    leadId,
-                    outcome: "BOOKED_CALL",
-                    idempotencyKey: `booking:${appointment.id}`,
-                });
-                await (0, refreshEvents_service_1.publishCRMRefreshEvent)({
-                    businessId,
-                    leadId,
-                    event: "booking_confirmed",
-                });
-            }
-            return appointment;
+        tenantId: businessId,
+        actorId: leadId || "booking_runtime",
+        actorType: "SERVICE",
+        role: "SERVICE",
+        permissions: ["messages:enqueue"],
+        scopes: ["WRITE"],
+        resourceType: "APPOINTMENT",
+        resourceId: leadId || "unknown_lead",
+        resourceTenantId: businessId,
+        purpose: "APPOINTMENT_CREATE",
+        metadata: {
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
         },
+    });
+    if (!leadId) {
+        throw new Error("Lead ID is required for canonical booking");
+    }
+    const appointment = await appointmentEngine_service_1.appointmentEngineService.bookDirect({
+        businessId,
+        leadId,
+        startAt: startTime,
+        endAt: endTime,
+        bookedBy: "SELF",
+        source: "BOOKING_API",
+        meetingType: "GENERAL",
+        timezone: "UTC",
+        metadata: {
+            legacyName: data.name,
+            legacyEmail: data.email || null,
+            legacyPhone: data.phone || null,
+        },
+    });
+    if (appointment.startAt) {
+        await appointmentReminder_service_1.appointmentReminderService
+            .scheduleCoreCadence({
+            businessId,
+            appointmentId: appointment.id,
+            appointmentKey: appointment.appointmentKey,
+            leadId: appointment.leadId,
+            startAt: appointment.startAt,
+        })
+            .catch(() => undefined);
+    }
+    const legacy = await resolveLegacyMirror({
+        businessId,
+        leadId,
+        startAt: startTime,
+    });
+    return (legacy || {
+        id: appointment.id,
+        businessId: appointment.businessId,
+        leadId: appointment.leadId,
+        name: data.name,
+        email: data.email || null,
+        phone: data.phone || null,
+        startTime: appointment.startAt || startTime,
+        endTime: appointment.endAt || endTime,
+        status: appointment.status,
+        meetingLink: appointment.meetingJoinUrl || null,
+        createdAt: appointment.createdAt,
+        updatedAt: appointment.updatedAt,
     });
 };
 exports.createNewAppointment = createNewAppointment;
@@ -233,159 +153,139 @@ const getUpcomingAppointment = async (businessId, leadId) => prisma_1.default.ap
     orderBy: { startTime: "asc" },
 });
 exports.getUpcomingAppointment = getUpcomingAppointment;
-const withLeadOwnedAppointmentLocks = async ({ businessId, leadId, startTime, endTime, run, }) => {
-    const leadLock = await acquireBookingLock({
-        key: buildBookingLeadLockKey(businessId, leadId),
-        unavailableMessage: "Another booking change is already in progress for this lead",
-    });
-    const locks = [leadLock];
-    try {
-        const appointment = await (0, exports.getUpcomingAppointment)(businessId, leadId);
-        if (!appointment) {
-            throw new Error("No active booking found");
-        }
-        locks.push(await acquireBookingLock({
-            key: buildBookingAppointmentLockKey(businessId, appointment.id),
-            unavailableMessage: "This appointment is already being updated",
-        }));
-        if (startTime && endTime) {
-            locks.push(await acquireBookingLock({
-                key: buildBookingSlotLockKey({
-                    businessId,
-                    startTime,
-                    endTime,
-                }),
-                unavailableMessage: "This slot is being booked right now",
-            }));
-        }
-        return await run(appointment);
-    }
-    finally {
-        await releaseBookingLocks(locks);
-    }
-};
 const cancelAppointmentByLead = async (businessId, leadId) => {
-    return withLeadOwnedAppointmentLocks({
+    await (0, securityGovernanceOS_service_1.enforceSecurityGovernanceInfluence)({
+        domain: "BOOKING",
+        action: "messages:enqueue",
+        businessId,
+        tenantId: businessId,
+        actorId: leadId,
+        actorType: "SERVICE",
+        role: "SERVICE",
+        permissions: ["messages:enqueue"],
+        scopes: ["WRITE"],
+        resourceType: "APPOINTMENT",
+        resourceId: leadId,
+        resourceTenantId: businessId,
+        purpose: "APPOINTMENT_CANCEL",
+    });
+    const appointment = await appointmentEngine_service_1.appointmentEngineService.getActiveAppointmentByLead({
         businessId,
         leadId,
-        run: async (appointment) => {
-            await prisma_1.default.appointment.updateMany({
-                where: {
-                    id: appointment.id,
-                    businessId,
-                    leadId,
-                },
-                data: { status: "CANCELLED" },
-            });
-            await (0, refreshEvents_service_1.publishCRMRefreshEvent)({
-                businessId,
-                leadId,
-                event: "booking_cancelled",
-            });
-            return getAppointmentById(businessId, appointment.id);
+    });
+    if (!appointment) {
+        throw new Error("No active booking found");
+    }
+    await appointmentEngine_service_1.appointmentEngineService.cancelAppointment({
+        businessId,
+        appointmentKey: appointment.appointmentKey,
+        reason: "cancelled_by_lead",
+        actor: "SELF",
+    });
+    return prisma_1.default.appointment.findFirst({
+        where: {
+            businessId,
+            leadId,
+            status: "CANCELLED",
+        },
+        orderBy: {
+            updatedAt: "desc",
         },
     });
 };
 exports.cancelAppointmentByLead = cancelAppointmentByLead;
 const rescheduleByLead = async (businessId, leadId, newStart, newEnd) => {
-    return withLeadOwnedAppointmentLocks({
+    await (0, securityGovernanceOS_service_1.enforceSecurityGovernanceInfluence)({
+        domain: "BOOKING",
+        action: "messages:enqueue",
+        businessId,
+        tenantId: businessId,
+        actorId: leadId,
+        actorType: "SERVICE",
+        role: "SERVICE",
+        permissions: ["messages:enqueue"],
+        scopes: ["WRITE"],
+        resourceType: "APPOINTMENT",
+        resourceId: leadId,
+        resourceTenantId: businessId,
+        purpose: "APPOINTMENT_RESCHEDULE",
+        metadata: {
+            newStart: newStart.toISOString(),
+            newEnd: newEnd.toISOString(),
+        },
+    });
+    const appointment = await appointmentEngine_service_1.appointmentEngineService.getActiveAppointmentByLead({
         businessId,
         leadId,
-        startTime: newStart,
-        endTime: newEnd,
-        run: async (appointment) => {
-            if (appointment.startTime < new Date()) {
-                throw new Error("Cannot reschedule past appointment");
-            }
-            const updated = await prisma_1.default.$transaction(async (tx) => {
-                const conflict = await tx.appointment.findFirst({
-                    where: {
-                        businessId,
-                        status: "CONFIRMED",
-                        id: { not: appointment.id },
-                        AND: [{ startTime: { lt: newEnd } }, { endTime: { gt: newStart } }],
-                    },
-                });
-                if (conflict) {
-                    throw new Error("New slot not available");
-                }
-                await tx.appointment.updateMany({
-                    where: {
-                        id: appointment.id,
-                        businessId,
-                        leadId,
-                    },
-                    data: {
-                        startTime: newStart,
-                        endTime: newEnd,
-                    },
-                });
-                const refreshed = await tx.appointment.findFirst({
-                    where: {
-                        id: appointment.id,
-                        businessId,
-                        leadId,
-                    },
-                });
-                if (!refreshed) {
-                    throw new Error("Appointment not found");
-                }
-                return refreshed;
-            });
-            await (0, ownerNotification_service_1.sendOwnerWhatsAppNotification)({
-                businessId,
-                leadId,
-                slot: newStart,
-                type: "RESCHEDULED",
-            });
-            await (0, refreshEvents_service_1.publishCRMRefreshEvent)({
-                businessId,
-                leadId,
-                event: "booking_rescheduled",
-            });
-            return updated;
+    });
+    if (!appointment) {
+        throw new Error("No active booking found");
+    }
+    const slot = await prisma_1.default.availabilitySlot.findFirst({
+        where: {
+            businessId,
+            startAt: newStart,
+            endAt: newEnd,
+        },
+        orderBy: {
+            updatedAt: "desc",
+        },
+    });
+    if (!slot) {
+        throw new Error("New slot not available");
+    }
+    await rescheduleEngine_service_1.rescheduleEngineService.reschedule({
+        businessId,
+        appointmentKey: appointment.appointmentKey,
+        newSlotKey: slot.slotKey,
+        actor: "SELF",
+        reason: "lead_reschedule",
+    });
+    return prisma_1.default.appointment.findFirst({
+        where: {
+            businessId,
+            leadId,
+            status: "CONFIRMED",
+            startTime: newStart,
+        },
+        orderBy: {
+            updatedAt: "desc",
         },
     });
 };
 exports.rescheduleByLead = rescheduleByLead;
 const autoCompleteAppointments = async () => {
-    const appointments = await prisma_1.default.appointment.findMany({
+    const now = new Date();
+    const due = await prisma_1.default.appointmentLedger.findMany({
         where: {
-            endTime: { lt: new Date() },
-            status: "CONFIRMED",
-        },
-        select: {
-            id: true,
-            businessId: true,
-            leadId: true,
-        },
-    });
-    if (!appointments.length) {
-        return {
-            count: 0,
-        };
-    }
-    const result = await prisma_1.default.appointment.updateMany({
-        where: {
-            id: {
-                in: appointments.map((appointment) => appointment.id),
+            status: {
+                in: ["CONFIRMED", "RESCHEDULED", "REMINDER_SENT", "CHECKED_IN", "LATE_JOIN", "IN_PROGRESS"],
+            },
+            endAt: {
+                lt: now,
             },
         },
-        data: {
-            status: "COMPLETED",
+        select: {
+            businessId: true,
+            appointmentKey: true,
         },
+        take: 200,
     });
-    await Promise.all(Array.from(new Set(appointments
-        .filter((appointment) => appointment.leadId)
-        .map((appointment) => `${appointment.businessId}:${appointment.leadId}`))).map((entry) => {
-        const [eventBusinessId, eventLeadId] = entry.split(":");
-        return (0, refreshEvents_service_1.publishCRMRefreshEvent)({
-            businessId: eventBusinessId,
-            leadId: eventLeadId,
-            event: "booking_completed",
-        });
-    }));
-    return result;
+    for (const appointment of due) {
+        await appointmentOutcome_service_1.appointmentOutcomeService
+            .complete({
+            businessId: appointment.businessId,
+            appointmentKey: appointment.appointmentKey,
+            outcome: "AUTO_COMPLETED",
+            metadata: {
+                completionSource: "automatic_completion_sweep",
+            },
+        })
+            .catch(() => undefined);
+    }
+    return {
+        count: due.length,
+    };
 };
 exports.autoCompleteAppointments = autoCompleteAppointments;
 const getAppointmentById = async (businessId, appointmentId) => {
@@ -400,85 +300,79 @@ const getAppointmentById = async (businessId, appointmentId) => {
     }
     return appointment;
 };
-const updateAppointmentForBusiness = async ({ businessId, appointmentId, data, }) => {
-    await prisma_1.default.appointment.updateMany({
-        where: {
-            id: appointmentId,
-            businessId,
-        },
-        data,
-    });
-    return getAppointmentById(businessId, appointmentId);
-};
 const cancelExistingAppointment = async (businessId, appointmentId) => {
-    const appointment = await getAppointmentById(businessId, appointmentId);
-    return withBookingLocks({
+    const canonical = await resolveCanonicalByLegacy({
         businessId,
-        appointmentId,
-        leadId: appointment.leadId || null,
-        run: async () => {
-            const currentAppointment = await getAppointmentById(businessId, appointmentId);
-            if (currentAppointment.status === "CANCELLED") {
-                return currentAppointment;
-            }
-            const updated = await updateAppointmentForBusiness({
-                businessId,
-                appointmentId: currentAppointment.id,
-                data: { status: "CANCELLED" },
-            });
-            if (updated.leadId) {
-                await (0, refreshEvents_service_1.publishCRMRefreshEvent)({
-                    businessId,
-                    leadId: updated.leadId,
-                    event: "booking_cancelled",
-                });
-            }
-            return updated;
-        },
+        legacyAppointmentId: appointmentId,
     });
+    if (canonical) {
+        await appointmentEngine_service_1.appointmentEngineService.cancelAppointment({
+            businessId,
+            appointmentKey: canonical.appointmentKey,
+            reason: "cancelled_via_legacy_endpoint",
+            actor: "HUMAN",
+        });
+    }
+    else {
+        await prisma_1.default.appointment.updateMany({
+            where: {
+                id: appointmentId,
+                businessId,
+            },
+            data: {
+                status: "CANCELLED",
+            },
+        });
+    }
+    return getAppointmentById(businessId, appointmentId);
 };
 exports.cancelExistingAppointment = cancelExistingAppointment;
 const rescheduleAppointment = async (businessId, appointmentId, newStart, newEnd) => {
-    const appointment = await getAppointmentById(businessId, appointmentId);
-    return withBookingLocks({
+    const canonical = await resolveCanonicalByLegacy({
         businessId,
-        appointmentId,
-        leadId: appointment.leadId || null,
-        startTime: newStart,
-        endTime: newEnd,
-        run: async () => {
-            const currentAppointment = await getAppointmentById(businessId, appointmentId);
-            const conflict = await prisma_1.default.appointment.findFirst({
-                where: {
-                    businessId,
-                    status: "CONFIRMED",
-                    id: { not: currentAppointment.id },
-                    AND: [{ startTime: { lt: newEnd } }, { endTime: { gt: newStart } }],
-                },
-            });
-            if (conflict) {
-                throw new Error("New slot not available");
-            }
-            const updated = await updateAppointmentForBusiness({
+        legacyAppointmentId: appointmentId,
+    });
+    if (!canonical) {
+        const conflict = await prisma_1.default.appointment.findFirst({
+            where: {
                 businessId,
-                appointmentId: currentAppointment.id,
-                data: {
-                    startTime: newStart,
-                    endTime: newEnd,
-                    status: currentAppointment.status === "CANCELLED"
-                        ? "CONFIRMED"
-                        : currentAppointment.status,
-                },
-            });
-            if (updated.leadId) {
-                await (0, refreshEvents_service_1.publishCRMRefreshEvent)({
-                    businessId,
-                    leadId: updated.leadId,
-                    event: "booking_rescheduled",
-                });
-            }
-            return updated;
+                status: "CONFIRMED",
+                id: { not: appointmentId },
+                AND: [{ startTime: { lt: newEnd } }, { endTime: { gt: newStart } }],
+            },
+        });
+        if (conflict) {
+            throw new Error("New slot not available");
+        }
+        await prisma_1.default.appointment.updateMany({
+            where: {
+                id: appointmentId,
+                businessId,
+            },
+            data: {
+                startTime: newStart,
+                endTime: newEnd,
+            },
+        });
+        return getAppointmentById(businessId, appointmentId);
+    }
+    const slot = await prisma_1.default.availabilitySlot.findFirst({
+        where: {
+            businessId,
+            startAt: newStart,
+            endAt: newEnd,
         },
     });
+    if (!slot) {
+        throw new Error("New slot not available");
+    }
+    await rescheduleEngine_service_1.rescheduleEngineService.reschedule({
+        businessId,
+        appointmentKey: canonical.appointmentKey,
+        newSlotKey: slot.slotKey,
+        actor: "HUMAN",
+        reason: "legacy_endpoint_reschedule",
+    });
+    return getAppointmentById(businessId, appointmentId);
 };
 exports.rescheduleAppointment = rescheduleAppointment;

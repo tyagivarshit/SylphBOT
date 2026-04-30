@@ -4,6 +4,10 @@ import {
   IDEMPOTENCY_TTL_SECONDS,
   buildIdempotencyRedisKey,
 } from "./redisState.service";
+import {
+  recordObservabilityEvent,
+  recordTraceLedger,
+} from "./reliability/reliabilityOS.service";
 
 export type WebhookPlatform =
   | "INSTAGRAM"
@@ -82,24 +86,83 @@ export const processWebhookEvent = async ({
   platform,
 }: WebhookCheckInput): Promise<boolean> => {
   if (!eventId) return true;
+  const traceId = `webhook_${platform}_${eventId}`;
 
   try {
     const lockAcquired = await acquireRedisLock(eventId, platform);
 
     if (!lockAcquired) {
+      await recordObservabilityEvent({
+        eventType: "webhook.dedupe.duplicate",
+        message: `Webhook duplicate skipped for ${platform}`,
+        severity: "info",
+        context: {
+          traceId,
+          correlationId: traceId,
+          provider: platform,
+          component: "webhook-reconciliation",
+          phase: "providers",
+        },
+        metadata: {
+          eventId,
+          reason: "redis_lock_exists",
+        },
+      }).catch(() => undefined);
       return false;
     }
 
     const exists = await checkDatabaseDuplicate(eventId);
 
     if (exists) {
+      await recordObservabilityEvent({
+        eventType: "webhook.dedupe.duplicate",
+        message: `Webhook duplicate skipped for ${platform}`,
+        severity: "info",
+        context: {
+          traceId,
+          correlationId: traceId,
+          provider: platform,
+          component: "webhook-reconciliation",
+          phase: "providers",
+        },
+        metadata: {
+          eventId,
+          reason: "db_duplicate",
+        },
+      }).catch(() => undefined);
       return false;
     }
 
     await saveWebhookEvent(eventId, platform);
+    await recordTraceLedger({
+      traceId,
+      correlationId: traceId,
+      stage: `webhook:${platform}:accepted`,
+      status: "COMPLETED",
+      endedAt: new Date(),
+      metadata: {
+        eventId,
+      },
+    }).catch(() => undefined);
     return true;
   } catch (error) {
     console.error("[WEBHOOK PROCESS ERROR]", error);
+    await recordObservabilityEvent({
+      eventType: "webhook.dedupe.error",
+      message: `Webhook dedupe failed for ${platform}`,
+      severity: "error",
+      context: {
+        traceId,
+        correlationId: traceId,
+        provider: platform,
+        component: "webhook-reconciliation",
+        phase: "providers",
+      },
+      metadata: {
+        eventId,
+        error: String((error as { message?: unknown })?.message || error || "webhook_dedupe_failed"),
+      },
+    }).catch(() => undefined);
     return true;
   }
 };

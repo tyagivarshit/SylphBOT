@@ -12,6 +12,7 @@ import {
 
 type AuthenticatedRequest = Request & {
   user?: {
+    id?: string;
     businessId?: string | null;
   };
 };
@@ -114,6 +115,20 @@ export const sendManualMessage = async (
         ? req.body.clientMessageId.trim()
         : null;
     const businessId = req.user?.businessId || null;
+    const humanId = req.user?.id || null;
+    const interactionId =
+      typeof req.body?.interactionId === "string" && req.body.interactionId.trim()
+        ? req.body.interactionId.trim()
+        : null;
+    const resolved = req.body?.resolved === true;
+    const resolutionCode =
+      typeof req.body?.resolutionCode === "string" && req.body.resolutionCode.trim()
+        ? req.body.resolutionCode.trim()
+        : null;
+    const releaseOutcome =
+      typeof req.body?.releaseOutcome === "string" && req.body.releaseOutcome.trim()
+        ? req.body.releaseOutcome.trim()
+        : null;
 
     if (!businessId) {
       return res.status(401).json({
@@ -165,6 +180,13 @@ export const sendManualMessage = async (
       content,
       sender: "AGENT",
       clientMessageId,
+      humanTakeover: {
+        interactionId,
+        humanId,
+        resolved,
+        resolutionCode,
+        releaseOutcome,
+      },
     });
 
     return res.json({

@@ -30,6 +30,15 @@ export type InboxRoutingContext = {
   sla: SlaPolicyDecision;
   references?: ReceptionContextReferences | null;
   receptionMemory?: ReceptionMemoryAuthorityRecord | null;
+  intelligence?: {
+    reception?: {
+      forceHumanQueue?: boolean;
+      escalationBias?: number;
+    } | null;
+    ai?: {
+      forceHumanEscalation?: boolean;
+    } | null;
+  } | null;
 };
 
 export type InboxRoutingRepository = {
@@ -45,14 +54,30 @@ export const resolveInboxRouting = ({
   sla,
   references,
   receptionMemory,
+  intelligence,
 }: InboxRoutingContext): InboxRoutingDecision => {
   const reasons = [...classification.reasons, ...priority.reasons, ...sla.reasons];
   const unresolvedCount = Number(receptionMemory?.unresolvedCount || 0);
+  const escalationBias = Number(intelligence?.reception?.escalationBias || 0);
+  const adjustedPriorityScore = Math.max(
+    0,
+    Math.min(100, Math.round(priority.score + escalationBias))
+  );
+  const forceHumanQueue = Boolean(intelligence?.reception?.forceHumanQueue);
+  const forceEscalation = Boolean(intelligence?.ai?.forceHumanEscalation);
   let routeDecision: InboxRouteTarget = classification.routeHint;
   let requiresHumanQueue = false;
 
   if (classification.spamScore >= 0.85 || classification.routeHint === "SPAM_BIN") {
     routeDecision = "SPAM_BIN";
+  } else if (forceHumanQueue) {
+    routeDecision = adjustedPriorityScore >= 78 ? "ESCALATION" : "HUMAN_QUEUE";
+    requiresHumanQueue = true;
+    reasons.push("intelligence_force_human_queue");
+  } else if (forceEscalation && adjustedPriorityScore >= 55) {
+    routeDecision = "ESCALATION";
+    requiresHumanQueue = true;
+    reasons.push("intelligence_force_escalation");
   } else if (references?.leadControl?.isHumanControlActive) {
     routeDecision = "HUMAN_QUEUE";
     requiresHumanQueue = true;
@@ -81,7 +106,7 @@ export const resolveInboxRouting = ({
     ["BILLING", "APPOINTMENTS", "SUPPORT"].includes(classification.routeHint)
   ) {
     routeDecision = classification.routeHint;
-    requiresHumanQueue = priority.level === "CRITICAL";
+    requiresHumanQueue = priority.level === "CRITICAL" || adjustedPriorityScore >= 85;
   } else {
     routeDecision = "REVENUE_BRAIN";
     requiresHumanQueue = false;
@@ -97,7 +122,7 @@ export const resolveInboxRouting = ({
 
   return {
     routeDecision,
-    priorityScore: priority.score,
+    priorityScore: adjustedPriorityScore,
     priorityLevel: priority.level,
     slaDeadline: routeDecision === "SPAM_BIN" ? null : sla.effectiveSlaDeadline,
     requiresHumanQueue,

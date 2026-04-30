@@ -11,6 +11,7 @@ import {
   reserveUsage,
   runWithContactUsageLimit,
 } from "./usage.service";
+import { getCanonicalSubscriptionSnapshot } from "./subscriptionAuthority.service";
 
 import redis from "../config/redis";
 
@@ -94,10 +95,7 @@ export const handleCommentAutomation = async ({
       return { executed, messageSent };
     }
 
-    const subscription = await prisma.subscription.findUnique({
-      where: { businessId },
-      include: { plan: true },
-    });
+    const subscription = await getCanonicalSubscriptionSnapshot(businessId);
 
     const plan = subscription?.plan || null;
 

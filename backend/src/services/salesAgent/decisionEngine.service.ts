@@ -4,6 +4,7 @@ import {
   SALES_DECISION_TTL_SECONDS,
   writeRedisJsonIfChanged,
 } from "../redisState.service";
+import { getIntelligenceRuntimeInfluence } from "../intelligence/intelligenceRuntimeInfluence.service";
 import { getMessageVariantPool } from "./abTesting.service";
 import { getSalesPerformanceSnapshot } from "./conversionTracker.service";
 import { getLeadStateContext } from "./leadState.service";
@@ -1067,6 +1068,103 @@ const applyProgressionOverrides = ({
   return next;
 };
 
+const applyIntelligenceDecisionAdjustments = ({
+  recommendation,
+  input,
+  allowedCtas,
+  intelligence,
+}: {
+  recommendation: CachedDecisionRecommendation;
+  input: DecisionSelectionInput;
+  allowedCtas: SalesCTA[];
+  intelligence: Awaited<ReturnType<typeof getIntelligenceRuntimeInfluence>> | null;
+}) => {
+  if (!intelligence) {
+    return recommendation;
+  }
+
+  const next = {
+    ...recommendation,
+    reasoning: [...recommendation.reasoning],
+  };
+  const controls = intelligence.controls.ai;
+
+  if (controls.tone) {
+    next.tone = controls.tone;
+    next.reasoning.push(`intelligence_tone:${controls.tone}`);
+  }
+
+  if (
+    controls.forceHumanEscalation &&
+    recommendation.intent !== "buy" &&
+    recommendation.action !== "HANDLE_OBJECTION"
+  ) {
+    next.action = "HANDLE_OBJECTION";
+    next.priority = Math.max(next.priority, getSalesActionPriority("HANDLE_OBJECTION"));
+    next.cta = pickBestAvailableCta(
+      ["REPLY_DM", "VIEW_DEMO", recommendation.cta],
+      allowedCtas
+    );
+    next.structure = "value_proof_cta";
+    next.guidance =
+      "Risk escalation is active. De-escalate, answer with proof, and avoid hard push CTA.";
+    next.reasoning.push("intelligence_force_escalation");
+  }
+
+  if (controls.urgencyBoost >= 20) {
+    next.cta = pickBestAvailableCta(
+      ["BUY_NOW", "BOOK_CALL", "VIEW_DEMO", recommendation.cta],
+      allowedCtas
+    );
+    next.messageLength = "short";
+    next.reasoning.push(`intelligence_urgency_boost:${controls.urgencyBoost}`);
+  } else if (controls.urgencyBoost <= -5) {
+    next.messageLength = "medium";
+    next.reasoning.push(`intelligence_urgency_relax:${controls.urgencyBoost}`);
+  }
+
+  if (
+    controls.offerTimingShiftMinutes <= -30 &&
+    (recommendation.intent === "buy" || recommendation.intent === "explore")
+  ) {
+    next.action = recommendation.intent === "buy" ? "CLOSE" : "PUSH_CTA";
+    next.priority = Math.max(next.priority, getSalesActionPriority(next.action));
+    next.structure = "direct_close";
+    next.reasoning.push(
+      `intelligence_offer_advance:${controls.offerTimingShiftMinutes}`
+    );
+  }
+
+  if (
+    controls.offerTimingShiftMinutes >= 90 &&
+    recommendation.intent !== "buy" &&
+    recommendation.action !== "ENGAGE"
+  ) {
+    next.action = "ENGAGE";
+    next.priority = getSalesActionPriority("ENGAGE");
+    next.cta = pickBestAvailableCta(
+      ["REPLY_DM", "CAPTURE_LEAD", "VIEW_DEMO", recommendation.cta],
+      allowedCtas
+    );
+    next.reasoning.push(
+      `intelligence_offer_delay:${controls.offerTimingShiftMinutes}`
+    );
+  }
+
+  if (controls.escalationAdvanceMinutes >= 45) {
+    next.priority = Math.max(next.priority, getSalesActionPriority("HANDLE_OBJECTION"));
+    next.reasoning.push(
+      `intelligence_escalation_advance:${controls.escalationAdvanceMinutes}`
+    );
+  }
+
+  if (input.clientData?.aiTone && next.tone === "human-confident") {
+    next.tone = input.clientData.aiTone;
+  }
+
+  return next;
+};
+
 const buildHeuristicDecision = (
   input: DecisionSelectionInput,
   state: LeadRevenueState,
@@ -1267,25 +1365,35 @@ export const selectBestAction = async (
       progression: input.progression,
       allowedCtas,
     });
+    const intelligence = await getIntelligenceRuntimeInfluence({
+      businessId: input.businessId,
+      leadId: input.leadId || null,
+    }).catch(() => null);
+    const intelligenceAdjusted = applyIntelligenceDecisionAdjustments({
+      recommendation: progressedRecommendation,
+      input,
+      allowedCtas,
+      intelligence,
+    });
     const variants = await getMessageVariantPool({
       businessId: input.businessId,
       clientId: input.clientId || null,
       messageType,
     });
     const finalCTA = adjustCTAForCapabilities(
-      progressedRecommendation,
+      intelligenceAdjusted,
       allowedCtas
     );
     const finalTone =
-      input.clientData?.aiTone && progressedRecommendation.tone === "human-confident"
+      input.clientData?.aiTone && intelligenceAdjusted.tone === "human-confident"
         ? input.clientData.aiTone
-        : progressedRecommendation.tone;
+        : intelligenceAdjusted.tone;
 
     return {
-      ...progressedRecommendation,
+      ...intelligenceAdjusted,
       cta: finalCTA,
       tone: finalTone,
-      variant: resolveVariantForRecommendation(progressedRecommendation, variants),
+      variant: resolveVariantForRecommendation(intelligenceAdjusted, variants),
     };
   } catch (error) {
     logger.warn(
@@ -1301,6 +1409,32 @@ export const selectBestAction = async (
       "Decision engine degraded to heuristic recommendation"
     );
 
-    return buildHeuristicDecision(input, state, allowedCtas);
+    const heuristic = buildHeuristicDecision(input, state, allowedCtas);
+    const intelligence = await getIntelligenceRuntimeInfluence({
+      businessId: input.businessId,
+      leadId: input.leadId || null,
+    }).catch(() => null);
+
+    if (!intelligence) {
+      return heuristic;
+    }
+
+    const adjusted = applyIntelligenceDecisionAdjustments({
+      recommendation: {
+        ...heuristic,
+        variantId: heuristic.variant?.id || null,
+        variantKey: heuristic.variant?.variantKey || null,
+      },
+      input,
+      allowedCtas,
+      intelligence,
+    });
+
+    return {
+      ...heuristic,
+      ...adjusted,
+      variant: heuristic.variant,
+      cta: adjustCTAForCapabilities(adjusted, allowedCtas),
+    };
   }
 };

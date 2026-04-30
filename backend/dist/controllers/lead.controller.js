@@ -6,13 +6,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getLeadControlState = exports.toggleHumanControl = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const leadControlState_service_1 = require("../services/leadControlState.service");
+const consentAuthorityWriter_service_1 = require("../services/consentAuthorityWriter.service");
 /* ======================================================
 TOGGLE HUMAN CONTROL (AI ↔ HUMAN SWITCH)
 ====================================================== */
 const toggleHumanControl = async (req, res) => {
     try {
-        const { leadId, forceState } = req.body;
+        const { leadId, forceState, consentAction, consentScope, consentChannel, consentLegalBasis, consentReason, previousConsentScope, } = req.body;
         const businessId = req.user?.businessId;
+        const userId = req.user?.id || null;
         if (!leadId) {
             return res.status(400).json({
                 success: false,
@@ -30,6 +32,10 @@ const toggleHumanControl = async (req, res) => {
             where: {
                 id: String(leadId),
                 businessId: String(businessId),
+            },
+            select: {
+                id: true,
+                platform: true,
             },
         });
         if (!lead) {
@@ -60,6 +66,42 @@ const toggleHumanControl = async (req, res) => {
             businessId: String(businessId),
             isActive: nextState,
         });
+        const normalizedConsentAction = String(consentAction || "")
+            .trim()
+            .toUpperCase();
+        if (["GRANT", "REVOKE", "UPDATE"].includes(normalizedConsentAction)) {
+            const consentWriter = (0, consentAuthorityWriter_service_1.createConsentAuthorityWriterService)();
+            const channel = String(consentChannel || lead.platform || "ALL").trim() || "ALL";
+            const scope = String(consentScope || "CONVERSATIONAL_OUTBOUND").trim();
+            const commonContext = {
+                businessId: String(businessId),
+                leadId: String(leadId),
+                channel,
+                scope,
+                source: "OWNER_MANUAL_OVERRIDE",
+                legalBasis: String(consentLegalBasis || "MANUAL_OVERRIDE").trim(),
+                actor: userId,
+                evidence: {
+                    reason: String(consentReason || "manual_override"),
+                    mode: nextState ? "HUMAN" : "AI",
+                    trigger: "lead.toggle-control",
+                },
+            };
+            if (normalizedConsentAction === "GRANT") {
+                await consentWriter.grantConsent(commonContext);
+            }
+            else if (normalizedConsentAction === "REVOKE") {
+                await consentWriter.revokeConsent(commonContext);
+            }
+            else {
+                await consentWriter.updateConsentScope({
+                    ...commonContext,
+                    scope: String(previousConsentScope || scope || "CONVERSATIONAL_OUTBOUND").trim() ||
+                        "CONVERSATIONAL_OUTBOUND",
+                    nextScope: scope || "CONVERSATIONAL_OUTBOUND",
+                });
+            }
+        }
         /* ======================================================
         SOCKET BROADCAST (REAL-TIME UI UPDATE)
         ====================================================== */

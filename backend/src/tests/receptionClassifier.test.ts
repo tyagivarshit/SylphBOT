@@ -54,4 +54,20 @@ export const receptionClassifierTests: TestCase[] = [
       assert.ok(classification.spamScore >= 0.85);
     },
   },
+  {
+    name: "reception classifier detects booking lifecycle intents on canonical appointment route",
+    run: () => {
+      const interaction = createInboundInteractionFixture({
+        normalizedPayload: {
+          message: "I am running late for the booked demo, please hold the slot.",
+        },
+      });
+      const classification = classifyReceptionInteraction({
+        interaction,
+      });
+
+      assert.equal(classification.intentClass, "RUNNING_LATE");
+      assert.equal(classification.routeHint, "APPOINTMENTS");
+    },
+  },
 ];

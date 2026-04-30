@@ -12,6 +12,7 @@ const feature_service_1 = require("../services/feature.service");
 const onboarding_service_1 = require("../services/onboarding.service");
 const connectionHealth_service_1 = require("../services/connectionHealth.service");
 const tenant_service_1 = require("../services/tenant.service");
+const subscriptionAuthority_service_1 = require("../services/subscriptionAuthority.service");
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
@@ -258,10 +259,13 @@ const upsertConnectedClient = async ({ businessId, platform, phoneNumberId, page
     return client;
 };
 const getSubscription = async (businessId) => {
-    return prisma_1.default.subscription.findUnique({
-        where: { businessId },
-        include: { plan: true },
-    });
+    const snapshot = await (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId);
+    return snapshot
+        ? {
+            plan: snapshot.plan,
+            status: snapshot.status,
+        }
+        : null;
 };
 const getAllowedPlatforms = async (businessId, subscription) => {
     if (!subscription?.plan) {

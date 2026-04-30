@@ -8,7 +8,6 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const plan_config_1 = require("../config/plan.config");
 const env_1 = require("../config/env");
-const billingSync_service_1 = require("../services/billingSync.service");
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
 const getKey = (businessId) => `sub:${businessId}`;
@@ -29,16 +28,48 @@ const lockContext = (context, status = "INACTIVE") => ({
     isLimited: true,
     upgradeRequired: true,
 });
+const mapCanonicalSubscription = (row) => ({
+    id: row.id,
+    businessId: row.businessId,
+    status: row.status === "TRIALING"
+        ? "TRIAL"
+        : row.status === "ACTIVE"
+            ? "ACTIVE"
+            : row.status === "PAST_DUE"
+                ? "PAST_DUE"
+                : row.status === "PENDING"
+                    ? "INACTIVE"
+                    : "CANCELLED",
+    graceUntil: row.status === "PAST_DUE" ? row.renewAt || row.currentPeriodEnd || null : null,
+    currentPeriodEnd: row.currentPeriodEnd || row.renewAt || null,
+    isTrial: row.status === "TRIALING" ||
+        (row.trialEndsAt ? new Date(row.trialEndsAt).getTime() > Date.now() : false),
+    stripeCustomerId: null,
+    stripeSubscriptionId: row.providerSubscriptionId || null,
+    currency: row.currency,
+    billingCycle: row.billingCycle,
+    plan: {
+        name: row.planCode,
+        type: row.planCode,
+    },
+});
 const getCachedSubscription = async (businessId) => {
     const cacheKey = getKey(businessId);
     const cached = await redis_1.default.get(cacheKey);
     if (cached) {
         return JSON.parse(cached);
     }
-    const subscription = await prisma_1.default.subscription.findUnique({
-        where: { businessId },
-        include: { plan: true },
+    const canonical = await prisma_1.default.subscriptionLedger.findFirst({
+        where: {
+            businessId,
+        },
+        orderBy: {
+            updatedAt: "desc",
+        },
     });
+    const subscription = canonical
+        ? mapCanonicalSubscription(canonical)
+        : null;
     if (subscription) {
         await redis_1.default.set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL);
     }
@@ -64,9 +95,7 @@ const getEarlyAccessSnapshot = async (subscription) => {
 };
 const loadBillingContext = async (businessId) => {
     const cachedSubscription = await getCachedSubscription(businessId);
-    const subscription = (cachedSubscription?.status === "PAST_DUE"
-        ? await (0, billingSync_service_1.expirePastDueSubscriptionIfNeeded)({ businessId })
-        : null) || cachedSubscription;
+    const subscription = cachedSubscription;
     const now = new Date();
     let context = getBaseContext();
     if (subscription?.plan) {

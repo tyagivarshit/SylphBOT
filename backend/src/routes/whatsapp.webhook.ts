@@ -11,6 +11,7 @@ import {
 } from "../services/webhookSecurity.service";
 import { resolveOrCreateReceptionLead } from "../services/receptionLead.service";
 import { receiveInboundInteraction } from "../services/receptionIntake.service";
+import { recordInboundProviderWebhook } from "../services/saasPackagingConnectHubOS.service";
 
 const router = Router();
 const isProduction = process.env.NODE_ENV === "production";
@@ -240,6 +241,17 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     attachResolvedBusinessContext(req, client);
+    await recordInboundProviderWebhook({
+      businessId: client.businessId,
+      tenantId: client.businessId,
+      provider: "WHATSAPP",
+      environment: "LIVE",
+      success: true,
+      details: {
+        eventId: eventId || null,
+        phoneNumberId: phoneNumberIds[0] || null,
+      },
+    }).catch(() => undefined);
     const lead = await resolveOrCreateReceptionLead({
       businessId: client.businessId,
       clientId: client.id,

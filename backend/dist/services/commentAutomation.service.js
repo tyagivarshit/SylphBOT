@@ -11,6 +11,7 @@ const ai_service_1 = require("./ai.service");
 const plan_config_1 = require("../config/plan.config");
 const rateLimiter_redis_1 = require("../redis/rateLimiter.redis");
 const usage_service_1 = require("./usage.service");
+const subscriptionAuthority_service_1 = require("./subscriptionAuthority.service");
 const redis_1 = __importDefault(require("../config/redis"));
 const buildCommentAIMessage = (commentText, aiPrompt) => {
     const sections = [`Lead message:\n${String(commentText || "").trim()}`];
@@ -53,10 +54,7 @@ const handleCommentAutomation = async ({ businessId, clientId, instagramUserId, 
         catch {
             return { executed, messageSent };
         }
-        const subscription = await prisma_1.default.subscription.findUnique({
-            where: { businessId },
-            include: { plan: true },
-        });
+        const subscription = await (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId);
         const plan = subscription?.plan || null;
         if (!(0, plan_config_1.hasFeature)(plan, "automationEnabled")) {
             return { executed, messageSent };

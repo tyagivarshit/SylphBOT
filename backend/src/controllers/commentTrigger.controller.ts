@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { canCreateTrigger } from "../config/plan.config";
 import { getRequestBusinessId } from "../services/tenant.service";
+import { getCanonicalSubscriptionSnapshot } from "../services/subscriptionAuthority.service";
 
 /* --------------------------------------------------- */
 /* GET BUSINESS */
@@ -103,10 +104,7 @@ export const createCommentTrigger = async (
         message: "Instagram client not found",
       });
 
-    const subscription = await prisma.subscription.findUnique({
-      where: { businessId: String(businessId) },
-      include: { plan: true },
-    });
+    const subscription = await getCanonicalSubscriptionSnapshot(String(businessId));
 
     const triggerCount = await prisma.commentTrigger.count({
       where: {

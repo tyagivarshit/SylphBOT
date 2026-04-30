@@ -3,7 +3,10 @@ import { requireBusinessContext } from "../middleware/tenant.middleware";
 import { asyncHandler } from "../utils/asyncHandler";
 import { resolveOrCreateReceptionLead } from "../services/receptionLead.service";
 import { receiveInboundInteraction } from "../services/receptionIntake.service";
-import { getInboxDashboardProjection } from "../services/inboxDashboardProjection.service";
+import {
+  getInboxDashboardProjection,
+  getOwnerCopilotProjection,
+} from "../services/inboxDashboardProjection.service";
 
 const router = Router();
 
@@ -79,6 +82,31 @@ router.get(
   asyncHandler(async (req, res) => {
     const businessId = req.tenant?.businessId;
     const projection = await getInboxDashboardProjection({
+      businessId,
+    });
+
+    res.json({
+      success: true,
+      requestId: req.requestId,
+      data: projection,
+    });
+  })
+);
+
+router.get(
+  "/owner-copilot-feed",
+  asyncHandler(async (req, res) => {
+    const businessId = req.tenant?.businessId;
+
+    if (!businessId) {
+      return res.status(403).json({
+        success: false,
+        requestId: req.requestId,
+        message: "Business context is required",
+      });
+    }
+
+    const projection = await getOwnerCopilotProjection({
       businessId,
     });
 

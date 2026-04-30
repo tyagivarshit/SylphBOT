@@ -1,6 +1,10 @@
 import pino, { type Logger as PinoLogger } from "pino";
 import { env } from "../config/env";
 import { buildContextBindings } from "../observability/requestContext";
+import {
+  RELIABILITY_PHASE_VERSION,
+  createStructuredLogDefaults,
+} from "../observability/logSchema";
 
 type LogMethod = (...args: unknown[]) => void;
 
@@ -121,9 +125,25 @@ const writeLog =
   (...args: unknown[]) => {
     const logMethod = (baseLogger[level] as (...methodArgs: any[]) => void).bind(baseLogger);
     const contextBindings = normalizeLogObject(buildContextBindings());
+    const mandatoryBindings = createStructuredLogDefaults(level);
     const mergedBindings = normalizeLogObject({
+      ...mandatoryBindings,
       ...contextBindings,
       ...bindings,
+      severity:
+        String(
+          (bindings.severity as string | undefined) ||
+            (contextBindings.severity as string | undefined) ||
+            level
+        )
+          .trim()
+          .toLowerCase() || level,
+      version:
+        String(
+          (bindings.version as string | undefined) ||
+            (contextBindings.version as string | undefined) ||
+            RELIABILITY_PHASE_VERSION
+        ).trim() || RELIABILITY_PHASE_VERSION,
     });
 
     if (!args.length) {

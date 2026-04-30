@@ -4,6 +4,7 @@ type CounterName =
   | "classified_total"
   | "routed_total"
   | "revenue_routed_total"
+  | "appointment_routed_total"
   | "support_routed_total"
   | "spam_detected_total"
   | "sla_warning_total"
@@ -26,6 +27,7 @@ const buildEmptyState = (): ReceptionMetricsState => ({
     classified_total: 0,
     routed_total: 0,
     revenue_routed_total: 0,
+    appointment_routed_total: 0,
     support_routed_total: 0,
     spam_detected_total: 0,
     sla_warning_total: 0,

@@ -29,10 +29,6 @@ UPGRADE PLAN
 ====================================== */
 router.post("/upgrade", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), rateLimit_middleware_1.authLimiter, (0, audit_middleware_1.auditRequest)("billing.upgrade_requested"), billing_controller_1.BillingController.upgradePlan);
 /* ======================================
-BILLING PORTAL
-====================================== */
-router.post("/portal", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), subscription_middleware_1.attachBillingContext, (0, audit_middleware_1.auditRequest)("billing.portal_requested"), billing_controller_1.BillingController.createPortal);
-/* ======================================
 CANCEL SUBSCRIPTION
 ====================================== */
 router.post("/cancel", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), subscription_middleware_1.attachBillingContext, (0, audit_middleware_1.auditRequest)("billing.cancel_requested"), billing_controller_1.BillingController.cancelSubscription);

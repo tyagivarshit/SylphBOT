@@ -13,6 +13,7 @@ export type PriorityFactors = {
   complaintSeverity?: number | null;
   conversionOpportunity?: number | null;
   slaRisk?: number | null;
+  intelligencePriorityBoost?: number | null;
 };
 
 export type PriorityDecision = {
@@ -78,6 +79,11 @@ export const scoreInboundPriority = (
       Number(factors.conversionOpportunity || 0)
     ),
     slaRisk: clampNumber(Number(factors.slaRisk || 0)),
+    intelligenceBoost: clampNumber(
+      Number(factors.intelligencePriorityBoost || 0),
+      -40,
+      40
+    ),
   };
 
   const score = Math.round(
@@ -88,7 +94,8 @@ export const scoreInboundPriority = (
       components.unresolvedCount * 0.12 +
       components.complaintSeverity * 0.1 +
       components.conversionOpportunity * 0.1 +
-      components.slaRisk * 0.08
+      components.slaRisk * 0.08 +
+      components.intelligenceBoost * 0.18
   );
   const level = resolvePriorityLevel(score);
   const reasons = Object.entries(components)

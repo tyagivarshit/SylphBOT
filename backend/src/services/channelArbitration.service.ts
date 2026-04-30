@@ -1,5 +1,6 @@
 import prisma from "../config/prisma";
 import { resolveConsentAuthority } from "./consentAuthority.service";
+import { getIntelligenceRuntimeInfluence } from "./intelligence/intelligenceRuntimeInfluence.service";
 
 export type ChannelArbitrationCandidate = {
   channel: string;
@@ -64,6 +65,22 @@ export const arbitrateOutboundChannel = async ({
       candidates: [],
     };
   }
+  const runtime = await getIntelligenceRuntimeInfluence({
+    businessId,
+    leadId,
+  }).catch(() => null);
+
+  if (
+    scope === "AUTONOMOUS_OUTREACH" &&
+    Boolean(runtime?.controls.autonomous.paused)
+  ) {
+    return {
+      allowed: false,
+      channel: null,
+      blockedReasons: ["intelligence_autonomous_paused"],
+      candidates: [],
+    };
+  }
 
   const preferred = normalizeChannel(preferredChannel);
   const candidateChannels = Array.from(
@@ -125,6 +142,10 @@ export const arbitrateOutboundChannel = async ({
         Number(health?.responseRate || 0) * 0.3 +
         Number(health?.conversionRate || 0) * 0.4 -
         Number(health?.fatigueRisk || 0) * 0.4;
+      const channelBias = Number(
+        runtime?.controls.autonomous.channelBias[channel] || 1
+      );
+      score *= channelBias;
 
       if (preferred && channel === preferred) {
         score += 0.25;

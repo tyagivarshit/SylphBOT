@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import logger from "../utils/logger";
+import { recordDataAccessAudit } from "./security/securityGovernanceOS.service";
 
 export type AuditLogInput = {
   action: string;
@@ -48,7 +49,7 @@ export const sanitizeMetadata = (
 
 export const createAuditLog = async (input: AuditLogInput) => {
   try {
-    return await prisma.auditLog.create({
+    const row = await prisma.auditLog.create({
       data: {
         action: input.action,
         userId: input.userId || null,
@@ -59,6 +60,25 @@ export const createAuditLog = async (input: AuditLogInput) => {
         requestId: input.requestId || null,
       },
     });
+
+    await recordDataAccessAudit({
+      businessId: input.businessId || null,
+      tenantId: input.businessId || null,
+      actorId: input.userId || null,
+      actorType: input.userId ? "USER" : "SYSTEM",
+      action: `audit:${input.action}`,
+      resourceType: "AUDIT_LOG",
+      resourceId: row.id,
+      purpose: "AUDIT_TRAIL",
+      result: "ALLOWED",
+      metadata: {
+        ip: input.ip || null,
+        userAgent: input.userAgent || null,
+        requestId: input.requestId || null,
+      },
+    }).catch(() => undefined);
+
+    return row;
   } catch (error) {
     logger.warn(
       {

@@ -11,6 +11,7 @@ const revenueTouchLedger_service_1 = require("../services/revenueTouchLedger.ser
 const webhookSecurity_service_1 = require("../services/webhookSecurity.service");
 const receptionLead_service_1 = require("../services/receptionLead.service");
 const receptionIntake_service_1 = require("../services/receptionIntake.service");
+const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
 const router = (0, express_1.Router)();
 const isProduction = process.env.NODE_ENV === "production";
 const normalizeIdentifier = (value) => {
@@ -169,6 +170,17 @@ router.post("/", async (req, res) => {
             return res.sendStatus(200);
         }
         attachResolvedBusinessContext(req, client);
+        await (0, saasPackagingConnectHubOS_service_1.recordInboundProviderWebhook)({
+            businessId: client.businessId,
+            tenantId: client.businessId,
+            provider: "WHATSAPP",
+            environment: "LIVE",
+            success: true,
+            details: {
+                eventId: eventId || null,
+                phoneNumberId: phoneNumberIds[0] || null,
+            },
+        }).catch(() => undefined);
         const lead = await (0, receptionLead_service_1.resolveOrCreateReceptionLead)({
             businessId: client.businessId,
             clientId: client.id,

@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAutomationFlow = exports.updateAutomationFlow = exports.getFlows = exports.createAutomationFlow = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const plan_config_1 = require("../config/plan.config");
+const subscriptionAuthority_service_1 = require("../services/subscriptionAuthority.service");
 class AutomationControllerError extends Error {
     constructor(message, statusCode) {
         super(message);
@@ -21,17 +22,14 @@ const allowedStepTypesByPlan = {
     ELITE: ["MESSAGE", "DELAY", "CONDITION", "BOOKING"],
 };
 const getRequestBusinessId = (req) => req.user?.businessId || null;
-const getBusinessPlan = async (businessId) => prisma_1.default.subscription.findUnique({
-    where: { businessId },
-    include: {
-        plan: {
-            select: {
-                name: true,
-                type: true,
-            },
-        },
-    },
-});
+const getBusinessPlan = async (businessId) => {
+    const snapshot = await (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId);
+    return snapshot
+        ? {
+            plan: snapshot.plan,
+        }
+        : null;
+};
 const sanitizeSteps = (steps) => steps.map((step, index) => ({
     stepKey: `STEP_${index + 1}`,
     stepType: String(step.type || "").trim().toUpperCase(),

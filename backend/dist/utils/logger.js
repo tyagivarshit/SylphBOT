@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const pino_1 = __importDefault(require("pino"));
 const env_1 = require("../config/env");
 const requestContext_1 = require("../observability/requestContext");
+const logSchema_1 = require("../observability/logSchema");
 const transport = env_1.env.IS_PROD
     ? undefined
     : pino_1.default.transport({
@@ -87,9 +88,19 @@ const normalizeLogObject = (value) => {
 const writeLog = (level, bindings) => (...args) => {
     const logMethod = baseLogger[level].bind(baseLogger);
     const contextBindings = normalizeLogObject((0, requestContext_1.buildContextBindings)());
+    const mandatoryBindings = (0, logSchema_1.createStructuredLogDefaults)(level);
     const mergedBindings = normalizeLogObject({
+        ...mandatoryBindings,
         ...contextBindings,
         ...bindings,
+        severity: String(bindings.severity ||
+            contextBindings.severity ||
+            level)
+            .trim()
+            .toLowerCase() || level,
+        version: String(bindings.version ||
+            contextBindings.version ||
+            logSchema_1.RELIABILITY_PHASE_VERSION).trim() || logSchema_1.RELIABILITY_PHASE_VERSION,
     });
     if (!args.length) {
         logMethod(mergedBindings);

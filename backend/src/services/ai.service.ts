@@ -1,4 +1,5 @@
 import { generateUnifiedAIReplyText } from "./aiRuntime.service";
+import { enforceSecurityGovernanceInfluence } from "./security/securityGovernanceOS.service";
 
 interface AIInput {
   businessId: string;
@@ -17,6 +18,26 @@ export const generateAIReply = async ({
   source,
   preview,
 }: AIInput): Promise<string | null> => {
+  await enforceSecurityGovernanceInfluence({
+    domain: "AI",
+    action: "messages:enqueue",
+    businessId,
+    tenantId: businessId,
+    actorId: "ai_runtime",
+    actorType: "SERVICE",
+    role: "SERVICE",
+    permissions: ["messages:enqueue"],
+    scopes: ["WRITE"],
+    resourceType: "AI_REPLY",
+    resourceId: leadId,
+    resourceTenantId: businessId,
+    purpose: "GENERATE_REPLY",
+    metadata: {
+      preview: Boolean(preview),
+      source: source || "LEGACY_AI_SERVICE",
+    },
+  });
+
   return generateUnifiedAIReplyText({
     businessId,
     leadId,

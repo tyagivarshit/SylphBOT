@@ -10,7 +10,6 @@ const upload_1 = __importDefault(require("../middleware/upload"));
 const cloudinary_1 = __importDefault(require("../config/cloudinary"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const authCookies_1 = require("../utils/authCookies");
-const stripe_service_1 = require("../services/stripe.service");
 const apiKey_service_1 = require("../services/apiKey.service");
 const rbac_middleware_1 = require("../middleware/rbac.middleware");
 const rateLimit_middleware_1 = require("../middleware/rateLimit.middleware");
@@ -266,22 +265,6 @@ router.delete("/delete-account", auth_middleware_1.protect, async (req, res) => 
             return res.status(404).json({ error: "User not found" });
         }
         const now = new Date();
-        if (user.businessId) {
-            const subscription = await prisma_1.default.subscription.findUnique({
-                where: { businessId: user.businessId },
-                select: {
-                    stripeSubscriptionId: true,
-                },
-            });
-            if (subscription?.stripeSubscriptionId) {
-                try {
-                    await stripe_service_1.stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
-                }
-                catch (stripeError) {
-                    console.error("DELETE ACCOUNT STRIPE CANCEL ERROR:", stripeError);
-                }
-            }
-        }
         await prisma_1.default.$transaction(async (tx) => {
             if (user.businessId) {
                 await tx.business.update({
@@ -328,12 +311,13 @@ router.delete("/delete-account", auth_middleware_1.protect, async (req, res) => 
                             isActive: false,
                         },
                     }),
-                    tx.subscription.updateMany({
+                    tx.subscriptionLedger.updateMany({
                         where: { businessId: user.businessId },
                         data: {
                             status: "CANCELLED",
-                            graceUntil: null,
-                            isTrial: false,
+                            cancelAt: now,
+                            cancelledAt: now,
+                            renewAt: null,
                         },
                     }),
                 ]);

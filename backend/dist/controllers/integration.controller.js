@@ -3,12 +3,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
+exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
 const onboarding_service_1 = require("../services/onboarding.service");
 const instagramProfile_service_1 = require("../services/instagramProfile.service");
+const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
 const normalizeOptionalString = (value) => {
     const normalized = String(value || "").trim();
     return normalized || null;
@@ -35,6 +36,22 @@ const getBusinessIdForRequest = async (req) => {
         select: { id: true },
     });
     return business?.id || null;
+};
+const resolveTenantContext = async (req) => {
+    const businessId = normalizeOptionalString(req.user?.businessId) ||
+        normalizeOptionalString(req.body?.businessId) ||
+        normalizeOptionalString(req.query?.businessId) ||
+        (await getBusinessIdForRequest(req));
+    if (!businessId) {
+        return null;
+    }
+    return {
+        businessId,
+        tenantId: normalizeOptionalString(req.user?.tenantId) ||
+            normalizeOptionalString(req.body?.tenantId) ||
+            normalizeOptionalString(req.query?.tenantId) ||
+            businessId,
+    };
 };
 const buildFallbackInstagramAccount = async (client) => {
     const pageId = normalizeOptionalString(client.pageId);
@@ -199,3 +216,304 @@ const getInstagramAccounts = async (req, res) => {
     }
 };
 exports.getInstagramAccounts = getInstagramAccounts;
+const getConnectHubDashboard = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const dashboard = await (0, saasPackagingConnectHubOS_service_1.getConnectHubProjection)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+        });
+        return res.json({
+            success: true,
+            data: dashboard,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to load connect hub projection",
+            error: String(error?.message || "connect_hub_error"),
+        });
+    }
+};
+exports.getConnectHubDashboard = getConnectHubDashboard;
+const provisionConnectHubTenant = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.provisionTenantSaaSPackaging)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            legalName: normalizeOptionalString(req.body?.legalName),
+            region: normalizeOptionalString(req.body?.region),
+            timezone: normalizeOptionalString(req.body?.timezone),
+            contactEmail: normalizeOptionalString(req.body?.contactEmail),
+            plan: normalizeOptionalString(req.body?.plan) || undefined,
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Failed to provision tenant",
+            error: String(error?.message || "provision_failed"),
+        });
+    }
+};
+exports.provisionConnectHubTenant = provisionConnectHubTenant;
+const connectInstagramHub = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.connectInstagramOneClick)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            reconnect: Boolean(req.body?.reconnect),
+            externalAccountRef: normalizeOptionalString(req.body?.externalAccountRef),
+            scopes: Array.isArray(req.body?.scopes) ? req.body.scopes : undefined,
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Instagram connect failed",
+            error: String(error?.message || "instagram_connect_failed"),
+        });
+    }
+};
+exports.connectInstagramHub = connectInstagramHub;
+const connectWhatsAppHub = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.connectWhatsAppGuidedWizard)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            reconnect: Boolean(req.body?.reconnect),
+            scenario: normalizeOptionalString(req.body?.scenario),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "WhatsApp connect failed",
+            error: String(error?.message || "whatsapp_connect_failed"),
+        });
+    }
+};
+exports.connectWhatsAppHub = connectWhatsAppHub;
+const retryConnectDiagnostic = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.retryConnectionDiagnostic)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            diagnosticKey: normalizeOptionalString(req.body?.diagnosticKey) ||
+                normalizeOptionalString(req.params?.diagnosticKey),
+            retryToken: normalizeOptionalString(req.body?.retryToken),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Retry failed",
+            error: String(error?.message || "retry_failed"),
+        });
+    }
+};
+exports.retryConnectDiagnostic = retryConnectDiagnostic;
+const getIntegrationDiagnostics = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const diagnostics = await (0, saasPackagingConnectHubOS_service_1.getIntegrationDiagnosticsProjection)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.params?.provider) ||
+                normalizeOptionalString(req.query?.provider),
+            environment: normalizeOptionalString(req.query?.environment) || "LIVE",
+        });
+        return res.json({
+            success: true,
+            data: diagnostics,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch diagnostics",
+            error: String(error?.message || "diagnostics_failed"),
+        });
+    }
+};
+exports.getIntegrationDiagnostics = getIntegrationDiagnostics;
+const saveConnectHubWizardProgress = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.saveSetupWizardProgress)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            step: normalizeOptionalString(req.body?.step) || "BUSINESS_INFO",
+            payload: req.body?.payload || {},
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Failed to save wizard progress",
+            error: String(error?.message || "wizard_save_failed"),
+        });
+    }
+};
+exports.saveConnectHubWizardProgress = saveConnectHubWizardProgress;
+const upgradeConnectHubPlan = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.processPlanUpgrade)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            toPlan: normalizeOptionalString(req.body?.toPlan) || "STARTER",
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+            remainingCycleDays: Number(req.body?.remainingCycleDays || 20),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Upgrade failed",
+            error: String(error?.message || "upgrade_failed"),
+        });
+    }
+};
+exports.upgradeConnectHubPlan = upgradeConnectHubPlan;
+const meterConnectHubFeatureGate = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.meterFeatureEntitlementUsage)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            featureKey: normalizeOptionalString(req.body?.featureKey) || "channels",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            units: Number(req.body?.units || 1),
+            replayToken: normalizeOptionalString(req.body?.replayToken),
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Feature gate check failed",
+            error: String(error?.message || "feature_gate_failed"),
+        });
+    }
+};
+exports.meterConnectHubFeatureGate = meterConnectHubFeatureGate;
+const runConnectHubSelfAudit = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const audit = await (0, saasPackagingConnectHubOS_service_1.runSaaSPackagingConnectHubSelfAudit)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+        });
+        return res.json({
+            success: true,
+            data: audit,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Self audit failed",
+            error: String(error?.message || "self_audit_failed"),
+        });
+    }
+};
+exports.runConnectHubSelfAudit = runConnectHubSelfAudit;

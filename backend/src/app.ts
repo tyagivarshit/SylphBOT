@@ -14,8 +14,9 @@ import clientRoutes from "./routes/client.routes";
 import aiRoutes from "./routes/ai.routes";
 import whatsappWebhook from "./routes/whatsapp.webhook";
 import instagramWebhook from "./routes/instagram.webhook";
+import calendarWebhook from "./routes/calendar.webhook";
 import billingRoutes from "./routes/billing.routes";
-import stripeWebhookRoutes from "./routes/stripeWebhook.routes";
+import commerceWebhookRoutes from "./routes/commerceWebhook.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 import commentTriggerRoutes from "./routes/commentTrigger.routes";
 import messageRoutes from "./routes/message.routes";
@@ -39,6 +40,7 @@ import conversationRoutes from "./routes/conversation.routes";
 import healthRoutes from "./routes/health.routes";
 import receptionIntakeRoutes from "./routes/receptionIntake.routes";
 import usageRoutes from "./routes/usage.routes";
+import commerceRoutes from "./routes/commerce.routes";
 import { getClientStatus } from "./controllers/client.controller";
 import helpAiRoutes from "./routes/helpAi.routes";
 import {
@@ -62,8 +64,28 @@ import { asyncHandler } from "./utils/asyncHandler";
 import {
   captureExceptionWithContext,
 } from "./observability/sentry";
+import { bootstrapReliabilityOS } from "./services/reliability/reliabilityOS.service";
+import { bootstrapInfrastructureResilienceOS } from "./services/reliability/infrastructureResilienceOS.service";
+import { bootstrapSecurityGovernanceOS } from "./services/security/securityGovernanceOS.service";
+import { bootstrapSaaSPackagingConnectHubOS } from "./services/saasPackagingConnectHubOS.service";
 
 const app = express();
+
+void bootstrapReliabilityOS().catch((error) => {
+  console.error("[RELIABILITY BOOTSTRAP FAILED]", error);
+});
+
+void bootstrapInfrastructureResilienceOS().catch((error) => {
+  console.error("[INFRASTRUCTURE RESILIENCE BOOTSTRAP FAILED]", error);
+});
+
+void bootstrapSecurityGovernanceOS().catch((error) => {
+  console.error("[SECURITY GOVERNANCE BOOTSTRAP FAILED]", error);
+});
+
+void bootstrapSaaSPackagingConnectHubOS().catch((error) => {
+  console.error("[SAAS PACKAGING CONNECT HUB BOOTSTRAP FAILED]", error);
+});
 
 const isPlainRecord = (
   value: unknown
@@ -249,9 +271,9 @@ app.use((req, res, next) => {
 });
 
 app.use(
-  "/api/webhooks/stripe",
-  express.raw({ type: "application/json" }),
-  stripeWebhookRoutes
+  "/api/webhooks/commerce",
+  express.json({ limit: "1mb" }),
+  commerceWebhookRoutes
 );
 
 app.use(
@@ -281,6 +303,7 @@ app.use(
   }),
   instagramWebhook
 );
+app.use("/api/webhook/calendar", express.json({ limit: "1mb" }), calendarWebhook);
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -431,6 +454,7 @@ app.use("/api/auth", googleAuthRoutes);
 
 app.use("/api/dashboard", protect, dashboardRoutes);
 app.use("/api/billing", protect, billingRoutes);
+app.use("/api/commerce", commerceRoutes);
 app.use("/api/usage", protect, usageRoutes);
 app.use("/api/help-ai", protect, helpAiRoutes);
 app.use("/api/user", protect, userRoutes);

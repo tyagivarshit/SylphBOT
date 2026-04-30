@@ -7,6 +7,7 @@ exports.toggleCommentTrigger = exports.deleteCommentTrigger = exports.updateComm
 const prisma_1 = __importDefault(require("../config/prisma"));
 const plan_config_1 = require("../config/plan.config");
 const tenant_service_1 = require("../services/tenant.service");
+const subscriptionAuthority_service_1 = require("../services/subscriptionAuthority.service");
 /* --------------------------------------------------- */
 /* GET BUSINESS */
 /* --------------------------------------------------- */
@@ -84,10 +85,7 @@ const createCommentTrigger = async (req, res) => {
                 data: null,
                 message: "Instagram client not found",
             });
-        const subscription = await prisma_1.default.subscription.findUnique({
-            where: { businessId: String(businessId) },
-            include: { plan: true },
-        });
+        const subscription = await (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(String(businessId));
         const triggerCount = await prisma_1.default.commentTrigger.count({
             where: {
                 businessId: String(businessId),

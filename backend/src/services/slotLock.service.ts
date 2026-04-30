@@ -169,3 +169,256 @@ export const __slotLockTestInternals = {
   encodeSlotLockMetadata,
   parseSlotLockMetadata,
 };
+
+const APPOINTMENT_HOLD_LOCK_SEPARATOR = "|";
+
+const buildAppointmentHoldKey = ({
+  businessId,
+  slotKey,
+}: {
+  businessId: string;
+  slotKey: string;
+}) => `appointment_hold:${businessId}:${slotKey}`;
+
+const buildAppointmentHoldMetadataKey = ({
+  businessId,
+  slotKey,
+}: {
+  businessId: string;
+  slotKey: string;
+}) => `${buildAppointmentHoldKey({ businessId, slotKey })}:meta`;
+
+const encodeAppointmentHoldMetadata = ({
+  token,
+  appointmentKey,
+  heldBy,
+}: {
+  token: string;
+  appointmentKey: string;
+  heldBy: string;
+}) => [token, appointmentKey, heldBy].join(APPOINTMENT_HOLD_LOCK_SEPARATOR);
+
+const parseAppointmentHoldMetadata = (
+  value: string | null
+): {
+  token: string;
+  appointmentKey: string;
+  heldBy: string;
+} | null => {
+  if (!value) {
+    return null;
+  }
+
+  const [token, appointmentKey, heldBy] = value.split(
+    APPOINTMENT_HOLD_LOCK_SEPARATOR
+  );
+
+  if (!token || !appointmentKey) {
+    return null;
+  }
+
+  return {
+    token: token.trim(),
+    appointmentKey: appointmentKey.trim(),
+    heldBy: String(heldBy || "").trim() || "SYSTEM",
+  };
+};
+
+export type AppointmentSlotHoldState = {
+  businessId: string;
+  slotKey: string;
+  token: string;
+  appointmentKey: string;
+  heldBy: string;
+};
+
+export type AppointmentSlotHoldHandle = AppointmentSlotHoldState & {
+  expiresAt: Date;
+  release: () => Promise<void>;
+};
+
+const cleanupAppointmentHoldMetadata = async ({
+  businessId,
+  slotKey,
+  metadataValue,
+}: {
+  businessId: string;
+  slotKey: string;
+  metadataValue: string;
+}) => {
+  await getSharedRedisConnection().eval(
+    DELETE_SLOT_LOCK_METADATA_SCRIPT,
+    1,
+    buildAppointmentHoldMetadataKey({
+      businessId,
+      slotKey,
+    }),
+    metadataValue
+  );
+};
+
+export const acquireAppointmentSlotHold = async ({
+  businessId,
+  slotKey,
+  appointmentKey,
+  heldBy = "SYSTEM",
+  ttlMs = 5 * 60 * 1000,
+}: {
+  businessId: string;
+  slotKey: string;
+  appointmentKey: string;
+  heldBy?: string;
+  ttlMs?: number;
+}): Promise<AppointmentSlotHoldHandle | null> => {
+  const lock = await acquireDistributedLock({
+    key: buildAppointmentHoldKey({
+      businessId,
+      slotKey,
+    }),
+    ttlMs: Math.max(30_000, ttlMs),
+  });
+
+  if (!lock) {
+    return null;
+  }
+
+  const metadataValue = encodeAppointmentHoldMetadata({
+    token: lock.token,
+    appointmentKey,
+    heldBy,
+  });
+  const metadataKey = buildAppointmentHoldMetadataKey({
+    businessId,
+    slotKey,
+  });
+
+  try {
+    await getSharedRedisConnection().set(
+      metadataKey,
+      metadataValue,
+      "PX",
+      Math.max(30_000, ttlMs)
+    );
+  } catch (error) {
+    await lock.release().catch(() => undefined);
+    throw error;
+  }
+
+  return {
+    businessId,
+    slotKey,
+    token: lock.token,
+    appointmentKey,
+    heldBy,
+    expiresAt: new Date(Date.now() + Math.max(30_000, ttlMs)),
+    release: async () => {
+      await releaseAppointmentSlotHold({
+        businessId,
+        slotKey,
+        token: lock.token,
+      });
+    },
+  };
+};
+
+export const readAppointmentSlotHold = async ({
+  businessId,
+  slotKey,
+}: {
+  businessId: string;
+  slotKey: string;
+}): Promise<AppointmentSlotHoldState | null> => {
+  const [tokenValue, metadataValue] = await getSharedRedisConnection().mget(
+    buildAppointmentHoldKey({
+      businessId,
+      slotKey,
+    }),
+    buildAppointmentHoldMetadataKey({
+      businessId,
+      slotKey,
+    })
+  );
+
+  if (!tokenValue) {
+    if (metadataValue) {
+      await cleanupAppointmentHoldMetadata({
+        businessId,
+        slotKey,
+        metadataValue,
+      }).catch(() => undefined);
+    }
+
+    return null;
+  }
+
+  const metadata = parseAppointmentHoldMetadata(metadataValue);
+
+  if (metadata?.token === tokenValue) {
+    return {
+      businessId,
+      slotKey,
+      token: tokenValue,
+      appointmentKey: metadata.appointmentKey,
+      heldBy: metadata.heldBy,
+    };
+  }
+
+  if (metadataValue) {
+    await cleanupAppointmentHoldMetadata({
+      businessId,
+      slotKey,
+      metadataValue,
+    }).catch(() => undefined);
+  }
+
+  return {
+    businessId,
+    slotKey,
+    token: tokenValue,
+    appointmentKey: "",
+    heldBy: "SYSTEM",
+  };
+};
+
+export const releaseAppointmentSlotHold = async ({
+  businessId,
+  slotKey,
+  token,
+}: {
+  businessId: string;
+  slotKey: string;
+  token: string;
+}) => {
+  const metadataKey = buildAppointmentHoldMetadataKey({
+    businessId,
+    slotKey,
+  });
+  const metadataValue = await getSharedRedisConnection().get(metadataKey);
+
+  await releaseDistributedLock({
+    key: buildAppointmentHoldKey({
+      businessId,
+      slotKey,
+    }),
+    token,
+  }).catch(() => undefined);
+
+  if (!metadataValue) {
+    return;
+  }
+
+  const metadata = parseAppointmentHoldMetadata(metadataValue);
+
+  if (metadata?.token === token) {
+    await cleanupAppointmentHoldMetadata({
+      businessId,
+      slotKey,
+      metadataValue,
+    }).catch(() => undefined);
+  }
+};
+
+export const __appointmentSlotHoldTestInternals = {
+  encodeAppointmentHoldMetadata,
+  parseAppointmentHoldMetadata,
+};

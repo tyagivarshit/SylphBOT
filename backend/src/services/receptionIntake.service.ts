@@ -25,6 +25,11 @@ import {
   enqueueInboundRouting,
 } from "../queues/receptionRuntime.queue";
 import { incrementReceptionMetric } from "./receptionMetrics.service";
+import {
+  recordObservabilityEvent,
+  recordTraceLedger,
+} from "./reliability/reliabilityOS.service";
+import { enforceSecurityGovernanceInfluence } from "./security/securityGovernanceOS.service";
 
 type ReceiveInboundInteractionCommand = {
   businessId: string;
@@ -171,6 +176,25 @@ const resumeInboundRuntime = async (
 export const receiveInboundInteraction = async (
   command: ReceiveInboundInteractionCommand
 ) => {
+  await enforceSecurityGovernanceInfluence({
+    domain: "RECEPTION",
+    action: "messages:enqueue",
+    businessId: command.businessId,
+    tenantId: command.businessId,
+    actorId: "reception_intake",
+    actorType: "SERVICE",
+    role: "SERVICE",
+    permissions: ["messages:enqueue"],
+    scopes: ["WRITE"],
+    resourceType: "INBOUND_INTERACTION",
+    resourceId: command.providerMessageIdHint || command.leadId,
+    resourceTenantId: command.businessId,
+    purpose: "INBOUND_PROCESSING",
+    metadata: {
+      adapter: command.adapter,
+    },
+  });
+
   const preview = resolveIntakePreview(command);
   const existing = await prisma.inboundInteraction.findUnique({
     where: {
@@ -252,6 +276,46 @@ export const receiveInboundInteraction = async (
   if (!existing) {
     incrementReceptionMetric("inbound_received_total");
   }
+
+  await recordTraceLedger({
+    traceId: interaction.traceId,
+    correlationId: interaction.correlationId || interaction.traceId,
+    businessId: interaction.businessId,
+    tenantId: interaction.businessId,
+    leadId: interaction.leadId,
+    interactionId: interaction.id,
+    stage: "reception:inbound_received",
+    status: "IN_PROGRESS",
+    metadata: {
+      channel: interaction.channel,
+      interactionType: interaction.interactionType,
+      externalInteractionKey: interaction.externalInteractionKey,
+      deduped: Boolean(existing),
+    },
+  }).catch(() => undefined);
+
+  await recordObservabilityEvent({
+    businessId: interaction.businessId,
+    tenantId: interaction.businessId,
+    eventType: "reception.inbound.received",
+    message: `Inbound interaction ${interaction.id} received`,
+    severity: "info",
+    context: {
+      traceId: interaction.traceId,
+      correlationId: interaction.correlationId || interaction.traceId,
+      tenantId: interaction.businessId,
+      leadId: interaction.leadId,
+      interactionId: interaction.id,
+      provider: interaction.channel,
+      component: "reception",
+      phase: "intake",
+    },
+    metadata: {
+      externalInteractionKey: interaction.externalInteractionKey,
+      interactionType: interaction.interactionType,
+      deduped: Boolean(existing),
+    },
+  }).catch(() => undefined);
 
   await resumeInboundRuntime(interaction);
 

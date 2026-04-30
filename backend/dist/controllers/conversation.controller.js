@@ -177,7 +177,18 @@ const sendMessage = async (req, res) => {
             ? req.body.clientMessageId.trim()
             : null;
         const businessId = req.user?.businessId || null;
+        const humanId = req.user?.id || null;
         const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";
+        const interactionId = typeof req.body?.interactionId === "string" && req.body.interactionId.trim()
+            ? req.body.interactionId.trim()
+            : null;
+        const resolved = req.body?.resolved === true;
+        const resolutionCode = typeof req.body?.resolutionCode === "string" && req.body.resolutionCode.trim()
+            ? req.body.resolutionCode.trim()
+            : null;
+        const releaseOutcome = typeof req.body?.releaseOutcome === "string" && req.body.releaseOutcome.trim()
+            ? req.body.releaseOutcome.trim()
+            : null;
         if (!businessId) {
             return res.status(401).json({
                 success: false,
@@ -218,6 +229,15 @@ const sendMessage = async (req, res) => {
             content,
             sender,
             clientMessageId,
+            humanTakeover: sender === "AGENT"
+                ? {
+                    interactionId,
+                    humanId,
+                    resolved,
+                    resolutionCode,
+                    releaseOutcome,
+                }
+                : null,
         });
         return res.json({
             success: result.delivery?.delivered ?? true,

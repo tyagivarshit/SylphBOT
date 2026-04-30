@@ -26,10 +26,12 @@ import {
   resolveHumanQueueAssignment,
   upsertHumanQueueAssignmentInTx,
 } from "./humanQueue.service";
+import { createEscalationLadderService } from "./escalationLadder.service";
 
 const INBOUND_SLA_MONITOR_LEADER_KEY = "inbound-sla-monitor:leader";
 const INBOUND_SLA_MONITOR_LEASE_MS = 90_000;
 const INBOUND_SLA_MONITOR_REFRESH_MS = 30_000;
+const escalationLadder = createEscalationLadderService();
 
 const globalForInboundSlaMonitor = globalThis as typeof globalThis & {
   __sylphInboundSlaMonitorRun?: Promise<any> | null;
@@ -334,6 +336,13 @@ const processQueuedCandidate = async ({
       : "sla_breach_total"
   );
 
+  if (status.eventType === "sla.breached") {
+    await escalationLadder.escalateQueue({
+      queueId: queue.id,
+      reason: "sla_breach_monotonic_ladder",
+    });
+  }
+
   return {
     interactionId: interaction.id,
     eventType: status.eventType,
@@ -494,6 +503,13 @@ const processQueueLessCandidate = async ({
       ? "sla_warning_total"
       : "sla_breach_total"
   );
+
+  if (status.eventType === "sla.breached") {
+    await escalationLadder.escalateQueue({
+      queueId: persisted.queueId,
+      reason: "sla_breach_monotonic_ladder",
+    });
+  }
 
   return {
     interactionId: interaction.id,

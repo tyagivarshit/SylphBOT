@@ -8,6 +8,7 @@ import {
 import { buildQueueJobOptions, withRedisWorkerFailSafe } from "../../queues/queue.defaults";
 import logger from "../../utils/logger";
 import { acquireDistributedLock } from "../distributedLock.service";
+import { enforceSecurityGovernanceInfluence } from "../security/securityGovernanceOS.service";
 
 export const CRM_REFRESH_QUEUE_NAME = "crm-intelligence-refresh";
 
@@ -544,6 +545,26 @@ const scheduleCRMRefreshWake = async ({
 export const enqueueCRMRefreshRequest = async (
   request: CRMRefreshRequestPayload
 ) => {
+  await enforceSecurityGovernanceInfluence({
+    domain: "CRM",
+    action: "messages:enqueue",
+    businessId: request.businessId,
+    tenantId: request.businessId,
+    actorId: "crm_refresh_runtime",
+    actorType: "SERVICE",
+    role: "SERVICE",
+    permissions: ["messages:enqueue"],
+    scopes: ["WRITE"],
+    resourceType: "CRM_REFRESH",
+    resourceId: request.leadId,
+    resourceTenantId: request.businessId,
+    purpose: "CRM_REFRESH",
+    metadata: {
+      source: request.source || "UNKNOWN",
+      route: request.route || null,
+    },
+  });
+
   const key = getCRMRefreshQueueKey(request.businessId, request.leadId);
   const now = new Date().toISOString();
   const version = Number(

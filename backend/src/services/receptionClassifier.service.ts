@@ -12,6 +12,7 @@ import {
   type ReceptionContextReferences,
   type ReceptionMemoryAuthorityRecord,
 } from "./reception.shared";
+import { isAppointmentIntentClass } from "./appointment.shared";
 import { transitionInboundInteraction } from "./inboundLifecycle.service";
 
 export type ReceptionClassification = {
@@ -28,6 +29,12 @@ export type ReceptionClassifierContext = {
   interaction: InboundInteractionAuthorityRecord;
   references?: ReceptionContextReferences | null;
   receptionMemory?: ReceptionMemoryAuthorityRecord | null;
+  intelligence?: {
+    reception?: {
+      spamThreshold?: number | null;
+      forceHumanQueue?: boolean;
+    } | null;
+  } | null;
 };
 
 export type InboundClassificationRepository = {
@@ -48,13 +55,62 @@ const SPAM_PATTERNS = [
 ];
 
 const BILLING_PATTERNS = [/invoice/i, /billing/i, /refund/i, /charge/i, /payment/i];
-const APPOINTMENT_PATTERNS = [
-  /book/i,
-  /resched/i,
-  /schedule/i,
-  /appointment/i,
-  /slot/i,
-  /demo/i,
+const APPOINTMENT_INTENT_PATTERNS: Array<{
+  intent: string;
+  patterns: RegExp[];
+}> = [
+  {
+    intent: "RESCHEDULE",
+    patterns: [/resched/i, /change time/i, /move (the )?(call|meeting)/i],
+  },
+  {
+    intent: "CANCEL_BOOKING",
+    patterns: [/cancel( the)? (booking|appointment|call|meeting)?/i, /\bdrop\b.*\bmeeting\b/i],
+  },
+  {
+    intent: "JOIN_LINK",
+    patterns: [/join link/i, /meeting link/i, /where to join/i],
+  },
+  {
+    intent: "RUNNING_LATE",
+    patterns: [/running late/i, /late by/i, /be late/i],
+  },
+  {
+    intent: "CHECK_IN",
+    patterns: [/check in/i, /i am here/i, /arrived/i],
+  },
+  {
+    intent: "NO_SHOW_RECOVERY",
+    patterns: [/missed.*meeting/i, /missed.*call/i, /can we recover/i],
+  },
+  {
+    intent: "FOLLOWUP_BOOKING",
+    patterns: [/follow ?up.*book/i, /book follow ?up/i],
+  },
+  {
+    intent: "GROUP_BOOKING",
+    patterns: [/group session/i, /webinar/i, /panel/i, /team callback/i],
+  },
+  {
+    intent: "RECURRING_BOOKING",
+    patterns: [/recurring/i, /every week/i, /weekly call/i, /monthly call/i],
+  },
+  {
+    intent: "WAITLIST_REQUEST",
+    patterns: [/waitlist/i, /if slot opens/i, /notify if available/i],
+  },
+  {
+    intent: "CONFIRM_SLOT",
+    patterns: [/confirm( the)? slot/i, /\byes\b.*\bslot\b/i],
+  },
+  {
+    intent: "CHECK_AVAILABILITY",
+    patterns: [/availability/i, /available slots?/i, /any slot/i, /next available/i],
+  },
+  {
+    intent: "BOOK",
+    patterns: [/book/i, /schedule/i, /appointment/i, /demo/i, /consultation/i],
+  },
 ];
 const SUPPORT_PATTERNS = [
   /issue/i,
@@ -88,6 +144,16 @@ const NEGATIVE_PATTERNS = [/angry/i, /upset/i, /frustrat/i, /hate/i, /bad/i];
 
 const includesPattern = (input: string, patterns: RegExp[]) =>
   patterns.some((pattern) => pattern.test(input));
+
+const resolveAppointmentIntentClass = (text: string) => {
+  for (const entry of APPOINTMENT_INTENT_PATTERNS) {
+    if (includesPattern(text, entry.patterns)) {
+      return entry.intent;
+    }
+  }
+
+  return null;
+};
 
 const detectSpamScore = (input: string) => {
   if (!input) {
@@ -126,15 +192,17 @@ const detectSpamScore = (input: string) => {
 const resolveIntentClass = ({
   text,
   interactionType,
+  spamThreshold = 0.85,
 }: {
   text: string;
   interactionType: string;
+  spamThreshold?: number;
 }) => {
   if (includesPattern(text, ABUSE_PATTERNS)) {
     return "ABUSE";
   }
 
-  if (detectSpamScore(text) >= 0.85) {
+  if (detectSpamScore(text) >= spamThreshold) {
     return "SPAM";
   }
 
@@ -146,8 +214,10 @@ const resolveIntentClass = ({
     return "BILLING";
   }
 
-  if (includesPattern(text, APPOINTMENT_PATTERNS)) {
-    return "APPOINTMENTS";
+  const appointmentIntent = resolveAppointmentIntentClass(text);
+
+  if (appointmentIntent) {
+    return appointmentIntent;
   }
 
   if (includesPattern(text, SUPPORT_PATTERNS)) {
@@ -177,7 +247,10 @@ const resolveUrgencyClass = ({
     return unresolvedCount > 1 || intentClass === "ABUSE" ? "CRITICAL" : "HIGH";
   }
 
-  if (["BILLING", "APPOINTMENTS", "COMPLAINT"].includes(intentClass)) {
+  if (
+    ["BILLING", "COMPLAINT"].includes(intentClass) ||
+    isAppointmentIntentClass(intentClass)
+  ) {
     return "MEDIUM";
   }
 
@@ -203,12 +276,20 @@ const resolveSentimentClass = (text: string, intentClass: string) => {
 const resolveRouteHint = ({
   intentClass,
   spamScore,
+  spamThreshold = 0.85,
+  forceHumanQueue = false,
   references,
 }: {
   intentClass: string;
   spamScore: number;
+  spamThreshold?: number;
+  forceHumanQueue?: boolean;
   references?: ReceptionContextReferences | null;
 }): InboxRouteTarget => {
+  if (forceHumanQueue && intentClass !== "SPAM") {
+    return "HUMAN_QUEUE";
+  }
+
   if (references?.leadControl?.isHumanControlActive) {
     return "HUMAN_QUEUE";
   }
@@ -217,7 +298,7 @@ const resolveRouteHint = ({
     return "HUMAN_QUEUE";
   }
 
-  if (spamScore >= 0.85 || intentClass === "SPAM") {
+  if (spamScore >= spamThreshold || intentClass === "SPAM") {
     return "SPAM_BIN";
   }
 
@@ -232,7 +313,7 @@ const resolveRouteHint = ({
     case "SUPPORT":
       return "SUPPORT";
     default:
-      return "REVENUE_BRAIN";
+      return isAppointmentIntentClass(intentClass) ? "APPOINTMENTS" : "REVENUE_BRAIN";
   }
 };
 
@@ -250,6 +331,7 @@ export const classifyReceptionInteraction = ({
   interaction,
   references,
   receptionMemory,
+  intelligence,
 }: ReceptionClassifierContext): ReceptionClassification => {
   const normalizedPayload = toRecord(interaction.normalizedPayload);
   const messageText = (
@@ -257,9 +339,16 @@ export const classifyReceptionInteraction = ({
     coerceOptionalString(toRecord(normalizedPayload.metadata).subject) ||
     ""
   ).trim();
+  const intelligenceSpamThreshold = clampNumber(
+    Number(intelligence?.reception?.spamThreshold ?? 0.85),
+    0.5,
+    0.98
+  );
+  const forceHumanQueue = Boolean(intelligence?.reception?.forceHumanQueue);
   const intentClass = resolveIntentClass({
     text: messageText,
     interactionType: interaction.interactionType,
+    spamThreshold: intelligenceSpamThreshold,
   });
   const spamScore = detectSpamScore(messageText);
   const complaintSeverity =
@@ -282,6 +371,8 @@ export const classifyReceptionInteraction = ({
   const routeHint = resolveRouteHint({
     intentClass,
     spamScore,
+    spamThreshold: intelligenceSpamThreshold,
+    forceHumanQueue,
     references,
   });
   const reasons = [
@@ -291,7 +382,7 @@ export const classifyReceptionInteraction = ({
     `route_hint:${routeHint}`,
   ];
 
-  if (spamScore >= 0.85) {
+  if (spamScore >= intelligenceSpamThreshold) {
     reasons.push("spam_threshold_exceeded");
   }
 
@@ -309,6 +400,10 @@ export const classifyReceptionInteraction = ({
 
   if (intentClass === "COMPLAINT" && (receptionMemory?.complaintCount || 0) > 0) {
     reasons.push("repeat_complaint_history");
+  }
+
+  if (forceHumanQueue) {
+    reasons.push("intelligence_force_human_queue");
   }
 
   return {

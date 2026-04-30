@@ -2,28 +2,73 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.monitoringMiddleware = void 0;
 const sentry_1 = require("../observability/sentry");
+const reliabilityOS_service_1 = require("../services/reliability/reliabilityOS.service");
 const tenant_service_1 = require("../services/tenant.service");
 const monitoringMiddleware = (req, res, next) => {
     const startedAt = Date.now();
     res.on("finish", () => {
+        const businessId = (0, tenant_service_1.getRequestBusinessId)(req);
+        const traceId = req.requestId || null;
+        const statusCode = res.statusCode;
+        const durationMs = Date.now() - startedAt;
         req.logger?.info({
-            statusCode: res.statusCode,
-            durationMs: Date.now() - startedAt,
+            statusCode,
+            durationMs,
             method: req.method,
             ip: req.ip,
             userId: req.user?.id || null,
-            businessId: (0, tenant_service_1.getRequestBusinessId)(req),
+            businessId,
         }, "Request completed");
-        if (res.statusCode >= 500) {
-            (0, sentry_1.captureExceptionWithContext)(new Error(`Request failed with status ${res.statusCode}`), {
+        void (0, reliabilityOS_service_1.recordTraceLedger)({
+            traceId,
+            correlationId: traceId,
+            businessId,
+            tenantId: businessId,
+            leadId: typeof req.query?.leadId === "string"
+                ? req.query.leadId
+                : null,
+            stage: `http:${req.method}:${req.originalUrl}`,
+            status: statusCode >= 500 ? "FAILED" : "COMPLETED",
+            endedAt: new Date(),
+            metadata: {
+                statusCode,
+                durationMs,
+            },
+        }).catch(() => undefined);
+        void (0, reliabilityOS_service_1.recordObservabilityEvent)({
+            businessId,
+            tenantId: businessId,
+            eventType: "http.request.completed",
+            message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
+            severity: statusCode >= 500
+                ? "error"
+                : statusCode >= 400
+                    ? "warn"
+                    : "info",
+            context: {
+                traceId,
+                correlationId: traceId,
+                tenantId: businessId,
+                component: "http",
+                phase: "reception",
+            },
+            metadata: {
+                statusCode,
+                durationMs,
+                method: req.method,
+                route: req.originalUrl,
+            },
+        }).catch(() => undefined);
+        if (statusCode >= 500) {
+            (0, sentry_1.captureExceptionWithContext)(new Error(`Request failed with status ${statusCode}`), {
                 tags: {
                     layer: "monitoring",
-                    statusCode: res.statusCode,
+                    statusCode,
                 },
                 extras: {
                     path: req.originalUrl,
                     method: req.method,
-                    businessId: (0, tenant_service_1.getRequestBusinessId)(req),
+                    businessId,
                     requestId: req.requestId,
                 },
             });

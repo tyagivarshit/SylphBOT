@@ -16,8 +16,11 @@ const isRetryableRedisError = (error) => {
     return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly|Connection is in closed state/i.test(message);
 };
 const buildRedisOptions = (connectionName) => {
-    if (!env_1.env.REDIS_URL.startsWith("rediss://")) {
-        throw new Error("REDIS_URL must use rediss:// for Upstash TLS connections");
+    const isTlsRedisUrl = env_1.env.REDIS_URL.startsWith("rediss://");
+    const isPlainRedisUrl = env_1.env.REDIS_URL.startsWith("redis://");
+    const allowPlainRedis = process.env.NODE_ENV === "integration" || process.env.NODE_ENV === "test";
+    if (!isTlsRedisUrl && !(allowPlainRedis && isPlainRedisUrl)) {
+        throw new Error("REDIS_URL must use rediss:// (or redis:// in integration/test mode)");
     }
     const isWorker = connectionName.startsWith("worker");
     return {
@@ -41,7 +44,7 @@ const buildRedisOptions = (connectionName) => {
         reconnectOnError(error) {
             return isRetryableRedisError(error) ? 1 : false;
         },
-        tls: {},
+        tls: isTlsRedisUrl ? {} : undefined,
     };
 };
 const attachRedisListeners = (client, label) => {

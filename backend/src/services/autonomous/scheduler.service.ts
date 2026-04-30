@@ -1,5 +1,6 @@
 import prisma from "../../config/prisma";
 import { acquireDistributedLock } from "../distributedLock.service";
+import { getIntelligenceRuntimeInfluence } from "../intelligence/intelligenceRuntimeInfluence.service";
 import {
   clearAutonomousOpportunity,
   persistAutonomousOpportunity,
@@ -83,10 +84,12 @@ const getCandidateLeadIds = async ({
 const shouldAutodispatch = ({
   score,
   autoDispatch,
+  threshold,
 }: {
   score: number;
   autoDispatch: boolean;
-}) => autoDispatch && score >= MIN_AUTODISPATCH_SCORE;
+  threshold: number;
+}) => autoDispatch && score >= threshold;
 
 export const runAutonomousScheduler = async ({
   businessId,
@@ -107,6 +110,19 @@ export const runAutonomousScheduler = async ({
   const results: AutonomousSchedulerLeadResult[] = [];
 
   for (const currentBusinessId of businessIds) {
+    const runtime = await getIntelligenceRuntimeInfluence({
+      businessId: currentBusinessId,
+    }).catch(() => null);
+    const dispatchThreshold = Math.max(
+      45,
+      Math.min(
+        95,
+        Math.round(
+          Number(runtime?.controls.autonomous.autoDispatchScoreFloor || MIN_AUTODISPATCH_SCORE)
+        )
+      )
+    );
+    const dispatchEnabled = autoDispatch && !Boolean(runtime?.controls.autonomous.paused);
     const leadIds = await getCandidateLeadIds({
       businessId: currentBusinessId,
       limit: maxLeadsPerBusiness,
@@ -156,7 +172,8 @@ export const runAutonomousScheduler = async ({
 
       if (best.guardrail.allowed && shouldAutodispatch({
         score: best.candidate.score,
-        autoDispatch,
+        autoDispatch: dispatchEnabled,
+        threshold: dispatchThreshold,
       })) {
         await queueAutonomousCampaign({
           snapshot,
@@ -172,7 +189,8 @@ export const runAutonomousScheduler = async ({
         status: best.guardrail.allowed
           ? shouldAutodispatch({
               score: best.candidate.score,
-              autoDispatch,
+              autoDispatch: dispatchEnabled,
+              threshold: dispatchThreshold,
             })
             ? "QUEUED"
             : "PENDING"
@@ -192,8 +210,10 @@ export const runAutonomousScheduler = async ({
         evaluatedLeads: businessResults.length,
         queued: businessResults.filter((item) => item.status === "QUEUED").length,
         blocked: businessResults.filter((item) => item.status === "BLOCKED").length,
-        autoDispatch,
+        autoDispatch: dispatchEnabled,
+        dispatchThreshold,
         maxLeadsPerBusiness,
+        intelligencePolicyVersion: runtime?.policyVersion || null,
       },
     }).catch(() => undefined);
   }

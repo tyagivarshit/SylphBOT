@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { getPlanKey } from "../config/plan.config";
 import { getPricingPlanLabel } from "../config/pricing.config";
 import { getUsageOverview } from "./usage.service";
+import { getCanonicalSubscriptionSnapshot } from "./subscriptionAuthority.service";
 
 export class DashboardService {
 
@@ -19,10 +20,7 @@ export class DashboardService {
       const baseFilter: Prisma.LeadWhereInput = { businessId };
 
       /* 🔥 SUBSCRIPTION (SAFE FALLBACK) */
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId },
-        include: { plan: true },
-      });
+      const subscription = await getCanonicalSubscriptionSnapshot(businessId);
 
       const planKey = getPlanKey(subscription?.plan || null);
 

@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import crypto from "crypto";
 import prisma from "../config/prisma";
 import { fetchInstagramUsername } from "../services/instagramProfile.service";
 import { processWebhookEvent } from "../services/webhookDedup.service";
@@ -10,8 +11,17 @@ import {
   isWebhookTimestampFresh,
   verifyMetaWebhookSignature,
 } from "../services/webhookSecurity.service";
+import {
+  enforceSecurityGovernanceInfluence,
+  recordWebhookSpoofAttempt,
+} from "../services/security/securityGovernanceOS.service";
 import { resolveOrCreateReceptionLead } from "../services/receptionLead.service";
 import { receiveInboundInteraction } from "../services/receptionIntake.service";
+import {
+  recordObservabilityEvent,
+  recordTraceLedger,
+} from "../services/reliability/reliabilityOS.service";
+import { recordInboundProviderWebhook } from "../services/saasPackagingConnectHubOS.service";
 
 const router = Router();
 const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
@@ -50,11 +60,6 @@ const clientBusinessInclude = {
   business: {
     select: {
       ownerId: true,
-      subscription: {
-        include: {
-          plan: true,
-        },
-      },
     },
   },
 };
@@ -149,12 +154,33 @@ const enforceWebhookSecurity = async (req: Request, body: any) => {
     signature,
     secret,
   }))) {
+    await recordWebhookSpoofAttempt({
+      businessId: null,
+      tenantId: null,
+      provider: "INSTAGRAM",
+      signature: Array.isArray(signature) ? signature[0] : signature,
+      reason: "signature_invalid",
+      metadata: {
+        requestId: req.requestId || null,
+      },
+    }).catch(() => undefined);
     return false;
   }
 
   const timestampMs = extractMetaWebhookTimestamp(body);
 
   if (!isWebhookTimestampFresh(timestampMs)) {
+    await recordWebhookSpoofAttempt({
+      businessId: null,
+      tenantId: null,
+      provider: "INSTAGRAM",
+      signature: Array.isArray(signature) ? signature[0] : signature,
+      reason: "timestamp_stale",
+      metadata: {
+        requestId: req.requestId || null,
+        timestampMs,
+      },
+    }).catch(() => undefined);
     return false;
   }
 
@@ -168,6 +194,17 @@ const enforceWebhookSecurity = async (req: Request, body: any) => {
     });
 
     if (!accepted) {
+      await recordWebhookSpoofAttempt({
+        businessId: null,
+        tenantId: null,
+        provider: "INSTAGRAM",
+        signature: replaySignature,
+        reason: "replay_rejected",
+        metadata: {
+          requestId: req.requestId || null,
+          timestampMs,
+        },
+      }).catch(() => undefined);
       return false;
     }
   }
@@ -252,6 +289,7 @@ router.get("/", (req: Request, res: Response) => {
 
 router.post("/", async (req: any, res: Response) => {
   let body: any;
+  const webhookTraceId = `ig_webhook_${req.requestId || crypto.randomUUID()}`;
 
   console.log("🔥 WEBHOOK HIT", JSON.stringify(req.body));
 
@@ -265,6 +303,21 @@ router.post("/", async (req: any, res: Response) => {
         stage: "body_parse",
       },
     });
+    await recordObservabilityEvent({
+      eventType: "webhook.instagram.body_parse_failed",
+      message: "Instagram webhook body parse failed",
+      severity: "error",
+      context: {
+        traceId: webhookTraceId,
+        correlationId: webhookTraceId,
+        provider: "INSTAGRAM",
+        component: "webhook",
+        phase: "reception",
+      },
+      metadata: {
+        error: String((error as { message?: unknown })?.message || error || "body_parse_failed"),
+      },
+    }).catch(() => undefined);
     log("Body parse failed", {
       message: (error as { message?: string })?.message || "Unknown error",
     });
@@ -280,6 +333,18 @@ router.post("/", async (req: any, res: Response) => {
 
     if (!(await enforceWebhookSecurity(req, body))) {
       log("Webhook security validation failed");
+      await recordObservabilityEvent({
+        eventType: "webhook.instagram.security_rejected",
+        message: "Instagram webhook rejected by security guard",
+        severity: "warn",
+        context: {
+          traceId: webhookTraceId,
+          correlationId: webhookTraceId,
+          provider: "INSTAGRAM",
+          component: "webhook",
+          phase: "reception",
+        },
+      }).catch(() => undefined);
       return res.sendStatus(403);
     }
 
@@ -288,6 +353,16 @@ router.post("/", async (req: any, res: Response) => {
     if (!entry) {
       return res.sendStatus(200);
     }
+
+    await recordTraceLedger({
+      traceId: webhookTraceId,
+      correlationId: webhookTraceId,
+      stage: "webhook:instagram:accepted",
+      status: "IN_PROGRESS",
+      metadata: {
+        entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+      },
+    }).catch(() => undefined);
 
     const deliveryMessageIds = getInstagramDeliveryMessageIds(entry);
 
@@ -298,6 +373,22 @@ router.post("/", async (req: any, res: Response) => {
           deliveredAt: new Date(),
         }).catch(() => undefined);
       }
+
+      await recordObservabilityEvent({
+        eventType: "webhook.instagram.delivery_reconciled",
+        message: "Instagram delivery reconciliation processed",
+        severity: "info",
+        context: {
+          traceId: webhookTraceId,
+          correlationId: webhookTraceId,
+          provider: "INSTAGRAM",
+          component: "webhook-reconciliation",
+          phase: "providers",
+        },
+        metadata: {
+          deliveryCount: deliveryMessageIds.length,
+        },
+      }).catch(() => undefined);
     }
 
     for (const change of entry?.changes || []) {
@@ -374,6 +465,36 @@ router.post("/", async (req: any, res: Response) => {
         }
 
         attachResolvedBusinessContext(req, client);
+        await recordInboundProviderWebhook({
+          businessId: client.businessId,
+          tenantId: client.businessId,
+          provider: "INSTAGRAM",
+          environment: "LIVE",
+          success: true,
+          details: {
+            webhookType: "comment",
+            commentId: commentId || null,
+          },
+        }).catch(() => undefined);
+        await enforceSecurityGovernanceInfluence({
+          domain: "RECEPTION",
+          action: "messages:enqueue",
+          businessId: client.businessId,
+          tenantId: client.businessId,
+          actorId: "instagram_webhook",
+          actorType: "WEBHOOK",
+          role: "SERVICE",
+          permissions: ["messages:enqueue"],
+          scopes: ["WRITE"],
+          resourceType: "INSTAGRAM_COMMENT",
+          resourceId: commentEventId,
+          resourceTenantId: client.businessId,
+          purpose: "INBOUND_MESSAGE",
+          metadata: {
+            provider: "INSTAGRAM",
+            webhookType: "comment",
+          },
+        });
         const lead = await resolveOrCreateReceptionLead({
           businessId: client.businessId,
           clientId: client.id,
@@ -500,6 +621,36 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     attachResolvedBusinessContext(req, client);
+    await recordInboundProviderWebhook({
+      businessId: client.businessId,
+      tenantId: client.businessId,
+      provider: "INSTAGRAM",
+      environment: "LIVE",
+      success: true,
+      details: {
+        webhookType: "message",
+        eventId: eventId || null,
+      },
+    }).catch(() => undefined);
+    await enforceSecurityGovernanceInfluence({
+      domain: "RECEPTION",
+      action: "messages:enqueue",
+      businessId: client.businessId,
+      tenantId: client.businessId,
+      actorId: "instagram_webhook",
+      actorType: "WEBHOOK",
+      role: "SERVICE",
+      permissions: ["messages:enqueue"],
+      scopes: ["WRITE"],
+      resourceType: "INSTAGRAM_MESSAGE",
+      resourceId: eventId,
+      resourceTenantId: client.businessId,
+      purpose: "INBOUND_MESSAGE",
+      metadata: {
+        provider: "INSTAGRAM",
+        webhookType: "message",
+      },
+    });
     let lead = await resolveOrCreateReceptionLead({
       businessId: client.businessId,
       clientId: client.id,
@@ -565,6 +716,21 @@ router.post("/", async (req: any, res: Response) => {
       });
     }
 
+    await recordTraceLedger({
+      traceId: webhookTraceId,
+      correlationId: webhookTraceId,
+      businessId: client.businessId,
+      tenantId: client.businessId,
+      leadId: lead.id,
+      interactionId: intake.interaction.id,
+      stage: "webhook:instagram:completed",
+      status: "COMPLETED",
+      endedAt: new Date(),
+      metadata: {
+        externalInteractionKey: intake.interaction.externalInteractionKey,
+      },
+    }).catch(() => undefined);
+
     return res.sendStatus(200);
   } catch (error) {
     req.logger?.error({ error }, "Instagram webhook error");
@@ -573,6 +739,31 @@ router.post("/", async (req: any, res: Response) => {
         webhook: "instagram",
       },
     });
+    await recordTraceLedger({
+      traceId: webhookTraceId,
+      correlationId: webhookTraceId,
+      stage: "webhook:instagram:failed",
+      status: "FAILED",
+      endedAt: new Date(),
+      metadata: {
+        error: String((error as { message?: unknown })?.message || error || "webhook_failed"),
+      },
+    }).catch(() => undefined);
+    await recordObservabilityEvent({
+      eventType: "webhook.instagram.failed",
+      message: "Instagram webhook processing failed",
+      severity: "error",
+      context: {
+        traceId: webhookTraceId,
+        correlationId: webhookTraceId,
+        provider: "INSTAGRAM",
+        component: "webhook",
+        phase: "reception",
+      },
+      metadata: {
+        error: String((error as { message?: unknown })?.message || error || "webhook_failed"),
+      },
+    }).catch(() => undefined);
     log("Webhook error:", error);
     return res.sendStatus(500);
   }

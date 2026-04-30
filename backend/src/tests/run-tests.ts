@@ -52,6 +52,20 @@ import { slaBreachTests } from "./sla.breach.test";
 import { resolutionReopenTests } from "./resolution.reopen.test";
 import { controlAuthorityForceHumanTests } from "./controlAuthority.forceHuman.test";
 import { dashboardProjectionTests } from "./dashboardProjection.test";
+import { assignmentEngineTests } from "./assignmentEngine.test";
+import { escalationLadderTests } from "./escalationLadder.test";
+import { humanReminderTests } from "./humanReminder.test";
+import { humanPerformanceTests } from "./humanPerformance.test";
+import { takeoverAtomicityTests } from "./takeover.atomicity.test";
+import { availabilityEngineTests } from "./availabilityEngine.test";
+import { appointmentPhase5CTests } from "./appointment.phase5c.test";
+import { calendarProviderPhase5C1Tests } from "./calendar.provider.phase5c1.test";
+import { commercePhase5DTests } from "./commerce.phase5d.test";
+import { intelligencePhase5ETests } from "./intelligence.phase5e.test";
+import { reliabilityPhase6ATests } from "./reliability.phase6a.test";
+import { securityPhase6BTests } from "./security.phase6b.test";
+import { infrastructurePhase6CTests } from "./infrastructure.phase6c.test";
+import { saasPackagingPhase6DTests } from "./saasPackaging.phase6d.test";
 
 type TestCase = {
   name: string;
@@ -848,6 +862,20 @@ const tests: TestCase[] = [
   ...resolutionReopenTests,
   ...controlAuthorityForceHumanTests,
   ...dashboardProjectionTests,
+  ...assignmentEngineTests,
+  ...escalationLadderTests,
+  ...humanReminderTests,
+  ...humanPerformanceTests,
+  ...takeoverAtomicityTests,
+  ...availabilityEngineTests,
+  ...appointmentPhase5CTests,
+  ...calendarProviderPhase5C1Tests,
+  ...commercePhase5DTests,
+  ...intelligencePhase5ETests,
+  ...reliabilityPhase6ATests,
+  ...securityPhase6BTests,
+  ...saasPackagingPhase6DTests,
+  ...infrastructurePhase6CTests,
   ...autonomousPhase4Tests,
   ...revenueBrainPhase3BTests,
   ...revenueBrainPhase3CTests,

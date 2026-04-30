@@ -1,6 +1,12 @@
 import prisma from "../config/prisma";
 import { conflict } from "../utils/AppError";
-import { stripe } from "./stripe.service";
+import { createConsentAuthorityWriterService } from "./consentAuthorityWriter.service";
+import {
+  markDeletionCompleted,
+  markExportCompleted,
+  requestDeletion,
+  requestExport,
+} from "./security/securityGovernanceOS.service";
 
 const buildDeletedEmail = (email: string) => {
   const [local, domain = "deleted.local"] = email.split("@");
@@ -13,6 +19,18 @@ export const exportBusinessData = async (input: {
   userId: string;
   businessId: string;
 }) => {
+  const exportRequest = await requestExport({
+    businessId: input.businessId,
+    tenantId: input.businessId,
+    requestedBy: input.userId,
+    purpose: "GDPR_EXPORT",
+    region: "GLOBAL",
+    autoApprove: true,
+    metadata: {
+      source: "compliance.service",
+    },
+  });
+
   const [user, business, clients, leads, flows, subscriptions, invoices, apiKeys] =
     await Promise.all([
       prisma.user.findUnique({
@@ -32,11 +50,6 @@ export const exportBusinessData = async (input: {
       prisma.business.findUnique({
         where: { id: input.businessId },
         include: {
-          subscription: {
-            include: {
-              plan: true,
-            },
-          },
           users: {
             select: {
               id: true,
@@ -80,13 +93,11 @@ export const exportBusinessData = async (input: {
           executions: true,
         },
       }),
-      prisma.subscription.findMany({
+      prisma.subscriptionLedger.findMany({
         where: { businessId: input.businessId },
-        include: {
-          plan: true,
-        },
+        orderBy: { createdAt: "desc" },
       }),
-      prisma.invoice.findMany({
+      prisma.invoiceLedger.findMany({
         where: { businessId: input.businessId },
         orderBy: { createdAt: "asc" },
       }),
@@ -107,8 +118,14 @@ export const exportBusinessData = async (input: {
       }),
     ]);
 
+  await markExportCompleted({
+    exportRequestKey: exportRequest.exportRequestKey,
+    artifactRef: `export://${input.businessId}/${Date.now()}`,
+  }).catch(() => undefined);
+
   return {
     exportedAt: new Date().toISOString(),
+    exportRequestKey: exportRequest.exportRequestKey,
     user,
     business,
     clients,
@@ -121,21 +138,61 @@ export const exportBusinessData = async (input: {
 };
 
 const cancelBusinessSubscription = async (businessId: string) => {
-  const subscription = await prisma.subscription.findUnique({
-    where: { businessId },
-    select: {
-      stripeSubscriptionId: true,
+  await prisma.subscriptionLedger.updateMany({
+    where: {
+      businessId,
+      status: {
+        in: ["TRIALING", "ACTIVE", "PAST_DUE", "PAUSED", "PENDING"],
+      },
+    },
+    data: {
+      status: "CANCELLED",
+      renewAt: null,
+      cancelledAt: new Date(),
+      cancelAt: new Date(),
     },
   });
+};
 
-  if (!subscription?.stripeSubscriptionId) {
-    return;
-  }
+const revokeBusinessConsentForCompliance = async ({
+  businessId,
+  actor,
+  reason,
+}: {
+  businessId: string;
+  actor: string;
+  reason: string;
+}) => {
+  const leads = await prisma.lead.findMany({
+    where: {
+      businessId,
+    },
+    select: {
+      id: true,
+      platform: true,
+    },
+  });
+  const consentWriter = createConsentAuthorityWriterService();
 
-  try {
-    await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
-  } catch {
-    // Preserve current behavior by failing open when Stripe cleanup is unavailable.
+  for (const lead of leads) {
+    await consentWriter
+      .revokeConsent({
+        businessId,
+        leadId: lead.id,
+        channel: lead.platform || "ALL",
+        scope: "ALL",
+        source: "COMPLIANCE_FLOW",
+        legalBasis: "LEGAL_OBLIGATION",
+        actor,
+        evidence: {
+          reason,
+        },
+        metadata: {
+          compliance: true,
+          reason,
+        },
+      })
+      .catch(() => undefined);
   }
 };
 
@@ -207,12 +264,13 @@ const softDeleteBusinessData = async (input: {
           isActive: false,
         },
       }),
-      tx.subscription.updateMany({
+      tx.subscriptionLedger.updateMany({
         where: { businessId: input.businessId },
         data: {
           status: "CANCELLED",
-          graceUntil: null,
-          isTrial: false,
+          renewAt: null,
+          cancelledAt: now,
+          cancelAt: now,
         },
       }),
       tx.apiKey.updateMany({
@@ -245,6 +303,12 @@ const softDeleteBusinessData = async (input: {
         },
       }),
     ]);
+  });
+
+  await revokeBusinessConsentForCompliance({
+    businessId: input.businessId,
+    actor: input.userId,
+    reason: "workspace_soft_delete",
   });
 };
 
@@ -373,6 +437,7 @@ export const restoreBusinessData = async (input: {
 
 const permanentDeleteBusinessData = async (input: {
   businessId: string;
+  userId: string;
 }) => {
   const [business, workspaceUsers, leads, flows, appointments] = await Promise.all([
     prisma.business.findUnique({
@@ -407,6 +472,12 @@ const permanentDeleteBusinessData = async (input: {
   if (!business) {
     throw new Error("Business not found");
   }
+
+  await revokeBusinessConsentForCompliance({
+    businessId: input.businessId,
+    actor: input.userId,
+    reason: "workspace_permanent_delete",
+  });
 
   const userIds = Array.from(
     new Set([...workspaceUsers.map((user) => user.id), business.ownerId])
@@ -622,7 +693,7 @@ const permanentDeleteBusinessData = async (input: {
           businessId: input.businessId,
         },
       }),
-      tx.invoice.deleteMany({
+      tx.invoiceLedger.deleteMany({
         where: {
           businessId: input.businessId,
         },
@@ -632,7 +703,7 @@ const permanentDeleteBusinessData = async (input: {
           businessId: input.businessId,
         },
       }),
-      tx.subscription.deleteMany({
+      tx.subscriptionLedger.deleteMany({
         where: {
           businessId: input.businessId,
         },
@@ -658,10 +729,30 @@ export const deleteBusinessData = async (input: {
   businessId: string;
   mode: DeleteMode;
 }) => {
+  const deletionRequest = await requestDeletion({
+    businessId: input.businessId,
+    tenantId: input.businessId,
+    requestedBy: input.userId,
+    mode: input.mode,
+    reason: "workspace_delete_request",
+    metadata: {
+      source: "compliance.service",
+    },
+  });
+
+  if (deletionRequest.status === "BLOCKED_LEGAL_HOLD") {
+    throw conflict("Delete request blocked by active legal hold");
+  }
+
   if (input.mode === "permanent") {
     await permanentDeleteBusinessData({
       businessId: input.businessId,
+      userId: input.userId,
     });
+
+    await markDeletionCompleted({
+      deletionRequestKey: deletionRequest.deletionRequestKey,
+    }).catch(() => undefined);
     return;
   }
 
@@ -669,4 +760,8 @@ export const deleteBusinessData = async (input: {
     userId: input.userId,
     businessId: input.businessId,
   });
+
+  await markDeletionCompleted({
+    deletionRequestKey: deletionRequest.deletionRequestKey,
+  }).catch(() => undefined);
 };

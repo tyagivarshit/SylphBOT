@@ -3,7 +3,6 @@ import prisma from "../config/prisma";
 import redis from "../config/redis";
 import { getPlanKey } from "../config/plan.config";
 import { env } from "../config/env";
-import { expirePastDueSubscriptionIfNeeded } from "../services/billingSync.service";
 
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
@@ -43,6 +42,34 @@ const lockContext = (
   upgradeRequired: true,
 });
 
+const mapCanonicalSubscription = (row: any) => ({
+  id: row.id,
+  businessId: row.businessId,
+  status:
+    row.status === "TRIALING"
+      ? "TRIAL"
+      : row.status === "ACTIVE"
+      ? "ACTIVE"
+      : row.status === "PAST_DUE"
+      ? "PAST_DUE"
+      : row.status === "PENDING"
+      ? "INACTIVE"
+      : "CANCELLED",
+  graceUntil: row.status === "PAST_DUE" ? row.renewAt || row.currentPeriodEnd || null : null,
+  currentPeriodEnd: row.currentPeriodEnd || row.renewAt || null,
+  isTrial:
+    row.status === "TRIALING" ||
+    (row.trialEndsAt ? new Date(row.trialEndsAt).getTime() > Date.now() : false),
+  stripeCustomerId: null,
+  stripeSubscriptionId: row.providerSubscriptionId || null,
+  currency: row.currency,
+  billingCycle: row.billingCycle,
+  plan: {
+    name: row.planCode,
+    type: row.planCode,
+  },
+});
+
 const getCachedSubscription = async (businessId: string) => {
   const cacheKey = getKey(businessId);
   const cached = await redis.get(cacheKey);
@@ -51,10 +78,17 @@ const getCachedSubscription = async (businessId: string) => {
     return JSON.parse(cached);
   }
 
-  const subscription = await prisma.subscription.findUnique({
-    where: { businessId },
-    include: { plan: true },
+  const canonical = await prisma.subscriptionLedger.findFirst({
+    where: {
+      businessId,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
   });
+  const subscription = canonical
+    ? mapCanonicalSubscription(canonical)
+    : null;
 
   if (subscription) {
     await redis.set(
@@ -98,10 +132,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
 
 export const loadBillingContext = async (businessId: string) => {
   const cachedSubscription = await getCachedSubscription(businessId);
-  const subscription =
-    (cachedSubscription?.status === "PAST_DUE"
-      ? await expirePastDueSubscriptionIfNeeded({ businessId })
-      : null) || cachedSubscription;
+  const subscription = cachedSubscription;
   const now = new Date();
 
   let context = getBaseContext();

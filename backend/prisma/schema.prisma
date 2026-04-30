@@ -2,14 +2,6 @@
 ENUMS (ADD THIS)
 ====================================== */
 
-enum SubscriptionStatus {
-  ACTIVE
-  INACTIVE
-  CANCELLED
-  PAST_DUE
-  TRIAL
-}
-
 enum Currency {
   INR
   USD
@@ -81,12 +73,270 @@ enum HumanWorkQueueState {
   CLOSED
 }
 
+enum HumanAvailabilityStatus {
+  OFFLINE
+  AVAILABLE
+  BUSY
+  OVERLOADED
+  AWAY
+}
+
 enum PriorityLevel {
   LOW
   MEDIUM
   HIGH
   CRITICAL
 }
+
+enum AppointmentBookedBy {
+  AI
+  HUMAN
+  SELF
+}
+
+enum AppointmentLifecycleStatus {
+  REQUESTED
+  PROPOSED
+  HOLD
+  CONFIRMED
+  REMINDER_SENT
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  FOLLOWUP_BOOKED
+  RESCHEDULED
+  NO_SHOW
+  LATE_JOIN
+  CANCELLED
+  EXPIRED
+}
+
+enum WaitlistStatus {
+  WAITING
+  FILLED
+  CANCELLED
+  EXPIRED
+}
+
+enum CalendarSyncStatus {
+  PENDING
+  SYNCING
+  RETRYING
+  SYNCED
+  CONFLICT
+  CANCELLED
+  CANCELLED_EXTERNAL
+  FAILED
+}
+
+enum AppointmentReminderStatus {
+  SCHEDULED
+  SENT
+  SKIPPED
+  SUPPRESSED
+}
+
+enum ProposalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+  CONTRACT_GENERATED
+}
+
+enum ContractStatus {
+  GENERATED
+  SENT_FOR_SIGNATURE
+  PARTIALLY_SIGNED
+  SIGNED
+  ACTIVATED
+  CANCELLED
+  EXPIRED
+}
+
+enum SignatureStatus {
+  PENDING
+  SIGNED
+  DECLINED
+  REVOKED
+  EXPIRED
+}
+
+enum PaymentIntentStatus {
+  CREATED
+  REQUIRES_ACTION
+  PROCESSING
+  PARTIALLY_CAPTURED
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentAttemptStatus {
+  INITIATED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
+enum InvoiceLedgerStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+  WRITTEN_OFF
+  REFUNDED
+}
+
+enum SubscriptionLedgerStatus {
+  PENDING
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ChargebackStatus {
+  RECEIVED
+  UNDER_REVIEW
+  WON
+  LOST
+  ACCEPTED
+  REVERSED
+}
+
+enum CommerceProvider {
+  STRIPE
+  RAZORPAY
+  PAYPAL
+  INTERNAL
+}
+
+enum CommerceProviderCredentialStatus {
+  ACTIVE
+  AUTH_FAILED
+  EXPIRED
+  REVOKED
+  DISCONNECTED
+}
+
+enum ExternalCommerceResolutionState {
+  CLAIMED
+  PROCESSED
+  REPLAYED
+  FAILED
+}
+
+enum CommerceActor {
+  AI
+  HUMAN
+  SELF
+  SYSTEM
+  WEBHOOK
+}
+
+enum DiscountApprovalStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum RevenueRecognitionStage {
+  BOOKED
+  INVOICED
+  COLLECTED
+  RECOGNIZED
+  DEFERRED
+  REFUNDED
+  WRITTEN_OFF
+}
+
+enum PricingModel {
+  PLAN
+  USAGE
+  SEAT
+  CUSTOM_QUOTE
+}
+
+enum IntelligenceHorizon {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum OptimizationDecisionStatus {
+  RECOMMENDED
+  APPROVED
+  APPLIED
+  REJECTED
+  ROLLED_BACK
+}
+
+enum ExperimentStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+  STOPPED
+}
+
+enum RecommendationStatus {
+  OPEN
+  ADOPTED
+  REJECTED
+  AUTO_APPLIED
+  EXPIRED
+}
+
+enum AnomalySeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AnomalyStatus {
+  OPEN
+  SUPPRESSED
+  RESOLVED
+}
+
+enum ModelDeploymentState {
+  SHADOW
+  ACTIVE
+  DISABLED
+  ROLLED_BACK
+}
+
+enum DriftStatus {
+  STABLE
+  WARNING
+  CRITICAL
+}
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -148,7 +398,6 @@ BUSINESS
 model Business {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
   name          String
-  stripeCustomerId String?
 
   ownerId       String   @db.ObjectId
   owner         User     @relation("BusinessOwner", fields: [ownerId], references: [id])
@@ -157,12 +406,26 @@ model Business {
   users         User[]   @relation("UserBusiness")
 
   clients       Client[]
-  subscription  Subscription?
   leads         Lead[]
   usage         Usage[]
   usageDaily    UsageDaily[]
   addonBalances AddonBalance[]
-  invoices      Invoice[]
+  proposalLedgers ProposalLedger[]
+  contractLedgers ContractLedger[]
+  paymentIntentLedgers PaymentIntentLedger[]
+  invoiceLedgers InvoiceLedger[]
+  subscriptionLedgers SubscriptionLedger[]
+  paymentAttemptLedgers PaymentAttemptLedger[]
+  refundLedgers RefundLedger[]
+  chargebackLedgers ChargebackLedger[]
+  signatureLedgers SignatureLedger[]
+  commercePolicies CommercePolicy[]
+  pricingCatalogEntries PricingCatalog[]
+  discountApprovalLedgers DiscountApprovalLedger[]
+  revenueRecognitionLedgers RevenueRecognitionLedger[]
+  commerceProviderCredentials CommerceProviderCredential[]
+  manualCommerceOverrides ManualCommerceOverride[]
+  taxComplianceLedgers TaxComplianceLedger[]
 
   commentTriggers CommentTrigger[]
   automationFlows AutomationFlow[]
@@ -180,8 +443,19 @@ model Business {
   notifications Notification[]
 
   calendarConnections CalendarConnection[]
+  calendarProviderCredentials CalendarProviderCredential[]
   bookingSlots        BookingSlot[]
   appointments        Appointment[]
+  appointmentLedgers  AppointmentLedger[]
+  availabilitySlots   AvailabilitySlot[]
+  slotReservations    SlotReservationLedger[]
+  appointmentPolicies AppointmentPolicy[]
+  waitlistEntries     WaitlistLedger[]
+  calendarSyncEntries CalendarSyncLedger[]
+  externalSyncIdempotencyEntries ExternalSyncIdempotency[]
+  manualCalendarOverrides ManualCalendarOverride[]
+  meetingArtifacts    MeetingArtifactLedger[]
+  appointmentReminders AppointmentReminderLedger[]
   apiKeys             ApiKey[]
   auditLogs           AuditLog[]
   securityAlerts      SecurityAlert[]
@@ -205,12 +479,26 @@ model Business {
   inboundInteractions InboundInteraction[]
   humanWorkQueues HumanWorkQueue[]
   receptionMemories ReceptionMemory[]
+  humanRoleCapabilities HumanRoleCapability[]
+  humanAvailabilityStates HumanAvailabilityState[]
+  humanTakeoverLedgerEntries HumanTakeoverLedger[]
+  humanEscalationRules HumanEscalationRule[]
+  forecastLedgers ForecastLedger[]
+  predictionLedgers PredictionLedger[]
+  optimizationDecisionLedgers OptimizationDecisionLedger[]
+  experimentLedgers ExperimentLedger[]
+  recommendationLedgers RecommendationLedger[]
+  anomalyLedgers AnomalyLedger[]
+  simulationLedgers SimulationLedger[]
+  modelRegistryLedgers ModelRegistryLedger[]
+  featureSnapshotLedgers FeatureSnapshotLedger[]
+  intelligencePolicies IntelligencePolicy[]
+  manualIntelligenceOverrides ManualIntelligenceOverride[]
 
   createdAt     DateTime @default(now())
   deletedAt DateTime?
 
   @@index([ownerId])
-  @@index([stripeCustomerId])
 }
 
 /* =====================================================
@@ -276,40 +564,6 @@ model Plan {
   earlyUsed    Int      @default(0)
   earlyLimit   Int      @default(20)
 
-  subscriptions Subscription[]
-
-}
-
-/* =====================================================
-SUBSCRIPTIONS
-===================================================== */
-
-model Subscription {
-  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
-
-  businessId           String   @unique @db.ObjectId
-  business             Business @relation(fields: [businessId], references: [id])
-
-  planId               String   @db.ObjectId
-  plan                 Plan     @relation(fields: [planId], references: [id])
-
-  status               SubscriptionStatus @default(INACTIVE)
-
-  stripeCustomerId     String?
-  stripeSubscriptionId String? @unique
-  graceUntil DateTime?
-
-  currentPeriodEnd     DateTime?
-
-  currency             Currency?
-  billingCycle         BillingCycle?
-
-  isTrial              Boolean @default(false)
-  trialUsed            Boolean @default(false)
-
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-
 }
 
 /* =====================================================
@@ -371,10 +625,14 @@ model Lead {
   inboundInteractions InboundInteraction[]
   humanWorkQueues HumanWorkQueue[]
   receptionMemory ReceptionMemory?
+  takeoverLedgerEntries HumanTakeoverLedger[]
 
   lastMessageAt  DateTime?
 
   appointments   Appointment[]
+  appointmentLedgers AppointmentLedger[]
+  appointmentReminders AppointmentReminderLedger[]
+  waitlistEntries WaitlistLedger[]
   conversationStates ConversationState[]
   automationExecutions AutomationExecution[]
 
@@ -988,6 +1246,7 @@ model InboundInteraction {
   updatedAt              DateTime @updatedAt
 
   humanWorkQueue HumanWorkQueue?
+  takeoverLedgerEntries HumanTakeoverLedger[]
 
   @@index([businessId, leadId, createdAt])
   @@index([businessId, lifecycleState, createdAt])
@@ -1024,6 +1283,95 @@ model HumanWorkQueue {
   @@index([assignedRole, state, priority])
   @@index([slaDeadline])
   @@index([businessId, state])
+}
+
+model HumanRoleCapability {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId        String   @db.ObjectId
+  business          Business @relation(fields: [businessId], references: [id])
+
+  roleKey           String
+  permissions       String[]
+  channels          String[]
+  expertiseTags     String[]
+  escalationAuthority Int    @default(0)
+  maxConcurrency    Int      @default(1)
+  schedule          Json?
+  priorityWeight    Int      @default(100)
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([businessId, roleKey])
+}
+
+model HumanAvailabilityState {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  humanId       String   @db.ObjectId
+  state         HumanAvailabilityStatus @default(OFFLINE)
+  activeLoad    Int      @default(0)
+  maxLoad       Int      @default(1)
+  timezone      String?
+  language      String?
+  skillScore    Float    @default(0)
+  responseScore Float    @default(0)
+  lastSeenAt    DateTime?
+  metadata      Json?
+  updatedAt     DateTime @updatedAt
+
+  @@unique([businessId, humanId])
+  @@index([businessId, state, updatedAt])
+}
+
+model HumanTakeoverLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  interactionId String   @db.ObjectId
+  interaction   InboundInteraction @relation(fields: [interactionId], references: [id])
+
+  leadId        String   @db.ObjectId
+  lead          Lead     @relation(fields: [leadId], references: [id])
+
+  reason        String
+  requestedBy   String?
+  assignedTo    String?  @db.ObjectId
+  acceptedAt    DateTime?
+  releasedAt    DateTime?
+  outcome       String?
+  durationMs    Int?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([businessId, interactionId, createdAt])
+  @@index([businessId, leadId, createdAt])
+  @@index([assignedTo, createdAt])
+}
+
+model HumanEscalationRule {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  queueType     String
+  severity      PriorityLevel @default(MEDIUM)
+  ladder        String[]
+  timeouts      Json?
+  ownerFallback Boolean  @default(true)
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([businessId, queueType, severity])
+  @@index([businessId, queueType])
 }
 
 model ReceptionMemory {
@@ -1341,19 +1689,6 @@ model SecurityAlert {
 STRIPE EVENTS
 ===================================================== */
 
-model StripeEvent {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  eventId   String   @unique
-  type      String 
-  createdAt DateTime @default(now())
-}
-
-model BillingEvent {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
-  stripeEventId String   @unique
-  createdAt     DateTime @default(now())
-}
-
 /* =====================================================
 ENTERPRISE BOOKING SYSTEM
 ===================================================== */
@@ -1365,16 +1700,93 @@ model CalendarConnection {
   business     Business @relation(fields: [businessId], references: [id])
 
   provider     String
+  providerAccountId String?
+  externalCalendarId String?
+  status       String   @default("ACTIVE")
+  scopes       String?
 
   accessToken  String
   refreshToken String
 
   expiryDate   DateTime?
+  watchChannelId String?
+  watchResourceId String?
+  watchExpiresAt DateTime?
+  lastWatchRenewedAt DateTime?
+  authFailedAt DateTime?
+  permissionRevokedAt DateTime?
+  lastSyncedAt DateTime?
+  metadata     Json?
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([businessId])
+  @@index([businessId, provider, status])
+  @@index([watchExpiresAt])
+  @@index([expiryDate])
+}
+
+model CalendarProviderCredential {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId      String   @db.ObjectId
+  business        Business @relation(fields: [businessId], references: [id])
+
+  provider        String
+  accessTokenRef  String
+  refreshTokenRef String
+  scope           String?
+  expiryDate      DateTime?
+  revokedAt       DateTime?
+  status          String   @default("ACTIVE")
+  providerMetadata Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([businessId, provider])
+  @@index([businessId, status, expiryDate])
+  @@index([provider, status])
+}
+
+model ExternalSyncIdempotency {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId         String   @db.ObjectId
+  business           Business @relation(fields: [businessId], references: [id])
+
+  provider           String
+  externalSyncKey    String   @unique
+  externalWebhookKey String   @unique
+  providerEventVersion String
+  processedAt        DateTime?
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([businessId, provider, processedAt])
+}
+
+model ManualCalendarOverride {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId String   @db.ObjectId
+  business   Business @relation(fields: [businessId], references: [id])
+
+  provider   String   @default("ALL")
+  windowStart DateTime
+  windowEnd  DateTime
+  reason     String
+  expiresAt  DateTime
+  priority   Int      @default(100)
+  isActive   Boolean  @default(true)
+  metadata   Json?
+  createdBy  String?  @db.ObjectId
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([businessId, provider, isActive, expiresAt])
+  @@index([businessId, windowStart, windowEnd, priority])
 }
 
 model BookingSlot {
@@ -1424,6 +1836,259 @@ model Appointment {
 
   @@index([businessId])
   @@index([leadId])
+}
+
+model AppointmentLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId       String   @db.ObjectId
+  business         Business @relation(fields: [businessId], references: [id])
+
+  appointmentKey   String   @unique
+  leadId           String   @db.ObjectId
+  lead             Lead     @relation(fields: [leadId], references: [id])
+  interactionId    String?  @db.ObjectId
+  slotId           String?  @db.ObjectId
+  slot             AvailabilitySlot? @relation(fields: [slotId], references: [id])
+  source           String
+  bookedBy         AppointmentBookedBy
+  meetingType      String
+  purpose          String?
+  status           AppointmentLifecycleStatus @default(REQUESTED)
+  priority         PriorityLevel @default(MEDIUM)
+  timezone         String
+  requestedWindow  Json?
+  startAt          DateTime?
+  endAt            DateTime?
+  durationMinutes  Int
+  assignedHumanId  String?  @db.ObjectId
+  assignedTeam     String?
+  locationType     String
+  locationDetails  Json?
+  meetingJoinUrl   String?
+  meetingPasscode  String?
+  notes            String?
+  rescheduleCount  Int      @default(0)
+  cancelReason     String?
+  checkInAt        DateTime?
+  startedAt        DateTime?
+  endedAt          DateTime?
+  completedAt      DateTime?
+  outcome          String?
+  feedbackScore    Int?
+  holdExpiresAt    DateTime?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  slotReservations SlotReservationLedger[]
+  waitlistEntries  WaitlistLedger[]
+  calendarSyncEntries CalendarSyncLedger[]
+  meetingArtifact  MeetingArtifactLedger?
+  reminders        AppointmentReminderLedger[]
+
+  @@index([businessId, leadId, createdAt])
+  @@index([businessId, status, startAt])
+  @@index([businessId, meetingType, status, startAt])
+  @@index([businessId, assignedHumanId, startAt])
+  @@index([interactionId])
+}
+
+model AvailabilitySlot {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId         String   @db.ObjectId
+  business           Business @relation(fields: [businessId], references: [id])
+
+  slotKey            String   @unique
+  humanId            String?  @db.ObjectId
+  teamId             String?
+  timezone           String
+  startAt            DateTime
+  endAt              DateTime
+  capacity           Int      @default(1)
+  reservedCount      Int      @default(0)
+  blocked            Boolean  @default(false)
+  blackoutReason     String?
+  bufferBeforeMinutes Int     @default(0)
+  bufferAfterMinutes Int      @default(0)
+  prepMinutes        Int      @default(0)
+  cooldownMinutes    Int      @default(0)
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  appointments       AppointmentLedger[]
+  reservations       SlotReservationLedger[]
+  waitlistEntries    WaitlistLedger[]
+
+  @@index([businessId, startAt, endAt])
+  @@index([businessId, humanId, startAt])
+  @@index([businessId, teamId, startAt])
+  @@index([businessId, blocked, startAt])
+}
+
+model SlotReservationLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  appointmentId String   @db.ObjectId
+  appointment   AppointmentLedger @relation(fields: [appointmentId], references: [id])
+
+  slotId        String   @db.ObjectId
+  slot          AvailabilitySlot @relation(fields: [slotId], references: [id])
+
+  reservedAt    DateTime @default(now())
+  releasedAt    DateTime?
+  reason        String
+  reservedBy    String
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([businessId, appointmentId, reservedAt])
+  @@index([businessId, slotId, reservedAt])
+  @@index([slotId, releasedAt, reservedAt])
+}
+
+model AppointmentPolicy {
+  id                     String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId             String   @db.ObjectId
+  business               Business @relation(fields: [businessId], references: [id])
+
+  meetingType            String
+  duration               Int
+  buffer                 Int      @default(0)
+  cooldown               Int      @default(0)
+  prep                   Int      @default(0)
+  priority               PriorityLevel @default(MEDIUM)
+  vipOverride            Json?
+  ownerEscalationOverride Json?
+  maxReschedules         Int      @default(2)
+  cancelWindowMinutes    Int      @default(60)
+  depositRequired        Boolean  @default(false)
+  depositAmount          Int?
+  graceWindowMinutes     Int      @default(10)
+  noShowRetryPolicy      Json?
+  followupRules          Json?
+  metadata               Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([businessId, meetingType])
+  @@index([businessId, priority])
+}
+
+model WaitlistLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId     String   @db.ObjectId
+  business       Business @relation(fields: [businessId], references: [id])
+
+  leadId         String   @db.ObjectId
+  lead           Lead     @relation(fields: [leadId], references: [id])
+
+  appointmentId  String?  @db.ObjectId
+  appointment    AppointmentLedger? @relation(fields: [appointmentId], references: [id])
+
+  slotId         String?  @db.ObjectId
+  slot           AvailabilitySlot? @relation(fields: [slotId], references: [id])
+
+  meetingType    String
+  priorityScore  Int      @default(0)
+  status         WaitlistStatus @default(WAITING)
+  requestedAt    DateTime @default(now())
+  filledAt       DateTime?
+  cancelledAt    DateTime?
+  expiresAt      DateTime?
+  reason         String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([businessId, slotId, status, priorityScore])
+  @@index([businessId, leadId, status, requestedAt])
+  @@index([businessId, meetingType, status, requestedAt])
+}
+
+model CalendarSyncLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  appointmentId         String   @db.ObjectId
+  appointment           AppointmentLedger @relation(fields: [appointmentId], references: [id])
+
+  provider              String
+  externalCalendarId    String?
+  externalEventId       String?
+  syncStatus            CalendarSyncStatus @default(PENDING)
+  lastSyncedAt          DateTime?
+  lastWebhookAt         DateTime?
+  externalUpdatedAt     DateTime?
+  conflictDetected      Boolean  @default(false)
+  cancelledExternallyAt DateTime?
+  dedupeKey             String?  @unique
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, appointmentId, provider])
+  @@index([provider, externalEventId])
+  @@index([businessId, syncStatus, updatedAt])
+}
+
+model MeetingArtifactLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  appointmentId String   @db.ObjectId
+  appointment   AppointmentLedger @relation(fields: [appointmentId], references: [id])
+
+  recordingRef  String?
+  transcriptRef String?
+  notesRef      String?
+  summaryRef    String?
+  actionItems   Json?
+  nextStepRef   String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([appointmentId])
+  @@index([businessId, updatedAt])
+}
+
+model AppointmentReminderLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId    String   @db.ObjectId
+  business      Business @relation(fields: [businessId], references: [id])
+
+  appointmentId String   @db.ObjectId
+  appointment   AppointmentLedger @relation(fields: [appointmentId], references: [id])
+
+  leadId        String   @db.ObjectId
+  lead          Lead     @relation(fields: [leadId], references: [id])
+
+  reminderType  String
+  scheduledFor  DateTime
+  channel       String   @default("WHATSAPP")
+  consentScope  String   @default("CONVERSATIONAL_OUTBOUND")
+  status        AppointmentReminderStatus @default(SCHEDULED)
+  dedupeKey     String   @unique
+  sentAt        DateTime?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([businessId, appointmentId, reminderType])
+  @@index([businessId, status, scheduledFor])
 }
 
 /* =====================================================
@@ -1518,32 +2183,2443 @@ model NotificationSettings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
-/* =====================================================
-INVOICES (🔥 BILLING CORE)
-===================================================== */
+model ProposalLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
 
-model Invoice {
-  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
 
-  businessId      String   @db.ObjectId
-  business        Business @relation(fields: [businessId], references: [id])
+  leadId                String?  @db.ObjectId
 
-  amount          Int      // total (including tax)
-  subtotal        Int?     // before tax
-  taxAmount       Int?     // Stripe tax
-  taxType         String?  // GST / VAT
+  proposalKey           String   @unique
+  source                CommerceActor   @default(SYSTEM)
+  status                ProposalStatus  @default(DRAFT)
+  currency              Currency
+  subtotalMinor         Int
+  taxMinor              Int      @default(0)
+  totalMinor            Int
+  quantity              Int      @default(1)
+  unitPriceMinor        Int?
+  discountRequestedMinor Int     @default(0)
+  discountApprovedMinor Int      @default(0)
+  discountPercent       Int      @default(0)
+  lineItems             Json?
+  pricingSnapshot       Json?
+  policySnapshot        Json?
+  metadata              Json?
+  validUntil            DateTime?
+  acceptedAt            DateTime?
+  contractGeneratedAt   DateTime?
+  idempotencyKey        String?  @unique
+  version               Int      @default(1)
 
-  currency        String
-  status          String
+  contracts             ContractLedger[] @relation("ProposalContracts")
+  paymentIntents        PaymentIntentLedger[] @relation("ProposalPaymentIntents")
+  invoices              InvoiceLedger[] @relation("ProposalInvoices")
+  discountApprovals     DiscountApprovalLedger[] @relation("ProposalDiscountApprovals")
+  revenueRecognitionEntries RevenueRecognitionLedger[] @relation("ProposalRevenueRecognition")
 
-  stripeInvoiceId String?
-  invoiceNumber   String   @unique
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  createdAt       DateTime @default(now())
-
-  @@index([businessId])
-  @@index([stripeInvoiceId])
+  @@index([businessId, status, createdAt])
+  @@index([businessId, leadId, createdAt])
 }
+
+model ContractLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  proposalId            String?  @db.ObjectId
+  proposal              ProposalLedger? @relation("ProposalContracts", fields: [proposalId], references: [id])
+
+  contractKey           String   @unique
+  status                ContractStatus @default(GENERATED)
+  source                CommerceActor  @default(SYSTEM)
+  templateKey           String?
+  templateVersion       String?
+  termsHash             String?
+  renderRef             String?
+  signedAt              DateTime?
+  activatedAt           DateTime?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+  version               Int      @default(1)
+
+  signatures            SignatureLedger[] @relation("ContractSignatures")
+  invoices              InvoiceLedger[] @relation("ContractInvoices")
+  subscriptions         SubscriptionLedger[] @relation("ContractSubscriptions")
+  paymentIntents        PaymentIntentLedger[] @relation("ContractPaymentIntents")
+  revenueRecognitionEntries RevenueRecognitionLedger[] @relation("ContractRevenueRecognition")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([proposalId, status])
+}
+
+model SignatureLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  contractId            String   @db.ObjectId
+  contract              ContractLedger @relation("ContractSignatures", fields: [contractId], references: [id])
+
+  signatureKey          String   @unique
+  status                SignatureStatus @default(PENDING)
+  signerName            String?
+  signerEmail           String
+  signerRole            String?
+  provider              CommerceProvider @default(INTERNAL)
+  providerSignatureId   String?
+  signedAt              DateTime?
+  declinedAt            DateTime?
+  expiresAt             DateTime?
+  replayedFromSignatureId String? @db.ObjectId
+  metadata              Json?
+  idempotencyKey        String?  @unique
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, contractId, status, createdAt])
+  @@index([provider, providerSignatureId])
+}
+
+model PaymentIntentLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  proposalId            String?  @db.ObjectId
+  proposal              ProposalLedger? @relation("ProposalPaymentIntents", fields: [proposalId], references: [id])
+
+  contractId            String?  @db.ObjectId
+  contract              ContractLedger? @relation("ContractPaymentIntents", fields: [contractId], references: [id])
+
+  invoiceId             String?  @db.ObjectId
+  invoice               InvoiceLedger? @relation("InvoicePaymentIntents", fields: [invoiceId], references: [id])
+
+  subscriptionId        String?  @db.ObjectId
+  subscription          SubscriptionLedger? @relation("SubscriptionPaymentIntents", fields: [subscriptionId], references: [id])
+
+  paymentIntentKey      String   @unique
+  provider              CommerceProvider @default(INTERNAL)
+  providerPaymentIntentId String?
+  status                PaymentIntentStatus @default(CREATED)
+  source                CommerceActor @default(SYSTEM)
+  amountMinor           Int
+  capturedMinor         Int      @default(0)
+  currency              Currency
+  checkoutUrl           String?
+  checkoutExpiresAt     DateTime?
+  referenceCode         String?
+  webhookFingerprint    String?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+
+  attempts              PaymentAttemptLedger[] @relation("PaymentIntentAttempts")
+  refunds               RefundLedger[] @relation("PaymentIntentRefunds")
+  chargebacks           ChargebackLedger[] @relation("PaymentIntentChargebacks")
+  revenueRecognitionEntries RevenueRecognitionLedger[] @relation("PaymentIntentRevenueRecognition")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([provider, providerPaymentIntentId])
+  @@index([proposalId, status])
+}
+
+model PaymentAttemptLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  paymentIntentId       String   @db.ObjectId
+  paymentIntent         PaymentIntentLedger @relation("PaymentIntentAttempts", fields: [paymentIntentId], references: [id])
+
+  attemptKey            String   @unique
+  provider              CommerceProvider
+  providerEventId       String?
+  status                PaymentAttemptStatus @default(INITIATED)
+  amountMinor           Int
+  currency              Currency
+  riskScore             Int      @default(0)
+  errorCode             String?
+  errorMessage          String?
+  attemptedAt           DateTime @default(now())
+  settledAt             DateTime?
+  timeoutAt             DateTime?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, paymentIntentId, createdAt])
+  @@index([provider, providerEventId])
+  @@index([paymentIntentId, status, attemptedAt])
+}
+
+model InvoiceLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  proposalId            String?  @db.ObjectId
+  proposal              ProposalLedger? @relation("ProposalInvoices", fields: [proposalId], references: [id])
+
+  contractId            String?  @db.ObjectId
+  contract              ContractLedger? @relation("ContractInvoices", fields: [contractId], references: [id])
+
+  subscriptionId        String?  @db.ObjectId
+  subscription          SubscriptionLedger? @relation("SubscriptionInvoices", fields: [subscriptionId], references: [id])
+
+  invoiceKey            String   @unique
+  status                InvoiceLedgerStatus @default(DRAFT)
+  currency              Currency
+  subtotalMinor         Int
+  taxMinor              Int      @default(0)
+  totalMinor            Int
+  paidMinor             Int      @default(0)
+  dueAt                 DateTime?
+  issuedAt              DateTime?
+  paidAt                DateTime?
+  writeOffAt            DateTime?
+  retryCount            Int      @default(0)
+  externalInvoiceId     String?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+
+  paymentIntents        PaymentIntentLedger[] @relation("InvoicePaymentIntents")
+  refunds               RefundLedger[] @relation("InvoiceRefunds")
+  chargebacks           ChargebackLedger[] @relation("InvoiceChargebacks")
+  revenueRecognitionEntries RevenueRecognitionLedger[] @relation("InvoiceRevenueRecognition")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([subscriptionId, status, dueAt])
+  @@index([externalInvoiceId])
+}
+
+model CommerceProviderCredential {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  provider              CommerceProvider
+  accessTokenRef        String?
+  refreshTokenRef       String?
+  signingSecretRef      String?
+  scope                 String?
+  status                CommerceProviderCredentialStatus @default(ACTIVE)
+  expiresAt             DateTime?
+  revokedAt             DateTime?
+  providerMetadata      Json?
+  version               Int      @default(1)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([businessId, provider])
+  @@index([businessId, status, expiresAt])
+  @@index([provider, status])
+}
+
+model ExternalCommerceIdempotency {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String?
+  provider              CommerceProvider
+  providerEventKey      String   @unique
+  providerObjectKey     String   @unique
+  providerVersion       String
+  resolutionState       ExternalCommerceResolutionState @default(CLAIMED)
+  processedAt           DateTime?
+  lastError             String?
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([provider, resolutionState, processedAt])
+  @@index([businessId, provider, processedAt])
+}
+
+model ManualCommerceOverride {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  scope                 String
+  provider              String   @default("ALL")
+  manualLock            Boolean  @default(true)
+  reason                String
+  expiresAt             DateTime
+  priority              Int      @default(100)
+  source                CommerceActor @default(HUMAN)
+  isActive              Boolean  @default(true)
+  metadata              Json?
+  createdBy             String?  @db.ObjectId
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, scope, isActive, expiresAt, priority])
+  @@index([businessId, provider, isActive, expiresAt])
+}
+
+model TaxComplianceLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  taxKey                String   @unique
+  jurisdiction          String
+  taxType               String
+  reverseCharge         Boolean  @default(false)
+  exemptionCode         String?
+  withholdingMinor      Int      @default(0)
+  taxableMinor          Int      @default(0)
+  taxMinor              Int      @default(0)
+  totalMinor            Int      @default(0)
+  currency              Currency
+  eventType             String
+  proposalKey           String?
+  invoiceKey            String?
+  refundKey             String?
+  chargebackKey         String?
+  creditNoteKey         String?
+  mappingRef            String?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+  occurredAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, eventType, occurredAt])
+  @@index([businessId, invoiceKey, occurredAt])
+  @@index([businessId, proposalKey, occurredAt])
+  @@index([businessId, refundKey, occurredAt])
+}
+
+model SubscriptionLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  contractId            String?  @db.ObjectId
+  contract              ContractLedger? @relation("ContractSubscriptions", fields: [contractId], references: [id])
+
+  proposalId            String?  @db.ObjectId
+
+  subscriptionKey       String   @unique
+  status                SubscriptionLedgerStatus @default(PENDING)
+  provider              CommerceProvider @default(INTERNAL)
+  providerSubscriptionId String?
+  planCode              String
+  billingCycle          BillingCycle
+  currency              Currency
+  quantity              Int      @default(1)
+  unitPriceMinor        Int      @default(0)
+  amountMinor           Int      @default(0)
+  trialEndsAt           DateTime?
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  renewAt               DateTime?
+  cancelAt              DateTime?
+  pausedAt              DateTime?
+  resumedAt             DateTime?
+  cancelledAt           DateTime?
+  saveAttemptCount      Int      @default(0)
+  metadata              Json?
+  idempotencyKey        String?  @unique
+  version               Int      @default(1)
+
+  invoices              InvoiceLedger[] @relation("SubscriptionInvoices")
+  paymentIntents        PaymentIntentLedger[] @relation("SubscriptionPaymentIntents")
+  revenueRecognitionEntries RevenueRecognitionLedger[] @relation("SubscriptionRevenueRecognition")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, renewAt, status])
+  @@index([provider, providerSubscriptionId])
+}
+
+model RefundLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  paymentIntentId       String?  @db.ObjectId
+  paymentIntent         PaymentIntentLedger? @relation("PaymentIntentRefunds", fields: [paymentIntentId], references: [id])
+
+  invoiceId             String?  @db.ObjectId
+  invoice               InvoiceLedger? @relation("InvoiceRefunds", fields: [invoiceId], references: [id])
+
+  refundKey             String   @unique
+  provider              CommerceProvider @default(INTERNAL)
+  providerRefundId      String?
+  status                RefundStatus @default(REQUESTED)
+  amountMinor           Int
+  currency              Currency
+  reason                String?
+  requestedBy           CommerceActor @default(SYSTEM)
+  riskScore             Int      @default(0)
+  requestedAt           DateTime @default(now())
+  processedAt           DateTime?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+
+  revenueRecognitionEntries RevenueRecognitionLedger[] @relation("RefundRevenueRecognition")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([paymentIntentId, status])
+  @@index([provider, providerRefundId])
+}
+
+model ChargebackLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  paymentIntentId       String?  @db.ObjectId
+  paymentIntent         PaymentIntentLedger? @relation("PaymentIntentChargebacks", fields: [paymentIntentId], references: [id])
+
+  invoiceId             String?  @db.ObjectId
+  invoice               InvoiceLedger? @relation("InvoiceChargebacks", fields: [invoiceId], references: [id])
+
+  chargebackKey         String   @unique
+  provider              CommerceProvider @default(INTERNAL)
+  providerCaseId        String?
+  status                ChargebackStatus @default(RECEIVED)
+  amountMinor           Int
+  currency              Currency
+  reasonCode            String?
+  riskScore             Int      @default(0)
+  openedAt              DateTime @default(now())
+  evidenceDueAt         DateTime?
+  resolvedAt            DateTime?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+
+  revenueRecognitionEntries RevenueRecognitionLedger[] @relation("ChargebackRevenueRecognition")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([paymentIntentId, status])
+  @@index([provider, providerCaseId])
+}
+
+model PricingCatalog {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String?  @db.ObjectId
+  business              Business? @relation(fields: [businessId], references: [id])
+
+  catalogKey            String   @unique
+  planCode              String
+  pricingModel          PricingModel
+  billingCycle          BillingCycle?
+  currency              Currency
+  unitPriceMinor        Int
+  minimumCommitmentMinor Int     @default(0)
+  seatPriceMinor        Int      @default(0)
+  usageUnitPriceMinor   Int      @default(0)
+  tierRules             Json?
+  discountLadder        Json?
+  taxRules              Json?
+  renewalRules          Json?
+  expiresAt             DateTime?
+  isActive              Boolean  @default(true)
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, planCode, isActive])
+  @@index([planCode, currency, billingCycle, isActive])
+}
+
+model CommercePolicy {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  policyKey             String   @unique
+  version               Int      @default(1)
+  discountApprovalWorkflow Json?
+  discountExpiryRules   Json?
+  checkoutExpiryRules   Json?
+  renewalRules          Json?
+  taxRules              Json?
+  dunningRules          Json?
+  controlGates          Json?
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, version, createdAt])
+}
+
+model DiscountApprovalLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  proposalId            String?  @db.ObjectId
+  proposal              ProposalLedger? @relation("ProposalDiscountApprovals", fields: [proposalId], references: [id])
+
+  approvalKey           String   @unique
+  status                DiscountApprovalStatus @default(REQUESTED)
+  requestedBy           CommerceActor @default(SYSTEM)
+  approvedBy            String?
+  requestedPercent      Int      @default(0)
+  requestedMinor        Int      @default(0)
+  approvedPercent       Int      @default(0)
+  approvedMinor         Int      @default(0)
+  reason                String?
+  expiresAt             DateTime?
+  decidedAt             DateTime?
+  metadata              Json?
+  idempotencyKey        String?  @unique
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([proposalId, status, createdAt])
+}
+
+model RevenueRecognitionLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  proposalId            String?  @db.ObjectId
+  proposal              ProposalLedger? @relation("ProposalRevenueRecognition", fields: [proposalId], references: [id])
+
+  contractId            String?  @db.ObjectId
+  contract              ContractLedger? @relation("ContractRevenueRecognition", fields: [contractId], references: [id])
+
+  invoiceId             String?  @db.ObjectId
+  invoice               InvoiceLedger? @relation("InvoiceRevenueRecognition", fields: [invoiceId], references: [id])
+
+  paymentIntentId       String?  @db.ObjectId
+  paymentIntent         PaymentIntentLedger? @relation("PaymentIntentRevenueRecognition", fields: [paymentIntentId], references: [id])
+
+  subscriptionId        String?  @db.ObjectId
+  subscription          SubscriptionLedger? @relation("SubscriptionRevenueRecognition", fields: [subscriptionId], references: [id])
+
+  refundId              String?  @db.ObjectId
+  refund                RefundLedger? @relation("RefundRevenueRecognition", fields: [refundId], references: [id])
+
+  chargebackId          String?  @db.ObjectId
+  chargeback            ChargebackLedger? @relation("ChargebackRevenueRecognition", fields: [chargebackId], references: [id])
+
+  recognitionKey        String   @unique
+  stage                 RevenueRecognitionStage
+  amountMinor           Int
+  currency              Currency
+  occurredAt            DateTime @default(now())
+  periodStart           DateTime?
+  periodEnd             DateTime?
+  sourceEvent           String
+  idempotencyKey        String?  @unique
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, stage, occurredAt])
+  @@index([invoiceId, stage, occurredAt])
+  @@index([subscriptionId, stage, occurredAt])
+}
+
+model FeatureSnapshotLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  snapshotKey           String   @unique
+  entityType            String
+  entityId              String?
+  schemaVersion         Int      @default(1)
+  sourceVersion         String   @default("phase5e")
+  snapshotAt            DateTime
+  pointInTimeWindowStart DateTime?
+  pointInTimeWindowEnd  DateTime?
+  features              Json
+  traceId               String?
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, entityType, entityId, snapshotAt])
+  @@index([businessId, schemaVersion, snapshotAt])
+}
+
+model ModelRegistryLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  modelKey              String   @unique
+  modelDomain           String
+  modelName             String
+  modelVersion          String
+  featureSchemaVersion  Int      @default(1)
+  trainingWindowStart   DateTime?
+  trainingWindowEnd     DateTime?
+  evaluation            Json?
+  driftStatus           DriftStatus @default(STABLE)
+  rollbackModelVersion  String?
+  deploymentState       ModelDeploymentState @default(ACTIVE)
+  isActive              Boolean  @default(true)
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, modelDomain, deploymentState, createdAt])
+  @@index([businessId, modelName, modelVersion, createdAt])
+}
+
+model ForecastLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  forecastKey           String   @unique
+  featureSnapshotKey    String?
+  modelKey              String?
+  metric                String
+  horizon               IntelligenceHorizon
+  version               Int      @default(1)
+  windowStart           DateTime
+  windowEnd             DateTime
+  predictedValue        Float
+  lowerBound            Float?
+  upperBound            Float?
+  confidence            Float
+  trend                 Float    @default(0)
+  reason                String
+  explanation           Json?
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, metric, horizon, createdAt])
+  @@index([businessId, metric, horizon, version])
+}
+
+model PredictionLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  predictionKey         String   @unique
+  featureSnapshotKey    String?
+  modelKey              String?
+  entityType            String
+  entityId              String
+  predictionType        String
+  score                 Float
+  confidence            Float
+  scoreBand             String
+  validUntil            DateTime?
+  reason                String
+  explanation           Json?
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, entityType, entityId, predictionType, createdAt])
+  @@index([businessId, predictionType, createdAt])
+}
+
+model OptimizationDecisionLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  decisionKey           String   @unique
+  featureSnapshotKey    String?
+  modelKey              String?
+  decisionType          String
+  targetType            String
+  targetId              String?
+  currentValue          Json?
+  recommendedValue      Json
+  expectedUplift        Float
+  confidence            Float
+  riskScore             Float
+  reason                String
+  rollbackPlan          Json
+  status                OptimizationDecisionStatus @default(RECOMMENDED)
+  approvalSource        String?
+  appliedAt             DateTime?
+  rolledBackAt          DateTime?
+  rollbackReason        String?
+  guardrail             Json?
+  metadata              Json?
+  version               Int      @default(1)
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, decisionType, status, createdAt])
+  @@index([businessId, targetType, targetId, createdAt])
+}
+
+model ExperimentLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  experimentKey         String   @unique
+  experimentType        String   @default("A_B")
+  objective             String
+  assignmentVersion     Int      @default(1)
+  assignmentSeed        String
+  variants              Json
+  guardrails            Json?
+  stopRules             Json?
+  status                ExperimentStatus @default(DRAFT)
+  startedAt             DateTime?
+  endedAt               DateTime?
+  winnerVariant         String?
+  exposures             Int      @default(0)
+  conversions           Int      @default(0)
+  sampleSize            Int      @default(0)
+  causalAttribution     Json?
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, objective, status])
+}
+
+model RecommendationLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  recommendationKey     String   @unique
+  optimizationDecisionKey String?
+  action                String
+  targetType            String
+  targetId              String?
+  expectedUplift        Float
+  confidence            Float
+  riskScore             Float
+  reason                String
+  rollbackPlan          Json
+  status                RecommendationStatus @default(OPEN)
+  adoptedAt             DateTime?
+  rejectedAt            DateTime?
+  autoAppliedAt         DateTime?
+  outcome               Json?
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, targetType, targetId, createdAt])
+  @@index([businessId, status, createdAt])
+}
+
+model AnomalyLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  anomalyKey            String   @unique
+  anomalyType           String
+  severity              AnomalySeverity @default(MEDIUM)
+  status                AnomalyStatus @default(OPEN)
+  detectedAt            DateTime @default(now())
+  baselineValue         Float?
+  observedValue         Float?
+  delta                 Float?
+  threshold             Float?
+  reason                String
+  suppressionKey        String?
+  suppressedUntil       DateTime?
+  resolvedAt            DateTime?
+  dedupeWindowStart     DateTime?
+  dedupeWindowEnd       DateTime?
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, anomalyType, status, detectedAt])
+  @@index([businessId, severity, detectedAt])
+}
+
+model SimulationLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  simulationKey         String   @unique
+  scenarioType          String
+  featureSnapshotKey    String?
+  assumptions           Json
+  baseline              Json
+  projection            Json
+  delta                 Json
+  confidence            Float
+  reason                String
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, scenarioType, createdAt])
+}
+
+model IntelligencePolicy {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  policyKey             String   @unique
+  version               Int      @default(1)
+  autoApplyEnabled      Boolean  @default(false)
+  forecastPolicy        Json?
+  predictionPolicy      Json?
+  optimizationPolicy    Json?
+  experimentPolicy      Json?
+  anomalyPolicy         Json?
+  driftPolicy           Json?
+  guardrails            Json?
+  effectiveFrom         DateTime @default(now())
+  isActive              Boolean  @default(true)
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, isActive, effectiveFrom])
+  @@index([businessId, version, createdAt])
+}
+
+model ManualIntelligenceOverride {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+
+  businessId            String   @db.ObjectId
+  business              Business @relation(fields: [businessId], references: [id])
+
+  overrideKey           String   @unique
+  scope                 String
+  targetType            String   @default("BUSINESS")
+  targetId              String?
+  action                String
+  reason                String
+  expiresAt             DateTime
+  isActive              Boolean  @default(true)
+  priority              Int      @default(100)
+  createdBy             String?  @db.ObjectId
+  metadata              Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([businessId, scope, isActive, expiresAt, priority])
+  @@index([businessId, targetType, targetId, isActive, expiresAt])
+}
+
+model ObservabilityEventLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  eventKey      String   @unique
+  eventType     String
+  businessId    String?  @db.ObjectId
+  tenantId      String?
+  traceId       String
+  correlationId String
+  leadId        String?
+  interactionId String?
+  appointmentId String?
+  proposalId    String?
+  contractId    String?
+  paymentId     String?
+  queueJobId    String?
+  workerId      String?
+  provider      String?
+  severity      String
+  component     String
+  phase         String
+  version       String
+  message       String
+  metadata      Json?
+  occurredAt    DateTime @default(now())
+  replayable    Boolean  @default(true)
+  replayToken   String?
+  canonicalHash String?
+  createdAt     DateTime @default(now())
+
+  @@index([businessId, component, severity, occurredAt])
+  @@index([traceId, occurredAt])
+  @@index([correlationId, occurredAt])
+}
+
+model TraceLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  traceId       String   @unique
+  correlationId String
+  businessId    String?  @db.ObjectId
+  tenantId      String?
+  leadId        String?
+  interactionId String?
+  status        String   @default("OPEN")
+  lifecycle     Json
+  lineage       Json?
+  replayable    Boolean  @default(true)
+  replayToken   String?
+  version       Int      @default(1)
+  startedAt     DateTime @default(now())
+  lastEventAt   DateTime @default(now())
+  endedAt       DateTime?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([businessId, startedAt])
+  @@index([status, lastEventAt])
+}
+
+model MetricSnapshotLedger {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  snapshotKey         String   @unique
+  businessId          String?  @db.ObjectId
+  tenantId            String?
+  subsystem           String
+  windowStart         DateTime
+  windowEnd           DateTime
+  throughput          Float    @default(0)
+  latencyP50Ms        Float    @default(0)
+  latencyP95Ms        Float    @default(0)
+  latencyP99Ms        Float    @default(0)
+  queueLag            Float    @default(0)
+  workerUtilization   Float    @default(0)
+  dlqRate             Float    @default(0)
+  retryRate           Float    @default(0)
+  lockContention      Float    @default(0)
+  providerErrorRate   Float    @default(0)
+  bookingFunnel       Json?
+  commerceFunnel      Json?
+  revenueFunnel       Json?
+  forecastDelta       Float    @default(0)
+  optimizationImpact  Float    @default(0)
+  infraCostMinor      Int      @default(0)
+  tenantMargin        Float    @default(0)
+  memoryUsage         Float    @default(0)
+  cpuUsage            Float    @default(0)
+  networkUsage        Float    @default(0)
+  storageGrowth       Float    @default(0)
+  healthState         String   @default("HEALTHY")
+  metadata            Json?
+  createdAt           DateTime @default(now())
+
+  @@index([businessId, subsystem, windowEnd])
+  @@index([healthState, windowEnd])
+}
+
+model ReliabilityPolicy {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  policyKey      String   @unique
+  scopeType      String   @default("GLOBAL")
+  scopeId        String?
+  version        Int      @default(1)
+  isActive       Boolean  @default(true)
+  thresholds     Json
+  suppression    Json?
+  escalation     Json?
+  autoMitigation Json?
+  sloPolicy      Json?
+  replayPolicy   Json?
+  chaosPolicy    Json?
+  createdBy      String?
+  metadata       Json?
+  effectiveFrom  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([scopeType, scopeId, isActive, effectiveFrom])
+  @@index([version, createdAt])
+}
+
+model RunbookLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  runbookKey       String   @unique
+  subsystem        String
+  title            String
+  ownerRole        String
+  ownerUserId      String?
+  version          Int      @default(1)
+  sop              Json
+  rollbackSteps    Json
+  escalationMatrix Json?
+  isActive         Boolean  @default(true)
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([subsystem, isActive])
+}
+
+model IncidentLedger {
+  id                      String   @id @default(auto()) @map("_id") @db.ObjectId
+  incidentKey             String   @unique
+  dedupeKey               String
+  businessId              String?  @db.ObjectId
+  tenantId                String?
+  traceId                 String?
+  correlationId           String?
+  subsystem               String
+  severity                String
+  status                  String   @default("OPEN")
+  title                   String
+  summary                 String
+  rootCauseKey            String
+  rootCause               String?
+  runbookKey              String?
+  runbookVersion          Int?
+  linkedAlertKeys         Json?
+  mitigationAction        String?
+  mitigationStatus        String?
+  mitigationDeterministic Boolean  @default(false)
+  openedAt                DateTime @default(now())
+  ackAt                   DateTime?
+  mitigatedAt             DateTime?
+  resolvedAt              DateTime?
+  postmortemAt            DateTime?
+  metadata                Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([dedupeKey, status, openedAt])
+  @@index([businessId, status, severity, openedAt])
+  @@index([traceId, openedAt])
+}
+
+model AlertLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  alertKey       String   @unique
+  dedupeKey      String
+  suppressionKey String?
+  businessId     String?  @db.ObjectId
+  tenantId       String?
+  incidentKey    String?
+  severity       String
+  state          String   @default("OPEN")
+  subsystem      String
+  title          String
+  message        String
+  firstFiredAt   DateTime @default(now())
+  lastFiredAt    DateTime @default(now())
+  fireCount      Int      @default(1)
+  suppressedUntil DateTime?
+  escalationLevel Int      @default(0)
+  routeTargets    Json?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([dedupeKey, state, lastFiredAt])
+  @@index([businessId, subsystem, severity, lastFiredAt])
+  @@index([incidentKey, lastFiredAt])
+}
+
+model SLOLedger {
+  id                      String   @id @default(auto()) @map("_id") @db.ObjectId
+  sloKey                  String   @unique
+  businessId              String?  @db.ObjectId
+  tenantId                String?
+  subsystem               String
+  objective               String
+  targetPercent           Float
+  observedPercent         Float
+  errorBudgetRemaining    Float
+  budgetBurnRate          Float
+  forecastBurnRate        Float
+  status                  String
+  windowStart             DateTime
+  windowEnd               DateTime
+  violationAt             DateTime?
+  forecastBreachAt        DateTime?
+  autoMitigationTriggered Boolean  @default(false)
+  mitigationAction        String?
+  metadata                Json?
+  createdAt               DateTime @default(now())
+
+  @@index([businessId, subsystem, windowEnd])
+  @@index([status, windowEnd])
+}
+
+model CapacityLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  capacityKey           String   @unique
+  businessId            String?  @db.ObjectId
+  tenantId              String?
+  provider              String?
+  workflow              String?
+  subsystem             String
+  scopeType             String
+  scopeId               String
+  currentLoad           Float
+  capacityLimit         Float
+  utilizationPercent    Float
+  forecastDemand        Float
+  forecastUtilization   Float
+  forecastBreachAt      DateTime?
+  scalingRecommendation String?
+  recommendationScore   Float?
+  metadata              Json?
+  snapshotAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  @@index([businessId, subsystem, snapshotAt])
+  @@index([provider, workflow, snapshotAt])
+}
+
+model CostLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  costKey          String   @unique
+  businessId       String?  @db.ObjectId
+  tenantId         String?
+  provider         String?
+  workflow         String?
+  scopeType        String
+  scopeId          String
+  amountMinor      Int
+  currency         String   @default("USD")
+  usageUnits       Float
+  unitCostMinor    Int
+  marginPercent    Float
+  spikeDetected    Boolean  @default(false)
+  spikeDeltaPercent Float   @default(0)
+  metadata         Json?
+  snapshotAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@index([businessId, snapshotAt])
+  @@index([provider, workflow, snapshotAt])
+}
+
+model DeadLetterLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  deadLetterKey    String   @unique
+  businessId       String?  @db.ObjectId
+  tenantId         String?
+  sourceQueue      String
+  sourceSubsystem  String
+  eventType        String?
+  traceId          String?
+  correlationId    String?
+  leadId           String?
+  interactionId    String?
+  queueJobId       String?
+  workerId         String?
+  provider         String?
+  severity         String   @default("P3")
+  failureReason    String
+  failureStack     String?
+  payload          Json?
+  attemptsMade     Int      @default(0)
+  replayCount      Int      @default(0)
+  replayCap        Int      @default(3)
+  status           String   @default("PENDING")
+  quarantineReason String?
+  lastReplayReason String?
+  replayedAt       DateTime?
+  lastFailedAt     DateTime?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status, sourceQueue, createdAt])
+  @@index([businessId, status, createdAt])
+  @@index([traceId, createdAt])
+}
+
+model ReliabilityOverrideLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  overrideKey   String   @unique
+  businessId    String?  @db.ObjectId
+  tenantId      String?
+  scope         String
+  targetType    String
+  targetId      String?
+  action        String
+  reason        String
+  priority      Int      @default(100)
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  expiresAt     DateTime?
+  createdBy     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([scope, targetType, targetId, isActive, priority])
+  @@index([businessId, scope, isActive, expiresAt])
+}
+
+model IdentityLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  identityKey       String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  userId            String?  @db.ObjectId
+  subjectType       String   @default("USER")
+  externalSubject   String?
+  roleKey           String?
+  status            String   @default("ACTIVE")
+  mfaState          String   @default("UNVERIFIED")
+  deviceTrust       Json?
+  riskScore         Float    @default(0)
+  version           Int      @default(1)
+  encryptedRef      String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, status, updatedAt])
+  @@index([tenantId, status, updatedAt])
+  @@index([userId, status, updatedAt])
+}
+
+model RoleLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  roleKey           String   @unique
+  businessId        String?  @db.ObjectId
+  scopeType         String   @default("GLOBAL")
+  scopeId           String?
+  roleName          String
+  description       String?
+  permissions       Json?
+  isSystem          Boolean  @default(false)
+  isActive          Boolean  @default(true)
+  version           Int      @default(1)
+  metadata          Json?
+  effectiveFrom     DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([scopeType, scopeId, isActive, updatedAt])
+  @@index([businessId, roleName, isActive])
+}
+
+model PermissionLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  permissionKey     String   @unique
+  businessId        String?  @db.ObjectId
+  action            String
+  scope             String?
+  constraints       Json?
+  isActive          Boolean  @default(true)
+  version           Int      @default(1)
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, action, isActive, updatedAt])
+  @@index([scope, action, isActive])
+}
+
+model AccessPolicyLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  policyKey         String   @unique
+  businessId        String?  @db.ObjectId
+  scopeType         String   @default("GLOBAL")
+  scopeId           String?
+  policyDomain      String   @default("ACCESS")
+  version           Int      @default(1)
+  status            String   @default("APPROVED")
+  isActive          Boolean  @default(true)
+  ruleSet           Json
+  approvalFlow      Json?
+  rollbackOfKey     String?
+  createdBy         String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  effectiveFrom     DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, policyDomain, isActive, effectiveFrom])
+  @@index([scopeType, scopeId, policyDomain, effectiveFrom])
+}
+
+model SessionLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionKey        String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  identityKey       String?
+  userId            String?  @db.ObjectId
+  deviceId          String?
+  ipHash            String?
+  userAgentHash     String?
+  trustLevel        String   @default("LOW")
+  anomalyScore      Float    @default(0)
+  status            String   @default("ACTIVE")
+  issuedAt          DateTime @default(now())
+  expiresAt         DateTime?
+  lastSeenAt        DateTime @default(now())
+  revokedAt         DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, userId, status, lastSeenAt])
+  @@index([tenantId, status, lastSeenAt])
+  @@index([identityKey, status, lastSeenAt])
+}
+
+model AuthEventLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  eventKey          String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  sessionKey        String?
+  identityKey       String?
+  actorId           String?
+  actorType         String
+  action            String
+  outcome           String
+  reason            String?
+  chainPrevHash     String?
+  chainHash         String
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([businessId, action, createdAt])
+  @@index([tenantId, action, createdAt])
+  @@index([sessionKey, createdAt])
+}
+
+model MFAChallengeLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  challengeKey      String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  identityKey       String?
+  userId            String?  @db.ObjectId
+  sessionKey        String?
+  action            String
+  challengeType     String   @default("STEP_UP_AUTH")
+  challengeNonceHash String
+  allowedFactors    String[]
+  status            String   @default("PENDING")
+  issuedAt          DateTime @default(now())
+  expiresAt         DateTime
+  verifiedAt        DateTime?
+  consumedAt        DateTime?
+  revokedAt         DateTime?
+  verifiedFactor    String?
+  ipHash            String?
+  userAgentHash     String?
+  deviceId          String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, userId, status, expiresAt])
+  @@index([tenantId, identityKey, status, expiresAt])
+  @@index([sessionKey, status, expiresAt])
+}
+
+model DeviceTrustLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  deviceTrustKey String   @unique
+  businessId     String?  @db.ObjectId
+  tenantId       String?
+  identityKey    String?
+  userId         String?  @db.ObjectId
+  deviceId       String
+  ipHash         String?
+  userAgentHash  String?
+  trustLevel     String   @default("MFA_VERIFIED")
+  status         String   @default("TRUSTED")
+  trustedAt      DateTime @default(now())
+  expiresAt      DateTime?
+  lastSeenAt     DateTime?
+  revokedAt      DateTime?
+  revokedBy      String?
+  revokedReason  String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([businessId, userId, status, expiresAt])
+  @@index([tenantId, identityKey, status, expiresAt])
+  @@index([deviceId, status, expiresAt])
+}
+
+model RecoveryLedger {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  recoveryKey        String   @unique
+  businessId         String?  @db.ObjectId
+  tenantId           String?
+  identityKey        String?
+  userId             String?  @db.ObjectId
+  recoveryType       String
+  challengeType      String?
+  codeHash           String
+  status             String   @default("ACTIVE")
+  consumedAt         DateTime?
+  revokedAt          DateTime?
+  usedByChallengeKey String?
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([businessId, identityKey, status, createdAt])
+  @@index([tenantId, userId, status, createdAt])
+  @@index([codeHash, status, createdAt])
+}
+
+model PrivilegeEscalationLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  escalationKey     String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  identityKey       String?
+  userId            String?  @db.ObjectId
+  approvalToken     String   @unique
+  permission        String
+  scope             String?
+  reason            String
+  status            String   @default("REQUESTED")
+  requestedAt       DateTime @default(now())
+  approvedBy        String?
+  approvedAt        DateTime?
+  expiresAt         DateTime?
+  consumedAt        DateTime?
+  revokedAt         DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, status, expiresAt])
+  @@index([tenantId, status, expiresAt])
+  @@index([userId, status, createdAt])
+}
+
+model SecretLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  secretKey         String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  secretName        String
+  secretType        String   @default("GENERIC")
+  encryptedRef      String
+  currentVersion    Int      @default(1)
+  blastRadius       String   @default("TENANT")
+  status            String   @default("ACTIVE")
+  createdBy         String?
+  rotatedAt         DateTime?
+  expiresAt         DateTime?
+  revokedAt         DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, secretName, status, updatedAt])
+  @@index([tenantId, status, updatedAt])
+}
+
+model KeyRotationLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  rotationKey       String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  secretKey         String
+  fromVersion       Int
+  toVersion         Int
+  rotationReason    String?
+  rotatedBy         String?
+  rotationState     String   @default("COMPLETED")
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([businessId, secretKey, createdAt])
+  @@index([tenantId, secretKey, createdAt])
+}
+
+model CredentialVaultLedger {
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  credentialKey        String   @unique
+  businessId           String?  @db.ObjectId
+  tenantId             String?
+  provider             String?
+  credentialType       String
+  secretKey            String
+  encryptedCredentialRef String
+  status               String   @default("ACTIVE")
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([businessId, provider, status, updatedAt])
+  @@index([tenantId, provider, status, updatedAt])
+}
+
+model PIIVaultLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  piiKey            String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  dataSubjectId     String
+  tokenizedSubjectId String
+  entityType        String
+  entityId          String
+  fieldName         String
+  classification    String   @default("PII_SENSITIVE")
+  encryptedValueRef String
+  region            String?
+  retentionUntil    DateTime?
+  status            String   @default("ACTIVE")
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, dataSubjectId, status, updatedAt])
+  @@index([tenantId, tokenizedSubjectId, status, updatedAt])
+  @@index([entityType, entityId, fieldName, status])
+}
+
+model DataClassificationLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  classificationKey String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  entityType        String
+  entityId          String
+  fieldName         String
+  classification    String
+  purposeTags       String[]
+  policyTags        String[]
+  region            String?
+  isActive          Boolean  @default(true)
+  version           Int      @default(1)
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, classification, isActive, updatedAt])
+  @@index([tenantId, entityType, entityId, fieldName, isActive])
+}
+
+model RetentionPolicyLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  retentionPolicyKey String  @unique
+  businessId        String?  @db.ObjectId
+  scopeType         String   @default("GLOBAL")
+  scopeId           String?
+  dataClass         String
+  purpose           String
+  region            String?
+  retentionDays     Int
+  deletionMode      String   @default("SOFT")
+  legalHoldAllowed  Boolean  @default(true)
+  isActive          Boolean  @default(true)
+  version           Int      @default(1)
+  metadata          Json?
+  effectiveFrom     DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, dataClass, purpose, isActive, effectiveFrom])
+  @@index([scopeType, scopeId, dataClass, purpose, isActive])
+}
+
+model DataAccessAuditLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  auditKey          String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  actorId           String?
+  actorType         String
+  action            String
+  resourceType      String
+  resourceId        String?
+  purpose           String?
+  result            String
+  chainPrevHash     String?
+  chainHash         String
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([businessId, action, createdAt])
+  @@index([tenantId, action, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model PolicyLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  policyVersionKey  String   @unique
+  businessId        String?  @db.ObjectId
+  policyDomain      String
+  scopeType         String   @default("GLOBAL")
+  scopeId           String?
+  version           Int
+  status            String   @default("DRAFT")
+  isActive          Boolean  @default(false)
+  rules             Json
+  approvalFlow      Json?
+  rollbackOfKey     String?
+  createdBy         String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  effectiveFrom     DateTime @default(now())
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, policyDomain, version])
+  @@index([businessId, policyDomain, isActive, effectiveFrom])
+}
+
+model ComplianceLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  complianceKey     String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  controlType       String
+  controlStatus     String
+  attestedBy        String?
+  attestedAt        DateTime?
+  evidenceRef       String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, controlType, controlStatus, updatedAt])
+  @@index([tenantId, controlType, controlStatus, updatedAt])
+}
+
+model FraudSignalLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  signalKey         String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  signalType        String
+  actorId           String?
+  ipFingerprint     String?
+  deviceFingerprint String?
+  sessionKey        String?
+  severity          String
+  score             Float    @default(0)
+  status            String   @default("OPEN")
+  containmentAction String?
+  containedAt       DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, signalType, status, createdAt])
+  @@index([tenantId, signalType, status, createdAt])
+  @@index([actorId, signalType, createdAt])
+}
+
+model TenantIsolationLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  isolationKey      String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  subsystem         String
+  actorTenantId     String?
+  resourceTenantId  String?
+  verdict           String
+  bleedDetected     Boolean  @default(false)
+  reason            String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([businessId, subsystem, createdAt])
+  @@index([tenantId, subsystem, createdAt])
+  @@index([verdict, bleedDetected, createdAt])
+}
+
+model IsolationAttestationLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  attestationKey String   @unique
+  businessId     String?  @db.ObjectId
+  tenantId       String?
+  source         String
+  verdict        String
+  breachedDomains String[]
+  checks         Json
+  metadata       Json?
+  containedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([businessId, source, verdict, createdAt])
+  @@index([tenantId, source, verdict, createdAt])
+}
+
+model SecurityIncidentLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  incidentKey       String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  signalKey         String?
+  severity          String
+  status            String   @default("OPEN")
+  title             String
+  summary           String
+  actions           Json?
+  isolatedAt        DateTime?
+  revokedAt         DateTime?
+  frozenAt          DateTime?
+  resolvedAt        DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, severity, status, createdAt])
+  @@index([tenantId, severity, status, createdAt])
+  @@index([signalKey, createdAt])
+}
+
+model SecurityOverrideLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  overrideKey       String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  scope             String
+  targetType        String
+  targetId          String?
+  action            String
+  reason            String
+  priority          Int      @default(100)
+  isActive          Boolean  @default(true)
+  effectiveFrom     DateTime @default(now())
+  expiresAt         DateTime?
+  createdBy         String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([scope, targetType, targetId, isActive, priority])
+  @@index([businessId, scope, isActive, expiresAt])
+}
+
+model LegalHoldLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  legalHoldKey      String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  caseRef           String
+  scopeType         String   @default("TENANT")
+  scopeId           String?
+  status            String   @default("ACTIVE")
+  reason            String
+  requestedBy       String?
+  appliedBy         String?
+  appliedAt         DateTime @default(now())
+  releasedBy        String?
+  releasedAt        DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, status, appliedAt])
+  @@index([tenantId, status, appliedAt])
+  @@index([caseRef, status, appliedAt])
+}
+
+model ExportRequestLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  exportRequestKey  String   @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  requestedBy       String
+  purpose           String?
+  region            String?
+  status            String   @default("REQUESTED")
+  approvedBy        String?
+  approvedAt        DateTime?
+  completedAt       DateTime?
+  artifactRef       String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([tenantId, status, createdAt])
+  @@index([requestedBy, createdAt])
+}
+
+model DeletionRequestLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  deletionRequestKey String  @unique
+  businessId        String?  @db.ObjectId
+  tenantId          String?
+  requestedBy       String
+  mode              String
+  reason            String?
+  status            String   @default("REQUESTED")
+  blockedByLegalHold Boolean @default(false)
+  approvedBy        String?
+  approvedAt        DateTime?
+  completedAt       DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([tenantId, status, createdAt])
+  @@index([requestedBy, createdAt])
+}
+
+model InfrastructureResiliencePolicy {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  policyKey      String   @unique
+  scopeType      String   @default("GLOBAL")
+  scopeId        String?
+  version        Int      @default(1)
+  isActive       Boolean  @default(true)
+  thresholds     Json
+  replayPolicy   Json?
+  overridePolicy Json?
+  recoveryPolicy Json?
+  metadata       Json?
+  effectiveFrom  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([scopeType, scopeId, isActive, effectiveFrom])
+  @@index([version, createdAt])
+}
+
+model InfrastructureSubsystemLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  subsystemKey String   @unique
+  businessId   String?  @db.ObjectId
+  tenantId     String?
+  authority    String
+  subsystem    String
+  ownerRole    String
+  criticality  String
+  engineCount  Int      @default(0)
+  isCanonical  Boolean  @default(true)
+  isActive     Boolean  @default(true)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId, authority, subsystem, createdAt])
+  @@index([tenantId, authority, subsystem, createdAt])
+}
+
+model InfrastructureEngineLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  engineKey    String   @unique
+  subsystemKey String
+  businessId   String?  @db.ObjectId
+  tenantId     String?
+  authority    String
+  subsystem    String
+  engine       String
+  ordinal      Int      @default(1)
+  status       String   @default("HEALTHY")
+  lastSignalAt DateTime?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([subsystemKey, status, updatedAt])
+  @@index([businessId, authority, subsystem, updatedAt])
+  @@index([tenantId, authority, subsystem, updatedAt])
+}
+
+model InfrastructureSignalLedger {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  signalKey           String   @unique
+  businessId          String?  @db.ObjectId
+  tenantId            String?
+  authority           String
+  subsystem           String
+  engine              String
+  healthState         String
+  latencyMs           Float    @default(0)
+  errorRate           Float    @default(0)
+  saturation          Float    @default(0)
+  backlog             Float    @default(0)
+  consecutiveFailures Int      @default(0)
+  occurredAt          DateTime @default(now())
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([businessId, authority, subsystem, occurredAt])
+  @@index([tenantId, authority, subsystem, occurredAt])
+  @@index([healthState, occurredAt])
+}
+
+model InfrastructureRecoveryLedger {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  recoveryKey           String   @unique
+  businessId            String?  @db.ObjectId
+  tenantId              String?
+  authority             String
+  subsystem             String
+  engine                String?
+  trigger               String
+  status                String
+  replayToken           String
+  deterministicPlanHash String
+  actions               Json?
+  reason                String?
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  completedAt           DateTime?
+
+  @@index([businessId, authority, subsystem, createdAt])
+  @@index([tenantId, authority, subsystem, createdAt])
+  @@index([status, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model InfrastructureOverrideLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  overrideKey   String   @unique
+  businessId    String?  @db.ObjectId
+  tenantId      String?
+  authority     String
+  scope         String
+  subsystem     String
+  engine        String?
+  action        String
+  reason        String
+  priority      Int      @default(100)
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  expiresAt     DateTime?
+  createdBy     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([authority, scope, subsystem, engine, isActive, priority])
+  @@index([businessId, authority, scope, isActive, expiresAt])
+  @@index([tenantId, authority, scope, isActive, expiresAt])
+}
+
+model InfrastructureAuditLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  auditKey     String   @unique
+  businessId   String?  @db.ObjectId
+  tenantId     String?
+  authority    String
+  subsystem    String
+  engine       String?
+  action       String
+  resourceType String
+  resourceKey  String
+  previousHash String
+  auditHash    String
+  metadata     Json?
+  occurredAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId, authority, occurredAt])
+  @@index([tenantId, authority, occurredAt])
+  @@index([resourceType, resourceKey, occurredAt])
+}
+
+model TenantLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantKey    String   @unique
+  tenantId     String
+  businessId   String?  @db.ObjectId
+  status       String   @default("ACTIVE")
+  legalName    String?
+  region       String?
+  timezone     String?
+  contactEmail String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, status, createdAt])
+  @@index([businessId, status, createdAt])
+}
+
+model TenantPlanLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  planLedgerKey String   @unique
+  tenantKey     String
+  planCode      String
+  billingCycle  String
+  status        String
+  source        String?
+  version       Int      @default(1)
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  effectiveTo   DateTime?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, isActive, effectiveFrom])
+  @@index([tenantKey, planCode, createdAt])
+}
+
+model TenantUsageLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  usageLedgerKey String  @unique
+  tenantKey     String
+  featureKey    String
+  environment   String
+  windowStart   DateTime
+  windowEnd     DateTime
+  used          Int      @default(0)
+  quota         Int      @default(0)
+  unit          String   @default("count")
+  replayToken   String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, featureKey, environment, windowStart])
+  @@index([replayToken, createdAt])
+}
+
+model FeatureEntitlementLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  entitlementKey String   @unique
+  tenantKey      String
+  featureKey     String
+  environment    String
+  quota          Int      @default(0)
+  isEnabled      Boolean  @default(false)
+  source         String
+  version        Int      @default(1)
+  isActive       Boolean  @default(true)
+  effectiveFrom  DateTime @default(now())
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantKey, featureKey, environment, isActive])
+  @@index([tenantKey, version, createdAt])
+}
+
+model IntegrationLedger {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  integrationKey     String   @unique
+  tenantKey          String
+  provider           String
+  environment        String
+  status             String
+  externalAccountRef String?
+  credentialRef      String?
+  scopes             Json?
+  tokenExpiresAt     DateTime?
+  lastConnectedAt    DateTime?
+  lastVerifiedAt     DateTime?
+  lastDisconnectedAt DateTime?
+  slot               Int      @default(1)
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantKey, provider, environment, status, createdAt])
+  @@index([tenantKey, environment, slot, createdAt])
+}
+
+model ProviderWebhookLedger {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  webhookKey          String   @unique
+  integrationKey      String
+  tenantKey           String
+  provider            String
+  environment         String
+  webhookUrl          String?
+  eventType           String
+  status              String
+  lastDeliveryAt      DateTime?
+  lastFailureAt       DateTime?
+  consecutiveFailures Int      @default(0)
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([integrationKey, eventType, createdAt])
+  @@index([tenantKey, provider, environment, status, createdAt])
+}
+
+model IntegrationHealthLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  healthKey        String   @unique
+  integrationKey   String
+  tenantKey        String
+  provider         String
+  environment      String
+  status           String
+  healthScore      Int      @default(0)
+  rootCauseCode    String?
+  rootCauseMessage String?
+  actionHint       String?
+  retryable        Boolean  @default(true)
+  nextRetryAt      DateTime?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([integrationKey, createdAt])
+  @@index([tenantKey, provider, environment, status, createdAt])
+}
+
+model IntegrationPolicyLedger {
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  policyKey            String   @unique
+  tenantKey            String
+  provider             String
+  environment          String
+  maxLiveConnections   Int      @default(1)
+  maxSandboxConnections Int     @default(1)
+  allowMultiConnect    Boolean  @default(false)
+  tokenRefreshMinutes  Int      @default(45)
+  rateLimitPerMinute   Int      @default(120)
+  version              Int      @default(1)
+  isActive             Boolean  @default(true)
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantKey, provider, environment, isActive, version])
+}
+
+model ConnectionAttemptLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  attemptKey     String   @unique
+  tenantKey      String
+  provider       String
+  environment    String
+  status         String
+  flow           String
+  replayToken    String?
+  step           String
+  statusDetail   String?
+  errorCode      String?
+  errorMessage   String?
+  resolutionHint String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantKey, provider, environment, status, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model ConnectionDiagnosticLedger {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  diagnosticKey    String   @unique
+  attemptKey       String?
+  integrationKey   String?
+  tenantKey        String
+  provider         String
+  environment      String
+  severity         String
+  code             String
+  message          String
+  fixAction        String
+  fixPayload       Json?
+  retryToken       String?
+  resolvedAt       DateTime?
+  resolutionStatus String   @default("PENDING")
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantKey, provider, environment, severity, createdAt])
+  @@index([retryToken, createdAt])
+}
+
+model OAuthStateLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  oauthStateKey String  @unique
+  tenantKey    String
+  provider     String
+  environment  String
+  stateHash    String
+  redirectUri  String?
+  scopes       Json?
+  status       String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  replayToken  String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantKey, provider, environment, status, expiresAt])
+  @@index([stateHash, createdAt])
+}
+
+model TokenRefreshLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  refreshKey    String   @unique
+  integrationKey String
+  tenantKey     String
+  provider      String
+  environment   String
+  status        String
+  attempt       Int      @default(1)
+  oldExpiry     DateTime?
+  newExpiry     DateTime?
+  errorCode     String?
+  errorMessage  String?
+  nextRetryAt   DateTime?
+  replayToken   String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([integrationKey, status, createdAt])
+  @@index([tenantKey, provider, environment, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model SandboxLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  sandboxKey    String   @unique
+  tenantKey     String
+  provider      String
+  slot          Int      @default(1)
+  status        String   @default("ACTIVE")
+  integrationKey String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, provider, status, createdAt])
+}
+
+model BrandingLedger {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  brandingKey       String   @unique
+  tenantKey         String
+  brandVersion      Int      @default(1)
+  logoRef           String?
+  domain            String?
+  theme             Json?
+  emailBranding     Json?
+  whatsappIdentity  Json?
+  proposalBranding  Json?
+  invoiceBranding   Json?
+  isActive          Boolean  @default(true)
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantKey, isActive, brandVersion, createdAt])
+}
+
+model MarketplaceLedger {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  installKey   String   @unique
+  tenantKey    String
+  packageKey   String
+  packageType  String
+  version      String
+  status       String
+  permissionSet Json?
+  rollbackOf   String?
+  replayToken  String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantKey, packageKey, status, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model SetupWizardLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  wizardKey      String   @unique
+  tenantKey      String
+  version        String
+  status         String
+  currentStep    String
+  completedSteps Json?
+  payload        Json?
+  resumeToken    String
+  lastTouchedAt  DateTime @default(now())
+  isActive       Boolean  @default(true)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantKey, isActive, status, lastTouchedAt])
+}
+
+model EnvironmentLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  environmentKey String  @unique
+  tenantKey     String
+  environment   String
+  status        String
+  promotedFrom  String?
+  promotedAt    DateTime?
+  isIsolated    Boolean  @default(true)
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, environment, status, createdAt])
+}
+
+model ProvisioningLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  provisioningKey String  @unique
+  tenantKey       String
+  status          String
+  stage           String
+  replayToken     String?
+  errorCode       String?
+  errorMessage    String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantKey, status, stage, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model UpgradeLedger {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  upgradeKey     String   @unique
+  tenantKey      String
+  fromPlan       String
+  toPlan         String
+  status         String
+  prorationAmount Float   @default(0)
+  graceEndsAt    DateTime?
+  replayToken    String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantKey, fromPlan, toPlan, createdAt])
+  @@index([replayToken, createdAt])
+}
+
+model SeatLedger {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  seatKey     String   @unique
+  tenantKey   String
+  userId      String
+  role        String
+  status      String
+  environment String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantKey, status, environment, createdAt])
+  @@index([tenantKey, userId, createdAt])
+}
+
+model RoleAssignmentLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  assignmentKey String   @unique
+  tenantKey     String
+  userId        String
+  role          String
+  grantedBy     String?
+  status        String
+  effectiveFrom DateTime @default(now())
+  revokedAt     DateTime?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, userId, role, status, createdAt])
+}
+
+model TenantConfigLedger {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  configKey     String   @unique
+  tenantKey     String
+  configVersion Int      @default(1)
+  timezone      String?
+  workingHours  Json?
+  aiPersona     String?
+  salesPolicy   Json?
+  bookingPolicy Json?
+  paymentPolicy Json?
+  isActive      Boolean  @default(true)
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantKey, isActive, configVersion, createdAt])
+}
+
+model PackagingOverrideLedger {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  overrideKey String  @unique
+  tenantKey  String
+  scope      String
+  targetType String
+  targetKey  String?
+  action     String
+  reason     String
+  priority   Int      @default(100)
+  isActive   Boolean  @default(true)
+  expiresAt  DateTime?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantKey, scope, targetType, isActive, priority])
+}
+
 model Analytics {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   businessId String

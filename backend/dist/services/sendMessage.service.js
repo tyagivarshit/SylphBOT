@@ -13,6 +13,7 @@ const leadControlState_service_1 = require("./leadControlState.service");
 const revenueTouchLedger_service_1 = require("./revenueTouchLedger.service");
 const encrypt_1 = require("../utils/encrypt");
 const logger_1 = __importDefault(require("../utils/logger"));
+const takeoverLedger_service_1 = require("./takeoverLedger.service");
 const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const normalizePlatform = (platform) => {
     const normalizedPlatform = String(platform || "")
@@ -23,6 +24,7 @@ const normalizePlatform = (platform) => {
     }
     return null;
 };
+const isObjectIdLike = (value) => /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 const getMessageMetadata = (metadata) => isRecord(metadata) ? metadata : {};
 const getDeliveryErrorMessage = (error) => {
     if (axios_1.default.isAxiosError(error)) {
@@ -239,7 +241,52 @@ const buildMessageMetadata = ({ existingMetadata, clientMessageId, platform, del
     }
     return Object.keys(metadata).length > 0 ? metadata : undefined;
 };
-const persistAndDispatchLeadMessage = async ({ lead, content, sender, clientMessageId, }) => {
+const resolveHumanTakeoverTarget = async ({ lead, requestedInteractionId, }) => {
+    if (!lead.businessId) {
+        return null;
+    }
+    if (!isObjectIdLike(lead.businessId) || !isObjectIdLike(lead.id)) {
+        return null;
+    }
+    const normalizedInteractionId = String(requestedInteractionId || "").trim();
+    if (normalizedInteractionId && isObjectIdLike(normalizedInteractionId)) {
+        const requestedQueue = await prisma_1.default.humanWorkQueue.findUnique({
+            where: {
+                interactionId: normalizedInteractionId,
+            },
+            select: {
+                interactionId: true,
+                assignedHumanId: true,
+                businessId: true,
+                leadId: true,
+            },
+        });
+        if (requestedQueue &&
+            requestedQueue.businessId === lead.businessId &&
+            requestedQueue.leadId === lead.id) {
+            return requestedQueue;
+        }
+    }
+    return prisma_1.default.humanWorkQueue.findFirst({
+        where: {
+            businessId: lead.businessId,
+            leadId: lead.id,
+            state: {
+                in: ["PENDING", "ASSIGNED", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"],
+            },
+        },
+        orderBy: {
+            updatedAt: "desc",
+        },
+        select: {
+            interactionId: true,
+            assignedHumanId: true,
+            businessId: true,
+            leadId: true,
+        },
+    });
+};
+const persistAndDispatchLeadMessage = async ({ lead, content, sender, clientMessageId, humanTakeover, }) => {
     const platform = normalizePlatform(lead.platform || lead.client?.platform);
     const initialMetadata = buildMessageMetadata({
         clientMessageId,
@@ -424,6 +471,49 @@ const persistAndDispatchLeadMessage = async ({ lead, content, sender, clientMess
                 messageType: "MANUAL_OUTBOUND",
                 metadata: getMessageMetadata(persistedMessage.metadata),
             });
+        }
+        if (outboundKey && delivery?.delivered && lead.businessId) {
+            const takeoverTarget = await resolveHumanTakeoverTarget({
+                lead,
+                requestedInteractionId: humanTakeover?.interactionId,
+            });
+            if (takeoverTarget?.interactionId) {
+                const takeoverLedger = (0, takeoverLedger_service_1.createTakeoverLedgerService)();
+                const humanId = String(humanTakeover?.humanId || takeoverTarget.assignedHumanId || "").trim();
+                if (humanId) {
+                    const resolved = Boolean(humanTakeover?.resolved);
+                    const resolutionCode = typeof humanTakeover?.resolutionCode === "string"
+                        ? humanTakeover.resolutionCode.trim() || null
+                        : null;
+                    await takeoverLedger.recordHumanOutbound({
+                        interactionId: takeoverTarget.interactionId,
+                        humanId,
+                        outboundKey,
+                        messageId: persistedMessage.id,
+                        channel: platform || "UNKNOWN",
+                        content,
+                        resolutionCode,
+                        resolved,
+                        metadata: {
+                            source: "manual_conversation_send",
+                        },
+                    });
+                    if (resolved) {
+                        await takeoverLedger.releaseTakeover({
+                            interactionId: takeoverTarget.interactionId,
+                            assignedTo: humanId,
+                            outcome: (typeof humanTakeover?.releaseOutcome === "string"
+                                ? humanTakeover.releaseOutcome.trim()
+                                : "") ||
+                                resolutionCode ||
+                                "RESOLVED_BY_HUMAN",
+                            metadata: {
+                                source: "manual_conversation_send",
+                            },
+                        });
+                    }
+                }
+            }
         }
         await (0, followup_queue_1.cancelFollowups)(lead.id).catch((error) => {
             logger_1.default.warn({

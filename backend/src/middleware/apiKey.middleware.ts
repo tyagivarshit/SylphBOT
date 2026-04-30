@@ -7,6 +7,7 @@ import {
   recordInvalidApiKeyAttempt,
   recordSuspiciousActivity,
 } from "../services/securityAlert.service";
+import { enforceSecurityGovernanceInfluence } from "../services/security/securityGovernanceOS.service";
 import { forbidden, unauthorized } from "../utils/AppError";
 import { updateRequestContext } from "../observability/requestContext";
 
@@ -56,6 +57,7 @@ const bindApiKeyContext = (
 
   updateRequestContext({
     businessId: apiKey.businessId,
+    tenantId: apiKey.businessId,
   });
 };
 
@@ -108,6 +110,26 @@ export const optionalApiKeyAuth = async (
 
       return next(forbidden("API key scope does not allow this request"));
     }
+
+    await enforceSecurityGovernanceInfluence({
+      domain: "API_CLIENT_AUTH",
+      action: "messages:enqueue",
+      businessId: authentication.apiKey.businessId,
+      tenantId: authentication.apiKey.businessId,
+      actorId: authentication.apiKey.id,
+      actorType: "API_KEY",
+      permissions: authentication.apiKey.permissions,
+      scopes: authentication.apiKey.scopes,
+      resourceType: "HTTP_REQUEST",
+      resourceId: req.originalUrl,
+      resourceTenantId: authentication.apiKey.businessId,
+      purpose: "API_REQUEST",
+      metadata: {
+        method: req.method,
+        path: req.originalUrl,
+        keyFingerprint: authentication.keyFingerprint,
+      },
+    });
 
     bindApiKeyContext(req, authentication.apiKey);
     next();

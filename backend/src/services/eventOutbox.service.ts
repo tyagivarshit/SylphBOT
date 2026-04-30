@@ -1,6 +1,10 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import crypto from "crypto";
+import {
+  recordObservabilityEvent,
+  recordTraceLedger,
+} from "./reliability/reliabilityOS.service";
 
 const stringifyOutboxError = (error: unknown) =>
   String((error as { message?: unknown })?.message || error || "outbox_failed").slice(
@@ -42,6 +46,83 @@ const getInMemoryCheckpointStore = () => {
   return globalForEventOutbox.__sylphEventOutboxCheckpoints;
 };
 
+const recordOutboxObservability = async (row: {
+  id: string;
+  businessId?: string | null;
+  eventType?: string | null;
+  aggregateType?: string | null;
+  aggregateId?: string | null;
+  payload?: unknown;
+}) => {
+  const payload =
+    row.payload && typeof row.payload === "object"
+      ? (row.payload as Record<string, unknown>)
+      : {};
+  const traceId =
+    typeof payload.traceId === "string" && payload.traceId.trim()
+      ? payload.traceId.trim()
+      : typeof (payload as any)?.payload?.traceId === "string" &&
+        String((payload as any).payload.traceId).trim()
+      ? String((payload as any).payload.traceId).trim()
+      : null;
+
+  await recordTraceLedger({
+    traceId,
+    correlationId: traceId,
+    businessId: row.businessId || null,
+    tenantId: row.businessId || null,
+    stage: `outbox:${String(row.eventType || "event")}`,
+    status: "IN_PROGRESS",
+    metadata: {
+      outboxId: row.id,
+      aggregateType: row.aggregateType || null,
+      aggregateId: row.aggregateId || null,
+    },
+  }).catch(() => undefined);
+
+  await recordObservabilityEvent({
+    businessId: row.businessId || null,
+    tenantId: row.businessId || null,
+    eventType: "outbox.event.created",
+    message: `Outbox event ${row.id} queued`,
+    severity: "info",
+    context: {
+      traceId,
+      correlationId: traceId,
+      tenantId: row.businessId || null,
+      component: "outbox",
+      phase: "dispatch",
+    },
+    metadata: {
+      outboxId: row.id,
+      eventType: row.eventType || null,
+      aggregateType: row.aggregateType || null,
+      aggregateId: row.aggregateId || null,
+    },
+  }).catch(() => undefined);
+};
+
+export const findOutboxEventByDedupeKey = async (dedupeKey: string) => {
+  const normalized = String(dedupeKey || "").trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (shouldUseInMemoryOutbox) {
+    const dedupe = getInMemoryOutboxByDedupe();
+    const store = getInMemoryOutboxStore();
+    const id = dedupe.get(normalized);
+    return id ? store.get(id) || null : null;
+  }
+
+  return prisma.eventOutbox.findUnique({
+    where: {
+      dedupeKey: normalized,
+    },
+  });
+};
+
 export const createDurableOutboxEvent = async ({
   businessId,
   eventType,
@@ -49,6 +130,7 @@ export const createDurableOutboxEvent = async ({
   aggregateId,
   payload,
   dedupeKey,
+  tx,
 }: {
   businessId?: string | null;
   eventType: string;
@@ -56,8 +138,10 @@ export const createDurableOutboxEvent = async ({
   aggregateId: string;
   payload: Record<string, unknown>;
   dedupeKey?: string | null;
+  tx?: Prisma.TransactionClient;
 }) => {
   const normalizedDedupeKey = String(dedupeKey || "").trim() || null;
+  const db = tx || prisma;
 
   if (shouldUseInMemoryOutbox) {
     const store = getInMemoryOutboxStore();
@@ -92,11 +176,12 @@ export const createDurableOutboxEvent = async ({
       dedupe.set(normalizedDedupeKey, record.id);
     }
 
+    void recordOutboxObservability(record).catch(() => undefined);
     return record;
   }
 
   if (normalizedDedupeKey) {
-    const existing = await prisma.eventOutbox.findUnique({
+    const existing = await db.eventOutbox.findUnique({
       where: {
         dedupeKey: normalizedDedupeKey,
       },
@@ -108,7 +193,7 @@ export const createDurableOutboxEvent = async ({
   }
 
   try {
-    return await prisma.eventOutbox.create({
+    const created = await db.eventOutbox.create({
       data: {
         businessId: businessId || null,
         eventType,
@@ -118,12 +203,14 @@ export const createDurableOutboxEvent = async ({
         dedupeKey: normalizedDedupeKey,
       },
     });
+    void recordOutboxObservability(created).catch(() => undefined);
+    return created;
   } catch (error) {
     if (!normalizedDedupeKey) {
       throw error;
     }
 
-    const existing = await prisma.eventOutbox.findUnique({
+    const existing = await db.eventOutbox.findUnique({
       where: {
         dedupeKey: normalizedDedupeKey,
       },
@@ -149,18 +236,68 @@ export const markEventOutboxPublished = async (id: string) =>
           lastError: null,
         };
         store.set(id, updated);
+        void recordObservabilityEvent({
+          businessId: updated.businessId || null,
+          tenantId: updated.businessId || null,
+          eventType: "outbox.event.published",
+          message: `Outbox event ${id} published`,
+          severity: "info",
+          context: {
+            traceId:
+              typeof updated.payload?.traceId === "string"
+                ? updated.payload.traceId
+                : null,
+            correlationId:
+              typeof updated.payload?.traceId === "string"
+                ? updated.payload.traceId
+                : null,
+            component: "outbox",
+            phase: "publish",
+          },
+          metadata: {
+            outboxId: id,
+            eventType: updated.eventType || null,
+          },
+        }).catch(() => undefined);
         return Promise.resolve(updated);
       })()
-    : prisma.eventOutbox.update({
-    where: {
-      id,
-    },
-    data: {
-      publishedAt: new Date(),
-      failedAt: null,
-      lastError: null,
-    },
-  });
+    : prisma.eventOutbox
+        .update({
+          where: {
+            id,
+          },
+          data: {
+            publishedAt: new Date(),
+            failedAt: null,
+            lastError: null,
+          },
+        })
+        .then((updated) => {
+          void recordObservabilityEvent({
+            businessId: updated.businessId || null,
+            tenantId: updated.businessId || null,
+            eventType: "outbox.event.published",
+            message: `Outbox event ${id} published`,
+            severity: "info",
+            context: {
+              traceId:
+                typeof (updated.payload as any)?.traceId === "string"
+                  ? String((updated.payload as any).traceId)
+                  : null,
+              correlationId:
+                typeof (updated.payload as any)?.traceId === "string"
+                  ? String((updated.payload as any).traceId)
+                  : null,
+              component: "outbox",
+              phase: "publish",
+            },
+            metadata: {
+              outboxId: id,
+              eventType: updated.eventType || null,
+            },
+          }).catch(() => undefined);
+          return updated;
+        });
 
 export const markEventOutboxFailed = async (id: string, error: unknown) =>
   shouldUseInMemoryOutbox
@@ -174,20 +311,72 @@ export const markEventOutboxFailed = async (id: string, error: unknown) =>
           retries: Number(current?.retries || 0) + 1,
         };
         store.set(id, updated);
+        void recordObservabilityEvent({
+          businessId: updated.businessId || null,
+          tenantId: updated.businessId || null,
+          eventType: "outbox.event.failed",
+          message: `Outbox event ${id} failed`,
+          severity: "error",
+          context: {
+            traceId:
+              typeof updated.payload?.traceId === "string"
+                ? updated.payload.traceId
+                : null,
+            correlationId:
+              typeof updated.payload?.traceId === "string"
+                ? updated.payload.traceId
+                : null,
+            component: "outbox",
+            phase: "publish",
+          },
+          metadata: {
+            outboxId: id,
+            eventType: updated.eventType || null,
+            error: stringifyOutboxError(error),
+          },
+        }).catch(() => undefined);
         return Promise.resolve(updated);
       })()
-    : prisma.eventOutbox.update({
-    where: {
-      id,
-    },
-    data: {
-      failedAt: new Date(),
-      lastError: stringifyOutboxError(error),
-      retries: {
-        increment: 1,
-      },
-    },
-  });
+    : prisma.eventOutbox
+        .update({
+          where: {
+            id,
+          },
+          data: {
+            failedAt: new Date(),
+            lastError: stringifyOutboxError(error),
+            retries: {
+              increment: 1,
+            },
+          },
+        })
+        .then((updated) => {
+          void recordObservabilityEvent({
+            businessId: updated.businessId || null,
+            tenantId: updated.businessId || null,
+            eventType: "outbox.event.failed",
+            message: `Outbox event ${id} failed`,
+            severity: "error",
+            context: {
+              traceId:
+                typeof (updated.payload as any)?.traceId === "string"
+                  ? String((updated.payload as any).traceId)
+                  : null,
+              correlationId:
+                typeof (updated.payload as any)?.traceId === "string"
+                  ? String((updated.payload as any).traceId)
+                  : null,
+              component: "outbox",
+              phase: "publish",
+            },
+            metadata: {
+              outboxId: id,
+              eventType: updated.eventType || null,
+              error: stringifyOutboxError(error),
+            },
+          }).catch(() => undefined);
+          return updated;
+        });
 
 export const hasOutboxConsumerCheckpoint = async ({
   eventOutboxId,

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import prisma from "../../config/prisma";
 import { buildMemoryContext } from "../aiMemoryEngine.service";
 import { getConversationState } from "../conversationState.service";
+import { getIntelligenceRuntimeInfluence } from "../intelligence/intelligenceRuntimeInfluence.service";
 import { logAIEvent, logError } from "../monitoringLogger.service";
 import { getSalesFollowupSchedule } from "../salesAgent/followup.service";
 import type { SalesAgentContext, SalesMemoryFact } from "../salesAgent/types";
@@ -744,14 +745,25 @@ const buildIntelligenceObservability = ({
 const buildLeadLifecyclePatch = ({
   snapshot,
   profile,
+  runtimeInfluence = null,
 }: {
   snapshot: CRMLeadSignalSnapshot;
   profile: CRMIntelligenceProfile;
+  runtimeInfluence?: Awaited<ReturnType<typeof getIntelligenceRuntimeInfluence>> | null;
 }) => {
   const data: Record<string, unknown> = {
     intelligenceUpdatedAt: snapshot.now,
     lastLifecycleAt: snapshot.now,
   };
+  const intelligenceLeadScoreDelta = Number(
+    runtimeInfluence?.controls.crm.leadScoreDelta || 0
+  );
+
+  if (intelligenceLeadScoreDelta !== 0) {
+    data.leadScore = clampScore(
+      Number(snapshot.lead.leadScore || 0) + intelligenceLeadScoreDelta
+    );
+  }
 
   if (!snapshot.lead.name && profile.enrichment.resolvedName) {
     data.name = profile.enrichment.resolvedName;
@@ -828,6 +840,21 @@ const buildLeadLifecyclePatch = ({
     data.stage = profile.lifecycle.nextLeadStage;
     data.aiStage = profile.lifecycle.nextAIStage;
     data.revenueState = profile.lifecycle.nextRevenueState;
+  }
+
+  if (runtimeInfluence?.controls.crm.segmentShift === "hot_conversion") {
+    data.stage = "READY_TO_BUY";
+    data.aiStage = "HOT";
+    data.revenueState = "HOT";
+  }
+
+  if (
+    runtimeInfluence?.controls.crm.segmentShift === "at_risk_recovery" &&
+    String(data.stage || snapshot.lead.stage || "").toUpperCase() !== "WON"
+  ) {
+    data.stage = "INTERESTED";
+    data.aiStage = "WARM";
+    data.revenueState = "WARM";
   }
 
   return data;
@@ -1953,10 +1980,16 @@ export const syncLeadIntelligenceProfile = async ({
   });
 
   if (!snapshot.preview) {
+    const runtimeInfluence = await getIntelligenceRuntimeInfluence({
+      businessId: snapshot.businessId,
+      leadId: snapshot.leadId,
+      asOf: snapshot.now,
+    }).catch(() => null);
     const relationshipEdges = buildRelationshipRecords(observedProfile);
     const leadPatch = buildLeadLifecyclePatch({
       snapshot,
       profile: observedProfile,
+      runtimeInfluence,
     });
     const persistedMetrics = toJsonSafe({
       scorecard: observedProfile.scorecard,

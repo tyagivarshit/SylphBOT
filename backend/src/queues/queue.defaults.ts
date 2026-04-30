@@ -5,6 +5,10 @@ import {
   safeRedisCall,
   shouldLogRedisSkip,
 } from "../redis/redisSafety";
+import {
+  recordMetricSnapshot,
+  recordObservabilityEvent,
+} from "../services/reliability/reliabilityOS.service";
 
 export const QUEUE_REMOVE_ON_COMPLETE = {
   count: 1000,
@@ -39,6 +43,19 @@ const getQueueMethodFallback = (methodName: string) => {
 };
 
 const throwQueueWriteUnavailable = (queueName: string, methodName: string) => {
+  void recordObservabilityEvent({
+    eventType: "queue.write.unavailable",
+    message: `Queue unavailable for ${queueName}.${methodName}`,
+    severity: "error",
+    context: {
+      component: "queue",
+      phase: "write",
+    },
+    metadata: {
+      queueName,
+      methodName,
+    },
+  }).catch(() => undefined);
   throw new Error(`queue_unavailable:${queueName}.${methodName}`);
 };
 
@@ -104,6 +121,21 @@ export const withRedisWorkerFailSafe = <
 ) =>
   async (job: TJob) => {
     if (isRedisCircuitOpen()) {
+      void recordMetricSnapshot({
+        subsystem: "REDIS",
+        queueLag: 0,
+        workerUtilization: 0,
+        dlqRate: 0,
+        retryRate: 1,
+        lockContention: 0,
+        providerErrorRate: 1,
+        metadata: {
+          queueName,
+          jobId: job?.id || null,
+          event: "redis_circuit_open",
+        },
+      }).catch(() => undefined);
+
       if (shouldLogRedisSkip(`worker:${queueName}`)) {
         logger.warn(
           {

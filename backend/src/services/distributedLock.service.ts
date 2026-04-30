@@ -1,5 +1,9 @@
 import crypto from "crypto";
 import { getSharedRedisConnection } from "../config/redis";
+import {
+  recordMetricSnapshot,
+  recordObservabilityEvent,
+} from "./reliability/reliabilityOS.service";
 
 const RELEASE_LOCK_SCRIPT = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -162,6 +166,39 @@ export const acquireDistributedLock = async ({
 
     await sleep(effectivePollMs);
   } while (Date.now() <= deadline);
+
+  await recordMetricSnapshot({
+    subsystem: "LOCKS",
+    queueLag: 0,
+    workerUtilization: 0,
+    dlqRate: 0,
+    retryRate: 0,
+    lockContention: 1,
+    providerErrorRate: 0,
+    metadata: {
+      lockKey: key,
+      ttlMs,
+      waitMs,
+      pollMs,
+      event: "lock_unavailable",
+    },
+  }).catch(() => undefined);
+
+  await recordObservabilityEvent({
+    eventType: "lock.acquire.unavailable",
+    message: `Unable to acquire distributed lock for ${key}`,
+    severity: "warn",
+    context: {
+      component: "locks",
+      phase: "acquire",
+    },
+    metadata: {
+      lockKey: key,
+      ttlMs,
+      waitMs,
+      pollMs,
+    },
+  }).catch(() => undefined);
 
   return null;
 };

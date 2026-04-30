@@ -3,6 +3,7 @@ import { TRIAL_DAYS } from "../config/pricing.config";
 import { enqueueAIBatch } from "../queues/ai.queue";
 import { assertPhase5APreviewBypassEnabled } from "./runtimePolicy.service";
 import { getUsageOverview } from "./usage.service";
+import { getCanonicalSubscriptionSnapshot } from "./subscriptionAuthority.service";
 import logger from "../utils/logger";
 
 const ONBOARDING_DEMO_MESSAGE =
@@ -286,14 +287,7 @@ export const triggerOnboardingDemo = async ({
     return null;
   }
 
-  const subscription = await prisma.subscription.findUnique({
-    where: {
-      businessId: normalizedBusinessId,
-    },
-    include: {
-      plan: true,
-    },
-  });
+  const subscription = await getCanonicalSubscriptionSnapshot(normalizedBusinessId);
 
   const demoLead = business.onboardingDemoLeadId
     ? await prisma.lead.findUnique({

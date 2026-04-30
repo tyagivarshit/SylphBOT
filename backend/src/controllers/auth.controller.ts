@@ -24,6 +24,10 @@ import {
 } from "../utils/authCookies";
 import { createAuditLog } from "../services/audit.service";
 import { recordFailedLoginAttempt } from "../services/securityAlert.service";
+import {
+  issueSessionLedger,
+  recordFraudSignal,
+} from "../services/security/securityGovernanceOS.service";
 
 /* ======================================
 UTILS
@@ -212,6 +216,18 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         email,
         ip: getIP(req),
       });
+      void recordFraudSignal({
+        businessId: user?.businessId || null,
+        tenantId: user?.businessId || null,
+        signalType: "credential_stuffing",
+        actorId: user?.id || email,
+        ipFingerprint: hashToken(getIP(req)).slice(0, 20),
+        severity: "MEDIUM",
+        metadata: {
+          email,
+          route: req.originalUrl,
+        },
+      }).catch(() => undefined);
       throw unauthorized("Invalid credentials");
     }
 
@@ -291,6 +307,20 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
+
+    await issueSessionLedger({
+      businessId: business?.id || null,
+      tenantId: business?.id || null,
+      userId: user.id,
+      sessionKey: hashToken(refreshRaw),
+      ip: getIP(req),
+      userAgent: String(getUA(req)),
+      deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      metadata: {
+        source: "auth.login",
+      },
+    }).catch(() => undefined);
 
     void writeAuthAuditLog(req, {
       action: "auth.login",

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { getPlanKey, type PlanType } from "../config/plan.config";
+import { getCanonicalSubscriptionSnapshot } from "../services/subscriptionAuthority.service";
 
 type AutomationStepInput = {
   type?: string;
@@ -44,18 +45,15 @@ const allowedStepTypesByPlan: Record<PlanType, string[]> = {
 
 const getRequestBusinessId = (req: Request) => req.user?.businessId || null;
 
-const getBusinessPlan = async (businessId: string) =>
-  prisma.subscription.findUnique({
-    where: { businessId },
-    include: {
-      plan: {
-        select: {
-          name: true,
-          type: true,
-        },
-      },
-    },
-  });
+const getBusinessPlan = async (businessId: string) => {
+  const snapshot = await getCanonicalSubscriptionSnapshot(businessId);
+
+  return snapshot
+    ? {
+        plan: snapshot.plan,
+      }
+    : null;
+};
 
 const sanitizeSteps = (steps: AutomationStepInput[]) =>
   steps.map((step, index) => ({

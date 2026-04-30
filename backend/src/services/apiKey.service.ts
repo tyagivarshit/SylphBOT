@@ -3,6 +3,10 @@ import type { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { decrypt, encrypt } from "../utils/encrypt";
 import { normalizeRole, type PermissionAction } from "./rbac.service";
+import {
+  revokeSecret,
+  upsertSecretInVault,
+} from "./security/securityGovernanceOS.service";
 
 export type ApiKeyScope = "READ_ONLY" | "WRITE" | "ADMIN";
 
@@ -151,6 +155,22 @@ export const createApiKey = async (input: {
     },
   });
 
+  await upsertSecretInVault({
+    businessId: input.businessId,
+    tenantId: input.businessId,
+    secretName: `api_key:${record.id}`,
+    secretValue: rawKey,
+    secretType: "API_KEY",
+    blastRadius: "TENANT",
+    createdBy: input.createdByUserId || null,
+    provider: "INTERNAL",
+    credentialType: "API_KEY",
+    metadata: {
+      apiKeyId: record.id,
+      prefix: record.prefix,
+    },
+  }).catch(() => undefined);
+
   return {
     id: record.id,
     businessId: record.businessId,
@@ -251,8 +271,14 @@ export const listApiKeys = async (businessId: string) => {
 export const revokeApiKey = async (input: {
   businessId: string;
   apiKeyId: string;
-}) =>
-  prisma.apiKey.updateMany({
+}) => {
+  await revokeSecret({
+    secretKey: `secret:${input.businessId}:api_key:${input.apiKeyId}`,
+    reason: "api_key_revoked",
+    revokedBy: null,
+  }).catch(() => undefined);
+
+  return prisma.apiKey.updateMany({
     where: {
       id: input.apiKeyId,
       businessId: input.businessId,
@@ -262,6 +288,7 @@ export const revokeApiKey = async (input: {
       revokedAt: new Date(),
     },
   });
+};
 
 export const rotateApiKey = async (input: {
   businessId: string;
@@ -315,6 +342,28 @@ export const rotateApiKey = async (input: {
 
     return nextKey;
   });
+
+  await revokeSecret({
+    secretKey: `secret:${input.businessId}:api_key:${existing.id}`,
+    reason: "api_key_rotated",
+    revokedBy: input.rotatedByUserId || null,
+  }).catch(() => undefined);
+
+  await upsertSecretInVault({
+    businessId: input.businessId,
+    tenantId: input.businessId,
+    secretName: `api_key:${created.id}`,
+    secretValue: rawKey,
+    secretType: "API_KEY",
+    blastRadius: "TENANT",
+    createdBy: input.rotatedByUserId || null,
+    provider: "INTERNAL",
+    credentialType: "API_KEY",
+    metadata: {
+      apiKeyId: created.id,
+      rotatedFrom: existing.id,
+    },
+  }).catch(() => undefined);
 
   return {
     id: created.id,

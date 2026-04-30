@@ -5,7 +5,6 @@ import {
   type PlanType,
 } from "../config/plan.config";
 import prisma from "../config/prisma";
-import { expirePastDueSubscriptionIfNeeded } from "./billingSync.service";
 
 type PlanRecord = {
   name?: string | null;
@@ -161,26 +160,48 @@ const createResolvedPlan = (
 const loadResolvedPlan = async (
   businessId: string
 ): Promise<ResolvedPlanContext> => {
-  const expired = await expirePastDueSubscriptionIfNeeded({
-    businessId,
+  const canonical = await prisma.subscriptionLedger.findFirst({
+    where: {
+      businessId,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    select: {
+      status: true,
+      planCode: true,
+      trialEndsAt: true,
+      currentPeriodEnd: true,
+      renewAt: true,
+    },
   });
-  const subscription =
-    expired ||
-    (await prisma.subscription.findUnique({
-      where: { businessId },
-      select: {
-        status: true,
-        graceUntil: true,
-        currentPeriodEnd: true,
-        isTrial: true,
+
+  const subscription: SubscriptionRecord = canonical
+    ? {
+        status:
+          canonical.status === "TRIALING"
+            ? "TRIAL"
+            : canonical.status === "PAST_DUE"
+            ? "PAST_DUE"
+            : canonical.status === "ACTIVE"
+            ? "ACTIVE"
+            : canonical.status === "PAUSED"
+            ? "PAST_DUE"
+            : "CANCELLED",
+        graceUntil:
+          canonical.status === "PAST_DUE" && canonical.renewAt
+            ? canonical.renewAt
+            : null,
+        currentPeriodEnd: canonical.currentPeriodEnd || null,
+        isTrial:
+          canonical.status === "TRIALING" ||
+          (canonical.trialEndsAt ? canonical.trialEndsAt.getTime() > Date.now() : false),
         plan: {
-          select: {
-            name: true,
-            type: true,
-          },
+          name: canonical.planCode,
+          type: canonical.planCode,
         },
-      },
-    }));
+      }
+    : null;
 
   const now = Date.now();
 

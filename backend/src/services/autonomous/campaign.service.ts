@@ -6,6 +6,7 @@ import { assertPhase5APreviewBypassEnabled } from "../runtimePolicy.service";
 import logger from "../../utils/logger";
 import { arbitrateOutboundChannel } from "../channelArbitration.service";
 import { getLeadControlAuthority } from "../leadControlState.service";
+import { getIntelligenceRuntimeInfluence } from "../intelligence/intelligenceRuntimeInfluence.service";
 import {
   registerRevenueBrainSubscriber,
   subscribeRevenueBrainEvent,
@@ -327,6 +328,23 @@ export const queueAutonomousCampaign = async ({
   if (!guardrail.allowed) {
     return null;
   }
+  const runtime = await getIntelligenceRuntimeInfluence({
+    businessId: snapshot.businessId,
+    leadId: snapshot.leadId,
+  }).catch(() => null);
+
+  if (runtime?.controls.autonomous.paused) {
+    await prisma.autonomousOpportunity.update({
+      where: {
+        id: opportunityId,
+      },
+      data: {
+        status: "BLOCKED",
+        blockedReasons: ["intelligence_autonomous_paused"],
+      },
+    });
+    return null;
+  }
 
   const arbitration = await arbitrateOutboundChannel({
     businessId: snapshot.businessId,
@@ -361,6 +379,13 @@ export const queueAutonomousCampaign = async ({
     idempotencyKey,
     ruleKey: "autonomous_touch_14d",
   });
+  const maxReservations = Math.max(
+    1,
+    Math.min(
+      6,
+      Math.round(AUTONOMOUS_TOUCH_CAP * Number(runtime?.controls.autonomous.budgetMultiplier || 1))
+    )
+  );
   const controlState = await getLeadControlAuthority({
     leadId: snapshot.leadId,
     businessId: snapshot.businessId,
@@ -406,7 +431,7 @@ export const queueAutonomousCampaign = async ({
     leadId: snapshot.leadId,
     channel: arbitration.channel,
     ruleKey: "autonomous_touch_14d",
-    maxReservations: AUTONOMOUS_TOUCH_CAP,
+    maxReservations,
     windowDays: AUTONOMOUS_TOUCH_WINDOW_DAYS,
     reservationKey,
     reason: "autonomous_campaign_queue",
@@ -415,6 +440,8 @@ export const queueAutonomousCampaign = async ({
       engine: candidate.engine,
       arbitration,
       idempotencyKey,
+      intelligencePolicyVersion: runtime?.policyVersion || null,
+      budgetMultiplier: runtime?.controls.autonomous.budgetMultiplier || 1,
     },
     now: snapshot.now,
   });

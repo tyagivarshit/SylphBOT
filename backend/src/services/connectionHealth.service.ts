@@ -1,6 +1,10 @@
 import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
+import {
+  recordMetricSnapshot,
+  recordObservabilityEvent,
+} from "./reliability/reliabilityOS.service";
 
 type ConnectionHealthClient = {
   id: string;
@@ -79,6 +83,33 @@ const markClientInactive = async (client: ConnectionHealthClient) => {
   });
 
   logInactiveConnection(client);
+  await recordMetricSnapshot({
+    subsystem: "PROVIDERS",
+    queueLag: 0,
+    workerUtilization: 0,
+    dlqRate: 0,
+    retryRate: 0.25,
+    lockContention: 0,
+    providerErrorRate: 1,
+    metadata: {
+      platform: client.platform,
+      clientId: client.id,
+      reason: "auth_failed_or_expired",
+    },
+  }).catch(() => undefined);
+  await recordObservabilityEvent({
+    eventType: "provider.connection.inactive",
+    message: `${client.platform} connection marked inactive`,
+    severity: "error",
+    context: {
+      provider: client.platform,
+      component: "providers",
+      phase: "health",
+    },
+    metadata: {
+      clientId: client.id,
+    },
+  }).catch(() => undefined);
 };
 
 const validateWithDebugToken = async (accessToken: string) => {

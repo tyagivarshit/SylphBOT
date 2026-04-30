@@ -1,4 +1,5 @@
 import prisma from "../config/prisma";
+import { toRecord } from "./reception.shared";
 
 export type ConsentAuthorityStatus = "GRANTED" | "REVOKED" | "UNKNOWN";
 
@@ -32,6 +33,29 @@ const resolveEffectiveAt = (input: {
 
   candidates.sort((left, right) => right.getTime() - left.getTime());
   return candidates[0] || null;
+};
+
+const isAuthorityBearingConsentRow = (row: {
+  grantedAt?: Date | null;
+  revokedAt?: Date | null;
+  metadata?: unknown;
+}) => {
+  if (row.grantedAt instanceof Date || row.revokedAt instanceof Date) {
+    return true;
+  }
+
+  const metadata = toRecord(row.metadata);
+  const consentAuthority = toRecord(metadata.consentAuthority);
+
+  if (consentAuthority.authorityEvent === true) {
+    return true;
+  }
+
+  if (consentAuthority.authorityEvent === false) {
+    return false;
+  }
+
+  return false;
 };
 
 export const resolveConsentAuthority = async ({
@@ -79,6 +103,7 @@ export const resolveConsentAuthority = async ({
   });
 
   const ranked = rows
+    .filter((row) => isAuthorityBearingConsentRow(row))
     .map((row) => ({
       row,
       effectiveAt: resolveEffectiveAt(row),

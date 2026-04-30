@@ -5,6 +5,7 @@ import {
   initRedis as initRedisConnections,
 } from "../config/redis";
 import { startCleanupCron } from "../cron/cron.runner";
+import { startMessageCleanupCron } from "../cron/messageCleanup.cron";
 import { startConnectionHealthCron } from "../cron/connectionHealth.cron";
 import { startMetaTokenRefreshCron } from "../cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "../cron/resetUsage.cron";
@@ -15,27 +16,38 @@ import {
   initAuthEmailQueue,
 } from "../queues/authEmail.queue";
 import {
-  closeAutomationQueue,
-  initAutomationQueue,
-} from "../queues/automation.queue";
-import {
   closeBookingReminderQueue,
   initBookingReminderQueue,
 } from "../queues/bookingReminder.queue";
 import {
+  closeAppointmentOpsQueue,
+  initAppointmentOpsQueue,
+} from "../queues/appointmentOps.queue";
+import {
+  closeCalendarSyncQueue,
+  initCalendarSyncQueue,
+} from "../queues/calendarSync.queue";
+import {
   closeFollowupQueue,
   initFollowupQueues,
 } from "../queues/followup.queue";
-import { closeFunnelQueue, initFunnelQueue } from "../queues/funnel.queue";
 import {
   closeReceptionRuntimeQueues,
   initReceptionRuntimeQueues,
 } from "../queues/receptionRuntime.queue";
 import {
+  closeHumanReminderQueue,
+  initHumanReminderQueue,
+} from "../queues/humanReminder.queue";
+import {
   closeCRMRefreshQueue,
   initCRMRefreshQueue,
 } from "../services/crm/refreshQueue.service";
 import { startInboundSlaMonitorCron } from "../cron/inboundSlaMonitor.cron";
+import { startHumanReminderCron } from "../cron/humanReminder.cron";
+import { startAppointmentOpsCron } from "../cron/appointmentOps.cron";
+import { startCalendarSyncCron } from "../cron/calendarSync.cron";
+import { startIntelligenceLoopCron } from "../cron/intelligenceLoop.cron";
 import { initRevenueBrainEventQueues } from "../services/revenueBrain/eventBus.service";
 import { shutdownLearningQueue } from "../services/learningQueue.service";
 import {
@@ -43,17 +55,17 @@ import {
   initAuthEmailWorker,
 } from "../workers/authEmail.worker";
 import {
-  closeAutomationWorker,
-  initAutomationWorker,
-} from "../workers/automation.worker";
-import {
-  closeBookingMonitorWorker,
-  initBookingMonitorWorker,
-} from "../workers/bookingMonitor.worker";
-import {
   closeBookingReminderWorker,
   initBookingReminderWorker,
 } from "../workers/bookingReminder.worker";
+import {
+  closeAppointmentOpsWorker,
+  initAppointmentOpsWorker,
+} from "../workers/appointmentOps.worker";
+import {
+  closeCalendarSyncWorker,
+  initCalendarSyncWorker,
+} from "../workers/calendarSync.worker";
 import {
   closeAIPartitionWorkers,
   initAIPartitionWorkers,
@@ -67,6 +79,10 @@ import {
   initReceptionRuntimeWorkers,
 } from "../workers/receptionRuntime.worker";
 import {
+  closeHumanReminderWorker,
+  initHumanReminderWorker,
+} from "../workers/humanReminder.worker";
+import {
   startCRMRefreshWorker,
   stopCRMRefreshWorker,
 } from "../workers/crmRefresh.worker";
@@ -74,6 +90,9 @@ import {
   startRevenueBrainEventWorker,
   stopRevenueBrainEventWorker,
 } from "../workers/revenueBrainEvents.worker";
+import { bootstrapReliabilityOS } from "../services/reliability/reliabilityOS.service";
+import { bootstrapInfrastructureResilienceOS } from "../services/reliability/infrastructureResilienceOS.service";
+import { bootstrapSaaSPackagingConnectHubOS } from "../services/saasPackagingConnectHubOS.service";
 
 type CronTask = {
   stop?: () => void;
@@ -86,10 +105,11 @@ export type WorkerLifecycleOptions = {
   aiPartition?: boolean;
   followup?: boolean;
   authEmail?: boolean;
-  automation?: boolean;
   bookingReminder?: boolean;
-  bookingMonitor?: boolean;
+  appointmentOps?: boolean;
+  calendarSync?: boolean;
   receptionRuntime?: boolean;
+  humanReminder?: boolean;
 };
 
 const globalForLifecycle = globalThis as typeof globalThis & {
@@ -100,15 +120,19 @@ export const initRedis = () => initRedisConnections();
 
 export const initQueues = () => {
   initRedisConnections();
+  void bootstrapReliabilityOS().catch(() => undefined);
+  void bootstrapInfrastructureResilienceOS().catch(() => undefined);
+  void bootstrapSaaSPackagingConnectHubOS().catch(() => undefined);
   initAIQueues();
   initFollowupQueues();
-  initAutomationQueue();
   initAuthEmailQueue();
   initBookingReminderQueue();
-  initFunnelQueue();
+  initAppointmentOpsQueue();
+  initCalendarSyncQueue();
   initCRMRefreshQueue();
   initRevenueBrainEventQueues();
   initReceptionRuntimeQueues();
+  initHumanReminderQueue();
 };
 
 export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
@@ -132,20 +156,24 @@ export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
     initAuthEmailWorker();
   }
 
-  if (options.automation) {
-    initAutomationWorker();
-  }
-
   if (options.bookingReminder) {
     initBookingReminderWorker();
   }
 
-  if (options.bookingMonitor) {
-    initBookingMonitorWorker();
+  if (options.appointmentOps) {
+    initAppointmentOpsWorker();
+  }
+
+  if (options.calendarSync) {
+    initCalendarSyncWorker();
   }
 
   if (options.receptionRuntime) {
     initReceptionRuntimeWorkers();
+  }
+
+  if (options.humanReminder) {
+    initHumanReminderWorker();
   }
 };
 
@@ -161,7 +189,12 @@ export const initCrons = () => {
     startUsageResetCron(),
     startConnectionHealthCron(),
     startCleanupCron(),
+    startMessageCleanupCron(),
     startInboundSlaMonitorCron(),
+    startHumanReminderCron(),
+    startAppointmentOpsCron(),
+    startCalendarSyncCron(),
+    startIntelligenceLoopCron(),
   ];
 
   return globalForLifecycle.__sylphCronTasks;
@@ -183,21 +216,23 @@ export const shutdown = async () => {
   await Promise.allSettled([
     closeAIPartitionWorkers(),
     closeFollowupWorkers(),
-    closeBookingMonitorWorker(),
     closeBookingReminderWorker(),
-    closeAutomationWorker(),
+    closeAppointmentOpsWorker(),
+    closeCalendarSyncWorker(),
     closeAuthEmailWorker(),
     closeReceptionRuntimeWorkers(),
+    closeHumanReminderWorker(),
     stopRevenueBrainEventWorker(),
     stopCRMRefreshWorker(),
     closeCRMRefreshQueue(),
     closeAIQueue(),
     closeFollowupQueue(),
-    closeAutomationQueue(),
     closeAuthEmailQueue(),
     closeBookingReminderQueue(),
-    closeFunnelQueue(),
+    closeAppointmentOpsQueue(),
+    closeCalendarSyncQueue(),
     closeReceptionRuntimeQueues(),
+    closeHumanReminderQueue(),
     prisma.$disconnect(),
     closeRedisConnection(),
   ]);

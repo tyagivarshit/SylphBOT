@@ -71,7 +71,7 @@ export const revenueBridgeTests: TestCase[] = [
       const originalInteractionFindUnique = (prisma.inboundInteraction as any).findUnique;
       const originalInteractionUpdate = (prisma.inboundInteraction as any).update;
       const originalClientFindUnique = (prisma.client as any).findUnique;
-      const originalSubscriptionFindUnique = (prisma.subscription as any).findUnique;
+      const originalSubscriptionFindFirst = (prisma.subscriptionLedger as any).findFirst;
       const originalProfileFindUnique = (prisma.leadIntelligenceProfile as any).findUnique;
       const originalConsentFindMany = (prisma.consentLedger as any).findMany;
       const originalLeadControlFindUnique = (prisma.leadControlState as any).findUnique;
@@ -103,12 +103,25 @@ export const revenueBridgeTests: TestCase[] = [
           pageId: "page_1",
           phoneNumberId: null,
         });
-        (prisma.subscription as any).findUnique = async () => ({
-          plan: {
-            id: "plan_1",
-            name: "PRO",
-            type: "PRO",
-          },
+        (prisma.subscriptionLedger as any).findFirst = async () => ({
+          id: "sub_1",
+          businessId: interaction.businessId,
+          status: "ACTIVE",
+          planCode: "PRO",
+          provider: "STRIPE",
+          providerSubscriptionId: "provider_sub_1",
+          currency: "INR",
+          billingCycle: "monthly",
+          quantity: 1,
+          unitPriceMinor: 10000,
+          amountMinor: 10000,
+          trialEndsAt: null,
+          currentPeriodStart: new Date("2026-04-20T10:00:00.000Z"),
+          currentPeriodEnd: new Date("2026-05-20T10:00:00.000Z"),
+          renewAt: new Date("2026-05-20T10:00:00.000Z"),
+          metadata: {},
+          createdAt: new Date("2026-04-20T10:00:00.000Z"),
+          updatedAt: new Date("2026-04-20T10:00:00.000Z"),
         });
         (prisma.leadIntelligenceProfile as any).findUnique = async () => null;
         (prisma.consentLedger as any).findMany = async () => [
@@ -189,7 +202,7 @@ export const revenueBridgeTests: TestCase[] = [
         (prisma.inboundInteraction as any).findUnique = originalInteractionFindUnique;
         (prisma.inboundInteraction as any).update = originalInteractionUpdate;
         (prisma.client as any).findUnique = originalClientFindUnique;
-        (prisma.subscription as any).findUnique = originalSubscriptionFindUnique;
+        (prisma.subscriptionLedger as any).findFirst = originalSubscriptionFindFirst;
         (prisma.leadIntelligenceProfile as any).findUnique = originalProfileFindUnique;
         (prisma.consentLedger as any).findMany = originalConsentFindMany;
         (prisma.leadControlState as any).findUnique = originalLeadControlFindUnique;

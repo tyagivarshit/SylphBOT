@@ -9,6 +9,7 @@ const date_fns_1 = require("date-fns");
 const plan_config_1 = require("../config/plan.config");
 const pricing_config_1 = require("../config/pricing.config");
 const usage_service_1 = require("./usage.service");
+const subscriptionAuthority_service_1 = require("./subscriptionAuthority.service");
 class DashboardService {
     /* ======================================
        📊 DASHBOARD STATS (SaaS PRO)
@@ -20,10 +21,7 @@ class DashboardService {
             const monthStart = (0, date_fns_1.startOfMonth)(now);
             const baseFilter = { businessId };
             /* 🔥 SUBSCRIPTION (SAFE FALLBACK) */
-            const subscription = await prisma_1.default.subscription.findUnique({
-                where: { businessId },
-                include: { plan: true },
-            });
+            const subscription = await (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId);
             const planKey = (0, plan_config_1.getPlanKey)(subscription?.plan || null);
             /* ======================================
             PARALLEL QUERIES (FAST)

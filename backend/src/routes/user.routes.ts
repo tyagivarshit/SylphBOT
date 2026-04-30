@@ -5,7 +5,6 @@ import upload from "../middleware/upload";
 import cloudinary from "../config/cloudinary";
 import { protect } from "../middleware/auth.middleware";
 import { clearAuthCookies } from "../utils/authCookies";
-import { stripe } from "../services/stripe.service";
 import { ensureWorkspaceApiKey } from "../services/apiKey.service";
 import { requirePermission } from "../middleware/rbac.middleware";
 import { userActionLimiter } from "../middleware/rateLimit.middleware";
@@ -334,28 +333,6 @@ router.delete("/delete-account", protect, async (req: any, res) => {
 
     const now = new Date();
 
-    if (user.businessId) {
-      const subscription = await prisma.subscription.findUnique({
-        where: { businessId: user.businessId },
-        select: {
-          stripeSubscriptionId: true,
-        },
-      });
-
-      if (subscription?.stripeSubscriptionId) {
-        try {
-          await stripe.subscriptions.cancel(
-            subscription.stripeSubscriptionId
-          );
-        } catch (stripeError) {
-          console.error(
-            "DELETE ACCOUNT STRIPE CANCEL ERROR:",
-            stripeError
-          );
-        }
-      }
-    }
-
     await prisma.$transaction(async (tx) => {
       if (user.businessId) {
         await tx.business.update({
@@ -403,12 +380,13 @@ router.delete("/delete-account", protect, async (req: any, res) => {
               isActive: false,
             },
           }),
-          tx.subscription.updateMany({
+          tx.subscriptionLedger.updateMany({
             where: { businessId: user.businessId },
             data: {
               status: "CANCELLED",
-              graceUntil: null,
-              isTrial: false,
+              cancelAt: now,
+              cancelledAt: now,
+              renewAt: null,
             },
           }),
         ]);

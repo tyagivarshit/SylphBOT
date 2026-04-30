@@ -164,7 +164,7 @@ export const getSalesAgentBlueprint = () => ({
     ],
     scalability: [
       "Queue-driven message processing for burst control.",
-      "Stateless HTTP layer with workers for AI, followups, booking monitors, and learning tasks.",
+      "Stateless HTTP layer with workers for AI, followups, and learning tasks.",
       "Analytics feedback loop stores lightweight events that can later power dashboards or offline optimization jobs.",
     ],
   },

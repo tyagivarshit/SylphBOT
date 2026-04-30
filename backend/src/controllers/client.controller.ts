@@ -7,6 +7,7 @@ import { resolvePlanContext } from "../services/feature.service";
 import { triggerOnboardingDemo } from "../services/onboarding.service";
 import { checkConnectionHealth } from "../services/connectionHealth.service";
 import { getRequestBusinessId } from "../services/tenant.service";
+import { getCanonicalSubscriptionSnapshot } from "../services/subscriptionAuthority.service";
 
 /*
 ---------------------------------------------------
@@ -351,10 +352,14 @@ const upsertConnectedClient = async ({
 };
 
 const getSubscription = async (businessId: string) => {
-  return prisma.subscription.findUnique({
-    where: { businessId },
-    include: { plan: true },
-  });
+  const snapshot = await getCanonicalSubscriptionSnapshot(businessId);
+
+  return snapshot
+    ? {
+        plan: snapshot.plan,
+        status: snapshot.status,
+      }
+    : null;
 };
 
 const getAllowedPlatforms = async (

@@ -15,6 +15,7 @@ const AppError_1 = require("../utils/AppError");
 const authCookies_1 = require("../utils/authCookies");
 const audit_service_1 = require("../services/audit.service");
 const securityAlert_service_1 = require("../services/securityAlert.service");
+const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
 /* ======================================
 UTILS
 ====================================== */
@@ -150,6 +151,18 @@ const login = async (req, res, next) => {
                 email,
                 ip: getIP(req),
             });
+            void (0, securityGovernanceOS_service_1.recordFraudSignal)({
+                businessId: user?.businessId || null,
+                tenantId: user?.businessId || null,
+                signalType: "credential_stuffing",
+                actorId: user?.id || email,
+                ipFingerprint: hashToken(getIP(req)).slice(0, 20),
+                severity: "MEDIUM",
+                metadata: {
+                    email,
+                    route: req.originalUrl,
+                },
+            }).catch(() => undefined);
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
         let business = await prisma_1.default.business.findFirst({
@@ -213,6 +226,19 @@ const login = async (req, res, next) => {
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
         });
+        await (0, securityGovernanceOS_service_1.issueSessionLedger)({
+            businessId: business?.id || null,
+            tenantId: business?.id || null,
+            userId: user.id,
+            sessionKey: hashToken(refreshRaw),
+            ip: getIP(req),
+            userAgent: String(getUA(req)),
+            deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            metadata: {
+                source: "auth.login",
+            },
+        }).catch(() => undefined);
         void writeAuthAuditLog(req, {
             action: "auth.login",
             userId: user.id,

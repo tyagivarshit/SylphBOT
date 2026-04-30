@@ -13,11 +13,20 @@ import {
 } from "./revenueTouchLedger.service";
 import { decrypt } from "../utils/encrypt";
 import logger from "../utils/logger";
+import { createTakeoverLedgerService } from "./takeoverLedger.service";
 
 export type SupportedMessageSender = "USER" | "AI" | "AGENT";
 export type SupportedOutboundPlatform = "INSTAGRAM" | "WHATSAPP";
 
 type MessageMetadata = Record<string, unknown>;
+
+type HumanTakeoverDispatchContext = {
+  interactionId?: string | null;
+  humanId?: string | null;
+  resolved?: boolean;
+  resolutionCode?: string | null;
+  releaseOutcome?: string | null;
+};
 
 type LeadMessageTarget = {
   id: string;
@@ -58,6 +67,9 @@ const normalizePlatform = (
 
   return null;
 };
+
+const isObjectIdLike = (value: unknown) =>
+  /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 
 const getMessageMetadata = (metadata: unknown): MessageMetadata =>
   isRecord(metadata) ? metadata : {};
@@ -369,16 +381,77 @@ const buildMessageMetadata = ({
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 };
 
+const resolveHumanTakeoverTarget = async ({
+  lead,
+  requestedInteractionId,
+}: {
+  lead: LeadMessageTarget;
+  requestedInteractionId?: string | null;
+}) => {
+  if (!lead.businessId) {
+    return null;
+  }
+
+  if (!isObjectIdLike(lead.businessId) || !isObjectIdLike(lead.id)) {
+    return null;
+  }
+
+  const normalizedInteractionId = String(requestedInteractionId || "").trim();
+
+  if (normalizedInteractionId && isObjectIdLike(normalizedInteractionId)) {
+    const requestedQueue = await prisma.humanWorkQueue.findUnique({
+      where: {
+        interactionId: normalizedInteractionId,
+      },
+      select: {
+        interactionId: true,
+        assignedHumanId: true,
+        businessId: true,
+        leadId: true,
+      },
+    });
+
+    if (
+      requestedQueue &&
+      requestedQueue.businessId === lead.businessId &&
+      requestedQueue.leadId === lead.id
+    ) {
+      return requestedQueue;
+    }
+  }
+
+  return prisma.humanWorkQueue.findFirst({
+    where: {
+      businessId: lead.businessId,
+      leadId: lead.id,
+      state: {
+        in: ["PENDING", "ASSIGNED", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"],
+      },
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    select: {
+      interactionId: true,
+      assignedHumanId: true,
+      businessId: true,
+      leadId: true,
+    },
+  });
+};
+
 export const persistAndDispatchLeadMessage = async ({
   lead,
   content,
   sender,
   clientMessageId,
+  humanTakeover,
 }: {
   lead: LeadMessageTarget;
   content: string;
   sender: SupportedMessageSender;
   clientMessageId?: string | null;
+  humanTakeover?: HumanTakeoverDispatchContext | null;
 }) => {
   const platform = normalizePlatform(lead.platform || lead.client?.platform);
   const initialMetadata = buildMessageMetadata({
@@ -587,6 +660,58 @@ export const persistAndDispatchLeadMessage = async ({
         messageType: "MANUAL_OUTBOUND",
         metadata: getMessageMetadata(persistedMessage.metadata),
       });
+    }
+
+    if (outboundKey && delivery?.delivered && lead.businessId) {
+      const takeoverTarget = await resolveHumanTakeoverTarget({
+        lead,
+        requestedInteractionId: humanTakeover?.interactionId,
+      });
+
+      if (takeoverTarget?.interactionId) {
+        const takeoverLedger = createTakeoverLedgerService();
+        const humanId = String(
+          humanTakeover?.humanId || takeoverTarget.assignedHumanId || ""
+        ).trim();
+
+        if (humanId) {
+          const resolved = Boolean(humanTakeover?.resolved);
+          const resolutionCode =
+            typeof humanTakeover?.resolutionCode === "string"
+              ? humanTakeover.resolutionCode.trim() || null
+              : null;
+
+          await takeoverLedger.recordHumanOutbound({
+            interactionId: takeoverTarget.interactionId,
+            humanId,
+            outboundKey,
+            messageId: persistedMessage.id,
+            channel: platform || "UNKNOWN",
+            content,
+            resolutionCode,
+            resolved,
+            metadata: {
+              source: "manual_conversation_send",
+            },
+          });
+
+          if (resolved) {
+            await takeoverLedger.releaseTakeover({
+              interactionId: takeoverTarget.interactionId,
+              assignedTo: humanId,
+              outcome:
+                (typeof humanTakeover?.releaseOutcome === "string"
+                  ? humanTakeover.releaseOutcome.trim()
+                  : "") ||
+                resolutionCode ||
+                "RESOLVED_BY_HUMAN",
+              metadata: {
+                source: "manual_conversation_send",
+              },
+            });
+          }
+        }
+      }
     }
 
     await cancelFollowups(lead.id).catch((error) => {

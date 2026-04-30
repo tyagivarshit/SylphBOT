@@ -10,5 +10,15 @@ const integration_controller_1 = require("../controllers/integration.controller"
 const router = express_1.default.Router();
 router.get("/onboarding", auth_middleware_1.protect, integration_controller_1.getOnboarding);
 router.get("/instagram/accounts", auth_middleware_1.protect, integration_controller_1.getInstagramAccounts);
+router.get("/connect-hub", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getConnectHubDashboard);
+router.post("/connect-hub/provision", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.provisionConnectHubTenant);
+router.post("/connect-hub/connect/instagram", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.connectInstagramHub);
+router.post("/connect-hub/connect/whatsapp", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.connectWhatsAppHub);
+router.get("/connect-hub/diagnostics/:provider", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getIntegrationDiagnostics);
+router.post("/connect-hub/diagnostics/retry", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.retryConnectDiagnostic);
+router.post("/connect-hub/wizard/progress", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.saveConnectHubWizardProgress);
+router.post("/connect-hub/feature-gate/meter", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.meterConnectHubFeatureGate);
+router.post("/connect-hub/upgrade", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.upgradeConnectHubPlan);
+router.get("/connect-hub/self-audit", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.runConnectHubSelfAudit);
 router.get("/", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getIntegrations);
 exports.default = router;

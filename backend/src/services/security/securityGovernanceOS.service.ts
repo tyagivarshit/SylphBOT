@@ -234,6 +234,30 @@ const toCanonicalUpdateData = <T extends Record<string, unknown>>(row: T) => {
   return updateData;
 };
 
+const isUniqueConstraintError = (error: unknown) =>
+  String((error as { code?: unknown })?.code || "")
+    .trim()
+    .toUpperCase() === "P2002";
+
+const mirrorCanonicalUpsert = async <T>(input: {
+  upsert: () => Promise<T>;
+  find: () => Promise<T | null>;
+}) => {
+  if (shouldUseInMemory) {
+    return null as T | null;
+  }
+
+  try {
+    return await input.upsert();
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return input.find().catch(() => null);
+    }
+
+    return null;
+  }
+};
+
 type BaseLedgerRecord = {
   businessId?: string | null;
   tenantId?: string | null;
@@ -901,20 +925,29 @@ export const assertTenantIsolation = async (input: {
     resourceTenantId &&
     String(actorTenantId) !== String(resourceTenantId);
   const timestamp = now();
+  const subsystem = String(input.subsystem || "runtime").trim().toUpperCase();
+  const normalizedBusinessId = normalizeBusinessId(input.businessId);
+  const normalizedTenantId = normalizeTenantId({
+    tenantId: input.tenantId,
+    businessId: input.businessId || null,
+  });
+  const isolationSeed = {
+    businessId: normalizedBusinessId,
+    tenantId: normalizedTenantId,
+    subsystem,
+    actorTenantId: actorTenantId || null,
+    resourceTenantId: resourceTenantId || null,
+    verdict: mismatch ? "BLOCKED" : "ALLOWED",
+  };
   const isolationKey = `tenant_isolation:${stableHash([
-    timestamp.toISOString(),
-    actorTenantId,
-    resourceTenantId,
-    input.subsystem,
+    "phase6b.final",
+    isolationSeed,
   ]).slice(0, 24)}`;
   const row = {
     isolationKey,
-    businessId: normalizeBusinessId(input.businessId),
-    tenantId: normalizeTenantId({
-      tenantId: input.tenantId,
-      businessId: input.businessId || null,
-    }),
-    subsystem: String(input.subsystem || "runtime").trim().toUpperCase(),
+    businessId: normalizedBusinessId,
+    tenantId: normalizedTenantId,
+    subsystem,
     actorTenantId,
     resourceTenantId,
     verdict: mismatch ? "BLOCKED" : "ALLOWED",
@@ -926,7 +959,32 @@ export const assertTenantIsolation = async (input: {
   getStore().tenantIsolationLedger.set(isolationKey, row);
   bumpAuthority("TenantIsolationLedger");
 
-  await withDbMirror(() => db.tenantIsolationLedger.create({ data: row }));
+  await mirrorCanonicalUpsert({
+    upsert: () =>
+      db.tenantIsolationLedger.upsert({
+        where: {
+          isolationKey,
+        },
+        update: {
+          businessId: row.businessId,
+          tenantId: row.tenantId,
+          subsystem: row.subsystem,
+          actorTenantId: row.actorTenantId,
+          resourceTenantId: row.resourceTenantId,
+          verdict: row.verdict,
+          bleedDetected: row.bleedDetected,
+          reason: row.reason,
+          metadata: row.metadata,
+        },
+        create: row,
+      }),
+    find: () =>
+      db.tenantIsolationLedger.findUnique({
+        where: {
+          isolationKey,
+        },
+      }),
+  });
 
   if (mismatch) {
     if (actorTenantId) {

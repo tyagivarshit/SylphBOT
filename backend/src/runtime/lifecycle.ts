@@ -3,6 +3,7 @@ import { startAutonomousSchedulerCron } from "../cron/autonomousScheduler.cron";
 import {
   closeRedisConnection,
   initRedis as initRedisConnections,
+  waitForRedisReady as waitForRedisConnectionsReady,
 } from "../config/redis";
 import { startCleanupCron } from "../cron/cron.runner";
 import { startMessageCleanupCron } from "../cron/messageCleanup.cron";
@@ -116,27 +117,56 @@ export type WorkerLifecycleOptions = {
 
 const globalForLifecycle = globalThis as typeof globalThis & {
   __sylphCronTasks?: CronTask[];
+  __sylphQueuesInitialized?: boolean;
+  __sylphQueueInitPromise?: Promise<void>;
 };
 
 export const initRedis = () => initRedisConnections();
 
-export const initQueues = () => {
-  initRedisConnections();
-  void bootstrapReliabilityOS().catch(() => undefined);
-  void bootstrapInfrastructureResilienceOS().catch(() => undefined);
-  void bootstrapSaaSPackagingConnectHubOS().catch(() => undefined);
-  void bootstrapDeveloperPlatformExtensibilityOS().catch(() => undefined);
-  void bootstrapGrowthExpansionOS().catch(() => undefined);
-  initAIQueues();
-  initFollowupQueues();
-  initAuthEmailQueue();
-  initBookingReminderQueue();
-  initAppointmentOpsQueue();
-  initCalendarSyncQueue();
-  initCRMRefreshQueue();
-  initRevenueBrainEventQueues();
-  initReceptionRuntimeQueues();
-  initHumanReminderQueue();
+export const waitForRedisReady = () =>
+  waitForRedisConnectionsReady({
+    requireQueue: true,
+  });
+
+export const initQueues = async () => {
+  if (globalForLifecycle.__sylphQueuesInitialized) {
+    return;
+  }
+
+  if (globalForLifecycle.__sylphQueueInitPromise) {
+    await globalForLifecycle.__sylphQueueInitPromise;
+    return;
+  }
+
+  const initPromise = (async () => {
+    initRedisConnections();
+    await waitForRedisReady();
+    void bootstrapReliabilityOS().catch(() => undefined);
+    void bootstrapInfrastructureResilienceOS().catch(() => undefined);
+    void bootstrapSaaSPackagingConnectHubOS().catch(() => undefined);
+    void bootstrapDeveloperPlatformExtensibilityOS().catch(() => undefined);
+    void bootstrapGrowthExpansionOS().catch(() => undefined);
+    initAIQueues();
+    initFollowupQueues();
+    initAuthEmailQueue();
+    initBookingReminderQueue();
+    initAppointmentOpsQueue();
+    initCalendarSyncQueue();
+    initCRMRefreshQueue();
+    initRevenueBrainEventQueues();
+    initReceptionRuntimeQueues();
+    initHumanReminderQueue();
+    globalForLifecycle.__sylphQueuesInitialized = true;
+  })();
+
+  globalForLifecycle.__sylphQueueInitPromise = initPromise;
+  try {
+    await initPromise;
+  } finally {
+    if (globalForLifecycle.__sylphQueueInitPromise === initPromise) {
+      globalForLifecycle.__sylphQueueInitPromise = undefined;
+    }
+  }
 };
 
 export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
@@ -240,4 +270,7 @@ export const shutdown = async () => {
     prisma.$disconnect(),
     closeRedisConnection(),
   ]);
+
+  globalForLifecycle.__sylphQueuesInitialized = undefined;
+  globalForLifecycle.__sylphQueueInitPromise = undefined;
 };

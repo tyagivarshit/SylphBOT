@@ -92,7 +92,7 @@ export const createIntegrationRuntime = async (
   ]);
 
   lifecycle.initRedis();
-  lifecycle.initQueues();
+  await lifecycle.initQueues();
   lifecycle.initWorkers({
     receptionRuntime: true,
     revenueBrainEvents: true,

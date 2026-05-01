@@ -64,33 +64,8 @@ import { asyncHandler } from "./utils/asyncHandler";
 import {
   captureExceptionWithContext,
 } from "./observability/sentry";
-import { bootstrapReliabilityOS } from "./services/reliability/reliabilityOS.service";
-import { bootstrapInfrastructureResilienceOS } from "./services/reliability/infrastructureResilienceOS.service";
-import { bootstrapSecurityGovernanceOS } from "./services/security/securityGovernanceOS.service";
-import { bootstrapSaaSPackagingConnectHubOS } from "./services/saasPackagingConnectHubOS.service";
-import { bootstrapDeveloperPlatformExtensibilityOS } from "./services/developerPlatformExtensibilityOS.service";
 
 const app = express();
-
-void bootstrapReliabilityOS().catch((error) => {
-  console.error("[RELIABILITY BOOTSTRAP FAILED]", error);
-});
-
-void bootstrapInfrastructureResilienceOS().catch((error) => {
-  console.error("[INFRASTRUCTURE RESILIENCE BOOTSTRAP FAILED]", error);
-});
-
-void bootstrapSecurityGovernanceOS().catch((error) => {
-  console.error("[SECURITY GOVERNANCE BOOTSTRAP FAILED]", error);
-});
-
-void bootstrapSaaSPackagingConnectHubOS().catch((error) => {
-  console.error("[SAAS PACKAGING CONNECT HUB BOOTSTRAP FAILED]", error);
-});
-
-void bootstrapDeveloperPlatformExtensibilityOS().catch((error) => {
-  console.error("[DEVELOPER PLATFORM EXTENSIBILITY BOOTSTRAP FAILED]", error);
-});
 
 const isPlainRecord = (
   value: unknown

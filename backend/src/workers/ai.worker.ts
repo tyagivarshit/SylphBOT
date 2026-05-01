@@ -5,7 +5,6 @@ import {
 } from "../observability/sentry";
 import {
   initQueues,
-  initRedis,
   initWorkers,
   shutdown,
 } from "../runtime/lifecycle";
@@ -32,8 +31,7 @@ export const startWorkerRuntime = async () => {
   try {
     started = true;
     initializeSentry();
-    initRedis();
-    initQueues();
+    await initQueues();
     initWorkers({
       crmRefresh: true,
       revenueBrainEvents: true,

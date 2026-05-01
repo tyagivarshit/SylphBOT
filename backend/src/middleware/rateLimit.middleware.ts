@@ -3,6 +3,7 @@ import RedisStore from "rate-limit-redis";
 import {
   getSharedRedisConnection,
   isRedisHealthy,
+  isRedisWritable,
 } from "../config/redis";
 import { isRedisCircuitOpen } from "../redis/redisSafety";
 
@@ -10,8 +11,19 @@ const isProd = process.env.NODE_ENV === "production";
 
 const createStore = (prefix: string) =>
   new RedisStore({
-    sendCommand: (...args: any[]) =>
-      (getSharedRedisConnection() as any).call(...args),
+    sendCommand: (...args: any[]) => {
+      if (!isRedisWritable()) {
+        const command = String(args?.[0] || "").toUpperCase();
+        const subcommand = String(args?.[1] || "").toUpperCase();
+        if (command === "SCRIPT" && subcommand === "LOAD") {
+          return "redis_not_writable_script_stub";
+        }
+
+        return null;
+      }
+
+      return (getSharedRedisConnection() as any).call(...args);
+    },
     prefix,
   });
 
@@ -44,7 +56,11 @@ const handler = (_req: any, res: any) =>
   });
 
 const shouldSkipRedisRateLimit = () =>
-  isRedisCircuitOpen() || !isRedisHealthy();
+  isRedisCircuitOpen() || !isRedisHealthy() || !isRedisWritable();
+
+export const __rateLimitTestInternals = {
+  shouldSkipRedisRateLimit,
+};
 
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

@@ -22,8 +22,7 @@ const startWorkerRuntime = async () => {
     try {
         started = true;
         (0, sentry_1.initializeSentry)();
-        (0, lifecycle_1.initRedis)();
-        (0, lifecycle_1.initQueues)();
+        await (0, lifecycle_1.initQueues)();
         (0, lifecycle_1.initWorkers)({
             crmRefresh: true,
             revenueBrainEvents: true,

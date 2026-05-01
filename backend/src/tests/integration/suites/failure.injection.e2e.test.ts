@@ -38,7 +38,7 @@ export const failureInjectionE2ESuite: IntegrationSuite = {
     );
 
     lifecycleModule.initRedis();
-    lifecycleModule.initQueues();
+    await lifecycleModule.initQueues();
     await harness.startReceptionWorkers();
 
     const replayEventId = `rb_evt_retry_${crypto.randomUUID()}`;

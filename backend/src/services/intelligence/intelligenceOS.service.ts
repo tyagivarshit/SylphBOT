@@ -1183,18 +1183,12 @@ const persistFeatureSnapshot = async ({
     return created;
   }
 
-  const existing = await db.featureSnapshotLedger.findUnique({
+  return db.featureSnapshotLedger.upsert({
     where: {
       snapshotKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.featureSnapshotLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 
@@ -1545,18 +1539,12 @@ const persistModelRegistry = async ({
     return created;
   }
 
-  const existing = await db.modelRegistryLedger.findUnique({
+  return db.modelRegistryLedger.upsert({
     where: {
       modelKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.modelRegistryLedger.create({
-    data: {
+    update: {},
+    create: {
       businessId,
       modelKey,
       modelDomain,
@@ -1627,18 +1615,12 @@ const upsertForecast = async (payload: any) => {
     );
   }
 
-  const existing = await db.forecastLedger.findUnique({
+  return db.forecastLedger.upsert({
     where: {
       forecastKey: payload.forecastKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.forecastLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 
@@ -1660,18 +1642,12 @@ const upsertPrediction = async (payload: any) => {
     return created;
   }
 
-  const existing = await db.predictionLedger.findUnique({
+  return db.predictionLedger.upsert({
     where: {
       predictionKey: payload.predictionKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.predictionLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 
@@ -1694,18 +1670,12 @@ const upsertOptimization = async (payload: any) => {
     return created;
   }
 
-  const existing = await db.optimizationDecisionLedger.findUnique({
+  return db.optimizationDecisionLedger.upsert({
     where: {
       decisionKey: payload.decisionKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.optimizationDecisionLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 
@@ -1728,18 +1698,12 @@ const upsertRecommendation = async (payload: any) => {
     return created;
   }
 
-  const existing = await db.recommendationLedger.findUnique({
+  return db.recommendationLedger.upsert({
     where: {
       recommendationKey: payload.recommendationKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.recommendationLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 
@@ -1762,18 +1726,12 @@ const upsertAnomaly = async (payload: any) => {
     return created;
   }
 
-  const existing = await db.anomalyLedger.findUnique({
+  return db.anomalyLedger.upsert({
     where: {
       anomalyKey: payload.anomalyKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.anomalyLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 
@@ -1795,18 +1753,12 @@ const upsertSimulation = async (payload: any) => {
     return created;
   }
 
-  const existing = await db.simulationLedger.findUnique({
+  return db.simulationLedger.upsert({
     where: {
       simulationKey: payload.simulationKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.simulationLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 
@@ -1829,18 +1781,12 @@ const upsertExperiment = async (payload: any) => {
     return created;
   }
 
-  const existing = await db.experimentLedger.findUnique({
+  return db.experimentLedger.upsert({
     where: {
       experimentKey: payload.experimentKey,
     },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  return db.experimentLedger.create({
-    data: payload,
+    update: {},
+    create: payload,
   });
 };
 export const runIntelligenceSimulation = async ({

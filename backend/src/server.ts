@@ -1,5 +1,4 @@
 import http from "http";
-import app from "./app";
 import { configurePassport } from "./config/passport";
 import { env } from "./config/env";
 import { initSocket } from "./sockets/socket.server";
@@ -11,7 +10,6 @@ import {
 import {
   initCrons,
   initQueues,
-  initRedis,
   shutdown,
 } from "./runtime/lifecycle";
 
@@ -20,13 +18,13 @@ let isShuttingDown = false;
 export const startServer = async () => {
   initializeSentry();
   configurePassport();
-  initRedis();
-  initQueues();
+  await initQueues();
 
   if (process.env.ENABLE_CRON === "true") {
     initCrons();
   }
 
+  const { default: app } = await import("./app");
   const server = http.createServer(app);
   initSocket(server);
   server.keepAliveTimeout = 65000;

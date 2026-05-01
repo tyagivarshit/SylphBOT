@@ -161,6 +161,107 @@ export const securityPhase6BTests: TestCase[] = [
     },
   },
   {
+    name: "phase6b tenant isolation double replay remains idempotent on canonical isolation key",
+    run: async () => {
+      await reset();
+      const first = await assertTenantIsolation({
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorTenantId: "business_1",
+        resourceTenantId: "business_1",
+        subsystem: "ACCESS",
+      });
+      const second = await assertTenantIsolation({
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorTenantId: "business_1",
+        resourceTenantId: "business_1",
+        subsystem: "ACCESS",
+      });
+
+      assert.equal(first.ledger.isolationKey, second.ledger.isolationKey);
+      assert.equal(getStore().tenantIsolationLedger.size, 1);
+    },
+  },
+  {
+    name: "phase6b tenant isolation triple replay remains idempotent on canonical isolation key",
+    run: async () => {
+      await reset();
+      await assertTenantIsolation({
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorTenantId: "business_1",
+        resourceTenantId: "business_1",
+        subsystem: "ACCESS",
+      });
+      await assertTenantIsolation({
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorTenantId: "business_1",
+        resourceTenantId: "business_1",
+        subsystem: "ACCESS",
+      });
+      const third = await assertTenantIsolation({
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorTenantId: "business_1",
+        resourceTenantId: "business_1",
+        subsystem: "ACCESS",
+      });
+
+      assert.equal(third.allowed, true);
+      assert.equal(getStore().tenantIsolationLedger.size, 1);
+    },
+  },
+  {
+    name: "phase6b tenant isolation parallel replay collapses to one canonical row",
+    run: async () => {
+      await reset();
+      const results = await Promise.all(
+        Array.from({ length: 12 }).map(() =>
+          assertTenantIsolation({
+            businessId: "business_1",
+            tenantId: "business_1",
+            actorTenantId: "business_1",
+            resourceTenantId: "business_1",
+            subsystem: "ACCESS",
+          })
+        )
+      );
+
+      const isolationKeys = Array.from(
+        new Set(results.map((result) => result.ledger.isolationKey))
+      );
+      assert.equal(isolationKeys.length, 1);
+      assert.equal(getStore().tenantIsolationLedger.size, 1);
+    },
+  },
+  {
+    name: "phase6b tenant isolation cold replay keeps deterministic canonical key",
+    run: async () => {
+      await reset();
+      const first = await assertTenantIsolation({
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorTenantId: "business_1",
+        resourceTenantId: "business_1",
+        subsystem: "ACCESS",
+      });
+
+      await reset();
+      const second = await assertTenantIsolation({
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorTenantId: "business_1",
+        resourceTenantId: "business_1",
+        subsystem: "ACCESS",
+      });
+
+      assert.equal(first.ledger.isolationKey, second.ledger.isolationKey);
+      assert.equal(getStore().tenantIsolationLedger.size, 1);
+    },
+  },
+  {
     name: "phase6b privilege escalation replay is blocked after first consume",
     run: async () => {
       await reset();

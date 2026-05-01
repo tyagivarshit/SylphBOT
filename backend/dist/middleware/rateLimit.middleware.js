@@ -3,14 +3,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.userActionLimiter = exports.securityLimiter = exports.globalLimiter = exports.aiLimiter = exports.authLimiter = void 0;
+exports.userActionLimiter = exports.securityLimiter = exports.globalLimiter = exports.aiLimiter = exports.authLimiter = exports.__rateLimitTestInternals = void 0;
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const rate_limit_redis_1 = __importDefault(require("rate-limit-redis"));
 const redis_1 = require("../config/redis");
 const redisSafety_1 = require("../redis/redisSafety");
 const isProd = process.env.NODE_ENV === "production";
 const createStore = (prefix) => new rate_limit_redis_1.default({
-    sendCommand: (...args) => (0, redis_1.getSharedRedisConnection)().call(...args),
+    sendCommand: (...args) => {
+        if (!(0, redis_1.isRedisWritable)()) {
+            const command = String(args?.[0] || "").toUpperCase();
+            const subcommand = String(args?.[1] || "").toUpperCase();
+            if (command === "SCRIPT" && subcommand === "LOAD") {
+                return "redis_not_writable_script_stub";
+            }
+            return null;
+        }
+        return (0, redis_1.getSharedRedisConnection)().call(...args);
+    },
     prefix,
 });
 const getIP = (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
@@ -32,7 +42,10 @@ const handler = (_req, res) => res.status(429).json({
     code: "RATE_LIMIT",
     message: "Too many requests. Please try again later.",
 });
-const shouldSkipRedisRateLimit = () => (0, redisSafety_1.isRedisCircuitOpen)() || !(0, redis_1.isRedisHealthy)();
+const shouldSkipRedisRateLimit = () => (0, redisSafety_1.isRedisCircuitOpen)() || !(0, redis_1.isRedisHealthy)() || !(0, redis_1.isRedisWritable)();
+exports.__rateLimitTestInternals = {
+    shouldSkipRedisRateLimit,
+};
 exports.authLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
     max: 5,

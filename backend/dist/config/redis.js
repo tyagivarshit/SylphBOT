@@ -3,13 +3,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getSharedRedisConnection = exports.initRedis = void 0;
+exports.__redisRuntimeTestInternals = exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getSharedRedisConnection = exports.waitForRedisReady = exports.isRedisWritable = exports.isQueueRedisWritable = exports.isSharedRedisWritable = exports.initRedis = void 0;
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
 const redisSafety_1 = require("../redis/redisSafety");
 const logger_1 = __importDefault(require("../utils/logger"));
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
 const MAX_RECONNECT_ATTEMPTS = 5;
+const REDIS_READY_POLL_MS = 50;
 const globalForRedis = globalThis;
 const isRetryableRedisError = (error) => {
     const message = String(error?.message || error || "");
@@ -77,6 +78,11 @@ const createRedisClient = (label) => {
     attachRedisListeners(client, label);
     return client;
 };
+const sleep = (ms) => new Promise((resolve) => {
+    setTimeout(resolve, ms);
+});
+const isAlreadyConnectedError = (error) => /already connecting|already connected/i.test(String(error?.message || error || ""));
+const isRedisClientWritable = (client) => Boolean(client && client.status === "ready");
 const getMethodFallback = (methodName) => {
     switch (methodName) {
         case "get":
@@ -194,11 +200,83 @@ const ensureSharedRedisProxy = () => {
     return globalForRedis.__sylphRedisProxy;
 };
 let workerConnectionCounter = 0;
+const maybeConnectClient = async (client) => {
+    if (client.status !== "wait" && client.status !== "end") {
+        return;
+    }
+    try {
+        await client.connect();
+    }
+    catch (error) {
+        if (!isAlreadyConnectedError(error)) {
+            throw error;
+        }
+    }
+};
+const waitForClientReady = async (client, label, timeoutMs) => {
+    if (isRedisClientWritable(client)) {
+        return;
+    }
+    let lastError = null;
+    const onError = (error) => {
+        lastError = error;
+    };
+    client.on("error", onError);
+    const deadline = Date.now() + timeoutMs;
+    try {
+        while (Date.now() <= deadline) {
+            if (isRedisClientWritable(client)) {
+                return;
+            }
+            try {
+                await maybeConnectClient(client);
+            }
+            catch (error) {
+                lastError = error;
+            }
+            if (isRedisClientWritable(client)) {
+                return;
+            }
+            await sleep(REDIS_READY_POLL_MS);
+        }
+    }
+    finally {
+        client.off("error", onError);
+    }
+    const suffix = lastError
+        ? `: ${String(lastError?.message || lastError)}`
+        : "";
+    throw new Error(`redis_not_ready:${label}${suffix}`);
+};
 const initRedis = () => ({
     shared: ensureSharedRedisClient(),
     queue: ensureQueueRedisClient(),
 });
 exports.initRedis = initRedis;
+const isSharedRedisWritable = () => isRedisClientWritable(globalForRedis.__sylphRedis);
+exports.isSharedRedisWritable = isSharedRedisWritable;
+const isQueueRedisWritable = () => isRedisClientWritable(globalForRedis.__sylphQueueRedis);
+exports.isQueueRedisWritable = isQueueRedisWritable;
+const isRedisWritable = () => (0, exports.isSharedRedisWritable)();
+exports.isRedisWritable = isRedisWritable;
+const waitForRedisReady = async (input) => {
+    const timeoutMs = Math.max(1000, Math.floor(Number(input?.timeoutMs ?? Math.max(env_1.env.REDIS_CONNECT_TIMEOUT_MS * 3, 15000))));
+    const shared = ensureSharedRedisClient();
+    await waitForClientReady(shared, "shared", timeoutMs);
+    if (input?.requireQueue === false) {
+        return {
+            shared,
+            queue: null,
+        };
+    }
+    const queue = ensureQueueRedisClient();
+    await waitForClientReady(queue, "queue", timeoutMs);
+    return {
+        shared,
+        queue,
+    };
+};
+exports.waitForRedisReady = waitForRedisReady;
 const getSharedRedisConnection = () => ensureSharedRedisClient();
 exports.getSharedRedisConnection = getSharedRedisConnection;
 const getQueueRedisConnection = () => ensureQueueRedisClient();
@@ -248,4 +326,9 @@ const redis = new Proxy({}, {
 });
 var redisSafety_2 = require("../redis/redisSafety");
 Object.defineProperty(exports, "isRedisHealthy", { enumerable: true, get: function () { return redisSafety_2.isRedisHealthy; } });
+exports.__redisRuntimeTestInternals = {
+    isAlreadyConnectedError,
+    isRedisClientWritable,
+    waitForClientReady,
+};
 exports.default = redis;

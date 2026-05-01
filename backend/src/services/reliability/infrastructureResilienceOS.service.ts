@@ -298,7 +298,20 @@ const withDbMirrorStrict = async <T>(writer: () => Promise<T>) => {
   if (shouldUseInMemory) {
     return null as T | null;
   }
-  return writer();
+
+  try {
+    return await writer();
+  } catch (error) {
+    if (
+      String((error as { code?: unknown })?.code || "")
+        .trim()
+        .toUpperCase() === "P2002"
+    ) {
+      return null as T | null;
+    }
+
+    throw error;
+  }
 };
 
 const toCanonicalUpdateData = <T extends Record<string, unknown>>(row: T) => {

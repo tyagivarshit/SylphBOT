@@ -11,6 +11,7 @@ import logger from "../utils/logger";
 
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
 const MAX_RECONNECT_ATTEMPTS = 5;
+const REDIS_READY_POLL_MS = 50;
 
 type ManagedRedisClient = Redis & {
   [MANUAL_CLOSE_SYMBOL]?: boolean;
@@ -112,6 +113,19 @@ const createRedisClient = (label: string) => {
   attachRedisListeners(client, label);
   return client;
 };
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const isAlreadyConnectedError = (error: unknown) =>
+  /already connecting|already connected/i.test(
+    String((error as { message?: unknown })?.message || error || "")
+  );
+
+const isRedisClientWritable = (client?: ManagedRedisClient | null) =>
+  Boolean(client && client.status === "ready");
 
 const getMethodFallback = (methodName: string) => {
   switch (methodName) {
@@ -288,10 +302,105 @@ const ensureSharedRedisProxy = () => {
 
 let workerConnectionCounter = 0;
 
+const maybeConnectClient = async (client: ManagedRedisClient) => {
+  if (client.status !== "wait" && client.status !== "end") {
+    return;
+  }
+
+  try {
+    await client.connect();
+  } catch (error) {
+    if (!isAlreadyConnectedError(error)) {
+      throw error;
+    }
+  }
+};
+
+const waitForClientReady = async (
+  client: ManagedRedisClient,
+  label: string,
+  timeoutMs: number
+) => {
+  if (isRedisClientWritable(client)) {
+    return;
+  }
+
+  let lastError: unknown = null;
+  const onError = (error: unknown) => {
+    lastError = error;
+  };
+
+  client.on("error", onError);
+  const deadline = Date.now() + timeoutMs;
+
+  try {
+    while (Date.now() <= deadline) {
+      if (isRedisClientWritable(client)) {
+        return;
+      }
+
+      try {
+        await maybeConnectClient(client);
+      } catch (error) {
+        lastError = error;
+      }
+
+      if (isRedisClientWritable(client)) {
+        return;
+      }
+
+      await sleep(REDIS_READY_POLL_MS);
+    }
+  } finally {
+    client.off("error", onError);
+  }
+
+  const suffix = lastError
+    ? `: ${String((lastError as { message?: unknown })?.message || lastError)}`
+    : "";
+  throw new Error(`redis_not_ready:${label}${suffix}`);
+};
+
 export const initRedis = () => ({
   shared: ensureSharedRedisClient(),
   queue: ensureQueueRedisClient(),
 });
+
+export const isSharedRedisWritable = () =>
+  isRedisClientWritable(globalForRedis.__sylphRedis);
+
+export const isQueueRedisWritable = () =>
+  isRedisClientWritable(globalForRedis.__sylphQueueRedis);
+
+export const isRedisWritable = () => isSharedRedisWritable();
+
+export const waitForRedisReady = async (input?: {
+  requireQueue?: boolean;
+  timeoutMs?: number;
+}) => {
+  const timeoutMs = Math.max(
+    1_000,
+    Math.floor(
+      Number(input?.timeoutMs ?? Math.max(env.REDIS_CONNECT_TIMEOUT_MS * 3, 15_000))
+    )
+  );
+  const shared = ensureSharedRedisClient();
+  await waitForClientReady(shared, "shared", timeoutMs);
+
+  if (input?.requireQueue === false) {
+    return {
+      shared,
+      queue: null,
+    };
+  }
+
+  const queue = ensureQueueRedisClient();
+  await waitForClientReady(queue, "queue", timeoutMs);
+  return {
+    shared,
+    queue,
+  };
+};
 
 export const getSharedRedisConnection = () => ensureSharedRedisClient();
 
@@ -353,5 +462,11 @@ const redis = new Proxy({} as ManagedRedisClient, {
 }) as ManagedRedisClient;
 
 export { isRedisHealthy } from "../redis/redisSafety";
+
+export const __redisRuntimeTestInternals = {
+  isAlreadyConnectedError,
+  isRedisClientWritable,
+  waitForClientReady,
+};
 
 export default redis;

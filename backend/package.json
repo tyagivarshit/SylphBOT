@@ -9,7 +9,7 @@
     "test:legacy": "npm run build && node dist/tests/run-tests.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "dev:worker": "ts-node-dev --respawn --transpile-only src/workers/ai.worker.ts",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 npx tsc",
+    "build": "npx --node-options=--max-old-space-size=16384 tsc",
     "prisma:generate": "npx prisma generate",
     "prisma:canonical:dedupe": "node scripts/canonical-dedupe.cjs",
     "prisma:db:push": "npm run prisma:canonical:dedupe && npx prisma db push --skip-generate",

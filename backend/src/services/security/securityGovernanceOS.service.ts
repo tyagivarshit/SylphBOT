@@ -220,6 +220,20 @@ const withDbMirror = async (writer: () => Promise<unknown>) => {
   }
 };
 
+const withDbMirrorStrict = async <T>(writer: () => Promise<T>) => {
+  if (shouldUseInMemory) {
+    return null as T | null;
+  }
+  return writer();
+};
+
+const toCanonicalUpdateData = <T extends Record<string, unknown>>(row: T) => {
+  const { createdAt: _createdAt, ...updateData } = row as T & {
+    createdAt?: unknown;
+  };
+  return updateData;
+};
+
 type BaseLedgerRecord = {
   businessId?: string | null;
   tenantId?: string | null;
@@ -271,6 +285,11 @@ type SecurityStore = {
 const globalForSecurity = globalThis as typeof globalThis & {
   __sylphSecurityStore?: SecurityStore;
 };
+
+let bootstrapSecurityGovernanceInFlight: Promise<{
+  bootstrappedAt: Date;
+  phaseVersion: string;
+}> | null = null;
 
 const createStore = (): SecurityStore => ({
   bootstrappedAt: null,
@@ -598,7 +617,7 @@ const writePolicyLedger = async (input: {
   store.policyLedger.set(row.policyVersionKey, row);
   bumpAuthority("PolicyLedger");
 
-  await withDbMirror(() =>
+  await withDbMirrorStrict(() =>
     db.policyLedger.create({
       data: {
         ...row,
@@ -621,159 +640,222 @@ export const bootstrapSecurityGovernanceOS = async () => {
     };
   }
 
-  const timestamp = now();
-
-  for (const role of DEFAULT_ROLES) {
-    const roleKey = `role:${role.roleName.toLowerCase()}:global`;
-    const row = {
-      roleKey,
-      businessId: null,
-      scopeType: "GLOBAL",
-      scopeId: null,
-      roleName: role.roleName,
-      description: `${role.roleName} runtime role`,
-      permissions: role.permissions,
-      isSystem: true,
-      isActive: true,
-      version: 1,
-      metadata: {
-        seededBy: SECURITY_PHASE_VERSION,
-      },
-      effectiveFrom: timestamp,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    store.roleLedger.set(roleKey, row);
-    bumpAuthority("RoleLedger");
-
-    await withDbMirror(() => db.roleLedger.create({ data: row }));
+  if (bootstrapSecurityGovernanceInFlight) {
+    return bootstrapSecurityGovernanceInFlight;
   }
 
-  const uniquePermissions = Array.from(
-    new Set(DEFAULT_ROLES.flatMap((role) => role.permissions))
-  );
+  const bootstrapPromise = (async () => {
+    const timestamp = now();
 
-  for (const permission of uniquePermissions) {
-    const permissionKey = `perm:${permission}`;
-    const row = {
-      permissionKey,
-      businessId: null,
-      action: permission,
-      scope: null,
-      constraints: {},
-      isActive: true,
-      version: 1,
-      metadata: {
-        seededBy: SECURITY_PHASE_VERSION,
-      },
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    store.permissionLedger.set(permissionKey, row);
-    bumpAuthority("PermissionLedger");
-
-    await withDbMirror(() => db.permissionLedger.create({ data: row }));
-  }
-
-  for (const policy of DEFAULT_POLICIES) {
-    await writePolicyLedger({
-      policyDomain: policy.domain,
-      rules: policy.rules,
-      status: "APPROVED",
-      isActive: true,
-      createdBy: "system_bootstrap",
-    });
-
-    const accessPolicyRow = {
-      policyKey: `access:${policy.domain.toLowerCase()}:global:v1`,
-      businessId: null,
-      scopeType: "GLOBAL",
-      scopeId: null,
-      policyDomain: policy.domain,
-      version: 1,
-      status: "APPROVED",
-      isActive: true,
-      ruleSet: policy.rules,
-      approvalFlow: {},
-      rollbackOfKey: null,
-      createdBy: "system_bootstrap",
-      approvedBy: "system_bootstrap",
-      approvedAt: timestamp,
-      effectiveFrom: timestamp,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-
-    store.accessPolicyLedger.set(accessPolicyRow.policyKey, accessPolicyRow);
-    bumpAuthority("AccessPolicyLedger");
-    await withDbMirror(() =>
-      db.accessPolicyLedger.create({
-        data: {
-          ...accessPolicyRow,
-          ruleSet: accessPolicyRow.ruleSet,
-          approvalFlow: accessPolicyRow.approvalFlow,
+    for (const role of DEFAULT_ROLES) {
+      const roleKey = `role:${role.roleName.toLowerCase()}:global`;
+      const row = {
+        roleKey,
+        businessId: null,
+        scopeType: "GLOBAL",
+        scopeId: null,
+        roleName: role.roleName,
+        description: `${role.roleName} runtime role`,
+        permissions: role.permissions,
+        isSystem: true,
+        isActive: true,
+        version: 1,
+        metadata: {
+          seededBy: SECURITY_PHASE_VERSION,
         },
+        effectiveFrom: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      store.roleLedger.set(roleKey, row);
+      bumpAuthority("RoleLedger");
+
+      const updateData = toCanonicalUpdateData(row);
+      await withDbMirrorStrict(() =>
+        db.roleLedger.upsert({
+          where: {
+            roleKey,
+          },
+          update: updateData,
+          create: row,
+        })
+      );
+    }
+
+    const uniquePermissions = Array.from(
+      new Set(DEFAULT_ROLES.flatMap((role) => role.permissions))
+    );
+
+    for (const permission of uniquePermissions) {
+      const permissionKey = `perm:${permission}`;
+      const row = {
+        permissionKey,
+        businessId: null,
+        action: permission,
+        scope: null,
+        constraints: {},
+        isActive: true,
+        version: 1,
+        metadata: {
+          seededBy: SECURITY_PHASE_VERSION,
+        },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      store.permissionLedger.set(permissionKey, row);
+      bumpAuthority("PermissionLedger");
+
+      const updateData = toCanonicalUpdateData(row);
+      await withDbMirrorStrict(() =>
+        db.permissionLedger.upsert({
+          where: {
+            permissionKey,
+          },
+          update: updateData,
+          create: row,
+        })
+      );
+    }
+
+    for (const policy of DEFAULT_POLICIES) {
+      await writePolicyLedger({
+        policyDomain: policy.domain,
+        rules: policy.rules,
+        status: "APPROVED",
+        isActive: true,
+        createdBy: "system_bootstrap",
+      });
+
+      const accessPolicyRow = {
+        policyKey: `access:${policy.domain.toLowerCase()}:global:v1`,
+        businessId: null,
+        scopeType: "GLOBAL",
+        scopeId: null,
+        policyDomain: policy.domain,
+        version: 1,
+        status: "APPROVED",
+        isActive: true,
+        ruleSet: policy.rules,
+        approvalFlow: {},
+        rollbackOfKey: null,
+        createdBy: "system_bootstrap",
+        approvedBy: "system_bootstrap",
+        approvedAt: timestamp,
+        effectiveFrom: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      store.accessPolicyLedger.set(accessPolicyRow.policyKey, accessPolicyRow);
+      bumpAuthority("AccessPolicyLedger");
+
+      const updateData = toCanonicalUpdateData(accessPolicyRow);
+      await withDbMirrorStrict(() =>
+        db.accessPolicyLedger.upsert({
+          where: {
+            policyKey: accessPolicyRow.policyKey,
+          },
+          update: {
+            ...updateData,
+            ruleSet: accessPolicyRow.ruleSet,
+            approvalFlow: accessPolicyRow.approvalFlow,
+          },
+          create: {
+            ...accessPolicyRow,
+            ruleSet: accessPolicyRow.ruleSet,
+            approvalFlow: accessPolicyRow.approvalFlow,
+          },
+        })
+      );
+    }
+
+    const retentionRow = {
+      retentionPolicyKey: "retention:global:pii:business_analytics:v1",
+      businessId: null,
+      scopeType: "GLOBAL",
+      scopeId: null,
+      dataClass: "PII_SENSITIVE",
+      purpose: "BUSINESS_ANALYTICS",
+      region: "GLOBAL",
+      retentionDays: 365,
+      deletionMode: "SOFT",
+      legalHoldAllowed: true,
+      isActive: true,
+      version: 1,
+      metadata: {
+        seededBy: SECURITY_PHASE_VERSION,
+      },
+      effectiveFrom: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    store.retentionPolicyLedger.set(retentionRow.retentionPolicyKey, retentionRow);
+    bumpAuthority("RetentionPolicyLedger");
+
+    const retentionUpdate = toCanonicalUpdateData(retentionRow);
+    await withDbMirrorStrict(() =>
+      db.retentionPolicyLedger.upsert({
+        where: {
+          retentionPolicyKey: retentionRow.retentionPolicyKey,
+        },
+        update: retentionUpdate,
+        create: retentionRow,
       })
     );
-  }
 
-  const retentionRow = {
-    retentionPolicyKey: "retention:global:pii:business_analytics:v1",
-    businessId: null,
-    scopeType: "GLOBAL",
-    scopeId: null,
-    dataClass: "PII_SENSITIVE",
-    purpose: "BUSINESS_ANALYTICS",
-    region: "GLOBAL",
-    retentionDays: 365,
-    deletionMode: "SOFT",
-    legalHoldAllowed: true,
-    isActive: true,
-    version: 1,
-    metadata: {
-      seededBy: SECURITY_PHASE_VERSION,
-    },
-    effectiveFrom: timestamp,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-  store.retentionPolicyLedger.set(retentionRow.retentionPolicyKey, retentionRow);
-  bumpAuthority("RetentionPolicyLedger");
-  await withDbMirror(() => db.retentionPolicyLedger.create({ data: retentionRow }));
+    for (const controlType of [
+      "GDPR_EXPORT_DELETE",
+      "SOC2_AUDITABILITY",
+      "DPDP_CONSENT_RETENTION",
+      "LEGAL_HOLD",
+      "POLICY_ATTESTATION",
+    ]) {
+      const complianceKey = `compliance:${controlType.toLowerCase()}:global`;
+      const row = {
+        complianceKey,
+        businessId: null,
+        tenantId: null,
+        controlType,
+        controlStatus: "ENFORCED",
+        attestedBy: "system_bootstrap",
+        attestedAt: timestamp,
+        evidenceRef: null,
+        metadata: {
+          seededBy: SECURITY_PHASE_VERSION,
+        },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      store.complianceLedger.set(complianceKey, row);
+      bumpAuthority("ComplianceLedger");
 
-  for (const controlType of [
-    "GDPR_EXPORT_DELETE",
-    "SOC2_AUDITABILITY",
-    "DPDP_CONSENT_RETENTION",
-    "LEGAL_HOLD",
-    "POLICY_ATTESTATION",
-  ]) {
-    const complianceKey = `compliance:${controlType.toLowerCase()}:global`;
-    const row = {
-      complianceKey,
-      businessId: null,
-      tenantId: null,
-      controlType,
-      controlStatus: "ENFORCED",
-      attestedBy: "system_bootstrap",
-      attestedAt: timestamp,
-      evidenceRef: null,
-      metadata: {
-        seededBy: SECURITY_PHASE_VERSION,
-      },
-      createdAt: timestamp,
-      updatedAt: timestamp,
+      const updateData = toCanonicalUpdateData(row);
+      await withDbMirrorStrict(() =>
+        db.complianceLedger.upsert({
+          where: {
+            complianceKey,
+          },
+          update: updateData,
+          create: row,
+        })
+      );
+    }
+
+    store.bootstrappedAt = timestamp;
+    return {
+      bootstrappedAt: timestamp,
+      phaseVersion: SECURITY_PHASE_VERSION,
     };
-    store.complianceLedger.set(complianceKey, row);
-    bumpAuthority("ComplianceLedger");
-    await withDbMirror(() => db.complianceLedger.create({ data: row }));
-  }
+  })();
 
-  store.bootstrappedAt = timestamp;
-  return {
-    bootstrappedAt: timestamp,
-    phaseVersion: SECURITY_PHASE_VERSION,
-  };
+  bootstrapSecurityGovernanceInFlight = bootstrapPromise;
+  try {
+    return await bootstrapPromise;
+  } finally {
+    if (bootstrapSecurityGovernanceInFlight === bootstrapPromise) {
+      bootstrapSecurityGovernanceInFlight = null;
+    }
+  }
 };
 
 type AccessRequest = {
@@ -4420,6 +4502,7 @@ attachKmsAuditSink();
 export const __securityPhase6BTestInternals = {
   resetStore: () => {
     globalForSecurity.__sylphSecurityStore = createStore();
+    bootstrapSecurityGovernanceInFlight = null;
     kmsProviderRouterService.resetState();
     kmsAuditSinkAttached = false;
     attachKmsAuditSink();

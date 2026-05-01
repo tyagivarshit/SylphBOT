@@ -31,7 +31,112 @@ const reset = async () => {
 const getInfraStore = () => __infrastructurePhase6CTestInternals.getStore();
 const getReliabilityStore = () => __reliabilityPhase6ATestInternals.getStore();
 
+const getCanonicalInfraExpectations = () => {
+  const catalog = __infrastructurePhase6CTestInternals.canonicalCatalog();
+  const engineCount = catalog.reduce(
+    (total, definition) => total + definition.engines.length,
+    0
+  );
+  return {
+    subsystemCount: catalog.length,
+    engineCount,
+    auditCount: catalog.length + 1,
+  };
+};
+
+const snapshotCanonicalInfrastructureKeys = () => {
+  const store = getInfraStore();
+  return {
+    policyKeys: Array.from(store.policyLedger.keys()).sort(),
+    subsystemKeys: Array.from(store.subsystemLedger.keys()).sort(),
+    engineKeys: Array.from(store.engineLedger.keys()).sort(),
+    auditKeys: Array.from(store.auditLedger.keys()).sort(),
+  };
+};
+
+const assertInfrastructureBootstrapFootprint = () => {
+  const store = getInfraStore();
+  const expected = getCanonicalInfraExpectations();
+  assert.equal(store.subsystemLedger.size, expected.subsystemCount);
+  assert.equal(store.engineLedger.size, expected.engineCount);
+  assert.equal(store.auditLedger.size, expected.auditCount);
+  assert.equal(store.policyLedger.size, 1);
+  assert.equal(
+    store.authorities.get("InfrastructureSubsystemLedger") || 0,
+    expected.subsystemCount
+  );
+  assert.equal(
+    store.authorities.get("InfrastructureEngineLedger") || 0,
+    expected.engineCount
+  );
+  assert.equal(
+    store.authorities.get("InfrastructureAuditLedger") || 0,
+    expected.auditCount
+  );
+  assert.equal(store.authorities.get("InfrastructurePolicyLedger") || 0, 1);
+};
+
 export const infrastructurePhase6CTests: TestCase[] = [
+  {
+    name: "phase6c bootstrap double replay remains idempotent for canonical infra ledgers",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      __infrastructurePhase6CTestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      const first = await bootstrapInfrastructureResilienceOS();
+      const second = await bootstrapInfrastructureResilienceOS();
+      assert.equal(
+        first.bootstrappedAt.toISOString(),
+        second.bootstrappedAt.toISOString()
+      );
+      assertInfrastructureBootstrapFootprint();
+    },
+  },
+  {
+    name: "phase6c bootstrap triple replay remains idempotent for canonical infra ledgers",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      __infrastructurePhase6CTestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      await bootstrapInfrastructureResilienceOS();
+      await bootstrapInfrastructureResilienceOS();
+      await bootstrapInfrastructureResilienceOS();
+      assertInfrastructureBootstrapFootprint();
+    },
+  },
+  {
+    name: "phase6c bootstrap parallel race collapses to a single infra authority path",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      __infrastructurePhase6CTestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      await Promise.all(
+        Array.from({
+          length: 10,
+        }).map(() => bootstrapInfrastructureResilienceOS())
+      );
+      assertInfrastructureBootstrapFootprint();
+    },
+  },
+  {
+    name: "phase6c cold start replay keeps canonical infra ledger keys deterministic",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      __infrastructurePhase6CTestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      await bootstrapInfrastructureResilienceOS();
+      const firstSnapshot = snapshotCanonicalInfrastructureKeys();
+
+      __reliabilityPhase6ATestInternals.resetStore();
+      __infrastructurePhase6CTestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      await bootstrapInfrastructureResilienceOS();
+      const secondSnapshot = snapshotCanonicalInfrastructureKeys();
+
+      assert.deepEqual(secondSnapshot, firstSnapshot);
+      assertInfrastructureBootstrapFootprint();
+    },
+  },
   {
     name: "phase6c bootstrap seeds canonical authorities and engines",
     run: async () => {

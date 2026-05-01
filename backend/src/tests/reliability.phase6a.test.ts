@@ -26,7 +26,67 @@ const reset = async () => {
 
 const getStore = () => __reliabilityPhase6ATestInternals.getStore();
 
+const snapshotCanonicalReliabilityKeys = () => {
+  const store = getStore();
+  return {
+    policyKeys: Array.from(store.policies.keys()).sort(),
+    runbookKeys: Array.from(store.runbooks.keys()).sort(),
+  };
+};
+
+const assertReliabilityBootstrapFootprint = () => {
+  const store = getStore();
+  assert.equal(store.policies.size, 1);
+  assert.equal(store.runbooks.size, 2);
+};
+
 export const reliabilityPhase6ATests: TestCase[] = [
+  {
+    name: "phase6a bootstrap double replay remains idempotent for reliability canonical rows",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      await bootstrapReliabilityOS();
+      assertReliabilityBootstrapFootprint();
+    },
+  },
+  {
+    name: "phase6a bootstrap triple replay remains idempotent for reliability canonical rows",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      await bootstrapReliabilityOS();
+      await bootstrapReliabilityOS();
+      assertReliabilityBootstrapFootprint();
+    },
+  },
+  {
+    name: "phase6a bootstrap parallel race collapses to one reliability seed path",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      await Promise.all(
+        Array.from({
+          length: 10,
+        }).map(() => bootstrapReliabilityOS())
+      );
+      assertReliabilityBootstrapFootprint();
+    },
+  },
+  {
+    name: "phase6a cold start replay keeps reliability canonical keys deterministic",
+    run: async () => {
+      __reliabilityPhase6ATestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      const firstSnapshot = snapshotCanonicalReliabilityKeys();
+
+      __reliabilityPhase6ATestInternals.resetStore();
+      await bootstrapReliabilityOS();
+      const secondSnapshot = snapshotCanonicalReliabilityKeys();
+
+      assert.deepEqual(secondSnapshot, firstSnapshot);
+      assertReliabilityBootstrapFootprint();
+    },
+  },
   {
     name: "phase6a trace replay remains lineage deterministic",
     run: async () => {

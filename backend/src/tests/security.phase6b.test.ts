@@ -46,7 +46,120 @@ const reset = async () => {
 
 const getStore = () => __securityPhase6BTestInternals.getStore();
 
+const expectedBootstrapFootprint = {
+  roleCount: 4,
+  permissionCount: 11,
+  policyCount: 3,
+  accessPolicyCount: 3,
+  retentionPolicyCount: 1,
+  complianceCount: 5,
+};
+
+const snapshotCanonicalSecurityKeys = () => {
+  const store = getStore();
+  return {
+    roleKeys: Array.from(store.roleLedger.keys()).sort(),
+    permissionKeys: Array.from(store.permissionLedger.keys()).sort(),
+    accessPolicyKeys: Array.from(store.accessPolicyLedger.keys()).sort(),
+    retentionPolicyKeys: Array.from(store.retentionPolicyLedger.keys()).sort(),
+    complianceKeys: Array.from(store.complianceLedger.keys()).sort(),
+  };
+};
+
+const assertBootstrapSecurityFootprint = () => {
+  const store = getStore();
+  assert.equal(store.roleLedger.size, expectedBootstrapFootprint.roleCount);
+  assert.equal(
+    store.permissionLedger.size,
+    expectedBootstrapFootprint.permissionCount
+  );
+  assert.equal(store.policyLedger.size, expectedBootstrapFootprint.policyCount);
+  assert.equal(
+    store.accessPolicyLedger.size,
+    expectedBootstrapFootprint.accessPolicyCount
+  );
+  assert.equal(
+    store.retentionPolicyLedger.size,
+    expectedBootstrapFootprint.retentionPolicyCount
+  );
+  assert.equal(
+    store.complianceLedger.size,
+    expectedBootstrapFootprint.complianceCount
+  );
+  assert.equal(store.authorities.get("RoleLedger") || 0, expectedBootstrapFootprint.roleCount);
+  assert.equal(
+    store.authorities.get("PermissionLedger") || 0,
+    expectedBootstrapFootprint.permissionCount
+  );
+  assert.equal(
+    store.authorities.get("PolicyLedger") || 0,
+    expectedBootstrapFootprint.policyCount
+  );
+  assert.equal(
+    store.authorities.get("AccessPolicyLedger") || 0,
+    expectedBootstrapFootprint.accessPolicyCount
+  );
+  assert.equal(
+    store.authorities.get("RetentionPolicyLedger") || 0,
+    expectedBootstrapFootprint.retentionPolicyCount
+  );
+  assert.equal(
+    store.authorities.get("ComplianceLedger") || 0,
+    expectedBootstrapFootprint.complianceCount
+  );
+};
+
 export const securityPhase6BTests: TestCase[] = [
+  {
+    name: "phase6b bootstrap double replay remains idempotent for canonical ledgers",
+    run: async () => {
+      __securityPhase6BTestInternals.resetStore();
+      const first = await bootstrapSecurityGovernanceOS();
+      const second = await bootstrapSecurityGovernanceOS();
+      assert.equal(
+        first.bootstrappedAt.toISOString(),
+        second.bootstrappedAt.toISOString()
+      );
+      assertBootstrapSecurityFootprint();
+    },
+  },
+  {
+    name: "phase6b bootstrap triple replay remains idempotent for canonical ledgers",
+    run: async () => {
+      __securityPhase6BTestInternals.resetStore();
+      await bootstrapSecurityGovernanceOS();
+      await bootstrapSecurityGovernanceOS();
+      await bootstrapSecurityGovernanceOS();
+      assertBootstrapSecurityFootprint();
+    },
+  },
+  {
+    name: "phase6b bootstrap parallel race collapses to a single authority path",
+    run: async () => {
+      __securityPhase6BTestInternals.resetStore();
+      await Promise.all(
+        Array.from({
+          length: 12,
+        }).map(() => bootstrapSecurityGovernanceOS())
+      );
+      assertBootstrapSecurityFootprint();
+    },
+  },
+  {
+    name: "phase6b cold start replay keeps canonical ledger keys deterministic",
+    run: async () => {
+      __securityPhase6BTestInternals.resetStore();
+      await bootstrapSecurityGovernanceOS();
+      const firstSnapshot = snapshotCanonicalSecurityKeys();
+
+      __securityPhase6BTestInternals.resetStore();
+      await bootstrapSecurityGovernanceOS();
+      const secondSnapshot = snapshotCanonicalSecurityKeys();
+
+      assert.deepEqual(secondSnapshot, firstSnapshot);
+      assertBootstrapSecurityFootprint();
+    },
+  },
   {
     name: "phase6b privilege escalation replay is blocked after first consume",
     run: async () => {

@@ -267,6 +267,8 @@ const globalForReliability = globalThis as typeof globalThis & {
   __sylphReliabilityStore?: ReliabilityStore;
 };
 
+let bootstrapReliabilityInFlight: Promise<ReliabilityPolicyRecord> | null = null;
+
 const createStore = (): ReliabilityStore => ({
   observabilityEvents: new Map(),
   incidents: new Map(),
@@ -395,17 +397,15 @@ const ensurePolicy = async () => {
     return created;
   }
 
-  const existing = await db.reliabilityPolicy
-    .findFirst({
-      where: {
-        isActive: true,
-        scopeType: "GLOBAL",
-      },
-      orderBy: {
-        effectiveFrom: "desc",
-      },
-    })
-    .catch(() => null);
+  const existing = await db.reliabilityPolicy.findFirst({
+    where: {
+      isActive: true,
+      scopeType: "GLOBAL",
+    },
+    orderBy: {
+      effectiveFrom: "desc",
+    },
+  });
 
   if (existing) {
     return {
@@ -421,8 +421,26 @@ const ensurePolicy = async () => {
   }
 
   const created = defaultPolicy();
-  const row = await db.reliabilityPolicy.create({
-    data: {
+  const row = await db.reliabilityPolicy.upsert({
+    where: {
+      policyKey: created.policyKey,
+    },
+    update: {
+      scopeType: created.scopeType,
+      scopeId: created.scopeId,
+      version: created.version,
+      isActive: created.isActive,
+      thresholds: created.thresholds,
+      suppression: created.suppression,
+      escalation: created.escalation,
+      autoMitigation: created.autoMitigation,
+      sloPolicy: created.sloPolicy,
+      replayPolicy: created.replayPolicy,
+      chaosPolicy: created.chaosPolicy,
+      effectiveFrom: created.effectiveFrom,
+      updatedAt: now(),
+    },
+    create: {
       ...created,
       thresholds: created.thresholds,
       suppression: created.suppression,
@@ -1887,37 +1905,24 @@ export const registerRunbook = async ({
     return row;
   }
 
-  const existing = await db.runbookLedger
-    .findUnique({
-      where: {
-        runbookKey,
-      },
-    })
-    .catch(() => null);
-
-  if (!existing) {
-    return db.runbookLedger.create({
-      data: {
-        runbookKey,
-        subsystem,
-        title,
-        ownerRole,
-        ownerUserId,
-        version: Math.max(1, Math.floor(version)),
-        sop,
-        rollbackSteps,
-        escalationMatrix: escalationMatrix || null,
-        isActive,
-        metadata,
-      },
-    });
-  }
-
-  return db.runbookLedger.update({
+  return db.runbookLedger.upsert({
     where: {
       runbookKey,
     },
-    data: {
+    update: {
+      subsystem,
+      title,
+      ownerRole,
+      ownerUserId,
+      version: Math.max(1, Math.floor(version)),
+      sop,
+      rollbackSteps,
+      escalationMatrix: escalationMatrix || null,
+      isActive,
+      metadata,
+    },
+    create: {
+      runbookKey,
       subsystem,
       title,
       ownerRole,
@@ -2427,62 +2432,78 @@ export const runReliabilitySelfAudit = async ({
 };
 
 export const bootstrapReliabilityOS = async () => {
-  const policy = await ensurePolicy();
-  await registerRunbook({
-    runbookKey: "runbook:providers:failover:v1",
-    subsystem: "PROVIDERS",
-    title: "Provider Outage Failover SOP",
-    ownerRole: "SRE",
-    version: 1,
-    sop: {
-      trigger: "provider_error_rate_critical",
-      actions: [
-        "verify provider status",
-        "enable provider failover override",
-        "route traffic to healthy provider",
-      ],
-    },
-    rollbackSteps: {
-      steps: ["disable failover override", "resume primary provider traffic"],
-    },
-    escalationMatrix: {
-      p1: ["ONCALL", "MANAGER", "OWNER"],
-    },
-    metadata: {
-      autoBootstrapped: true,
-    },
-  });
-  await registerRunbook({
-    runbookKey: "runbook:queues:lag:v1",
-    subsystem: "QUEUES",
-    title: "Queue Lag Drain SOP",
-    ownerRole: "SRE",
-    version: 1,
-    sop: {
-      trigger: "queue_lag_critical",
-      actions: [
-        "throttle non-critical workers",
-        "drain dead-letter backlog",
-        "isolate problematic tenant",
-      ],
-    },
-    rollbackSteps: {
-      steps: ["restore worker concurrency", "disable tenant isolation override"],
-    },
-    escalationMatrix: {
-      p1: ["ONCALL", "MANAGER", "OWNER"],
-    },
-    metadata: {
-      autoBootstrapped: true,
-    },
-  });
+  if (bootstrapReliabilityInFlight) {
+    return bootstrapReliabilityInFlight;
+  }
 
-  return policy;
+  const bootstrapPromise = (async () => {
+    const policy = await ensurePolicy();
+    await registerRunbook({
+      runbookKey: "runbook:providers:failover:v1",
+      subsystem: "PROVIDERS",
+      title: "Provider Outage Failover SOP",
+      ownerRole: "SRE",
+      version: 1,
+      sop: {
+        trigger: "provider_error_rate_critical",
+        actions: [
+          "verify provider status",
+          "enable provider failover override",
+          "route traffic to healthy provider",
+        ],
+      },
+      rollbackSteps: {
+        steps: ["disable failover override", "resume primary provider traffic"],
+      },
+      escalationMatrix: {
+        p1: ["ONCALL", "MANAGER", "OWNER"],
+      },
+      metadata: {
+        autoBootstrapped: true,
+      },
+    });
+    await registerRunbook({
+      runbookKey: "runbook:queues:lag:v1",
+      subsystem: "QUEUES",
+      title: "Queue Lag Drain SOP",
+      ownerRole: "SRE",
+      version: 1,
+      sop: {
+        trigger: "queue_lag_critical",
+        actions: [
+          "throttle non-critical workers",
+          "drain dead-letter backlog",
+          "isolate problematic tenant",
+        ],
+      },
+      rollbackSteps: {
+        steps: ["restore worker concurrency", "disable tenant isolation override"],
+      },
+      escalationMatrix: {
+        p1: ["ONCALL", "MANAGER", "OWNER"],
+      },
+      metadata: {
+        autoBootstrapped: true,
+      },
+    });
+
+    return policy;
+  })();
+
+  bootstrapReliabilityInFlight = bootstrapPromise;
+  try {
+    return await bootstrapPromise;
+  } finally {
+    if (bootstrapReliabilityInFlight === bootstrapPromise) {
+      bootstrapReliabilityInFlight = null;
+    }
+  }
 };
 
 export const __reliabilityPhase6ATestInternals = {
   resetStore: () => {
     globalForReliability.__sylphReliabilityStore = createStore();
+    bootstrapReliabilityInFlight = null;
   },
   getStore,
 };

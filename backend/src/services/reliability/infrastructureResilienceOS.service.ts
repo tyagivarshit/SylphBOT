@@ -246,6 +246,12 @@ const globalForInfrastructure = globalThis as typeof globalThis & {
   __sylphInfrastructureStore?: InfrastructureStore;
 };
 
+let bootstrapInfrastructureResilienceInFlight: Promise<{
+  bootstrappedAt: Date;
+  phaseVersion: string;
+  alreadyBootstrapped: boolean;
+}> | null = null;
+
 const createStore = (): InfrastructureStore => ({
   bootstrappedAt: null,
   invokeCount: 0,
@@ -286,6 +292,20 @@ const withDbMirror = async (writer: () => Promise<unknown>) => {
   } catch {
     return null;
   }
+};
+
+const withDbMirrorStrict = async <T>(writer: () => Promise<T>) => {
+  if (shouldUseInMemory) {
+    return null as T | null;
+  }
+  return writer();
+};
+
+const toCanonicalUpdateData = <T extends Record<string, unknown>>(row: T) => {
+  const { createdAt: _createdAt, ...updateData } = row as T & {
+    createdAt?: unknown;
+  };
+  return updateData;
 };
 
 const appendAuditLedger = async (input: {
@@ -348,7 +368,15 @@ const appendAuditLedger = async (input: {
 
   const ledger = getDbLedger("infrastructureAuditLedger");
   if (ledger) {
-    await withDbMirror(() => ledger.create({ data: row }));
+    await withDbMirrorStrict(() =>
+      ledger.upsert({
+        where: {
+          auditKey,
+        },
+        update: {},
+        create: row,
+      })
+    );
   }
 
   return row;
@@ -500,17 +528,15 @@ const ensurePolicy = async () => {
     return defaultPolicy;
   }
 
-  const existing = await ledger
-    .findFirst({
-      where: {
-        isActive: true,
-        scopeType: "GLOBAL",
-      },
-      orderBy: {
-        effectiveFrom: "desc",
-      },
-    })
-    .catch(() => null);
+  const existing = await ledger.findFirst({
+    where: {
+      isActive: true,
+      scopeType: "GLOBAL",
+    },
+    orderBy: {
+      effectiveFrom: "desc",
+    },
+  });
 
   if (existing) {
     const normalizedExisting = normalizePolicyRecord(existing);
@@ -521,7 +547,7 @@ const ensurePolicy = async () => {
     }
 
     const upgraded = buildUpgradedPolicy(normalizedExisting);
-    await withDbMirror(() =>
+    await withDbMirrorStrict(() =>
       ledger.updateMany({
         where: {
           scopeType: "GLOBAL",
@@ -533,7 +559,15 @@ const ensurePolicy = async () => {
         },
       })
     );
-    const created = await ledger.create({ data: upgraded }).catch(() => upgraded);
+    const created = await ledger.upsert({
+      where: {
+        policyKey: upgraded.policyKey,
+      },
+      update: {
+        ...toCanonicalUpdateData(upgraded),
+      },
+      create: upgraded,
+    });
     const normalizedCreated = normalizePolicyRecord(created);
     store.policyLedger.set(normalizedExisting.policyKey, {
       ...normalizedExisting,
@@ -545,7 +579,15 @@ const ensurePolicy = async () => {
     return normalizedCreated;
   }
 
-  const created = await ledger.create({ data: defaultPolicy }).catch(() => defaultPolicy);
+  const created = await ledger.upsert({
+    where: {
+      policyKey: defaultPolicy.policyKey,
+    },
+    update: {
+      ...toCanonicalUpdateData(defaultPolicy),
+    },
+    create: defaultPolicy,
+  });
   const normalized = normalizePolicyRecord(created);
   store.policyLedger.set(normalized.policyKey, normalized);
   bumpAuthority("InfrastructurePolicyLedger");
@@ -817,7 +859,7 @@ export const registerInfrastructureSubsystem = async (input: {
 
   const subsystemLedger = getDbLedger("infrastructureSubsystemLedger");
   if (subsystemLedger) {
-    await withDbMirror(() =>
+    await withDbMirrorStrict(() =>
       subsystemLedger.upsert({
         where: {
           subsystemKey,
@@ -862,7 +904,7 @@ export const registerInfrastructureSubsystem = async (input: {
     bumpAuthority("InfrastructureEngineLedger");
 
     if (engineLedger) {
-      await withDbMirror(() =>
+      await withDbMirrorStrict(() =>
         engineLedger.upsert({
           where: {
             engineKey,
@@ -2180,47 +2222,63 @@ export const bootstrapInfrastructureResilienceOS = async () => {
     };
   }
 
-  await ensurePolicy();
-
-  for (const definition of CANONICAL_SUBSYSTEM_CATALOG) {
-    await registerInfrastructureSubsystem({
-      authority: definition.authority,
-      subsystem: definition.subsystem,
-      ownerRole: definition.ownerRole,
-      criticality: definition.criticality,
-      engines: definition.engines,
-      metadata: {
-        bootstrapped: true,
-      },
-    });
+  if (bootstrapInfrastructureResilienceInFlight) {
+    return bootstrapInfrastructureResilienceInFlight;
   }
 
-  const timestamp = now();
-  store.bootstrappedAt = timestamp;
+  const bootstrapPromise = (async () => {
+    await ensurePolicy();
 
-  await appendAuditLedger({
-    authority: "CONTROL_PLANE",
-    subsystem: "API_EDGE",
-    action: "BOOTSTRAP_COMPLETED",
-    resourceType: "INFRA_BOOTSTRAP",
-    resourceKey: "phase6c.final",
-    metadata: {
+    for (const definition of CANONICAL_SUBSYSTEM_CATALOG) {
+      await registerInfrastructureSubsystem({
+        authority: definition.authority,
+        subsystem: definition.subsystem,
+        ownerRole: definition.ownerRole,
+        criticality: definition.criticality,
+        engines: definition.engines,
+        metadata: {
+          bootstrapped: true,
+        },
+      });
+    }
+
+    const timestamp = now();
+    store.bootstrappedAt = timestamp;
+
+    await appendAuditLedger({
+      authority: "CONTROL_PLANE",
+      subsystem: "API_EDGE",
+      action: "BOOTSTRAP_COMPLETED",
+      resourceType: "INFRA_BOOTSTRAP",
+      resourceKey: "phase6c.final",
+      metadata: {
+        phaseVersion: INFRASTRUCTURE_PHASE_VERSION,
+        authorities: INFRA_AUTHORITIES.length,
+        subsystems: CANONICAL_SUBSYSTEM_CATALOG.length,
+      },
+    });
+
+    return {
+      bootstrappedAt: timestamp,
       phaseVersion: INFRASTRUCTURE_PHASE_VERSION,
-      authorities: INFRA_AUTHORITIES.length,
-      subsystems: CANONICAL_SUBSYSTEM_CATALOG.length,
-    },
-  });
+      alreadyBootstrapped: false,
+    };
+  })();
 
-  return {
-    bootstrappedAt: timestamp,
-    phaseVersion: INFRASTRUCTURE_PHASE_VERSION,
-    alreadyBootstrapped: false,
-  };
+  bootstrapInfrastructureResilienceInFlight = bootstrapPromise;
+  try {
+    return await bootstrapPromise;
+  } finally {
+    if (bootstrapInfrastructureResilienceInFlight === bootstrapPromise) {
+      bootstrapInfrastructureResilienceInFlight = null;
+    }
+  }
 };
 
 export const __infrastructurePhase6CTestInternals = {
   resetStore: () => {
     globalForInfrastructure.__sylphInfrastructureStore = createStore();
+    bootstrapInfrastructureResilienceInFlight = null;
   },
   getStore: () => getStore(),
   canonicalCatalog: () => CANONICAL_SUBSYSTEM_CATALOG,

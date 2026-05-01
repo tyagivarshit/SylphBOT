@@ -1,57 +1,95 @@
-"use client"
+"use client";
 
-import { useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { apiFetch } from "@/lib/apiClient"
-import { fetchClientConnectionStatus } from "@/lib/userApi"
+import { Suspense, useEffect } from "react";
+import type { Route } from "next";
+import { useRouter, useSearchParams } from "next/navigation";
+import { apiFetch } from "@/lib/apiClient";
+import { buildAppUrl, fetchClientConnectionStatus } from "@/lib/userApi";
 
-export default function MetaCallback(){
+const buildSettingsRedirect = (params: Record<string, string>) => {
+  const url = new URL(buildAppUrl("/settings"));
 
-const router = useRouter()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) {
+      url.searchParams.set(key, value);
+    }
+  });
 
-useEffect(()=>{
+  return `${url.pathname}${url.search}`;
+};
 
-const params = new URLSearchParams(window.location.search)
+function MetaCallbackContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-const code = params.get("code")
+  useEffect(() => {
+    const code = searchParams.get("code") || "";
+    const state = searchParams.get("state") || "";
+    const platform = (searchParams.get("platform") || "").toLowerCase();
 
-if(!code) return
+    if (!code || !state) {
+      router.replace(
+        buildSettingsRedirect({
+          integration: "error",
+          reason: "oauth_callback_payload_missing",
+          platform,
+        }) as Route
+      );
+      return;
+    }
 
-const connect = async()=>{
+    const connect = async () => {
+      const response = await apiFetch<{
+        platform?: string;
+      }>("/api/clients/oauth/meta", {
+        method: "POST",
+        body: JSON.stringify({ code, state }),
+      });
 
-try{
+      if (!response.success) {
+        router.replace(
+          buildSettingsRedirect({
+            integration: "error",
+            reason: "oauth_connect_failed",
+            platform,
+          }) as Route
+        );
+        return;
+      }
 
-await apiFetch("/api/clients/oauth/meta",{
-method:"POST",
-body:JSON.stringify({ code })
-})
+      await fetchClientConnectionStatus().catch(() => null);
 
-await fetchClientConnectionStatus().catch(() => null)
+      const connectedPlatform =
+        platform || String(response.data?.platform || "").toLowerCase();
 
-router.push("/clients")
+      router.replace(
+        buildSettingsRedirect({
+          integration: "success",
+          platform: connectedPlatform,
+        }) as Route
+      );
+    };
 
-}catch(err){
+    void connect();
+  }, [router, searchParams]);
 
-console.error(err)
-
-router.push("/clients")
-
+  return (
+    <div className="flex h-screen items-center justify-center text-sm text-slate-600">
+      Finalizing integration connection...
+    </div>
+  );
 }
 
-}
-
-connect()
-
-},[])
-
-return(
-
-<div className="flex items-center justify-center h-screen">
-
-Connecting Instagram...
-
-</div>
-
-)
-
+export default function MetaCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center text-sm text-slate-600">
+          Finalizing integration connection...
+        </div>
+      }
+    >
+      <MetaCallbackContent />
+    </Suspense>
+  );
 }

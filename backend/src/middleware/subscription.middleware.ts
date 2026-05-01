@@ -72,66 +72,83 @@ const mapCanonicalSubscription = (row: any) => ({
 
 const getCachedSubscription = async (businessId: string) => {
   const cacheKey = getKey(businessId);
-  const cached = await redis.get(cacheKey);
+  const cached = await redis.get(cacheKey).catch(() => null);
 
   if (cached) {
-    return JSON.parse(cached);
+    try {
+      return JSON.parse(cached);
+    } catch {
+      await redis.del(cacheKey).catch(() => undefined);
+    }
   }
 
-  const canonical = await prisma.subscriptionLedger.findFirst({
-    where: {
-      businessId,
-    },
-    orderBy: {
-      updatedAt: "desc",
-    },
-  });
+  const canonical = await prisma.subscriptionLedger
+    .findFirst({
+      where: {
+        businessId,
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    })
+    .catch(() => null);
   const subscription = canonical
     ? mapCanonicalSubscription(canonical)
     : null;
 
   if (subscription) {
-    await redis.set(
-      cacheKey,
-      JSON.stringify(subscription),
-      "EX",
-      CACHE_TTL
-    );
+    await redis
+      .set(
+        cacheKey,
+        JSON.stringify(subscription),
+        "EX",
+        CACHE_TTL
+      )
+      .catch(() => undefined);
   }
 
   return subscription;
 };
 
 const getEarlyAccessSnapshot = async (subscription: any | null) => {
-  const plans = await prisma.plan.findMany({
-    where: {
-      type: {
-        in: ["BASIC", "PRO", "ELITE"],
+  try {
+    const plans = await prisma.plan.findMany({
+      where: {
+        type: {
+          in: ["BASIC", "PRO", "ELITE"],
+        },
       },
-    },
-    select: {
-      earlyUsed: true,
-    },
-  });
+      select: {
+        earlyUsed: true,
+      },
+    });
 
-  const totalEarlyUsed = plans.reduce(
-    (acc, plan) => acc + (plan.earlyUsed || 0),
-    0
-  );
-
-  return {
-    allowEarly:
-      totalEarlyUsed < EARLY_ACCESS_LIMIT &&
-      !subscription?.stripeSubscriptionId,
-    remainingEarly: Math.max(
-      EARLY_ACCESS_LIMIT - totalEarlyUsed,
+    const totalEarlyUsed = plans.reduce(
+      (acc, plan) => acc + (plan.earlyUsed || 0),
       0
-    ),
-  };
+    );
+
+    return {
+      allowEarly:
+        totalEarlyUsed < EARLY_ACCESS_LIMIT &&
+        !subscription?.stripeSubscriptionId,
+      remainingEarly: Math.max(
+        EARLY_ACCESS_LIMIT - totalEarlyUsed,
+        0
+      ),
+    };
+  } catch {
+    return {
+      allowEarly: false,
+      remainingEarly: 0,
+    };
+  }
 };
 
 export const loadBillingContext = async (businessId: string) => {
-  const cachedSubscription = await getCachedSubscription(businessId);
+  const cachedSubscription = await getCachedSubscription(businessId).catch(
+    () => null
+  );
   const subscription = cachedSubscription;
   const now = new Date();
 
@@ -180,7 +197,10 @@ export const loadBillingContext = async (businessId: string) => {
     }
   }
 
-  const earlyAccess = await getEarlyAccessSnapshot(subscription);
+  const earlyAccess = await getEarlyAccessSnapshot(subscription).catch(() => ({
+    allowEarly: false,
+    remainingEarly: 0,
+  }));
 
   context.allowEarly = earlyAccess.allowEarly;
   context.remainingEarly = earlyAccess.remainingEarly;

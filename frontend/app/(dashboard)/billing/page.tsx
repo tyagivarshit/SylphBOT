@@ -8,10 +8,7 @@ import { notify } from "@/lib/toast";
 import PaymentHistory from "@/components/billing/PaymentHistory";
 import { apiFetch } from "@/lib/apiClient";
 import LoadingButton from "@/components/ui/LoadingButton";
-import {
-  RetryState,
-  SkeletonCard,
-} from "@/components/ui/feedback";
+import { SkeletonCard } from "@/components/ui/feedback";
 
 type Currency = "INR" | "USD";
 type BillingCycle = "monthly" | "yearly";
@@ -83,6 +80,13 @@ type BillingApiResponse = {
   currency?: Currency;
 };
 
+const DEFAULT_BILLING_CONTEXT: BillingContext = {
+  planKey: "FREE_LOCKED",
+  status: "INACTIVE",
+  allowEarly: false,
+  remainingEarly: 0,
+};
+
 const formatMoney = (amount: number, currency: Currency) =>
   new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
     style: "currency",
@@ -139,40 +143,76 @@ function BillingPageContent() {
     trialDays: 7,
   });
   const [pageLoading, setPageLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadWarning, setLoadWarning] = useState<string | null>(null);
 
   const loadBilling = useCallback(async () => {
     try {
       setPageLoading(true);
-      setError(null);
+      setLoadWarning(null);
 
-      const [billingData, plansData] = await Promise.all([
+      const [billingResult, plansResult] = await Promise.allSettled([
         fetchJson<BillingApiResponse>("/api/billing"),
         fetchJson<PlansResponse>("/api/billing/plans"),
       ]);
 
-      setSubscription(billingData.subscription || null);
-      setInvoices(billingData.invoices || []);
-      setBillingContext(billingData.billing || null);
-      setPlansResponse({
-        plans: plansData.plans || [],
-        addons: plansData.addons || [],
-        trialDays: plansData.trialDays || 7,
-      });
+      const warnings: string[] = [];
 
-      const nextCurrency =
-        billingData.subscription?.currency || billingData.currency || "INR";
+      if (billingResult.status === "fulfilled") {
+        const billingData = billingResult.value;
 
-      setCurrency(nextCurrency);
-      setLockedCurrency(billingData.subscription?.currency || null);
+        setSubscription(billingData.subscription || null);
+        setInvoices(billingData.invoices || []);
+        setBillingContext(billingData.billing || DEFAULT_BILLING_CONTEXT);
 
-      if (billingData.subscription?.billingCycle) {
-        setBilling(billingData.subscription.billingCycle);
+        const nextCurrency =
+          billingData.subscription?.currency || billingData.currency || "INR";
+
+        setCurrency(nextCurrency);
+        setLockedCurrency(billingData.subscription?.currency || null);
+
+        if (billingData.subscription?.billingCycle) {
+          setBilling(billingData.subscription.billingCycle);
+        }
+      } else {
+        warnings.push("Billing summary is temporarily unavailable.");
+        setSubscription(null);
+        setInvoices([]);
+        setBillingContext(DEFAULT_BILLING_CONTEXT);
+        setLockedCurrency(null);
       }
+
+      if (plansResult.status === "fulfilled") {
+        const plansData = plansResult.value;
+
+        setPlansResponse({
+          plans: plansData.plans || [],
+          addons: plansData.addons || [],
+          trialDays: plansData.trialDays || 7,
+        });
+      } else {
+        warnings.push("Plan catalog is temporarily unavailable.");
+        setPlansResponse({
+          plans: [],
+          addons: [],
+          trialDays: 7,
+        });
+      }
+
+      setLoadWarning(warnings.length ? warnings.join(" ") : null);
     } catch (loadError) {
-      setError(
-        loadError instanceof Error ? loadError.message : "Failed to load billing"
+      setLoadWarning(
+        loadError instanceof Error
+          ? loadError.message
+          : "Some billing data could not be loaded."
       );
+      setSubscription(null);
+      setInvoices([]);
+      setBillingContext(DEFAULT_BILLING_CONTEXT);
+      setPlansResponse({
+        plans: [],
+        addons: [],
+        trialDays: 7,
+      });
     } finally {
       setPageLoading(false);
     }
@@ -237,16 +277,6 @@ function BillingPageContent() {
     return <BillingPageSkeleton />;
   }
 
-  if (error) {
-    return (
-      <RetryState
-        title="Billing workspace unavailable"
-        description={error}
-        onRetry={() => void loadBilling()}
-      />
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
@@ -274,6 +304,12 @@ function BillingPageContent() {
           </div>
         </div>
       </div>
+
+      {loadWarning ? (
+        <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800">
+          {loadWarning}
+        </div>
+      ) : null}
 
       {isCancelled ? (
         <div className="rounded-[24px] border border-amber-200 bg-amber-50/90 px-5 py-4 text-sm text-amber-800 shadow-sm">
@@ -435,6 +471,12 @@ function BillingPageContent() {
             </div>
           );
         })}
+
+        {plans.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200/80 bg-white/86 p-6 text-sm text-slate-600 sm:col-span-2 xl:col-span-3">
+            Plan options are temporarily unavailable. Your billing state and payment history are still accessible below.
+          </div>
+        ) : null}
       </div>
 
       {plansResponse.addons?.length ? (

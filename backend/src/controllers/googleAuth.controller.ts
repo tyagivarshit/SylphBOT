@@ -124,6 +124,13 @@ export const googleCallback = async (req: Request, res: Response) => {
         business = { id: newBusiness.id };
       }
 
+      if (user.businessId !== business.id) {
+        await tx.user.update({
+          where: { id: user.id },
+          data: { businessId: business.id },
+        });
+      }
+
       const accessToken = generateAccessToken(
         user.id,
         user.role,

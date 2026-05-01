@@ -14,70 +14,172 @@ const proposalEngine_service_1 = require("../services/proposalEngine.service");
 const subscriptionEngine_service_1 = require("../services/subscriptionEngine.service");
 const pricing_config_1 = require("../config/pricing.config");
 const usage_service_1 = require("../services/usage.service");
-/* ====================================== */
-/* USER CONTEXT */
-/* ====================================== */
+const tenant_service_1 = require("../services/tenant.service");
+const EMPTY_USAGE_SUMMARY = {
+    aiCallsUsed: 0,
+    messagesUsed: 0,
+    followupsUsed: 0,
+    summary: {
+        plan: "LOCKED",
+        planLabel: "Locked",
+        trialActive: false,
+        daysLeft: 0,
+        warning: false,
+        warningMessage: null,
+        addonCredits: 0,
+        ai: {
+            usedToday: 0,
+            limit: 0,
+            remaining: 0,
+        },
+        usage: {
+            ai: {
+                used: 0,
+                dailyLimit: 0,
+                monthlyUsed: 0,
+                monthlyLimit: 0,
+                dailyRemaining: 0,
+                monthlyRemaining: 0,
+                warning: false,
+            },
+            contacts: {
+                used: 0,
+                limit: 0,
+                remaining: 0,
+            },
+            messages: {
+                used: 0,
+                limit: 0,
+                remaining: 0,
+            },
+            automation: {
+                used: 0,
+                limit: 0,
+                remaining: 0,
+            },
+        },
+        addons: {
+            aiCredits: 0,
+            contacts: 0,
+        },
+    },
+};
+const EMPTY_BILLING_CONTEXT = {
+    subscription: null,
+    plan: null,
+    planKey: "FREE_LOCKED",
+    status: "INACTIVE",
+    isLimited: true,
+    upgradeRequired: true,
+    allowEarly: false,
+    remainingEarly: 0,
+};
+const mapInvoiceForClient = (invoice) => ({
+    id: invoice.invoiceKey,
+    invoiceKey: invoice.invoiceKey,
+    status: String(invoice.status || "").toLowerCase(),
+    currency: invoice.currency,
+    amount: invoice.totalMinor,
+    subtotal: invoice.subtotalMinor,
+    taxAmount: invoice.taxMinor,
+    paidAmount: invoice.paidMinor,
+    created: Math.floor(invoice.createdAt.getTime() / 1000),
+    createdAt: invoice.createdAt,
+    dueAt: invoice.dueAt,
+    issuedAt: invoice.issuedAt,
+    paidAt: invoice.paidAt,
+    externalInvoiceId: invoice.externalInvoiceId,
+    hosted_invoice_url: null,
+    invoice_pdf: null,
+});
 async function getUserContext(req) {
     const userId = req.user?.id;
-    const businessId = req.user?.businessId;
-    if (!userId || !businessId) {
+    if (!userId) {
         throw new Error("Unauthorized");
     }
     const user = await prisma_1.default.user.findUnique({
         where: { id: userId },
+        select: {
+            id: true,
+            email: true,
+            businessId: true,
+        },
     });
     if (!user) {
         throw new Error("Unauthorized");
     }
+    const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+        userId,
+        preferredBusinessId: req.user?.businessId || user.businessId || null,
+    });
     return {
         userId,
-        businessId,
+        businessId: identity.businessId,
         email: user.email,
     };
 }
-/* ====================================== */
-/* CONTROLLER */
-/* ====================================== */
 class BillingController {
     static async buildBillingResponse(businessId, req) {
-        const [{ subscription, context }, usage] = await Promise.all([
+        if (!businessId) {
+            return {
+                success: true,
+                subscription: null,
+                billing: EMPTY_BILLING_CONTEXT,
+                usage: EMPTY_USAGE_SUMMARY,
+                currency: (0, billingGeo_service_1.resolveBillingCurrency)(req),
+                invoices: [],
+            };
+        }
+        const [billingContextResult, usageResult, invoicesResult] = await Promise.allSettled([
             (0, subscription_middleware_1.loadBillingContext)(businessId),
             (0, usage_service_1.getUsageOverview)(businessId),
+            prisma_1.default.invoiceLedger.findMany({
+                where: {
+                    businessId,
+                },
+                orderBy: {
+                    createdAt: "desc",
+                },
+                take: 20,
+                select: {
+                    invoiceKey: true,
+                    status: true,
+                    currency: true,
+                    subtotalMinor: true,
+                    taxMinor: true,
+                    totalMinor: true,
+                    paidMinor: true,
+                    dueAt: true,
+                    issuedAt: true,
+                    paidAt: true,
+                    externalInvoiceId: true,
+                    createdAt: true,
+                },
+            }),
         ]);
-        const invoices = await prisma_1.default.invoiceLedger.findMany({
-            where: {
-                businessId,
-            },
-            orderBy: {
-                createdAt: "desc",
-            },
-            take: 20,
-            select: {
-                invoiceKey: true,
-                status: true,
-                currency: true,
-                subtotalMinor: true,
-                taxMinor: true,
-                totalMinor: true,
-                paidMinor: true,
-                dueAt: true,
-                issuedAt: true,
-                paidAt: true,
-                externalInvoiceId: true,
-                createdAt: true,
-            },
-        });
+        const billingContext = billingContextResult.status === "fulfilled"
+            ? billingContextResult.value
+            : {
+                subscription: null,
+                context: EMPTY_BILLING_CONTEXT,
+            };
+        const usage = usageResult.status === "fulfilled" ? usageResult.value : null;
+        const invoices = invoicesResult.status === "fulfilled"
+            ? invoicesResult.value.map(mapInvoiceForClient)
+            : [];
         return {
             success: true,
-            subscription,
-            billing: context,
-            usage: {
-                aiCallsUsed: usage.usage.ai.monthlyUsed,
-                messagesUsed: usage.usage.messages.used,
-                followupsUsed: usage.usage.automation.used,
-                summary: usage,
-            },
-            currency: subscription?.currency || (0, billingGeo_service_1.resolveBillingCurrency)(req),
+            subscription: billingContext.subscription,
+            billing: billingContext.context,
+            usage: usage
+                ? {
+                    aiCallsUsed: usage.usage.ai.monthlyUsed,
+                    messagesUsed: usage.usage.messages.used,
+                    followupsUsed: usage.usage.automation.used,
+                    summary: usage,
+                }
+                : EMPTY_USAGE_SUMMARY,
+            currency: billingContext.subscription?.currency || (0, billingGeo_service_1.resolveBillingCurrency)(req),
             invoices,
         };
     }
@@ -111,6 +213,12 @@ class BillingController {
                 });
             }
             const { businessId } = await getUserContext(req);
+            if (!businessId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Business context is required",
+                });
+            }
             const currency = (0, billingGeo_service_1.resolveBillingCurrency)(req);
             const pricingPlan = (0, pricing_config_1.getPricingPlanConfig)(normalizedPlan);
             const unitPrice = normalizedBilling === "yearly"
@@ -235,6 +343,12 @@ class BillingController {
             return res.json(await BillingController.buildBillingResponse(businessId, req));
         }
         catch (error) {
+            if (error?.message === "Unauthorized") {
+                return res.status(401).json({
+                    success: false,
+                    message: "Unauthorized",
+                });
+            }
             console.error("Billing fetch error:", error);
             return res.status(500).json({
                 success: false,
@@ -258,6 +372,12 @@ class BillingController {
                 });
             }
             const { businessId } = await getUserContext(req);
+            if (!businessId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Business context is required",
+                });
+            }
             const paymentIntent = await prisma_1.default.paymentIntentLedger.findFirst({
                 where: {
                     businessId,
@@ -313,6 +433,12 @@ class BillingController {
     static async cancelSubscription(req, res) {
         try {
             const { businessId } = await getUserContext(req);
+            if (!businessId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Business context is required",
+                });
+            }
             const subscription = await prisma_1.default.subscriptionLedger.findFirst({
                 where: {
                     businessId,

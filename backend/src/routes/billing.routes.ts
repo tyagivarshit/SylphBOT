@@ -80,6 +80,14 @@ router.post(
   BillingController.upgradePlan
 );
 
+router.post(
+  "/portal",
+  protect,
+  requireBusinessContext,
+  requirePermission("billing:manage"),
+  BillingController.createPortal
+);
+
 /* ======================================
 CANCEL SUBSCRIPTION
 ====================================== */

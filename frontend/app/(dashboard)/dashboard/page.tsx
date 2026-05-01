@@ -7,16 +7,9 @@ import { Sparkles } from "lucide-react";
 import LeadsChart from "@/components/charts/LeadsCharts";
 import UsageOverview from "@/components/dashboard/UsageOverview";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
-import {
-  getActiveConversations,
-  getDashboardStats,
-} from "@/lib/dashboard.api";
+import { getActiveConversations, getDashboardStats } from "@/lib/dashboard.api";
 import { useUpgrade } from "@/app/(dashboard)/layout";
-import {
-  EmptyState,
-  RetryState,
-  SkeletonCard,
-} from "@/components/ui/feedback";
+import { EmptyState, RetryState, SkeletonCard } from "@/components/ui/feedback";
 
 type DashboardValue = number | string;
 
@@ -40,6 +33,7 @@ type DashboardStats = {
   plan: DashboardValue;
   chartData: ChartPoint[];
   recentActivity: ActivityItem[];
+  premiumLocked?: boolean;
 };
 
 type ConversationStats = {
@@ -48,15 +42,22 @@ type ConversationStats = {
   resolved: DashboardValue;
 };
 
+const EMPTY_CONVERSATION_STATS: ConversationStats = {
+  active: 0,
+  waitingReplies: 0,
+  resolved: 0,
+};
+
 export default function DashboardPage() {
   const { user, loading } = useAuth();
   const { openUpgrade } = useUpgrade();
   const router = useRouter();
 
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [convo, setConvo] = useState<ConversationStats | null>(null);
+  const [convo, setConvo] = useState<ConversationStats>(EMPTY_CONVERSATION_STATS);
   const [limited, setLimited] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
+  const [conversationUnavailable, setConversationUnavailable] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -73,23 +74,34 @@ export default function DashboardPage() {
     try {
       setPageLoading(true);
       setError("");
+      setConversationUnavailable(false);
 
-      const [statsRes, convoRes] = await Promise.all([
+      const [statsResult, convoResult] = await Promise.allSettled([
         getDashboardStats(),
         getActiveConversations(),
       ]);
 
-      if (!statsRes.success || !statsRes.data) {
-        throw new Error(statsRes.message || "We couldn't load your dashboard right now.");
+      if (statsResult.status !== "fulfilled" || !statsResult.value.success || !statsResult.value.data) {
+        throw new Error(
+          statsResult.status === "fulfilled"
+            ? statsResult.value.message || "We couldn't load your dashboard right now."
+            : "We couldn't load your dashboard right now."
+        );
       }
 
-      if (!convoRes.success || !convoRes.data) {
-        throw new Error(convoRes.message || "We couldn't load your conversations right now.");
-      }
+      setStats(statsResult.value.data as DashboardStats);
+      setLimited(Boolean(statsResult.value.limited));
 
-      setStats(statsRes.data as DashboardStats);
-      setConvo(convoRes.data as ConversationStats);
-      setLimited(Boolean(statsRes.limited || convoRes.limited));
+      if (
+        convoResult.status === "fulfilled" &&
+        convoResult.value.success &&
+        convoResult.value.data
+      ) {
+        setConvo(convoResult.value.data as ConversationStats);
+      } else {
+        setConversationUnavailable(true);
+        setConvo(EMPTY_CONVERSATION_STATS);
+      }
     } catch (dashboardError) {
       console.error("Dashboard error", dashboardError);
       setError("We couldn't load your dashboard right now.");
@@ -120,6 +132,11 @@ export default function DashboardPage() {
     return null;
   }
 
+  const premiumLocked = Boolean(stats.premiumLocked);
+  const qualifiedValue: DashboardValue = premiumLocked
+    ? "Upgrade required"
+    : stats.qualifiedLeads;
+
   return (
     <div className="relative min-w-0 space-y-6">
       {limited ? (
@@ -130,7 +147,7 @@ export default function DashboardPage() {
                 Usage limit reached
               </p>
               <h2 className="mt-2 text-xl font-semibold text-slate-950">
-                You've used all your AI replies for today
+                You have used all your AI replies for today
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 Buy credits or upgrade to keep replies running.
@@ -144,9 +161,8 @@ export default function DashboardPage() {
                   openUpgrade({
                     variant: "usage_limit",
                     remainingCredits: 0,
-                    title: "You've used all your AI replies for today",
-                    description:
-                      "Buy credits or upgrade to keep replies running.",
+                    title: "You have used all your AI replies for today",
+                    description: "Buy credits or upgrade to keep replies running.",
                   })
                 }
                 className="brand-button-primary"
@@ -167,8 +183,19 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      <OnboardingFlow />
+      {premiumLocked ? (
+        <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Premium dashboard metrics are locked. Upgrade required.
+        </div>
+      ) : null}
 
+      {conversationUnavailable ? (
+        <div className="rounded-[22px] border border-slate-200 bg-white/82 px-4 py-3 text-sm text-slate-600">
+          Conversation insights are temporarily unavailable. Core dashboard metrics are still live.
+        </div>
+      ) : null}
+
+      <OnboardingFlow />
       <UsageOverview />
 
       <div className="space-y-3.5 md:hidden">
@@ -179,13 +206,11 @@ export default function DashboardPage() {
           <MiniCard title="Messages" value={stats.messagesToday} />
         </div>
 
-        {convo ? (
-          <div className="grid grid-cols-3 gap-2.5">
-            <MiniCard title="Active" value={convo.active} />
-            <MiniCard title="Waiting" value={convo.waitingReplies} />
-            <MiniCard title="Resolved" value={convo.resolved} />
-          </div>
-        ) : null}
+        <div className="grid grid-cols-3 gap-2.5">
+          <MiniCard title="Active" value={convo.active} />
+          <MiniCard title="Waiting" value={convo.waitingReplies} />
+          <MiniCard title="Resolved" value={convo.resolved} />
+        </div>
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-3 backdrop-blur-xl">
           <LeadsChart data={stats.chartData} />
@@ -200,19 +225,14 @@ export default function DashboardPage() {
                 key={item.id}
                 className="min-w-0 border-b border-blue-100 py-2 last:border-none"
               >
-                <p className="break-words text-xs leading-5 text-gray-900">
-                  {item.text}
-                </p>
+                <p className="break-words text-xs leading-5 text-gray-900">{item.text}</p>
                 <span className="text-[10px] text-gray-500">
                   {new Date(item.time).toLocaleTimeString()}
                 </span>
               </div>
             ))
           ) : (
-            <EmptyState
-              title="No recent activity yet"
-              description="Activity will appear here."
-            />
+            <EmptyState title="No recent activity yet" description="Activity will appear here." />
           )}
         </div>
       </div>
@@ -223,7 +243,7 @@ export default function DashboardPage() {
           <Card title="Today" value={stats.leadsToday} />
           <Card title="This Month" value={stats.leadsThisMonth} />
           <Card title="Messages" value={stats.messagesToday} />
-          <Card title="Qualified" value={stats.qualifiedLeads} />
+          <Card title="Qualified" value={qualifiedValue} />
           <Card title="Plan" value={stats.plan} />
         </div>
 
@@ -232,13 +252,11 @@ export default function DashboardPage() {
           <LeadsChart data={stats.chartData} />
         </div>
 
-        {convo ? (
-          <div className="grid grid-cols-3 gap-4">
-            <Card title="Active" value={convo.active} />
-            <Card title="Waiting Replies" value={convo.waitingReplies} />
-            <Card title="Resolved" value={convo.resolved} />
-          </div>
-        ) : null}
+        <div className="grid grid-cols-3 gap-4">
+          <Card title="Active" value={convo.active} />
+          <Card title="Waiting Replies" value={convo.waitingReplies} />
+          <Card title="Resolved" value={convo.resolved} />
+        </div>
 
         <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
           <h2 className="mb-4 font-semibold text-gray-900">Recent activity</h2>
@@ -249,19 +267,14 @@ export default function DashboardPage() {
                 key={item.id}
                 className="flex min-w-0 justify-between gap-4 border-b border-blue-100 py-3 last:border-none"
               >
-                <p className="min-w-0 break-words text-sm text-gray-900">
-                  {item.text}
-                </p>
+                <p className="min-w-0 break-words text-sm text-gray-900">{item.text}</p>
                 <span className="shrink-0 text-sm text-gray-500">
                   {new Date(item.time).toLocaleTimeString()}
                 </span>
               </div>
             ))
           ) : (
-            <EmptyState
-              title="No recent activity yet"
-              description="Activity will appear here."
-            />
+            <EmptyState title="No recent activity yet" description="Activity will appear here." />
           )}
         </div>
       </div>
@@ -273,9 +286,7 @@ function Card({ title, value }: { title: string; value: DashboardValue }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-sm transition hover:shadow-md">
       <p className="text-sm font-medium text-gray-500">{title}</p>
-      <h2 className="mt-1 break-words text-xl font-semibold text-gray-900">
-        {value}
-      </h2>
+      <h2 className="mt-1 break-words text-xl font-semibold text-gray-900">{value}</h2>
     </div>
   );
 }
@@ -284,9 +295,7 @@ function MiniCard({ title, value }: { title: string; value: DashboardValue }) {
   return (
     <div className="overflow-hidden rounded-xl border border-blue-100 bg-white/80 p-3 shadow-sm">
       <p className="text-[10px] font-medium text-gray-500">{title}</p>
-      <h2 className="break-words text-sm font-semibold text-gray-900">
-        {value}
-      </h2>
+      <h2 className="break-words text-sm font-semibold text-gray-900">{value}</h2>
     </div>
   );
 }

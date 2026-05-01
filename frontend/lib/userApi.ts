@@ -14,6 +14,10 @@ export type CurrentUser = {
   phone?: string | null;
   avatar?: string | null;
   businessId?: string | null;
+  workspace?: {
+    id: string;
+    name?: string | null;
+  } | null;
   business?: {
     id: string;
     name?: string | null;
@@ -22,6 +26,19 @@ export type CurrentUser = {
     teamSize?: string | null;
     type?: string | null;
     timezone?: string | null;
+  } | null;
+  connectedAccounts?: {
+    instagram?: {
+      connected: boolean;
+      pageId?: string | null;
+      healthy?: boolean;
+    };
+    whatsapp?: {
+      connected: boolean;
+      phoneNumberId?: string | null;
+      healthy?: boolean;
+    };
+    totalConnected?: number;
   } | null;
 };
 

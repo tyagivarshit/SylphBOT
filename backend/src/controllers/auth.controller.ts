@@ -28,6 +28,7 @@ import {
   issueSessionLedger,
   recordFraudSignal,
 } from "../services/security/securityGovernanceOS.service";
+import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 
 /* ======================================
 UTILS
@@ -270,6 +271,13 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       });
 
       business = { id: newBusiness.id, deletedAt: null };
+    }
+
+    if (business?.id && user.businessId !== business.id) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { businessId: business.id },
+      });
     }
 
     const accessToken = generateAccessToken(
@@ -542,6 +550,11 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
   try {
     if (!req.user?.id) throw unauthorized("Not authenticated");
 
+    const identity = await resolveUserWorkspaceIdentity({
+      userId: req.user.id,
+      preferredBusinessId: req.user?.businessId || null,
+    });
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: {
@@ -549,15 +562,20 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
         name: true,
         email: true,
         role: true,
-        businessId: true, // 🔥 THIS FIXES EVERYTHING
-}
+        businessId: true,
+      },
     });
 
     res.setHeader("Cache-Control", "no-store");
 
     res.json({
       success: true,
-      user,
+      user: user
+        ? {
+            ...user,
+            businessId: identity.businessId,
+          }
+        : null,
     });
 
   } catch (err) {
@@ -589,3 +607,4 @@ export const logout = async (req: any, res: Response, next: NextFunction) => {
     next(err);
   }
 };
+

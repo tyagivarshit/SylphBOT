@@ -10,6 +10,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const generateToken_1 = require("../utils/generateToken");
 const authCookies_1 = require("../utils/authCookies");
 const requestContext_1 = require("../observability/requestContext");
+const tenant_service_1 = require("../services/tenant.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
 const getUserWithBusiness = async (userId) => prisma_1.default.user.findUnique({
@@ -20,28 +21,10 @@ const getUserWithBusiness = async (userId) => prisma_1.default.user.findUnique({
         isActive: true,
         deletedAt: true,
         tokenVersion: true,
-        businessId: true,
         email: true,
-        business: {
-            select: {
-                id: true,
-                deletedAt: true,
-            },
-        },
+        businessId: true,
     },
 });
-const resolveActiveBusinessId = (user) => {
-    if (!user.businessId) {
-        return null;
-    }
-    if (!user.business) {
-        return null;
-    }
-    if (user.business?.deletedAt) {
-        return null;
-    }
-    return user.businessId;
-};
 const bindAuthenticatedContext = (req, user) => {
     req.user = user;
     req.businessId = user.businessId;
@@ -160,15 +143,19 @@ const protect = async (req, res, next) => {
                     user.isActive &&
                     !user.deletedAt &&
                     user.tokenVersion === decoded.tokenVersion) {
+                    const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+                        userId: user.id,
+                        preferredBusinessId: decoded.businessId,
+                    });
                     bindAuthenticatedContext(req, {
                         id: user.id,
                         role: user.role,
                         email: user.email,
-                        businessId: resolveActiveBusinessId(user),
+                        businessId: identity.businessId,
                     });
                     await enforceSessionAnomalyGuard(req, {
                         userId: user.id,
-                        businessId: resolveActiveBusinessId(user),
+                        businessId: identity.businessId,
                     });
                     return next();
                 }
@@ -202,7 +189,10 @@ const protect = async (req, res, next) => {
             (0, authCookies_1.clearAuthCookies)(res, req);
             throw (0, AppError_1.unauthorized)("Invalid session");
         }
-        const newAccessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, resolveActiveBusinessId(user), user.tokenVersion);
+        const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId: user.id,
+        });
+        const newAccessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, identity.businessId, user.tokenVersion);
         res.cookie("accessToken", newAccessToken, {
             ...(0, authCookies_1.getAuthCookieOptions)(req),
             maxAge: 15 * 60 * 1000,
@@ -211,11 +201,11 @@ const protect = async (req, res, next) => {
             id: user.id,
             role: user.role,
             email: user.email,
-            businessId: resolveActiveBusinessId(user),
+            businessId: identity.businessId,
         });
         await enforceSessionAnomalyGuard(req, {
             userId: user.id,
-            businessId: resolveActiveBusinessId(user),
+            businessId: identity.businessId,
         });
         return next();
     }

@@ -16,6 +16,7 @@ const authCookies_1 = require("../utils/authCookies");
 const audit_service_1 = require("../services/audit.service");
 const securityAlert_service_1 = require("../services/securityAlert.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
+const tenant_service_1 = require("../services/tenant.service");
 /* ======================================
 UTILS
 ====================================== */
@@ -200,6 +201,12 @@ const login = async (req, res, next) => {
                 data: { businessId: newBusiness.id },
             });
             business = { id: newBusiness.id, deletedAt: null };
+        }
+        if (business?.id && user.businessId !== business.id) {
+            await prisma_1.default.user.update({
+                where: { id: user.id },
+                data: { businessId: business.id },
+            });
         }
         const accessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business?.id || null, user.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(user.id, user.tokenVersion);
@@ -418,6 +425,10 @@ const getMe = async (req, res, next) => {
     try {
         if (!req.user?.id)
             throw (0, AppError_1.unauthorized)("Not authenticated");
+        const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId: req.user.id,
+            preferredBusinessId: req.user?.businessId || null,
+        });
         const user = await prisma_1.default.user.findUnique({
             where: { id: req.user.id },
             select: {
@@ -425,13 +436,18 @@ const getMe = async (req, res, next) => {
                 name: true,
                 email: true,
                 role: true,
-                businessId: true, // 🔥 THIS FIXES EVERYTHING
-            }
+                businessId: true,
+            },
         });
         res.setHeader("Cache-Control", "no-store");
         res.json({
             success: true,
-            user,
+            user: user
+                ? {
+                    ...user,
+                    businessId: identity.businessId,
+                }
+                : null,
         });
     }
     catch (err) {

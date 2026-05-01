@@ -17,14 +17,24 @@ type ClientConnection = {
   platform: string;
 };
 
-const defaultConnections = {
+type PlatformConnectionState = {
+  connected: boolean | null;
+  healthy: boolean | null;
+};
+
+type ConnectionState = {
+  instagram: PlatformConnectionState;
+  whatsapp: PlatformConnectionState;
+};
+
+const unknownConnections: ConnectionState = {
   instagram: {
-    connected: false,
-    healthy: false,
+    connected: null,
+    healthy: null,
   },
   whatsapp: {
-    connected: false,
-    healthy: false,
+    connected: null,
+    healthy: null,
   },
 };
 
@@ -32,7 +42,8 @@ export default function IntegrationsSettings() {
   const queryClient = useQueryClient();
   const params = useSearchParams();
   const [connecting, setConnecting] = useState<string | null>(null);
-  const [connections, setConnections] = useState(defaultConnections);
+  const [connections, setConnections] = useState<ConnectionState>(unknownConnections);
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["integrations"],
@@ -59,9 +70,11 @@ export default function IntegrationsSettings() {
           healthy: Boolean(whatsappStatus?.healthy),
         },
       });
+      setStatusUnavailable(false);
     } catch (error) {
       console.error("Connection status error", error);
-      setConnections(defaultConnections);
+      setConnections(unknownConnections);
+      setStatusUnavailable(true);
     }
   }, []);
 
@@ -71,6 +84,7 @@ export default function IntegrationsSettings() {
 
   useEffect(() => {
     const status = params.get("integration");
+    const reason = params.get("reason");
 
     const syncAfterConnect = async () => {
       if (status === "success") {
@@ -84,7 +98,11 @@ export default function IntegrationsSettings() {
       }
 
       if (status === "error") {
-        toast.error("Integration failed");
+        toast.error(
+          reason
+            ? `Integration failed (${reason.replace(/_/g, " ")})`
+            : "Integration failed"
+        );
         await loadConnections();
         window.history.replaceState({}, "", buildAppUrl("/settings"));
       }
@@ -162,16 +180,21 @@ export default function IntegrationsSettings() {
   };
 
   if (isLoading) {
-    return <div className="text-sm text-gray-500 animate-pulse">Loading...</div>;
+    return <div className="animate-pulse text-sm text-gray-500">Loading...</div>;
   }
 
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-base font-semibold text-gray-900">Connection status</h3>
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="mt-1 text-sm text-gray-500">
           Connect your external platforms and keep access synced.
         </p>
+        {statusUnavailable ? (
+          <p className="mt-2 text-xs text-amber-700">
+            Real-time connection state is temporarily unavailable. Refresh status before reconnecting.
+          </p>
+        ) : null}
       </div>
 
       <IntegrationCard
@@ -180,9 +203,10 @@ export default function IntegrationsSettings() {
         connected={connections.whatsapp.connected}
         healthy={connections.whatsapp.healthy}
         loading={connecting === "whatsapp"}
-        onConnect={() => connectMeta("whatsapp")}
-        onReconnect={() => reconnectPlatform("whatsapp", whatsapp?.id)}
+        onConnect={() => void connectMeta("whatsapp")}
+        onReconnect={() => void reconnectPlatform("whatsapp", whatsapp?.id)}
         onDisconnect={() => whatsapp && disconnect.mutate(whatsapp.id)}
+        onRefresh={() => void loadConnections()}
       />
 
       <IntegrationCard
@@ -191,9 +215,10 @@ export default function IntegrationsSettings() {
         connected={connections.instagram.connected}
         healthy={connections.instagram.healthy}
         loading={connecting === "instagram"}
-        onConnect={() => connectMeta("instagram")}
-        onReconnect={() => reconnectPlatform("instagram", instagram?.id)}
+        onConnect={() => void connectMeta("instagram")}
+        onReconnect={() => void reconnectPlatform("instagram", instagram?.id)}
         onDisconnect={() => instagram && disconnect.mutate(instagram.id)}
+        onRefresh={() => void loadConnections()}
       />
 
       <ApiKeySection />
@@ -210,15 +235,17 @@ function IntegrationCard({
   onConnect,
   onReconnect,
   onDisconnect,
+  onRefresh,
 }: {
   title: string;
   desc: string;
-  connected: boolean;
-  healthy: boolean;
+  connected: boolean | null;
+  healthy: boolean | null;
   loading: boolean;
   onConnect: () => void;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onRefresh: () => void;
 }) {
   return (
     <div className="flex items-center justify-between rounded-[24px] border border-slate-200/80 bg-white/84 p-5 transition hover:-translate-y-0.5 hover:shadow-md">
@@ -227,14 +254,31 @@ function IntegrationCard({
         <p className="text-xs text-gray-500">{desc}</p>
       </div>
 
-      {connected && healthy ? (
+      {connected === null ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled
+            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600"
+          >
+            Status unavailable
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:shadow-md"
+          >
+            Refresh status
+          </button>
+        </div>
+      ) : connected && healthy ? (
         <div className="flex items-center gap-2">
           <button
             type="button"
             disabled
             className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700"
           >
-            Connected ✅
+            Connected
           </button>
           <button
             type="button"
@@ -251,7 +295,7 @@ function IntegrationCard({
             disabled
             className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700"
           >
-            Connection expired ⚠️
+            Connection expired
           </button>
           <button
             type="button"
@@ -263,11 +307,7 @@ function IntegrationCard({
           </button>
         </div>
       ) : (
-        <button
-          onClick={onConnect}
-          disabled={loading}
-          className="brand-button-primary px-4 py-2"
-        >
+        <button onClick={onConnect} disabled={loading} className="brand-button-primary px-4 py-2">
           {loading ? "Connecting..." : `Connect ${title}`}
         </button>
       )}
@@ -295,14 +335,14 @@ function ApiKeySection() {
   };
 
   return (
-    <div className="rounded-[24px] border border-slate-200/80 bg-white/84 p-5 space-y-4">
+    <div className="space-y-4 rounded-[24px] border border-slate-200/80 bg-white/84 p-5">
       <div>
         <p className="text-sm font-semibold text-gray-900">API Key</p>
         <p className="text-xs text-gray-500">Use this key to access API</p>
       </div>
 
       <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5">
-        <span className="text-sm text-gray-700 truncate">
+        <span className="truncate text-sm text-gray-700">
           {isError ? "Unable to load workspace API key" : maskedKey}
         </span>
 

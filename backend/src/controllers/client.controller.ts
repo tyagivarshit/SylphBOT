@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import { env } from "../config/env";
 import { encrypt } from "../utils/encrypt";
 import axios from "axios";
 import { getPlanKey } from "../config/plan.config";
@@ -8,6 +9,12 @@ import { triggerOnboardingDemo } from "../services/onboarding.service";
 import { checkConnectionHealth } from "../services/connectionHealth.service";
 import { getRequestBusinessId } from "../services/tenant.service";
 import { getCanonicalSubscriptionSnapshot } from "../services/subscriptionAuthority.service";
+import {
+  createMetaOAuthState,
+  parseMetaOAuthMode,
+  parseMetaOAuthPlatform,
+  verifyMetaOAuthState,
+} from "../utils/metaOAuthState";
 
 /*
 ---------------------------------------------------
@@ -42,6 +49,22 @@ const createClientControllerError = (message: string, code: string) => {
   const error = new Error(message) as Error & { code?: string };
   error.code = code;
   return error;
+};
+
+const getMetaOAuthRuntimeConfig = () => {
+  const appId = String(process.env.META_APP_ID || "").trim();
+  const appSecret = String(process.env.META_APP_SECRET || "").trim();
+  const backendUrl = String(env.BACKEND_URL || process.env.BACKEND_URL || "").trim();
+
+  if (!appId || !backendUrl) {
+    return null;
+  }
+
+  return {
+    appId,
+    appSecret,
+    backendUrl,
+  };
 };
 
 const extractFirstWhatsAppPhoneNumberId = (payload: any) => {
@@ -367,13 +390,13 @@ const getAllowedPlatforms = async (
   subscription: Awaited<ReturnType<typeof getSubscription>>
 ) => {
   if (!subscription?.plan) {
-    return [];
+    return ["WHATSAPP", "INSTAGRAM"];
   }
 
   const planContext = await resolvePlanContext(businessId).catch(() => null);
 
   if (!planContext || planContext.state !== "ACTIVE") {
-    return [];
+    return ["WHATSAPP", "INSTAGRAM"];
   }
 
   const planKey = getPlanKey(subscription.plan);
@@ -453,15 +476,6 @@ export const createClient = async (req: Request, res: Response) => {
     platform = platform.toUpperCase();
 
     const subscription = await getSubscription(businessId);
-
-    if (!subscription) {
-      return res.status(403).json({
-        success: false,
-        data: null,
-        message: "No active subscription found",
-      });
-    }
-
     const allowedPlatforms = await getAllowedPlatforms(
       businessId,
       subscription
@@ -590,139 +604,213 @@ META OAUTH CONNECT (INSTAGRAM)
 */
 
 export const metaOAuthConnect = async (req: Request, res: Response) => {
-
   try {
-
     const userId = (req as any).user?.id;
-    const businessId = getRequestBusinessId(req);
-
+    const requestBusinessId = getRequestBusinessId(req);
     const {
       code,
+      state,
       aiTone,
       businessInfo,
       pricingInfo,
-
-      /* NEW */
       faqKnowledge,
-      salesInstructions
+      salesInstructions,
+    } = req.body || {};
 
-    } = req.body;
+    const oauthState = verifyMetaOAuthState(state);
 
-    if (!userId || !businessId || !code) {
+    if (!userId || !requestBusinessId || !code || !oauthState) {
       return res.status(400).json({
         success: false,
         data: null,
-        message: "Invalid request",
+        message: "Invalid OAuth callback contract",
       });
     }
+
+    if (
+      oauthState.userId !== userId ||
+      oauthState.businessId !== requestBusinessId ||
+      oauthState.workspaceId !== requestBusinessId
+    ) {
+      return res.status(403).json({
+        success: false,
+        data: null,
+        message: "OAuth state mismatch",
+      });
+    }
+
+    const businessId = oauthState.businessId;
+    const targetPlatform = oauthState.platform;
 
     const subscription = await getSubscription(businessId);
+    const allowedPlatforms = await getAllowedPlatforms(businessId, subscription);
 
-    if (!subscription) {
+    if (!allowedPlatforms.includes(targetPlatform)) {
       return res.status(403).json({
         success: false,
         data: null,
-        message: "No active subscription found",
+        message: `${targetPlatform} integration not allowed in your workspace`,
       });
     }
 
-    const allowedPlatforms = await getAllowedPlatforms(
-      businessId,
-      subscription
-    );
+    const metaRuntime = getMetaOAuthRuntimeConfig();
 
-    if (!allowedPlatforms.includes("INSTAGRAM")) {
-      return res.status(403).json({
+    if (!metaRuntime?.appSecret) {
+      return res.status(500).json({
         success: false,
         data: null,
-        message: "Instagram integration not allowed in your plan",
+        message: "Meta OAuth is not configured on this server",
       });
     }
+
+    const redirectUri = `${metaRuntime.backendUrl}/api/oauth/meta/callback`;
 
     const shortTokenRes = await axios.get(
       "https://graph.facebook.com/v19.0/oauth/access_token",
       {
         params: {
-          client_id: process.env.META_APP_ID,
-          client_secret: process.env.META_APP_SECRET,
-          redirect_uri: `${process.env.BACKEND_URL}/api/oauth/meta/callback`,
+          client_id: metaRuntime.appId,
+          client_secret: metaRuntime.appSecret,
+          redirect_uri: redirectUri,
           code,
         },
       }
     );
 
-    const shortToken = shortTokenRes.data.access_token;
+    const shortToken = normalizeOptionalString(shortTokenRes.data?.access_token);
+
+    if (!shortToken) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: "Meta token exchange failed",
+      });
+    }
 
     const longTokenRes = await axios.get(
       "https://graph.facebook.com/v19.0/oauth/access_token",
       {
         params: {
           grant_type: "fb_exchange_token",
-          client_id: process.env.META_APP_ID,
-          client_secret: process.env.META_APP_SECRET,
+          client_id: metaRuntime.appId,
+          client_secret: metaRuntime.appSecret,
           fb_exchange_token: shortToken,
         },
       }
     );
 
-    const longToken = longTokenRes.data.access_token;
+    const longToken = normalizeOptionalString(longTokenRes.data?.access_token);
 
-    const instagramConnection = await fetchInstagramConnection(longToken);
-
-    if (!instagramConnection.pageId) {
+    if (!longToken) {
       return res.status(400).json({
         success: false,
         data: null,
-        message: "No Instagram page found",
+        message: "Unable to resolve long lived token",
       });
     }
 
-    const instagramAccessToken =
-      instagramConnection.pageAccessToken || longToken;
-    const encryptedInstagramToken = encrypt(instagramAccessToken);
+    const connectedClients: any[] = [];
 
-    const client = await upsertConnectedClient({
-      businessId,
-      platform: "INSTAGRAM",
-      pageId: instagramConnection.pageId,
-      accessToken: encryptedInstagramToken,
-      aiTone,
-      businessInfo,
-      pricingInfo,
-      faqKnowledge,
-      salesInstructions,
-    });
+    if (targetPlatform === "INSTAGRAM") {
+      const instagramConnection = await fetchInstagramConnection(longToken);
 
-    if (allowedPlatforms.includes("WHATSAPP")) {
+      if (!instagramConnection.pageId) {
+        return res.status(400).json({
+          success: false,
+          data: null,
+          message: "No Instagram page found",
+        });
+      }
+
+      const instagramAccessToken = instagramConnection.pageAccessToken || longToken;
+      const instagramClient = await upsertConnectedClient({
+        businessId,
+        platform: "INSTAGRAM",
+        pageId: instagramConnection.pageId,
+        accessToken: encrypt(instagramAccessToken),
+        aiTone,
+        businessInfo,
+        pricingInfo,
+        faqKnowledge,
+        salesInstructions,
+      });
+
+      connectedClients.push(instagramClient);
+      await queueOnboardingDemoForClient(businessId, instagramClient);
+
+      if (allowedPlatforms.includes("WHATSAPP")) {
+        const phoneNumberId = await fetchWhatsAppPhoneNumberId(longToken);
+
+        if (phoneNumberId) {
+          const whatsappClient = await upsertConnectedClient({
+            businessId,
+            platform: "WHATSAPP",
+            phoneNumberId,
+            accessToken: encrypt(longToken),
+          }).catch((error) => {
+            console.log("WHATSAPP CLIENT UPSERT FAILED", {
+              businessId,
+              phoneNumberId,
+              message: getAxiosErrorMessage(error),
+            });
+            return null;
+          });
+
+          if (whatsappClient) {
+            connectedClients.push(whatsappClient);
+          }
+        }
+      }
+    } else {
       const phoneNumberId = await fetchWhatsAppPhoneNumberId(longToken);
-      const encryptedWhatsAppToken = encrypt(longToken);
 
-      await upsertConnectedClient({
+      if (!phoneNumberId) {
+        return res.status(400).json({
+          success: false,
+          data: null,
+          message: "Unable to resolve WhatsApp phone number ID",
+        });
+      }
+
+      const whatsappClient = await upsertConnectedClient({
         businessId,
         platform: "WHATSAPP",
         phoneNumberId,
-        accessToken: encryptedWhatsAppToken,
-      }).catch((error) => {
-        console.log("WHATSAPP CLIENT UPSERT FAILED", {
-          businessId,
-          phoneNumberId,
-          message: getAxiosErrorMessage(error),
-        });
+        accessToken: encrypt(longToken),
       });
+
+      connectedClients.push(whatsappClient);
+      await queueOnboardingDemoForClient(businessId, whatsappClient);
     }
 
-    await queueOnboardingDemoForClient(businessId, client);
+    const healthRows = await Promise.all(
+      connectedClients.map(async (client) => {
+        const healthy = await checkConnectionHealth(client).catch(() =>
+          Boolean(client?.isActive)
+        );
+
+        return {
+          platform: client.platform,
+          healthy,
+          connected: Boolean(client.isActive),
+          clientId: client.id,
+          pageId: client.pageId || null,
+          phoneNumberId: client.phoneNumberId || null,
+        };
+      })
+    );
 
     return res.json({
       success: true,
       data: {
-        client,
+        platform: targetPlatform,
+        mode: oauthState.mode,
+        workspaceId: oauthState.workspaceId,
+        clients: healthRows,
       },
-      message: "Instagram connected successfully",
+      message: `${targetPlatform} connected successfully`,
     });
-
-} catch (error: any) {
-
+  } catch (error: any) {
     if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
       return res.status(400).json({
         success: false,
@@ -739,15 +827,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
     }
 
-    if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT") {
-      return res.status(400).json({
-        success: false,
-        data: null,
-        message: "This connected account already exists for your business",
-      });
-    }
-
-    if (error.code === "P2002") {
+    if (error.code === "CLIENT_DUPLICATE_KEY_CONFLICT" || error.code === "P2002") {
       return res.status(400).json({
         success: false,
         data: null,
@@ -760,11 +840,9 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       data: null,
-      message: "Instagram connection failed",
+      message: "Integration connection failed",
     });
-
   }
-
 };
 
 /*
@@ -1245,9 +1323,37 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
       });
     }
 
-    const mode = String(req.query.mode || "").trim().toLowerCase();
-    const platform =
-      normalizeOptionalString(req.query.platform)?.toUpperCase() || null;
+    const platform = parseMetaOAuthPlatform(
+      normalizeOptionalString(req.query.platform)
+    );
+    const mode = parseMetaOAuthMode(normalizeOptionalString(req.query.mode));
+
+    if (!platform) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: "platform must be INSTAGRAM or WHATSAPP",
+      });
+    }
+
+    const subscription = await getSubscription(businessId);
+    const allowedPlatforms = await getAllowedPlatforms(businessId, subscription);
+
+    if (!allowedPlatforms.includes(platform)) {
+      return res.status(403).json({
+        success: false,
+        data: null,
+        message: `${platform} integration not allowed in your workspace`,
+      });
+    }
+
+    const state = createMetaOAuthState({
+      userId,
+      businessId,
+      workspaceId: businessId,
+      platform,
+      mode,
+    });
 
     if (mode === "reconnect") {
       console.info("Reconnect triggered", {
@@ -1256,17 +1362,29 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
       });
     }
 
-    const redirectUri = `${process.env.BACKEND_URL}/api/oauth/meta/callback`;
+    const metaRuntime = getMetaOAuthRuntimeConfig();
 
-    const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${process.env.META_APP_ID}&redirect_uri=${redirectUri}&scope=pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_messages,whatsapp_business_management&response_type=code&state=${userId}`;
+    if (!metaRuntime) {
+      return res.status(500).json({
+        success: false,
+        data: null,
+        message: "Meta OAuth is not configured on this server",
+      });
+    }
+
+    const redirectUri = `${metaRuntime.backendUrl}/api/oauth/meta/callback`;
+    const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${metaRuntime.appId}&redirect_uri=${redirectUri}&scope=pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_messages,whatsapp_business_management&response_type=code&state=${state}`;
 
     return res.json({
       success: true,
       data: {
         url,
+        state,
+        platform,
+        mode,
+        workspaceId: businessId,
       },
     });
-
   } catch (error) {
     console.error("Start OAuth error:", error);
 

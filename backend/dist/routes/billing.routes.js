@@ -28,6 +28,7 @@ router.get("/checkout/confirm", auth_middleware_1.protect, tenant_middleware_1.r
 UPGRADE PLAN
 ====================================== */
 router.post("/upgrade", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), rateLimit_middleware_1.authLimiter, (0, audit_middleware_1.auditRequest)("billing.upgrade_requested"), billing_controller_1.BillingController.upgradePlan);
+router.post("/portal", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:manage"), billing_controller_1.BillingController.createPortal);
 /* ======================================
 CANCEL SUBSCRIPTION
 ====================================== */

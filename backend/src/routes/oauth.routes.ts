@@ -1,54 +1,79 @@
 import { Router, Request, Response } from "express";
-import axios from "axios";
+import { env } from "../config/env";
+import { verifyMetaOAuthState } from "../utils/metaOAuthState";
 
 const router = Router();
 
-/*
----------------------------------------------------
-META OAUTH CALLBACK
----------------------------------------------------
-*/
+const buildSettingsRedirect = (params?: Record<string, string>) => {
+  const url = new URL("/settings", env.FRONTEND_URL);
+
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return url.toString();
+};
 
 router.get("/meta/callback", async (req: Request, res: Response) => {
   try {
-    const { code, state } = req.query;
+    const code = String(req.query.code || "").trim();
+    const rawState = String(req.query.state || "").trim();
+    const oauthState = verifyMetaOAuthState(rawState);
 
-    if (!code || !state) {
-      return res.status(400).send("Invalid OAuth request");
+    if (!oauthState) {
+      return res.redirect(
+        buildSettingsRedirect({
+          integration: "error",
+          reason: "invalid_oauth_state",
+        })
+      );
     }
 
-    const userId = state as string;
+    const requestUserId = String(req.user?.id || "").trim();
+    const requestBusinessId = String(req.user?.businessId || "").trim();
 
-    /*
-    🔥 CALL YOUR EXISTING CONTROLLER
-    (metaOAuthConnect ko reuse karenge)
-    */
+    if (
+      !requestUserId ||
+      !requestBusinessId ||
+      oauthState.userId !== requestUserId ||
+      oauthState.businessId !== requestBusinessId
+    ) {
+      return res.redirect(
+        buildSettingsRedirect({
+          integration: "error",
+          reason: "oauth_state_mismatch",
+          platform: oauthState.platform.toLowerCase(),
+        })
+      );
+    }
 
-    const response = await axios.post(
-      `${process.env.BACKEND_URL}/api/clients/oauth/meta`,
-      {
-        code,
-      },
-      {
-        headers: {
-          Cookie: req.headers.cookie || "", // 🔥 session pass karne ke liye
-        },
-      }
-    );
+    if (!code) {
+      return res.redirect(
+        buildSettingsRedirect({
+          integration: "error",
+          reason: "oauth_code_missing",
+          platform: oauthState.platform.toLowerCase(),
+        })
+      );
+    }
 
-    /*
-    🔥 SUCCESS → FRONTEND REDIRECT
-    */
+    const callbackUrl = new URL("/integrations/meta/callback", env.FRONTEND_URL);
+    callbackUrl.searchParams.set("code", code);
+    callbackUrl.searchParams.set("state", rawState);
+    callbackUrl.searchParams.set("platform", oauthState.platform.toLowerCase());
+    callbackUrl.searchParams.set("mode", oauthState.mode);
 
-    return res.redirect(
-      `${process.env.FRONTEND_URL}/settings?integration=success&onboarding=1`
-    );
-
+    return res.redirect(callbackUrl.toString());
   } catch (error) {
     console.error("OAuth callback error:", error);
 
     return res.redirect(
-      `${process.env.FRONTEND_URL}/settings?integration=error`
+      buildSettingsRedirect({
+        integration: "error",
+        reason: "oauth_callback_failed",
+      })
     );
   }
 });

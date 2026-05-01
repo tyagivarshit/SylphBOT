@@ -81,6 +81,12 @@ const googleCallback = async (req, res) => {
                 });
                 business = { id: newBusiness.id };
             }
+            if (user.businessId !== business.id) {
+                await tx.user.update({
+                    where: { id: user.id },
+                    data: { businessId: business.id },
+                });
+            }
             const accessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business.id, user.tokenVersion);
             const refreshRaw = (0, generateToken_1.generateRefreshToken)(user.id, user.tokenVersion);
             const refreshToken = hashToken(refreshRaw);

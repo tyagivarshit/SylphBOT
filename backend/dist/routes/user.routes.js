@@ -11,6 +11,7 @@ const cloudinary_1 = __importDefault(require("../config/cloudinary"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const authCookies_1 = require("../utils/authCookies");
 const apiKey_service_1 = require("../services/apiKey.service");
+const tenant_service_1 = require("../services/tenant.service");
 const rbac_middleware_1 = require("../middleware/rbac.middleware");
 const rateLimit_middleware_1 = require("../middleware/rateLimit.middleware");
 const router = express_1.default.Router();
@@ -21,36 +22,88 @@ const safeUserSelect = {
     phone: true,
     avatar: true,
     businessId: true,
-    business: {
-        select: {
-            id: true,
-            name: true,
-            website: true,
-            industry: true,
-            teamSize: true,
-            type: true,
-            timezone: true,
-        },
-    },
 };
-const getCurrentUser = async (userId) => prisma_1.default.user.findUnique({
-    where: { id: userId },
-    select: safeUserSelect,
-});
 const buildDeletedEmail = (email) => {
     const [local, domain = "deleted.local"] = email.split("@");
     return `${local}+deleted_${Date.now()}@${domain}`;
 };
-/* =========================
-   🔥 GET CURRENT USER (PROTECTED)
-========================= */
+const getUserRecord = async (userId) => prisma_1.default.user.findUnique({
+    where: { id: userId },
+    select: safeUserSelect,
+});
+const getCurrentUser = async (userId, preferredBusinessId) => {
+    const [user, identity] = await Promise.all([
+        getUserRecord(userId),
+        (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId,
+            preferredBusinessId: preferredBusinessId || null,
+        }),
+    ]);
+    if (!user) {
+        return null;
+    }
+    const businessId = identity.businessId;
+    const clients = businessId
+        ? await prisma_1.default.client.findMany({
+            where: {
+                businessId,
+                deletedAt: null,
+                platform: {
+                    in: ["INSTAGRAM", "WHATSAPP"],
+                },
+            },
+            select: {
+                platform: true,
+                pageId: true,
+                phoneNumberId: true,
+                isActive: true,
+            },
+        })
+        : [];
+    const instagramClient = clients.find((client) => client.platform === "INSTAGRAM");
+    const whatsappClient = clients.find((client) => client.platform === "WHATSAPP");
+    return {
+        ...user,
+        businessId,
+        business: identity.workspace
+            ? {
+                id: identity.workspace.id,
+                name: identity.workspace.name,
+                website: identity.workspace.website,
+                industry: identity.workspace.industry,
+                teamSize: identity.workspace.teamSize,
+                type: identity.workspace.type,
+                timezone: identity.workspace.timezone,
+            }
+            : null,
+        workspace: identity.workspace
+            ? {
+                id: identity.workspace.id,
+                name: identity.workspace.name,
+            }
+            : null,
+        connectedAccounts: {
+            instagram: {
+                connected: Boolean(instagramClient?.pageId),
+                pageId: instagramClient?.pageId || null,
+                healthy: Boolean(instagramClient?.isActive),
+            },
+            whatsapp: {
+                connected: Boolean(whatsappClient?.phoneNumberId),
+                phoneNumberId: whatsappClient?.phoneNumberId || null,
+                healthy: Boolean(whatsappClient?.isActive),
+            },
+            totalConnected: clients.filter((client) => client.isActive).length,
+        },
+    };
+};
 router.get("/me", auth_middleware_1.protect, async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized" });
         }
-        const user = await getCurrentUser(userId);
+        const user = await getCurrentUser(userId, req.user?.businessId || null);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -62,9 +115,6 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
         res.status(500).json({ error: "Failed to fetch user" });
     }
 });
-/* =========================
-   🔥 UPDATE USER + BUSINESS (PROTECTED)
-========================= */
 router.patch("/update", auth_middleware_1.protect, async (req, res) => {
     try {
         const userId = req.user?.id;
@@ -72,7 +122,6 @@ router.patch("/update", auth_middleware_1.protect, async (req, res) => {
             return res.status(401).json({ error: "Unauthorized" });
         }
         const { name, phone, business, website, industry, teamSize, type, timezone, } = req.body;
-        /* 🔹 UPDATE USER */
         await prisma_1.default.user.update({
             where: { id: userId },
             data: {
@@ -80,15 +129,13 @@ router.patch("/update", auth_middleware_1.protect, async (req, res) => {
                 ...(phone !== undefined && { phone }),
             },
         });
-        /* 🔹 GET BUSINESS ID */
-        const userData = await prisma_1.default.user.findUnique({
-            where: { id: userId },
-            select: { businessId: true },
+        const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId,
+            preferredBusinessId: req.user?.businessId || null,
         });
-        /* 🔹 UPDATE BUSINESS */
-        if (userData?.businessId) {
+        if (identity.businessId) {
             await prisma_1.default.business.update({
-                where: { id: userData.businessId },
+                where: { id: identity.businessId },
                 data: {
                     ...(business && { name: business }),
                     ...(website !== undefined && { website }),
@@ -99,8 +146,7 @@ router.patch("/update", auth_middleware_1.protect, async (req, res) => {
                 },
             });
         }
-        /* 🔥 RETURN UPDATED USER */
-        const updatedUser = await getCurrentUser(userId);
+        const updatedUser = await getCurrentUser(userId, identity.businessId);
         return res.json(updatedUser);
     }
     catch (err) {
@@ -108,9 +154,6 @@ router.patch("/update", auth_middleware_1.protect, async (req, res) => {
         res.status(500).json({ error: "Update failed" });
     }
 });
-/* =========================
-   🔥 UPLOAD AVATAR (PROTECTED)
-========================= */
 router.post("/upload-avatar", auth_middleware_1.protect, upload_1.default.single("file"), async (req, res) => {
     try {
         const userId = req.user?.id;
@@ -120,37 +163,30 @@ router.post("/upload-avatar", auth_middleware_1.protect, upload_1.default.single
         if (!req.file) {
             return res.status(400).json({ error: "No file uploaded" });
         }
-        /* 🔥 CHECK USER */
-        const user = await prisma_1.default.user.findUnique({
-            where: { id: userId },
-        });
+        const user = await getUserRecord(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
-        /* 🔥 CLOUDINARY UPLOAD */
         const result = await new Promise((resolve, reject) => {
             cloudinary_1.default.uploader
                 .upload_stream({
                 folder: "avatars",
                 transformation: [{ width: 300, height: 300, crop: "fill" }],
-            }, (error, result) => {
+            }, (error, uploadResult) => {
                 if (error)
                     reject(error);
                 else
-                    resolve(result);
+                    resolve(uploadResult);
             })
                 .end(req.file.buffer);
         });
-        const imageUrl = result.secure_url;
-        /* 🔥 SAVE IN DB */
         await prisma_1.default.user.update({
             where: { id: userId },
             data: {
-                avatar: imageUrl,
+                avatar: result.secure_url,
             },
         });
-        /* 🔥 RETURN UPDATED USER */
-        const updatedUser = await getCurrentUser(userId);
+        const updatedUser = await getCurrentUser(userId, req.user?.businessId || null);
         return res.json(updatedUser);
     }
     catch (err) {
@@ -212,9 +248,7 @@ router.post("/change-password", auth_middleware_1.protect, async (req, res) => {
     }
     catch (err) {
         console.error("CHANGE PASSWORD ERROR:", err);
-        return res
-            .status(500)
-            .json({ error: "Failed to update password" });
+        return res.status(500).json({ error: "Failed to update password" });
     }
 });
 router.get("/api-key", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("api_keys:manage"), rateLimit_middleware_1.userActionLimiter, async (req, res) => {
@@ -223,19 +257,19 @@ router.get("/api-key", auth_middleware_1.protect, (0, rbac_middleware_1.requireP
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized" });
         }
-        const user = await prisma_1.default.user.findUnique({
-            where: { id: userId },
-            select: {
-                id: true,
-                businessId: true,
-                tokenVersion: true,
-            },
-        });
+        const user = await getUserRecord(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
+        const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId,
+            preferredBusinessId: req.user?.businessId || null,
+        });
+        if (!identity.businessId) {
+            return res.status(403).json({ error: "Business context is required" });
+        }
         const apiKey = await (0, apiKey_service_1.ensureWorkspaceApiKey)({
-            businessId: user.businessId,
+            businessId: identity.businessId,
             createdByUserId: user.id,
         });
         return res.json({
@@ -264,55 +298,60 @@ router.delete("/delete-account", auth_middleware_1.protect, async (req, res) => 
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
+        const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId,
+            preferredBusinessId: req.user?.businessId || user.businessId || null,
+        });
+        const businessId = identity.businessId || user.businessId || null;
         const now = new Date();
         await prisma_1.default.$transaction(async (tx) => {
-            if (user.businessId) {
+            if (businessId) {
                 await tx.business.update({
-                    where: { id: user.businessId },
+                    where: { id: businessId },
                     data: {
                         deletedAt: now,
                     },
                 });
                 await Promise.all([
                     tx.client.updateMany({
-                        where: { businessId: user.businessId },
+                        where: { businessId },
                         data: {
                             isActive: false,
                             deletedAt: now,
                         },
                     }),
                     tx.lead.updateMany({
-                        where: { businessId: user.businessId },
+                        where: { businessId },
                         data: {
                             deletedAt: now,
                         },
                     }),
                     tx.commentTrigger.updateMany({
-                        where: { businessId: user.businessId },
+                        where: { businessId },
                         data: {
                             isActive: false,
                         },
                     }),
                     tx.automationFlow.updateMany({
-                        where: { businessId: user.businessId },
+                        where: { businessId },
                         data: {
                             status: "INACTIVE",
                         },
                     }),
                     tx.knowledgeBase.updateMany({
-                        where: { businessId: user.businessId },
+                        where: { businessId },
                         data: {
                             isActive: false,
                         },
                     }),
                     tx.bookingSlot.updateMany({
-                        where: { businessId: user.businessId },
+                        where: { businessId },
                         data: {
                             isActive: false,
                         },
                     }),
                     tx.subscriptionLedger.updateMany({
-                        where: { businessId: user.businessId },
+                        where: { businessId },
                         data: {
                             status: "CANCELLED",
                             cancelAt: now,

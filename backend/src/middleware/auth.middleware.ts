@@ -12,6 +12,7 @@ import {
   getAuthCookieOptions,
 } from "../utils/authCookies";
 import { updateRequestContext } from "../observability/requestContext";
+import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import {
   authorizeSuspiciousSessionChallenge,
   issueSessionLedger,
@@ -30,38 +31,10 @@ const getUserWithBusiness = async (userId: string) =>
       isActive: true,
       deletedAt: true,
       tokenVersion: true,
-      businessId: true,
       email: true,
-      business: {
-        select: {
-          id: true,
-          deletedAt: true,
-        },
-      },
+      businessId: true,
     },
   });
-
-const resolveActiveBusinessId = (user: {
-  businessId: string | null;
-  business?: {
-    id: string;
-    deletedAt: Date | null;
-  } | null;
-}) => {
-  if (!user.businessId) {
-    return null;
-  }
-
-  if (!user.business) {
-    return null;
-  }
-
-  if (user.business?.deletedAt) {
-    return null;
-  }
-
-  return user.businessId;
-};
 
 const bindAuthenticatedContext = (
   req: Request,
@@ -223,16 +196,21 @@ export const protect = async (
           !user.deletedAt &&
           user.tokenVersion === decoded.tokenVersion
         ) {
+          const identity = await resolveUserWorkspaceIdentity({
+            userId: user.id,
+            preferredBusinessId: decoded.businessId,
+          });
+
           bindAuthenticatedContext(req, {
             id: user.id,
             role: user.role,
             email: user.email,
-            businessId: resolveActiveBusinessId(user),
+            businessId: identity.businessId,
           });
 
           await enforceSessionAnomalyGuard(req, {
             userId: user.id,
-            businessId: resolveActiveBusinessId(user),
+            businessId: identity.businessId,
           });
 
           return next();
@@ -277,10 +255,14 @@ export const protect = async (
       throw unauthorized("Invalid session");
     }
 
+    const identity = await resolveUserWorkspaceIdentity({
+      userId: user.id,
+    });
+
     const newAccessToken = generateAccessToken(
       user.id,
       user.role,
-      resolveActiveBusinessId(user),
+      identity.businessId,
       user.tokenVersion
     );
 
@@ -293,12 +275,12 @@ export const protect = async (
       id: user.id,
       role: user.role,
       email: user.email,
-      businessId: resolveActiveBusinessId(user),
+      businessId: identity.businessId,
     });
 
     await enforceSessionAnomalyGuard(req, {
       userId: user.id,
-      businessId: resolveActiveBusinessId(user),
+      businessId: identity.businessId,
     });
 
     return next();

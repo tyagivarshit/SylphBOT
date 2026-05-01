@@ -68,6 +68,8 @@ import { infrastructurePhase6CTests } from "./infrastructure.phase6c.test";
 import { saasPackagingPhase6DTests } from "./saasPackaging.phase6d.test";
 import { developerPlatformPhase6ETests } from "./developerPlatform.phase6e.test";
 import { growthPhase6FTests } from "./growth.phase6f.test";
+import { metaOAuthStateTests } from "./metaOAuthState.test";
+import { tenantWorkspaceIdentityTests } from "./tenantWorkspaceIdentity.test";
 
 type TestCase = {
   name: string;
@@ -883,6 +885,8 @@ const tests: TestCase[] = [
   ...autonomousPhase4Tests,
   ...revenueBrainPhase3BTests,
   ...revenueBrainPhase3CTests,
+  ...metaOAuthStateTests,
+  ...tenantWorkspaceIdentityTests,
 ];
 
 let failures = 0;

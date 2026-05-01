@@ -1,9 +1,6 @@
 import { Request, Response } from "express";
 import { DashboardService } from "../services/dashboard.service";
-
-/* ======================================
-TYPES
-====================================== */
+import { withTimeoutFallback } from "../utils/boundedTimeout";
 
 type AuthRequest = Request & {
   user?: {
@@ -12,20 +9,23 @@ type AuthRequest = Request & {
     businessId: string | null;
   };
   featureDenied?: boolean;
-  isLimited?: boolean; // 🔥 ADD THIS
+  isLimited?: boolean;
 };
 
-/* ======================================
-UTILS
-====================================== */
+type BaseHandlerOptions = {
+  timeoutLabel: string;
+  timeoutMs?: number;
+  fallback: unknown;
+  projectionLog?: string;
+};
 
-function isValidString(val: any): val is string {
-  return typeof val === "string" && val.trim().length > 0;
+function isValidString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function sendSuccess(
   res: Response,
-  data: any,
+  data: unknown,
   extra: {
     limited?: boolean;
     upgradeRequired?: boolean;
@@ -46,38 +46,28 @@ function sendError(res: Response, status: number, message: string) {
   });
 }
 
-function logError(req: AuthRequest, error: any) {
-  console.error("❌ DASHBOARD ERROR", {
+function logError(req: AuthRequest, error: unknown) {
+  const message = error instanceof Error ? error.message : "unknown_dashboard_error";
+  console.error("DASHBOARD_ERROR", {
     userId: req.user?.id,
     businessId: req.user?.businessId,
     path: req.originalUrl,
-    error: error?.message,
+    error: message,
   });
 }
-
-/* ======================================
-BASE HANDLER (SaaS UPGRADED)
-====================================== */
 
 async function baseHandler(
   req: AuthRequest,
   res: Response,
-  handler: (businessId: string) => Promise<any>
+  handler: (businessId: string) => Promise<unknown>,
+  options: BaseHandlerOptions
 ) {
   try {
     const businessId = req.user?.businessId;
 
     if (!businessId) {
-      return sendError(
-        res,
-        403,
-        "No business found. Please complete onboarding."
-      );
+      return sendError(res, 403, "No business found. Please complete onboarding.");
     }
-
-    /* ======================================
-    🔥 SOFT LIMIT MODE (IMPORTANT FIX)
-    ====================================== */
 
     if (req.featureDenied || req.isLimited) {
       return sendSuccess(res, null, {
@@ -86,111 +76,162 @@ async function baseHandler(
       });
     }
 
-    const data = await handler(businessId);
+    const projection = await withTimeoutFallback({
+      label: options.timeoutLabel,
+      timeoutMs: options.timeoutMs || 4000,
+      task: handler(businessId),
+      fallback: options.fallback,
+    });
 
-    /* ======================================
-    ✅ NORMAL FLOW
-    ====================================== */
+    if (options.projectionLog) {
+      console.info(options.projectionLog, {
+        businessId,
+        timedOut: projection.timedOut,
+        fallback: projection.timedOut || projection.failed,
+      });
+    }
 
-    return sendSuccess(res, data);
-
-  } catch (error: any) {
+    return sendSuccess(res, projection.value);
+  } catch (error) {
     logError(req, error);
-    return sendError(res, 500, error?.message || "Dashboard error");
+    return sendError(res, 500, error instanceof Error ? error.message : "Dashboard error");
   }
 }
 
-/* ======================================
-CONTROLLER
-====================================== */
-
 export class DashboardController {
-
-  /* ================================
-     📊 STATS
-  ================================ */
   static async getStats(req: AuthRequest, res: Response) {
-    return baseHandler(req, res, async (businessId) => {
-      return DashboardService.getStats(businessId);
-    });
+    return baseHandler(
+      req,
+      res,
+      async (businessId) => DashboardService.getStats(businessId),
+      {
+        timeoutLabel: "dashboard_stats_projection",
+        timeoutMs: 4500,
+        fallback: {
+          totalLeads: 0,
+          leadsToday: 0,
+          leadsThisMonth: 0,
+          messagesToday: 0,
+          qualifiedLeads: 0,
+          aiCallsUsed: 0,
+          aiCallsLimit: 0,
+          aiCallsRemaining: 0,
+          usagePercent: 0,
+          nearLimit: false,
+          warning: false,
+          warningMessage: null,
+          isUnlimited: false,
+          plan: "LOCKED",
+          planKey: "LOCKED",
+          premiumLocked: true,
+          chartData: [],
+          messagesChart: [],
+          recentActivity: [],
+        },
+        projectionLog: "DASHBOARD_PROJECTION_READY",
+      }
+    );
   }
 
-  /* ================================
-     👥 LEADS LIST
-  ================================ */
   static async getLeadsList(req: AuthRequest, res: Response) {
-    return baseHandler(req, res, async (businessId) => {
+    return baseHandler(
+      req,
+      res,
+      async (businessId) => {
+        const page = Math.max(Number(req.query.page) || 1, 1);
+        const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
+        const stage = isValidString(req.query.stage)
+          ? String(req.query.stage)
+          : undefined;
+        const search = isValidString(req.query.search)
+          ? String(req.query.search)
+          : undefined;
 
-      const page = Math.max(Number(req.query.page) || 1, 1);
-      const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
+        const result = await DashboardService.getLeadsList(
+          businessId,
+          page,
+          limit,
+          stage,
+          search
+        );
 
-      const stage = isValidString(req.query.stage)
-        ? String(req.query.stage)
-        : undefined;
-
-      const search = isValidString(req.query.search)
-        ? String(req.query.search)
-        : undefined;
-
-      const result = await DashboardService.getLeadsList(
-        businessId,
-        page,
-        limit,
-        stage,
-        search
-      );
-
-      return {
-        leads: result.leads,
-        pagination: result.pagination,
-      };
-    });
+        return {
+          leads: result.leads,
+          pagination: result.pagination,
+        };
+      },
+      {
+        timeoutLabel: "dashboard_leads_projection",
+        timeoutMs: 3500,
+        fallback: {
+          leads: [],
+          pagination: {
+            total: 0,
+            page: 1,
+            limit: 10,
+            totalPages: 0,
+          },
+        },
+      }
+    );
   }
 
-  /* ================================
-     🔍 LEAD DETAIL
-  ================================ */
   static async getLeadDetail(req: AuthRequest, res: Response) {
-    return baseHandler(req, res, async (businessId) => {
+    return baseHandler(
+      req,
+      res,
+      async (businessId) => {
+        const id = req.params.id;
+        if (!isValidString(id)) {
+          throw new Error("Valid Lead ID is required");
+        }
 
-      const id = req.params.id;
-
-      if (!isValidString(id)) {
-        throw new Error("Valid Lead ID is required");
+        return DashboardService.getLeadDetail(businessId, id);
+      },
+      {
+        timeoutLabel: "dashboard_lead_detail_projection",
+        timeoutMs: 3500,
+        fallback: null,
       }
-
-      return DashboardService.getLeadDetail(businessId, id);
-    });
+    );
   }
 
-  /* ================================
-     ✏️ UPDATE LEAD STAGE
-  ================================ */
   static async updateLeadStage(req: AuthRequest, res: Response) {
-    return baseHandler(req, res, async (businessId) => {
+    return baseHandler(
+      req,
+      res,
+      async (businessId) => {
+        const id = req.params.id;
+        const { stage } = req.body;
 
-      const id = req.params.id;
-      const { stage } = req.body;
+        if (!isValidString(id) || !isValidString(stage)) {
+          throw new Error("Valid Lead ID and stage are required");
+        }
 
-      if (!isValidString(id) || !isValidString(stage)) {
-        throw new Error("Valid Lead ID and stage are required");
+        return DashboardService.updateLeadStage(businessId, id, stage);
+      },
+      {
+        timeoutLabel: "dashboard_lead_stage_projection",
+        timeoutMs: 3500,
+        fallback: null,
       }
-
-      return DashboardService.updateLeadStage(
-        businessId,
-        id,
-        stage
-      );
-    });
+    );
   }
 
-  /* ================================
-     💬 ACTIVE CONVERSATIONS
-  ================================ */
   static async getActiveConversations(req: AuthRequest, res: Response) {
-    return baseHandler(req, res, async (businessId) => {
-      return DashboardService.getActiveConversations(businessId);
-    });
+    return baseHandler(
+      req,
+      res,
+      async (businessId) => DashboardService.getActiveConversations(businessId),
+      {
+        timeoutLabel: "dashboard_conversation_projection",
+        timeoutMs: 3500,
+        fallback: {
+          active: 0,
+          waitingReplies: 0,
+          resolved: 0,
+        },
+      }
+    );
   }
-
 }

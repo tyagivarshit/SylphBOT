@@ -2,7 +2,10 @@ import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { env } from "../config/env";
 import { resolveBillingCurrency } from "../services/billingGeo.service";
-import { loadBillingContext } from "../middleware/subscription.middleware";
+import {
+  loadBillingContext,
+  type BillingContext,
+} from "../middleware/subscription.middleware";
 import { commerceProjectionService } from "../services/commerceProjection.service";
 import { paymentIntentService } from "../services/paymentIntent.service";
 import { proposalEngineService } from "../services/proposalEngine.service";
@@ -15,6 +18,7 @@ import {
 } from "../config/pricing.config";
 import { getUsageOverview } from "../services/usage.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
+import { withTimeoutFallback } from "../utils/boundedTimeout";
 
 const EMPTY_USAGE_SUMMARY = {
   aiCallsUsed: 0,
@@ -66,7 +70,7 @@ const EMPTY_USAGE_SUMMARY = {
   },
 };
 
-const EMPTY_BILLING_CONTEXT = {
+const EMPTY_BILLING_CONTEXT: BillingContext = {
   subscription: null,
   plan: null,
   planKey: "FREE_LOCKED",
@@ -163,47 +167,69 @@ export class BillingController {
       };
     }
 
-    const [billingContextResult, usageResult, invoicesResult] = await Promise.allSettled([
-      loadBillingContext(businessId),
-      getUsageOverview(businessId),
-      prisma.invoiceLedger.findMany({
-        where: {
-          businessId,
+    const [billingContextResult, usageResult, invoicesResult] = await Promise.all([
+      withTimeoutFallback({
+        label: "billing_context_projection",
+        timeoutMs: 3500,
+        task: loadBillingContext(businessId),
+        fallback: {
+          subscription: null,
+          context: EMPTY_BILLING_CONTEXT,
         },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 20,
-        select: {
-          invoiceKey: true,
-          status: true,
-          currency: true,
-          subtotalMinor: true,
-          taxMinor: true,
-          totalMinor: true,
-          paidMinor: true,
-          dueAt: true,
-          issuedAt: true,
-          paidAt: true,
-          externalInvoiceId: true,
-          createdAt: true,
-        },
+      }),
+      withTimeoutFallback({
+        label: "billing_usage_projection",
+        timeoutMs: 3500,
+        task: getUsageOverview(businessId),
+        fallback: null,
+      }),
+      withTimeoutFallback({
+        label: "billing_invoice_projection",
+        timeoutMs: 2500,
+        task: prisma.invoiceLedger.findMany({
+          where: {
+            businessId,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 20,
+          select: {
+            invoiceKey: true,
+            status: true,
+            currency: true,
+            subtotalMinor: true,
+            taxMinor: true,
+            totalMinor: true,
+            paidMinor: true,
+            dueAt: true,
+            issuedAt: true,
+            paidAt: true,
+            externalInvoiceId: true,
+            createdAt: true,
+          },
+        }),
+        fallback: [],
       }),
     ]);
 
-    const billingContext =
-      billingContextResult.status === "fulfilled"
-        ? billingContextResult.value
-        : {
-            subscription: null,
-            context: EMPTY_BILLING_CONTEXT,
-          };
+    const billingContext = billingContextResult.value;
+    const usage = usageResult.value;
+    const invoices = invoicesResult.value.map(mapInvoiceForClient);
 
-    const usage = usageResult.status === "fulfilled" ? usageResult.value : null;
-    const invoices =
-      invoicesResult.status === "fulfilled"
-        ? invoicesResult.value.map(mapInvoiceForClient)
-        : [];
+    console.info("BILLING_PROJECTION_READY", {
+      businessId,
+      contextTimedOut: billingContextResult.timedOut,
+      usageTimedOut: usageResult.timedOut,
+      invoicesTimedOut: invoicesResult.timedOut,
+      usedFallback:
+        billingContextResult.timedOut ||
+        billingContextResult.failed ||
+        usageResult.timedOut ||
+        usageResult.failed ||
+        invoicesResult.timedOut ||
+        invoicesResult.failed,
+    });
 
     return {
       success: true,

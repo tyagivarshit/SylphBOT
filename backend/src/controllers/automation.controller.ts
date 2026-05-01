@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { getPlanKey, type PlanType } from "../config/plan.config";
 import { getCanonicalSubscriptionSnapshot } from "../services/subscriptionAuthority.service";
+import { withTimeoutFallback } from "../utils/boundedTimeout";
 
 type AutomationStepInput = {
   type?: string;
@@ -216,34 +217,47 @@ export const getFlows = async (req: Request, res: Response) => {
       });
     }
 
-    const flows = await prisma.automationFlow.findMany({
-      where: {
-        businessId,
-      },
-      select: {
-        id: true,
-        name: true,
-        channel: true,
-        triggerType: true,
-        triggerValue: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-        steps: {
-          select: {
-            stepKey: true,
-            stepType: true,
-            message: true,
-            condition: true,
-            nextStep: true,
-            metadata: true,
-          },
-          orderBy: { createdAt: "asc" },
+    const flowsResult = await withTimeoutFallback({
+      label: "automation_projection",
+      timeoutMs: 3000,
+      task: prisma.automationFlow.findMany({
+        where: {
+          businessId,
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
+        select: {
+          id: true,
+          name: true,
+          channel: true,
+          triggerType: true,
+          triggerValue: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          steps: {
+            select: {
+              stepKey: true,
+              stepType: true,
+              message: true,
+              condition: true,
+              nextStep: true,
+              metadata: true,
+            },
+            orderBy: { createdAt: "asc" },
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      }),
+      fallback: [],
+    });
+    const flows = flowsResult.value;
+
+    console.info("AUTOMATION_PROJECTION_READY", {
+      businessId,
+      timedOut: flowsResult.timedOut,
+      fallback: flowsResult.timedOut || flowsResult.failed,
+      count: Array.isArray(flows) ? flows.length : 0,
     });
 
     return res.json({

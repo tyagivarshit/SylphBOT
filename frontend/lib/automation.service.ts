@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/apiClient";
+import { apiFetch } from "@/lib/apiClient";
 
 export type AutomationStepConfig = {
   message?: string | null;
@@ -60,7 +61,21 @@ export type CreateCommentTriggerInput = {
 };
 
 export async function getAutomationFlows(): Promise<AutomationFlow[]> {
-  const response = await apiClient.get<AutomationFlow[]>("/automation/flows");
+  const response = await apiFetch<AutomationFlow[]>("/api/automation/flows", {
+    cache: "no-store",
+  });
+
+  if (response.limited || response.upgradeRequired) {
+    return [];
+  }
+
+  if (!response.success) {
+    if ((response.message || "").toLowerCase().includes("timeout")) {
+      return [];
+    }
+    throw new Error(response.message || "Failed to fetch automations");
+  }
+
   return Array.isArray(response.data) ? response.data : [];
 }
 

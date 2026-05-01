@@ -15,10 +15,8 @@ import { useQuery } from "@tanstack/react-query";
 import NotificationsDropdown from "../topbar/NotificationsDropdown";
 import ProfileDropdown from "../topbar/ProfileDropdown";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  fetchCurrentUser,
-  searchApp,
-} from "@/lib/userApi";
+import { searchApp } from "@/lib/userApi";
+import { useAuth } from "@/context/AuthContext";
 
 interface TopbarProps {
   setOpen: Dispatch<SetStateAction<boolean>>;
@@ -35,6 +33,7 @@ type SearchResult = {
 const brandLogoSrc = "/logo.png";
 
 function TopbarComponent({ setOpen }: TopbarProps) {
+  const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [openSearch, setOpenSearch] = useState(false);
 
@@ -45,11 +44,6 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   const debounced = useDebounce(search, 300);
   const normalizedQuery = debounced.trim();
   const shouldSearch = openSearch && normalizedQuery.length > 0;
-
-  const { data: userData } = useQuery({
-    queryKey: ["me"],
-    queryFn: fetchCurrentUser,
-  });
 
   const { data: searchData, isLoading } = useQuery({
     queryKey: ["search", normalizedQuery],
@@ -185,7 +179,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
         </div>
 
         <div className="relative z-[100] flex-shrink-0">
-          <NotificationsDropdown userId={userData?.id} />
+          <NotificationsDropdown userId={user?.id} />
         </div>
 
         <div className="relative z-[1000] flex-shrink-0">

@@ -12,10 +12,10 @@ import { auditRequest } from "../middleware/audit.middleware";
 const router = Router();
 
 router.use(protect);
+router.get("/flows", getFlows);
 router.use(subscriptionGuard);
 
 router.post("/flows", auditRequest("automation.flow_created"), createAutomationFlow);
-router.get("/flows", getFlows);
 router.patch(
   "/flows/:id",
   auditRequest("automation.flow_update_requested"),

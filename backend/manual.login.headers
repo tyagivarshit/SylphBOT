@@ -1,0 +1,31 @@
+HTTP/1.1 200 OK
+Content-Security-Policy: default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Resource-Policy: cross-origin
+Origin-Agent-Cluster: ?1
+Referrer-Policy: strict-origin-when-cross-origin
+X-Content-Type-Options: nosniff
+X-DNS-Prefetch-Control: off
+X-Download-Options: noopen
+X-Frame-Options: SAMEORIGIN
+X-Permitted-Cross-Domain-Policies: none
+X-XSS-Protection: 0
+X-Request-Id: ef12478c-79e8-4474-85ce-606e646039ed
+X-Correlation-Id: ef12478c-79e8-4474-85ce-606e646039ed
+Vary: Origin, Accept-Encoding
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: X-Request-Id
+RateLimit-Policy: 5;w=900
+RateLimit-Limit: 5
+RateLimit-Remaining: 4
+RateLimit-Reset: 900
+Cache-Control: no-store
+Set-Cookie: accessToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5ZjRkMDhhOTljMWMyYTgxMjgxNmE2OCIsInJvbGUiOiJPV05FUiIsImJ1c2luZXNzSWQiOiI2OWY0ZDBhODNjM2JiMTE4NGJmMDI3MGEiLCJ0b2tlblZlcnNpb24iOjAsInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3Nzc2NTIyMzUsImV4cCI6MTc3NzY1MzEzNSwiYXVkIjoidXNlciIsImlzcyI6InN5bHBoLWFpIiwianRpIjoiMjU2Mzk5MDAtNGZmNy00Y2M1LTlmNTUtMWM3NGJkMzhlNGQ1In0.je9VLLTeRRoOTBqJEAHiWUxGPRdtKRvQR1dIxuE8OjE; Max-Age=900; Path=/; Expires=Fri, 01 May 2026 16:32:16 GMT; HttpOnly; SameSite=Lax
+Set-Cookie: refreshToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5ZjRkMDhhOTljMWMyYTgxMjgxNmE2OCIsInRva2VuVmVyc2lvbiI6MCwidHlwZSI6InJlZnJlc2giLCJpYXQiOjE3Nzc2NTIyMzUsImV4cCI6MTc3ODI1NzAzNSwiYXVkIjoidXNlciIsImlzcyI6InN5bHBoLWFpIiwianRpIjoiMjg5ZDJlNmMtZGNjMS00YjRlLTlmNWYtNzU3NjNmOGY4OWI2In0.SB8LomLDanX_PbYex3Op_YiAJ-w-BNwyWfSYxCFARF0; Max-Age=604800; Path=/; Expires=Fri, 08 May 2026 16:17:16 GMT; HttpOnly; SameSite=Lax
+Content-Type: application/json; charset=utf-8
+Content-Length: 339
+ETag: W/"153-VLELZH6ZXbwdauCZsITJuP8LJ+k"
+Date: Fri, 01 May 2026 16:17:16 GMT
+Connection: keep-alive
+Keep-Alive: timeout=65
+

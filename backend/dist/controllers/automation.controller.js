@@ -7,6 +7,7 @@ exports.deleteAutomationFlow = exports.updateAutomationFlow = exports.getFlows =
 const prisma_1 = __importDefault(require("../config/prisma"));
 const plan_config_1 = require("../config/plan.config");
 const subscriptionAuthority_service_1 = require("../services/subscriptionAuthority.service");
+const boundedTimeout_1 = require("../utils/boundedTimeout");
 class AutomationControllerError extends Error {
     constructor(message, statusCode) {
         super(message);
@@ -156,34 +157,46 @@ const getFlows = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const flows = await prisma_1.default.automationFlow.findMany({
-            where: {
-                businessId,
-            },
-            select: {
-                id: true,
-                name: true,
-                channel: true,
-                triggerType: true,
-                triggerValue: true,
-                status: true,
-                createdAt: true,
-                updatedAt: true,
-                steps: {
-                    select: {
-                        stepKey: true,
-                        stepType: true,
-                        message: true,
-                        condition: true,
-                        nextStep: true,
-                        metadata: true,
-                    },
-                    orderBy: { createdAt: "asc" },
+        const flowsResult = await (0, boundedTimeout_1.withTimeoutFallback)({
+            label: "automation_projection",
+            timeoutMs: 3000,
+            task: prisma_1.default.automationFlow.findMany({
+                where: {
+                    businessId,
                 },
-            },
-            orderBy: {
-                createdAt: "desc",
-            },
+                select: {
+                    id: true,
+                    name: true,
+                    channel: true,
+                    triggerType: true,
+                    triggerValue: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    steps: {
+                        select: {
+                            stepKey: true,
+                            stepType: true,
+                            message: true,
+                            condition: true,
+                            nextStep: true,
+                            metadata: true,
+                        },
+                        orderBy: { createdAt: "asc" },
+                    },
+                },
+                orderBy: {
+                    createdAt: "desc",
+                },
+            }),
+            fallback: [],
+        });
+        const flows = flowsResult.value;
+        console.info("AUTOMATION_PROJECTION_READY", {
+            businessId,
+            timedOut: flowsResult.timedOut,
+            fallback: flowsResult.timedOut || flowsResult.failed,
+            count: Array.isArray(flows) ? flows.length : 0,
         });
         return res.json({
             success: true,

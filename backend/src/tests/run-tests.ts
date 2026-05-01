@@ -70,6 +70,7 @@ import { developerPlatformPhase6ETests } from "./developerPlatform.phase6e.test"
 import { growthPhase6FTests } from "./growth.phase6f.test";
 import { metaOAuthStateTests } from "./metaOAuthState.test";
 import { tenantWorkspaceIdentityTests } from "./tenantWorkspaceIdentity.test";
+import { authHydrationBootstrapTests } from "./authHydrationBootstrap.test";
 
 type TestCase = {
   name: string;
@@ -887,6 +888,7 @@ const tests: TestCase[] = [
   ...revenueBrainPhase3CTests,
   ...metaOAuthStateTests,
   ...tenantWorkspaceIdentityTests,
+  ...authHydrationBootstrapTests,
 ];
 
 let failures = 0;

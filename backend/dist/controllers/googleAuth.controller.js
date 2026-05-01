@@ -10,6 +10,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const generateToken_1 = require("../utils/generateToken");
 const authCookies_1 = require("../utils/authCookies");
 const googleOAuthState_1 = require("../utils/googleOAuthState");
+const authBootstrap_service_1 = require("../services/authBootstrap.service");
 /* ======================================
 UTILS
 ====================================== */
@@ -63,66 +64,46 @@ const googleCallback = async (req, res) => {
         if (!user || !user.id || !user.isActive) {
             return res.redirect(buildAuthErrorUrl(redirectOrigin, user?.id ? "account_inactive" : "oauth_failed"));
         }
-        const result = await prisma_1.default.$transaction(async (tx) => {
-            let business = await tx.business.findFirst({
-                where: { ownerId: user.id },
-                select: { id: true },
-            });
-            if (!business) {
-                const newBusiness = await tx.business.create({
-                    data: {
-                        name: `${user.name || "My"} Workspace`,
-                        ownerId: user.id,
-                    },
-                });
-                await tx.user.update({
-                    where: { id: user.id },
-                    data: { businessId: newBusiness.id },
-                });
-                business = { id: newBusiness.id };
-            }
-            if (user.businessId !== business.id) {
-                await tx.user.update({
-                    where: { id: user.id },
-                    data: { businessId: business.id },
-                });
-            }
-            const accessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business.id, user.tokenVersion);
-            const refreshRaw = (0, generateToken_1.generateRefreshToken)(user.id, user.tokenVersion);
-            const refreshToken = hashToken(refreshRaw);
-            const count = await tx.refreshToken.count({
-                where: { userId: user.id },
-            });
-            if (count >= 5) {
-                const oldest = await tx.refreshToken.findFirst({
-                    where: { userId: user.id },
-                    orderBy: { createdAt: "asc" },
-                });
-                if (oldest) {
-                    await tx.refreshToken.delete({
-                        where: { id: oldest.id },
-                    });
-                }
-            }
-            await tx.refreshToken.create({
-                data: {
-                    token: refreshToken,
-                    userId: user.id,
-                    userAgent: req.headers["user-agent"],
-                    ip: getIP(req),
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                },
-            });
-            return {
-                accessToken,
-                refreshRaw,
-                businessId: business.id,
-            };
-        });
-        (0, authCookies_1.setAuthCookies)(res, req, result.accessToken, result.refreshRaw);
-        console.log("GOOGLE LOGIN SUCCESS", {
+        const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
             userId: user.id,
-            businessId: result.businessId,
+            preferredBusinessId: user.businessId || null,
+            profileSeed: {
+                email: user.email || null,
+                name: user.name || null,
+                avatar: user.avatar || null,
+            },
+        });
+        const accessToken = (0, generateToken_1.generateAccessToken)(bootstrap.user.id, bootstrap.user.role, bootstrap.identity.businessId, bootstrap.user.tokenVersion);
+        const refreshRaw = (0, generateToken_1.generateRefreshToken)(bootstrap.user.id, bootstrap.user.tokenVersion);
+        const refreshToken = hashToken(refreshRaw);
+        const count = await prisma_1.default.refreshToken.count({
+            where: { userId: bootstrap.user.id },
+        });
+        if (count >= 5) {
+            const oldest = await prisma_1.default.refreshToken.findFirst({
+                where: { userId: bootstrap.user.id },
+                orderBy: { createdAt: "asc" },
+            });
+            if (oldest) {
+                await prisma_1.default.refreshToken.delete({
+                    where: { id: oldest.id },
+                });
+            }
+        }
+        await prisma_1.default.refreshToken.create({
+            data: {
+                token: refreshToken,
+                userId: bootstrap.user.id,
+                userAgent: req.headers["user-agent"],
+                ip: getIP(req),
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            },
+        });
+        (0, authCookies_1.setAuthCookies)(res, req, accessToken, refreshRaw);
+        console.info("AUTH_GOOGLE_CALLBACK_OK", {
+            userId: bootstrap.user.id,
+            businessId: bootstrap.identity.businessId,
+            source: bootstrap.identity.source,
         });
         return res.redirect(`${redirectOrigin}/dashboard`);
     }

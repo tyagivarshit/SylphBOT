@@ -3,19 +3,14 @@
 import { useState, useRef, useEffect } from "react";
 import { LogOut, Settings, HelpCircle, User, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
 import { logoutUser } from "@/lib/auth";
-import { fetchCurrentUser } from "@/lib/userApi";
+import { useAuth } from "@/context/AuthContext";
 
 export default function ProfileDropdown() {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
-
-  const { data: user } = useQuery({
-    queryKey: ["me"],
-    queryFn: fetchCurrentUser,
-  });
 
   const displayName = user?.name?.trim() || user?.email?.trim() || "Account";
   const displayEmail = user?.email?.trim() || "No email on file";

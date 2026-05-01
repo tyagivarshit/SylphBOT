@@ -143,6 +143,16 @@ export const protect = async (
   next: NextFunction
 ) => {
   try {
+    if (req.user?.id && typeof req.user.role === "string") {
+      bindAuthenticatedContext(req, {
+        id: req.user.id,
+        role: req.user.role,
+        email: req.user.email,
+        businessId: req.user.businessId || null,
+      });
+      return next();
+    }
+
     if (
       process.env.NODE_ENV === "integration" &&
       process.env.INTEGRATION_AUTH_BYPASS === "true"

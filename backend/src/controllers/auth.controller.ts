@@ -28,7 +28,7 @@ import {
   issueSessionLedger,
   recordFraudSignal,
 } from "../services/security/securityGovernanceOS.service";
-import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
+import { ensureAuthBootstrapContext } from "../services/authBootstrap.service";
 
 /* ======================================
 UTILS
@@ -232,70 +232,36 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       throw unauthorized("Invalid credentials");
     }
 
-    let business = await prisma.business.findFirst({
-      where: { ownerId: user.id },
-      select: { id: true, deletedAt: true },
+    const bootstrap = await ensureAuthBootstrapContext({
+      userId: user.id,
+      preferredBusinessId: user.businessId || null,
+      profileSeed: {
+        email: user.email,
+        name: user.name,
+        avatar: user.avatar || null,
+      },
     });
-
-    if (business?.deletedAt) {
-      void writeAuthAuditLog(req, {
-        action: "auth.login_failed",
-        userId: user.id,
-        businessId: business.id,
-        metadata: {
-          email,
-          reason: "workspace_deleted",
-        },
-      });
-      void recordFailedLoginAttempt({
-        businessId: business.id,
-        userId: user.id,
-        email,
-        ip: getIP(req),
-      });
-      throw unauthorized("Invalid credentials");
-    }
-
-    /* ✅ SAFETY FALLBACK (ADDED) */
-    if (!business) {
-      const newBusiness = await prisma.business.create({
-        data: {
-          name: `${user.name || "My"} Workspace`,
-          ownerId: user.id,
-        },
-      });
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { businessId: newBusiness.id },
-      });
-
-      business = { id: newBusiness.id, deletedAt: null };
-    }
-
-    if (business?.id && user.businessId !== business.id) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { businessId: business.id },
-      });
-    }
+    const businessId = bootstrap.identity.businessId;
 
     const accessToken = generateAccessToken(
-      user.id,
-      user.role,
-      business?.id || null,
-      user.tokenVersion
+      bootstrap.user.id,
+      bootstrap.user.role,
+      businessId,
+      bootstrap.user.tokenVersion
     );
 
-    const refreshRaw = generateRefreshToken(user.id, user.tokenVersion);
+    const refreshRaw = generateRefreshToken(
+      bootstrap.user.id,
+      bootstrap.user.tokenVersion
+    );
 
     const count = await prisma.refreshToken.count({
-      where: { userId: user.id },
+      where: { userId: bootstrap.user.id },
     });
 
     if (count >= 5) {
       const oldest = await prisma.refreshToken.findFirst({
-        where: { userId: user.id },
+        where: { userId: bootstrap.user.id },
         orderBy: { createdAt: "asc" },
       });
 
@@ -309,7 +275,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     await prisma.refreshToken.create({
       data: {
         token: hashToken(refreshRaw),
-        userId: user.id,
+        userId: bootstrap.user.id,
         userAgent: getUA(req),
         ip: getIP(req),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -317,9 +283,9 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     });
 
     await issueSessionLedger({
-      businessId: business?.id || null,
-      tenantId: business?.id || null,
-      userId: user.id,
+      businessId,
+      tenantId: businessId,
+      userId: bootstrap.user.id,
       sessionKey: hashToken(refreshRaw),
       ip: getIP(req),
       userAgent: String(getUA(req)),
@@ -332,11 +298,11 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     void writeAuthAuditLog(req, {
       action: "auth.login",
-      userId: user.id,
-      businessId: business?.id || null,
+      userId: bootstrap.user.id,
+      businessId,
       metadata: {
-        email: user.email,
-        role: user.role,
+        email: bootstrap.user.email,
+        role: bootstrap.user.role,
       },
     });
 
@@ -345,10 +311,10 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     res.json({
       success: true,
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        businessId: business?.id || null,
+        id: bootstrap.user.id,
+        email: bootstrap.user.email,
+        name: bootstrap.user.name,
+        businessId,
       },
     });
 
@@ -414,6 +380,16 @@ export const verifyEmail = async (req: Request, res: Response, next: NextFunctio
       where: { id: updatedUser.id },
       data: {
         businessId: business!.id,
+      },
+    });
+
+    await ensureAuthBootstrapContext({
+      userId: updatedUser.id,
+      preferredBusinessId: business!.id,
+      profileSeed: {
+        email: updatedUser.email,
+        name: updatedUser.name,
+        avatar: updatedUser.avatar || null,
       },
     });
 
@@ -550,19 +526,11 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
   try {
     if (!req.user?.id) throw unauthorized("Not authenticated");
 
-    const identity = await resolveUserWorkspaceIdentity({
+    const bootstrap = await ensureAuthBootstrapContext({
       userId: req.user.id,
       preferredBusinessId: req.user?.businessId || null,
-    });
-
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        businessId: true,
+      profileSeed: {
+        email: req.user?.email || null,
       },
     });
 
@@ -570,12 +538,13 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
 
     res.json({
       success: true,
-      user: user
-        ? {
-            ...user,
-            businessId: identity.businessId,
-          }
-        : null,
+      user: {
+        id: bootstrap.user.id,
+        name: bootstrap.user.name,
+        email: bootstrap.user.email,
+        role: bootstrap.user.role,
+        businessId: bootstrap.identity.businessId,
+      },
     });
 
   } catch (err) {
@@ -607,4 +576,5 @@ export const logout = async (req: any, res: Response, next: NextFunction) => {
     next(err);
   }
 };
+
 

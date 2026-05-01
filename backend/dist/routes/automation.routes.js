@@ -7,9 +7,9 @@ const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.
 const audit_middleware_1 = require("../middleware/audit.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.protect);
+router.get("/flows", automation_controller_1.getFlows);
 router.use(subscriptionGuard_middleware_1.subscriptionGuard);
 router.post("/flows", (0, audit_middleware_1.auditRequest)("automation.flow_created"), automation_controller_1.createAutomationFlow);
-router.get("/flows", automation_controller_1.getFlows);
 router.patch("/flows/:id", (0, audit_middleware_1.auditRequest)("automation.flow_update_requested"), automation_controller_1.updateAutomationFlow);
 router.delete("/flows/:id", (0, audit_middleware_1.auditRequest)("automation.flow_deleted"), automation_controller_1.deleteAutomationFlow);
 exports.default = router;

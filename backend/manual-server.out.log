@@ -1,0 +1,1296 @@
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ⚙️  override existing env vars with { override: true }
+[15:36:59] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+[15:37:00] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+[15:37:00] [32mINFO[39m: [36mServer listening[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mport[39m: 5000
+AUTH_WORKSPACE_READY {
+  userId: '69f4d08a99c1c2a812816a68',
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  source: 'bootstrapped',
+  usageSeeded: true,
+  addonSeeded: true,
+  billingSeeded: true
+}
+[16:11:22] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "affc8715-9a47-4eed-ab68-d42b852ecd7c"
+    [35mcorrelationId[39m: "affc8715-9a47-4eed-ab68-d42b852ecd7c"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "affc8715-9a47-4eed-ab68-d42b852ecd7c"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3662
+    [35mmethod[39m: "POST"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:11:52] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "ae3f4cfa-4c33-4c54-87da-52423eee9dc2"
+    [35mcorrelationId[39m: "ae3f4cfa-4c33-4c54-87da-52423eee9dc2"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "ae3f4cfa-4c33-4c54-87da-52423eee9dc2"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/auth/login"
+    [35mmethod[39m: "POST"
+    error: {
+      "type": "SyntaxError",
+      "message": "Expected property name or '}' in JSON at position 1 (line 1 column 2)",
+      "stack":
+          SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+              at JSON.parse (<anonymous>)
+              at parse (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:72:19)
+              at D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:162:18
+              at AsyncResource.runInAsyncScope (node:async_hooks:214:14)
+              at invokeCallback (D:\sylph-ai\backend\node_modules\raw-body\index.js:238:16)
+              at done (D:\sylph-ai\backend\node_modules\raw-body\index.js:227:7)
+              at IncomingMessage.onEnd (D:\sylph-ai\backend\node_modules\raw-body\index.js:287:7)
+              at IncomingMessage.emit (node:events:519:28)
+              at endReadableNT (node:internal/streams/readable:1698:12)
+              at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+      "expose": true,
+      "statusCode": 400,
+      "status": 400,
+      "body": "{email:manual.smoke.login+20260501@automexia.local,password:SmokePass1A}"
+    }
+    err: {
+      "type": "SyntaxError",
+      "message": "Expected property name or '}' in JSON at position 1 (line 1 column 2)",
+      "stack":
+          SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+              at JSON.parse (<anonymous>)
+              at parse (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:72:19)
+              at D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:162:18
+              at AsyncResource.runInAsyncScope (node:async_hooks:214:14)
+              at invokeCallback (D:\sylph-ai\backend\node_modules\raw-body\index.js:238:16)
+              at done (D:\sylph-ai\backend\node_modules\raw-body\index.js:227:7)
+              at IncomingMessage.onEnd (D:\sylph-ai\backend\node_modules\raw-body\index.js:287:7)
+              at IncomingMessage.emit (node:events:519:28)
+              at endReadableNT (node:internal/streams/readable:1698:12)
+              at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+      "expose": true,
+      "statusCode": 400,
+      "status": 400,
+      "body": "{email:manual.smoke.login+20260501@automexia.local,password:SmokePass1A}"
+    }
+[16:11:52] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "ae3f4cfa-4c33-4c54-87da-52423eee9dc2"
+    [35mcorrelationId[39m: "ae3f4cfa-4c33-4c54-87da-52423eee9dc2"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "ae3f4cfa-4c33-4c54-87da-52423eee9dc2"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 500
+    [35mdurationMs[39m: 18
+    [35mmethod[39m: "POST"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:11:53] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "f5c76a7b-774b-4324-bd1b-222ec978e463"
+    [35mcorrelationId[39m: "f5c76a7b-774b-4324-bd1b-222ec978e463"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "f5c76a7b-774b-4324-bd1b-222ec978e463"
+    [35mroute[39m: "/api/user/me"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/user/me"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:11:53] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "f5c76a7b-774b-4324-bd1b-222ec978e463"
+    [35mcorrelationId[39m: "f5c76a7b-774b-4324-bd1b-222ec978e463"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "f5c76a7b-774b-4324-bd1b-222ec978e463"
+    [35mroute[39m: "/api/user/me"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 6
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:11:54] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "a6309319-e6ab-496a-9d13-f34aaff5dd13"
+    [35mcorrelationId[39m: "a6309319-e6ab-496a-9d13-f34aaff5dd13"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "a6309319-e6ab-496a-9d13-f34aaff5dd13"
+    [35mroute[39m: "/api/dashboard/stats"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/dashboard/stats"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:11:54] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "a6309319-e6ab-496a-9d13-f34aaff5dd13"
+    [35mcorrelationId[39m: "a6309319-e6ab-496a-9d13-f34aaff5dd13"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "a6309319-e6ab-496a-9d13-f34aaff5dd13"
+    [35mroute[39m: "/api/dashboard/stats"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 4
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:11:55] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "c34a35e8-7816-4b0a-b2b4-c0abb51b95ee"
+    [35mcorrelationId[39m: "c34a35e8-7816-4b0a-b2b4-c0abb51b95ee"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "c34a35e8-7816-4b0a-b2b4-c0abb51b95ee"
+    [35mroute[39m: "/api/automation/flows"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/automation/flows"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:11:55] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "c34a35e8-7816-4b0a-b2b4-c0abb51b95ee"
+    [35mcorrelationId[39m: "c34a35e8-7816-4b0a-b2b4-c0abb51b95ee"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "c34a35e8-7816-4b0a-b2b4-c0abb51b95ee"
+    [35mroute[39m: "/api/automation/flows"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 3
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:11:56] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "7780c696-dbb6-4940-b53f-210b51eb9985"
+    [35mcorrelationId[39m: "7780c696-dbb6-4940-b53f-210b51eb9985"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "7780c696-dbb6-4940-b53f-210b51eb9985"
+    [35mroute[39m: "/api/billing"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/billing"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:11:56] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "7780c696-dbb6-4940-b53f-210b51eb9985"
+    [35mcorrelationId[39m: "7780c696-dbb6-4940-b53f-210b51eb9985"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "7780c696-dbb6-4940-b53f-210b51eb9985"
+    [35mroute[39m: "/api/billing"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 2
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:11:58] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "625c5923-e5ee-4308-ae35-c31654a481be"
+    [35mcorrelationId[39m: "625c5923-e5ee-4308-ae35-c31654a481be"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "625c5923-e5ee-4308-ae35-c31654a481be"
+    [35mroute[39m: "/api/auth/google"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 302
+    [35mdurationMs[39m: 125
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+AUTH_WORKSPACE_READY {
+  userId: '69f4d08a99c1c2a812816a68',
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  source: 'linked',
+  usageSeeded: false,
+  addonSeeded: false,
+  billingSeeded: false
+}
+[16:15:27] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "53269f49-9d55-41c3-9dde-340952f0f55a"
+    [35mcorrelationId[39m: "53269f49-9d55-41c3-9dde-340952f0f55a"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "53269f49-9d55-41c3-9dde-340952f0f55a"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1660
+    [35mmethod[39m: "POST"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:15:28] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "df5ecaff-d745-4c16-92cb-c609193336be"
+    [35mcorrelationId[39m: "df5ecaff-d745-4c16-92cb-c609193336be"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "df5ecaff-d745-4c16-92cb-c609193336be"
+    [35mroute[39m: "/api/user/me"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/user/me"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:15:28] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "df5ecaff-d745-4c16-92cb-c609193336be"
+    [35mcorrelationId[39m: "df5ecaff-d745-4c16-92cb-c609193336be"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "df5ecaff-d745-4c16-92cb-c609193336be"
+    [35mroute[39m: "/api/user/me"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 4
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:15:30] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "7f5ad53c-5e07-4c58-8683-5a27c0ce047c"
+    [35mcorrelationId[39m: "7f5ad53c-5e07-4c58-8683-5a27c0ce047c"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "7f5ad53c-5e07-4c58-8683-5a27c0ce047c"
+    [35mroute[39m: "/api/dashboard/stats"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/dashboard/stats"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:15:30] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "7f5ad53c-5e07-4c58-8683-5a27c0ce047c"
+    [35mcorrelationId[39m: "7f5ad53c-5e07-4c58-8683-5a27c0ce047c"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "7f5ad53c-5e07-4c58-8683-5a27c0ce047c"
+    [35mroute[39m: "/api/dashboard/stats"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 3
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:15:31] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "fffe4ac6-5ad0-4975-9484-33b1ab93c850"
+    [35mcorrelationId[39m: "fffe4ac6-5ad0-4975-9484-33b1ab93c850"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "fffe4ac6-5ad0-4975-9484-33b1ab93c850"
+    [35mroute[39m: "/api/automation/flows"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/automation/flows"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:15:31] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "fffe4ac6-5ad0-4975-9484-33b1ab93c850"
+    [35mcorrelationId[39m: "fffe4ac6-5ad0-4975-9484-33b1ab93c850"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "fffe4ac6-5ad0-4975-9484-33b1ab93c850"
+    [35mroute[39m: "/api/automation/flows"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 1
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:15:32] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "b70ff9ce-c751-4f5c-b02e-a1318c161e73"
+    [35mcorrelationId[39m: "b70ff9ce-c751-4f5c-b02e-a1318c161e73"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "b70ff9ce-c751-4f5c-b02e-a1318c161e73"
+    [35mroute[39m: "/api/billing"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/billing"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[16:15:32] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "b70ff9ce-c751-4f5c-b02e-a1318c161e73"
+    [35mcorrelationId[39m: "b70ff9ce-c751-4f5c-b02e-a1318c161e73"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "b70ff9ce-c751-4f5c-b02e-a1318c161e73"
+    [35mroute[39m: "/api/billing"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 2
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:15:33] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "f6d8e86b-603d-43b3-9489-dad4da4b327c"
+    [35mcorrelationId[39m: "f6d8e86b-603d-43b3-9489-dad4da4b327c"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "f6d8e86b-603d-43b3-9489-dad4da4b327c"
+    [35mroute[39m: "/api/auth/google"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 302
+    [35mdurationMs[39m: 124
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+AUTH_WORKSPACE_READY {
+  userId: '69f4d08a99c1c2a812816a68',
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  source: 'linked',
+  usageSeeded: false,
+  addonSeeded: false,
+  billingSeeded: false
+}
+[16:15:58] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "2540de25-fd4e-46d0-a93d-9711de05307e"
+    [35mcorrelationId[39m: "2540de25-fd4e-46d0-a93d-9711de05307e"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "2540de25-fd4e-46d0-a93d-9711de05307e"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1672
+    [35mmethod[39m: "POST"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+AUTH_WORKSPACE_READY {
+  userId: '69f4d08a99c1c2a812816a68',
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  source: 'linked',
+  usageSeeded: false,
+  addonSeeded: false,
+  billingSeeded: false
+}
+[16:16:05] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "8ae05809-35b6-4a16-9a40-25571bc5b11a"
+    [35mcorrelationId[39m: "8ae05809-35b6-4a16-9a40-25571bc5b11a"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "8ae05809-35b6-4a16-9a40-25571bc5b11a"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1710
+    [35mmethod[39m: "POST"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+AUTH_WORKSPACE_READY {
+  userId: '69f4d08a99c1c2a812816a68',
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  source: 'linked',
+  usageSeeded: false,
+  addonSeeded: false,
+  billingSeeded: false
+}
+[16:16:28] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "11897561-c511-4cd4-9dd0-85aaa15aebf4"
+    [35mcorrelationId[39m: "11897561-c511-4cd4-9dd0-85aaa15aebf4"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "11897561-c511-4cd4-9dd0-85aaa15aebf4"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1680
+    [35mmethod[39m: "POST"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[16:17:04] [33mWARN[39m: [36mLogin rate limited[39m
+    [35mtraceId[39m: "256fd5e3-ed51-48ce-b46e-0f1c649e557c"
+    [35mcorrelationId[39m: "256fd5e3-ed51-48ce-b46e-0f1c649e557c"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "256fd5e3-ed51-48ce-b46e-0f1c649e557c"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35memail[39m: "manual.smoke.login+20260501@automexia.local"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35misEmailBlocked[39m: true
+    [35misIPBlocked[39m: false
+    [35mretryAfter[39m: 900
+[16:17:04] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "256fd5e3-ed51-48ce-b46e-0f1c649e557c"
+    [35mcorrelationId[39m: "256fd5e3-ed51-48ce-b46e-0f1c649e557c"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "256fd5e3-ed51-48ce-b46e-0f1c649e557c"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 429
+    [35mdurationMs[39m: 119
+    [35mmethod[39m: "POST"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+AUTH_WORKSPACE_READY {
+  userId: '69f4d08a99c1c2a812816a68',
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  source: 'linked',
+  usageSeeded: false,
+  addonSeeded: false,
+  billingSeeded: false
+}
+[16:17:16] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "ef12478c-79e8-4474-85ce-606e646039ed"
+    [35mcorrelationId[39m: "ef12478c-79e8-4474-85ce-606e646039ed"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "ef12478c-79e8-4474-85ce-606e646039ed"
+    [35mroute[39m: "/api/auth/login"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1806
+    [35mmethod[39m: "POST"
+    [35mip[39m: "10.20.30.40"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+prisma:error 
+Invalid `db.sessionLedger.create()` invocation in
+D:\sylph-ai\backend\dist\services\security\securityGovernanceOS.service.js:2014:47
+
+  2011 }
+  2012 getStore().sessionLedger.set(sessionKey, row);
+  2013 bumpAuthority("SessionLedger");
+→ 2014 await withDbMirror(() => db.sessionLedger.create(
+Unique constraint failed on the constraint: `SessionLedger_sessionKey_key`
+[16:17:28] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "96af13e7-3917-4df3-80e6-c6f032b670c0"
+    [35mcorrelationId[39m: "96af13e7-3917-4df3-80e6-c6f032b670c0"
+    [35mtenantId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "96af13e7-3917-4df3-80e6-c6f032b670c0"
+    [35muserId[39m: "69f4d08a99c1c2a812816a68"
+    [35mbusinessId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mroute[39m: "/api/user/me"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1393
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+prisma:error 
+Invalid `db.sessionLedger.create()` invocation in
+D:\sylph-ai\backend\dist\services\security\securityGovernanceOS.service.js:2014:47
+
+  2011 }
+  2012 getStore().sessionLedger.set(sessionKey, row);
+  2013 bumpAuthority("SessionLedger");
+→ 2014 await withDbMirror(() => db.sessionLedger.create(
+Unique constraint failed on the constraint: `SessionLedger_sessionKey_key`
+DASHBOARD_PROJECTION_READY {
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  timedOut: false,
+  fallback: false
+}
+[16:17:30] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "0c48191f-c47f-47a4-a375-9d58f3dcf4bb"
+    [35mcorrelationId[39m: "0c48191f-c47f-47a4-a375-9d58f3dcf4bb"
+    [35mtenantId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "0c48191f-c47f-47a4-a375-9d58f3dcf4bb"
+    [35muserId[39m: "69f4d08a99c1c2a812816a68"
+    [35mbusinessId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mroute[39m: "/api/dashboard/stats"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2031
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+prisma:error 
+Invalid `db.sessionLedger.create()` invocation in
+D:\sylph-ai\backend\dist\services\security\securityGovernanceOS.service.js:2014:47
+
+  2011 }
+  2012 getStore().sessionLedger.set(sessionKey, row);
+  2013 bumpAuthority("SessionLedger");
+→ 2014 await withDbMirror(() => db.sessionLedger.create(
+Unique constraint failed on the constraint: `SessionLedger_sessionKey_key`
+AUTOMATION_PROJECTION_READY {
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  timedOut: false,
+  fallback: false,
+  count: 0
+}
+[16:17:32] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "ac8d3a4d-dfbe-4aa4-b227-72d0ac5baa2a"
+    [35mcorrelationId[39m: "ac8d3a4d-dfbe-4aa4-b227-72d0ac5baa2a"
+    [35mtenantId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "ac8d3a4d-dfbe-4aa4-b227-72d0ac5baa2a"
+    [35muserId[39m: "69f4d08a99c1c2a812816a68"
+    [35mbusinessId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mroute[39m: "/api/automation/flows"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1424
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+prisma:error 
+Invalid `db.sessionLedger.create()` invocation in
+D:\sylph-ai\backend\dist\services\security\securityGovernanceOS.service.js:2014:47
+
+  2011 }
+  2012 getStore().sessionLedger.set(sessionKey, row);
+  2013 bumpAuthority("SessionLedger");
+→ 2014 await withDbMirror(() => db.sessionLedger.create(
+Unique constraint failed on the constraint: `SessionLedger_sessionKey_key`
+BILLING_PROJECTION_READY {
+  businessId: '69f4d0a83c3bb1184bf0270a',
+  contextTimedOut: false,
+  usageTimedOut: false,
+  invoicesTimedOut: false,
+  usedFallback: false
+}
+[16:17:34] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "0e02f43c-ed9b-4c71-955a-c28eb91293f2"
+    [35mcorrelationId[39m: "0e02f43c-ed9b-4c71-955a-c28eb91293f2"
+    [35mtenantId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "0e02f43c-ed9b-4c71-955a-c28eb91293f2"
+    [35muserId[39m: "69f4d08a99c1c2a812816a68"
+    [35mbusinessId[39m: "69f4d0a83c3bb1184bf0270a"
+    [35mroute[39m: "/api/billing"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2440
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"

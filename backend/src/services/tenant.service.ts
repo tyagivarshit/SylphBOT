@@ -16,7 +16,12 @@ type WorkspaceSnapshot = {
 type UserWorkspaceIdentity = {
   businessId: string | null;
   workspace: WorkspaceSnapshot | null;
-  source: "linked" | "preferred" | "owner_fallback" | "none";
+  source:
+    | "linked"
+    | "preferred"
+    | "owner_fallback"
+    | "bootstrapped"
+    | "none";
 };
 
 const normalizeBusinessId = (value?: string | null) => {
@@ -34,6 +39,23 @@ const toWorkspaceSnapshot = (
   return workspace;
 };
 
+const workspaceSelect = {
+  id: true,
+  name: true,
+  website: true,
+  industry: true,
+  teamSize: true,
+  type: true,
+  timezone: true,
+  ownerId: true,
+  deletedAt: true,
+} as const;
+
+const buildWorkspaceName = (name?: string | null) => {
+  const base = String(name || "").trim() || "My";
+  return `${base} Workspace`;
+};
+
 const selectWorkspaceById = async (
   businessId: string
 ): Promise<WorkspaceSnapshot | null> =>
@@ -41,23 +63,40 @@ const selectWorkspaceById = async (
     where: {
       id: businessId,
     },
-    select: {
-      id: true,
-      name: true,
-      website: true,
-      industry: true,
-      teamSize: true,
-      type: true,
-      timezone: true,
-      ownerId: true,
-      deletedAt: true,
-    },
+    select: workspaceSelect,
   });
+
+const createWorkspaceForUser = async (input: {
+  userId: string;
+  userName?: string | null;
+}) => {
+  const createdWorkspace = await prisma.business.create({
+    data: {
+      name: buildWorkspaceName(input.userName),
+      ownerId: input.userId,
+    },
+    select: workspaceSelect,
+  });
+
+  await prisma.user
+    .update({
+      where: {
+        id: input.userId,
+      },
+      data: {
+        businessId: createdWorkspace.id,
+      },
+    })
+    .catch(() => undefined);
+
+  return createdWorkspace as WorkspaceSnapshot;
+};
 
 export const resolveUserWorkspaceIdentity = async (input: {
   userId: string;
   preferredBusinessId?: string | null;
   persistResolvedBusinessId?: boolean;
+  bootstrapWorkspaceIfMissing?: boolean;
 }): Promise<UserWorkspaceIdentity> => {
   const userId = String(input.userId || "").trim();
 
@@ -76,19 +115,10 @@ export const resolveUserWorkspaceIdentity = async (input: {
     },
     select: {
       id: true,
+      name: true,
       businessId: true,
       business: {
-        select: {
-          id: true,
-          name: true,
-          website: true,
-          industry: true,
-          teamSize: true,
-          type: true,
-          timezone: true,
-          ownerId: true,
-          deletedAt: true,
-        },
+        select: workspaceSelect,
       },
       ownedBusinesses: {
         where: {
@@ -98,17 +128,7 @@ export const resolveUserWorkspaceIdentity = async (input: {
           createdAt: "asc",
         },
         take: 1,
-        select: {
-          id: true,
-          name: true,
-          website: true,
-          industry: true,
-          teamSize: true,
-          type: true,
-          timezone: true,
-          ownerId: true,
-          deletedAt: true,
-        },
+        select: workspaceSelect,
       },
     },
   });
@@ -156,6 +176,19 @@ export const resolveUserWorkspaceIdentity = async (input: {
       resolvedWorkspace = ownerWorkspace;
       source = "owner_fallback";
     }
+  }
+
+  if (
+    !resolvedWorkspace &&
+    input.bootstrapWorkspaceIfMissing !== false
+  ) {
+    resolvedWorkspace = toWorkspaceSnapshot(
+      await createWorkspaceForUser({
+        userId,
+        userName: user.name,
+      })
+    );
+    source = resolvedWorkspace ? "bootstrapped" : "none";
   }
 
   if (

@@ -32,7 +32,7 @@ const getIpAddress = (req: Request) =>
       return forwarded.split(",")[0]?.trim() || "";
     }
 
-    return req.socket.remoteAddress || "";
+    return req.socket?.remoteAddress || "";
   })();
 
 export const detectRequestCountry = (req: Request) => {

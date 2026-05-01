@@ -8,13 +8,10 @@ import {
   useRef,
   useCallback,
 } from "react";
-import { getCurrentUser } from "@/lib/auth";
+import { fetchCurrentUser, type CurrentUser } from "@/lib/userApi";
 
-export type AuthUser = {
-  id: string;
-  email: string;
-  role: string;
-  businessId?: string | null;
+export type AuthUser = CurrentUser & {
+  role?: string;
 };
 
 type AuthContextType = {
@@ -41,20 +38,61 @@ export const AuthProvider = ({
 
   const hasFetched = useRef(false);
 
+  const persistAuthState = (nextUser: AuthUser | null) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!nextUser) {
+      sessionStorage.removeItem("auth_state");
+      sessionStorage.removeItem("auth_tenant_id");
+      sessionStorage.removeItem("auth_workspace_id");
+      sessionStorage.removeItem("auth_token_transport");
+      return;
+    }
+
+    const workspaceId = nextUser.workspace?.id || nextUser.business?.id || null;
+    const tenantId = nextUser.businessId || workspaceId || null;
+
+    sessionStorage.setItem(
+      "auth_state",
+      JSON.stringify({
+        status: "authenticated",
+        userId: nextUser.id,
+        tenantId,
+        workspaceId,
+        hydratedAt: new Date().toISOString(),
+      })
+    );
+
+    sessionStorage.setItem("auth_tenant_id", tenantId || "");
+    sessionStorage.setItem("auth_workspace_id", workspaceId || "");
+    sessionStorage.setItem("auth_token_transport", "cookie_http_only");
+  };
+
   const fetchUser = useCallback(async (options?: { isInitial?: boolean }) => {
     try {
-      const res = await getCurrentUser();
+      let nextUser = await fetchCurrentUser();
 
-      if (res?.unauthorized || !res?.success) {
+      if (!nextUser) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 300);
+        });
+        nextUser = await fetchCurrentUser();
+      }
+
+      if (!nextUser) {
         setUser(null);
+        persistAuthState(null);
         return null;
       }
 
-      const nextUser = res?.data?.user ?? null;
       setUser(nextUser);
+      persistAuthState(nextUser);
       return nextUser;
     } catch {
       setUser(null);
+      persistAuthState(null);
       return null;
     } finally {
       if (options?.isInitial) {

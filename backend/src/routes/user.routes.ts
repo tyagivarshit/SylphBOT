@@ -9,6 +9,7 @@ import { ensureWorkspaceApiKey } from "../services/apiKey.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import { requirePermission } from "../middleware/rbac.middleware";
 import { userActionLimiter } from "../middleware/rateLimit.middleware";
+import { withTimeoutFallback } from "../utils/boundedTimeout";
 
 const router = express.Router();
 
@@ -16,6 +17,7 @@ const safeUserSelect = {
   id: true,
   name: true,
   email: true,
+  role: true,
   phone: true,
   avatar: true,
   businessId: true,
@@ -49,23 +51,33 @@ const getCurrentUser = async (
   }
 
   const businessId = identity.businessId;
-  const clients = businessId
-    ? await prisma.client.findMany({
-        where: {
-          businessId,
-          deletedAt: null,
-          platform: {
-            in: ["INSTAGRAM", "WHATSAPP"],
+  const clientsResult = businessId
+    ? await withTimeoutFallback({
+        label: "user_me_clients_projection",
+        timeoutMs: 2500,
+        task: prisma.client.findMany({
+          where: {
+            businessId,
+            deletedAt: null,
+            platform: {
+              in: ["INSTAGRAM", "WHATSAPP"],
+            },
           },
-        },
-        select: {
-          platform: true,
-          pageId: true,
-          phoneNumberId: true,
-          isActive: true,
-        },
+          select: {
+            platform: true,
+            pageId: true,
+            phoneNumberId: true,
+            isActive: true,
+          },
+        }),
+        fallback: [],
       })
-    : [];
+    : {
+        value: [],
+        timedOut: false,
+        failed: false,
+      };
+  const clients = clientsResult.value;
 
   const instagramClient = clients.find((client) => client.platform === "INSTAGRAM");
   const whatsappClient = clients.find((client) => client.platform === "WHATSAPP");
@@ -114,17 +126,92 @@ router.get("/me", protect, async (req: any, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const user = await getCurrentUser(userId, req.user?.businessId || null);
+    const userHydration = await withTimeoutFallback({
+      label: "user_me_hydration",
+      timeoutMs: 4000,
+      task: getCurrentUser(userId, req.user?.businessId || null),
+      fallback: null,
+    });
+    const user = userHydration.value;
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
     res.setHeader("Cache-Control", "no-store");
+    if (userHydration.timedOut || userHydration.failed) {
+      console.warn("AUTH_PROFILE_HYDRATION_FALLBACK", {
+        userId,
+        businessId: user.businessId || null,
+        timedOut: userHydration.timedOut,
+      });
+    }
     return res.json(user);
   } catch (err) {
     console.error("GET USER ERROR:", err);
     res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+
+router.get("/profile", protect, async (req: any, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const profile = await getUserRecord(userId);
+
+    if (!profile) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({
+      id: profile.id,
+      name: profile.name,
+      email: profile.email,
+      phone: profile.phone || null,
+      avatar: profile.avatar || null,
+    });
+  } catch (err) {
+    console.error("GET PROFILE ERROR:", err);
+    return res.status(500).json({ error: "Failed to fetch profile" });
+  }
+});
+
+router.get("/workspace", protect, async (req: any, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const workspaceIdentity = await withTimeoutFallback({
+      label: "user_workspace_hydration",
+      timeoutMs: 3000,
+      task: resolveUserWorkspaceIdentity({
+        userId,
+        preferredBusinessId: req.user?.businessId || null,
+      }),
+      fallback: {
+        businessId: null,
+        workspace: null,
+        source: "none" as const,
+      },
+    });
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({
+      businessId: workspaceIdentity.value.businessId,
+      workspace: workspaceIdentity.value.workspace,
+      source: workspaceIdentity.value.source,
+    });
+  } catch (err) {
+    console.error("GET WORKSPACE ERROR:", err);
+    return res.status(500).json({ error: "Failed to fetch workspace" });
   }
 });
 

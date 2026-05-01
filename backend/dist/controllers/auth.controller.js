@@ -16,7 +16,7 @@ const authCookies_1 = require("../utils/authCookies");
 const audit_service_1 = require("../services/audit.service");
 const securityAlert_service_1 = require("../services/securityAlert.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
-const tenant_service_1 = require("../services/tenant.service");
+const authBootstrap_service_1 = require("../services/authBootstrap.service");
 /* ======================================
 UTILS
 ====================================== */
@@ -166,56 +166,24 @@ const login = async (req, res, next) => {
             }).catch(() => undefined);
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
-        let business = await prisma_1.default.business.findFirst({
-            where: { ownerId: user.id },
-            select: { id: true, deletedAt: true },
+        const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
+            userId: user.id,
+            preferredBusinessId: user.businessId || null,
+            profileSeed: {
+                email: user.email,
+                name: user.name,
+                avatar: user.avatar || null,
+            },
         });
-        if (business?.deletedAt) {
-            void writeAuthAuditLog(req, {
-                action: "auth.login_failed",
-                userId: user.id,
-                businessId: business.id,
-                metadata: {
-                    email,
-                    reason: "workspace_deleted",
-                },
-            });
-            void (0, securityAlert_service_1.recordFailedLoginAttempt)({
-                businessId: business.id,
-                userId: user.id,
-                email,
-                ip: getIP(req),
-            });
-            throw (0, AppError_1.unauthorized)("Invalid credentials");
-        }
-        /* ✅ SAFETY FALLBACK (ADDED) */
-        if (!business) {
-            const newBusiness = await prisma_1.default.business.create({
-                data: {
-                    name: `${user.name || "My"} Workspace`,
-                    ownerId: user.id,
-                },
-            });
-            await prisma_1.default.user.update({
-                where: { id: user.id },
-                data: { businessId: newBusiness.id },
-            });
-            business = { id: newBusiness.id, deletedAt: null };
-        }
-        if (business?.id && user.businessId !== business.id) {
-            await prisma_1.default.user.update({
-                where: { id: user.id },
-                data: { businessId: business.id },
-            });
-        }
-        const accessToken = (0, generateToken_1.generateAccessToken)(user.id, user.role, business?.id || null, user.tokenVersion);
-        const refreshRaw = (0, generateToken_1.generateRefreshToken)(user.id, user.tokenVersion);
+        const businessId = bootstrap.identity.businessId;
+        const accessToken = (0, generateToken_1.generateAccessToken)(bootstrap.user.id, bootstrap.user.role, businessId, bootstrap.user.tokenVersion);
+        const refreshRaw = (0, generateToken_1.generateRefreshToken)(bootstrap.user.id, bootstrap.user.tokenVersion);
         const count = await prisma_1.default.refreshToken.count({
-            where: { userId: user.id },
+            where: { userId: bootstrap.user.id },
         });
         if (count >= 5) {
             const oldest = await prisma_1.default.refreshToken.findFirst({
-                where: { userId: user.id },
+                where: { userId: bootstrap.user.id },
                 orderBy: { createdAt: "asc" },
             });
             if (oldest) {
@@ -227,16 +195,16 @@ const login = async (req, res, next) => {
         await prisma_1.default.refreshToken.create({
             data: {
                 token: hashToken(refreshRaw),
-                userId: user.id,
+                userId: bootstrap.user.id,
                 userAgent: getUA(req),
                 ip: getIP(req),
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
         });
         await (0, securityGovernanceOS_service_1.issueSessionLedger)({
-            businessId: business?.id || null,
-            tenantId: business?.id || null,
-            userId: user.id,
+            businessId,
+            tenantId: businessId,
+            userId: bootstrap.user.id,
             sessionKey: hashToken(refreshRaw),
             ip: getIP(req),
             userAgent: String(getUA(req)),
@@ -248,21 +216,21 @@ const login = async (req, res, next) => {
         }).catch(() => undefined);
         void writeAuthAuditLog(req, {
             action: "auth.login",
-            userId: user.id,
-            businessId: business?.id || null,
+            userId: bootstrap.user.id,
+            businessId,
             metadata: {
-                email: user.email,
-                role: user.role,
+                email: bootstrap.user.email,
+                role: bootstrap.user.role,
             },
         });
         setCookies(req, res, accessToken, refreshRaw);
         res.json({
             success: true,
             user: {
-                id: user.id,
-                email: user.email,
-                name: user.name,
-                businessId: business?.id || null,
+                id: bootstrap.user.id,
+                email: bootstrap.user.email,
+                name: bootstrap.user.name,
+                businessId,
             },
         });
     }
@@ -318,6 +286,15 @@ const verifyEmail = async (req, res, next) => {
             where: { id: updatedUser.id },
             data: {
                 businessId: business.id,
+            },
+        });
+        await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
+            userId: updatedUser.id,
+            preferredBusinessId: business.id,
+            profileSeed: {
+                email: updatedUser.email,
+                name: updatedUser.name,
+                avatar: updatedUser.avatar || null,
             },
         });
         res.json({ success: true });
@@ -425,29 +402,23 @@ const getMe = async (req, res, next) => {
     try {
         if (!req.user?.id)
             throw (0, AppError_1.unauthorized)("Not authenticated");
-        const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+        const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
             userId: req.user.id,
             preferredBusinessId: req.user?.businessId || null,
-        });
-        const user = await prisma_1.default.user.findUnique({
-            where: { id: req.user.id },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                role: true,
-                businessId: true,
+            profileSeed: {
+                email: req.user?.email || null,
             },
         });
         res.setHeader("Cache-Control", "no-store");
         res.json({
             success: true,
-            user: user
-                ? {
-                    ...user,
-                    businessId: identity.businessId,
-                }
-                : null,
+            user: {
+                id: bootstrap.user.id,
+                name: bootstrap.user.name,
+                email: bootstrap.user.email,
+                role: bootstrap.user.role,
+                businessId: bootstrap.identity.businessId,
+            },
         });
     }
     catch (err) {

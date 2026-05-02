@@ -181,6 +181,80 @@ export const buildDeterministicDigest = (input: unknown) =>
     .update(stableStringify(input))
     .digest("hex");
 
+export const scopeIdempotencyKey = ({
+  businessId,
+  idempotencyKey,
+}: {
+  businessId: string;
+  idempotencyKey?: string | null;
+}) => {
+  const normalizedBusinessId = String(businessId || "").trim();
+  const normalizedIdempotency = String(idempotencyKey || "").trim();
+
+  if (!normalizedBusinessId || !normalizedIdempotency) {
+    return null;
+  }
+
+  return `biz:${normalizedBusinessId}:${normalizedIdempotency}`;
+};
+
+export const getScopedAndLegacyIdempotencyCandidates = ({
+  businessId,
+  idempotencyKey,
+}: {
+  businessId: string;
+  idempotencyKey?: string | null;
+}) => {
+  const normalizedIdempotency = String(idempotencyKey || "").trim();
+
+  if (!normalizedIdempotency) {
+    return [] as string[];
+  }
+
+  const scoped = scopeIdempotencyKey({
+    businessId,
+    idempotencyKey: normalizedIdempotency,
+  });
+
+  if (!scoped) {
+    return [normalizedIdempotency];
+  }
+
+  return [scoped, normalizedIdempotency];
+};
+
+export const normalizeProviderVersion = (value?: string | null) =>
+  String(value || "").trim() || "0:unknown";
+
+export const parseProviderVersion = (value?: string | null) => {
+  const normalized = normalizeProviderVersion(value);
+  const [rawSeconds, ...eventTail] = normalized.split(":");
+  const seconds = Number(rawSeconds);
+  const occurredAtMs = Number.isFinite(seconds) ? Math.max(0, seconds) * 1000 : 0;
+  const eventId = eventTail.join(":").trim() || "unknown";
+
+  return {
+    raw: normalized,
+    occurredAtMs,
+    eventId,
+  };
+};
+
+export const compareProviderVersion = (left?: string | null, right?: string | null) => {
+  const a = parseProviderVersion(left);
+  const b = parseProviderVersion(right);
+
+  if (a.occurredAtMs !== b.occurredAtMs) {
+    return a.occurredAtMs < b.occurredAtMs ? -1 : 1;
+  }
+
+  if (a.eventId === b.eventId) {
+    return 0;
+  }
+
+  return a.eventId < b.eventId ? -1 : 1;
+};
+
 export const assertTransition = <TState extends string>({
   current,
   next,

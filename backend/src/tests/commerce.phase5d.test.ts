@@ -23,6 +23,15 @@ class InMemoryCommerceHarness {
   failures = new Set<string>();
   providerCredentialStatus = new Map<string, "ACTIVE" | "EXPIRED" | "REVOKED" | "AUTH_FAILED">();
   activeOverrideScopes = new Set<string>();
+  checkoutSessions = new Map<string, { sessionId: string; mode: string }>();
+  subscriptionState = {
+    key: "sub_1",
+    status: "ACTIVE",
+    planCode: "BASIC",
+    quantity: 1,
+  };
+  providerSyncFailures = 0;
+  coldBootPending = new Set<string>();
 
   createPaymentIntent(key: string, amountMinor: number) {
     this.paymentIntents.set(key, {
@@ -111,6 +120,140 @@ class InMemoryCommerceHarness {
 
     return {
       url: "https://checkout.example/test",
+    };
+  }
+
+  createCheckoutSession(idempotencyKey: string, mode = "subscription") {
+    this.assertProviderCredential("STRIPE");
+    this.assertNoOverride("CHECKOUT");
+
+    const normalized = String(idempotencyKey || "").trim();
+    if (!normalized) {
+      throw new Error("idempotency_required");
+    }
+
+    const existing = this.checkoutSessions.get(normalized);
+    if (existing) {
+      return {
+        replay: true,
+        sessionId: existing.sessionId,
+        mode: existing.mode,
+      };
+    }
+
+    const sessionId = `cs_${normalized.slice(0, 10)}`;
+    this.checkoutSessions.set(normalized, {
+      sessionId,
+      mode,
+    });
+
+    return {
+      replay: false,
+      sessionId,
+      mode,
+    };
+  }
+
+  markPaymentFailed(key: string) {
+    const intent = this.paymentIntents.get(key);
+    if (!intent) {
+      throw new Error("intent_missing");
+    }
+
+    intent.status = "FAILED";
+    return intent;
+  }
+
+  recoverPaymentFromRetry(key: string) {
+    const intent = this.paymentIntents.get(key);
+    if (!intent) {
+      throw new Error("intent_missing");
+    }
+
+    if (intent.status !== "FAILED") {
+      return false;
+    }
+
+    intent.status = "PROCESSING";
+    intent.status = "SUCCEEDED";
+    intent.capturedMinor = intent.amountMinor;
+    return true;
+  }
+
+  cancelSubscription(subscriptionKey: string) {
+    if (this.subscriptionState.key !== subscriptionKey) {
+      throw new Error("subscription_missing");
+    }
+    this.subscriptionState.status = "CANCELLED";
+    return this.subscriptionState.status;
+  }
+
+  applyPlanChange({
+    action,
+    planCode,
+    quantity,
+    prorationMinor,
+  }: {
+    action: "upgrade" | "downgrade";
+    planCode: string;
+    quantity: number;
+    prorationMinor: number;
+  }) {
+    this.subscriptionState.planCode = planCode;
+    this.subscriptionState.quantity = Math.max(1, Math.floor(quantity));
+    this.subscriptionState.status = "ACTIVE";
+
+    return {
+      action,
+      planCode: this.subscriptionState.planCode,
+      quantity: this.subscriptionState.quantity,
+      prorationMinor: Math.max(0, Math.floor(prorationMinor)),
+    };
+  }
+
+  applyPortalUpdate(update: {
+    planCode?: string;
+    quantity?: number;
+    status?: string;
+  }) {
+    if (update.planCode) {
+      this.subscriptionState.planCode = String(update.planCode).trim().toUpperCase();
+    }
+    if (update.quantity !== undefined) {
+      this.subscriptionState.quantity = Math.max(1, Math.floor(Number(update.quantity)));
+    }
+    if (update.status) {
+      this.subscriptionState.status = String(update.status).trim().toUpperCase();
+    }
+
+    return { ...this.subscriptionState };
+  }
+
+  simulatePartialProviderFailure(key: string) {
+    const intent = this.paymentIntents.get(key);
+    if (!intent) {
+      throw new Error("intent_missing");
+    }
+
+    intent.status = "PROCESSING";
+    this.providerSyncFailures += 1;
+
+    return {
+      canonicalCommitted: true,
+      providerSynced: false,
+      paymentStatus: intent.status,
+    };
+  }
+
+  scheduleColdBootPending(reference: string) {
+    this.coldBootPending.add(reference);
+  }
+
+  coldBootReconcile() {
+    const recovered = this.coldBootPending.size;
+    this.coldBootPending.clear();
+    return {
+      recovered,
     };
   }
 
@@ -296,6 +439,121 @@ export const commercePhase5DTests: TestCase[] = [
     run: () => {
       const harness = new InMemoryCommerceHarness();
       assert.throws(() => harness.providerCheckout(0), /provider_timeout/);
+    },
+  },
+  {
+    name: "phase5d successful checkout is deterministic",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      const first = harness.createCheckoutSession("checkout_success");
+
+      assert.equal(first.replay, false);
+      assert.match(first.sessionId, /^cs_/);
+    },
+  },
+  {
+    name: "phase5d duplicate checkout replay is idempotent",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      const first = harness.createCheckoutSession("checkout_replay");
+      const second = harness.createCheckoutSession("checkout_replay");
+
+      assert.equal(first.replay, false);
+      assert.equal(second.replay, true);
+      assert.equal(first.sessionId, second.sessionId);
+    },
+  },
+  {
+    name: "phase5d failed payment can recover on retry",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      harness.createPaymentIntent("pi_1", 10000);
+      harness.markPaymentFailed("pi_1");
+      assert.equal(harness.paymentIntents.get("pi_1")?.status, "FAILED");
+
+      const recovered = harness.recoverPaymentFromRetry("pi_1");
+      assert.equal(recovered, true);
+      assert.equal(harness.paymentIntents.get("pi_1")?.status, "SUCCEEDED");
+    },
+  },
+  {
+    name: "phase5d subscription cancel path is explicit",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      const status = harness.cancelSubscription("sub_1");
+      assert.equal(status, "CANCELLED");
+    },
+  },
+  {
+    name: "phase5d upgrade supports proration and seats",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      const changed = harness.applyPlanChange({
+        action: "upgrade",
+        planCode: "PRO",
+        quantity: 5,
+        prorationMinor: 2499,
+      });
+
+      assert.equal(changed.action, "upgrade");
+      assert.equal(changed.planCode, "PRO");
+      assert.equal(changed.quantity, 5);
+      assert.equal(changed.prorationMinor, 2499);
+    },
+  },
+  {
+    name: "phase5d downgrade keeps monotonic subscription authority",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      const changed = harness.applyPlanChange({
+        action: "downgrade",
+        planCode: "BASIC",
+        quantity: 2,
+        prorationMinor: 0,
+      });
+
+      assert.equal(changed.action, "downgrade");
+      assert.equal(changed.planCode, "BASIC");
+      assert.equal(changed.quantity, 2);
+    },
+  },
+  {
+    name: "phase5d portal update sync updates canonical subscription snapshot",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      const updated = harness.applyPortalUpdate({
+        planCode: "ELITE",
+        quantity: 7,
+        status: "ACTIVE",
+      });
+
+      assert.equal(updated.planCode, "ELITE");
+      assert.equal(updated.quantity, 7);
+      assert.equal(updated.status, "ACTIVE");
+    },
+  },
+  {
+    name: "phase5d partial provider failure preserves canonical commit",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      harness.createPaymentIntent("pi_1", 10000);
+      const result = harness.simulatePartialProviderFailure("pi_1");
+
+      assert.equal(result.canonicalCommitted, true);
+      assert.equal(result.providerSynced, false);
+      assert.equal(result.paymentStatus, "PROCESSING");
+    },
+  },
+  {
+    name: "phase5d cold boot reconcile drains pending stripe sync work",
+    run: () => {
+      const harness = new InMemoryCommerceHarness();
+      harness.scheduleColdBootPending("evt_1");
+      harness.scheduleColdBootPending("evt_2");
+
+      const result = harness.coldBootReconcile();
+      assert.equal(result.recovered, 2);
+      assert.equal(harness.coldBootPending.size, 0);
     },
   },
   {

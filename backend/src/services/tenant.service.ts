@@ -57,6 +57,9 @@ const buildWorkspaceName = (name?: string | null) => {
   return `${base} Workspace`;
 };
 
+const isLikelyMongoObjectId = (value?: string | null) =>
+  /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
+
 const selectWorkspaceById = async (
   businessId: string
 ): Promise<WorkspaceSnapshot | null> =>
@@ -71,17 +74,33 @@ const createWorkspaceForUser = async (input: {
   userId: string;
   userName?: string | null;
 }) => {
+  const readOwnerWorkspace = async () => {
+    if (!isLikelyMongoObjectId(input.userId)) {
+      return null;
+    }
+
+    return prisma.business
+      .findFirst({
+        where: {
+          ownerId: input.userId,
+          deletedAt: null,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        select: workspaceSelect,
+      })
+      .catch((error) => {
+        const message = String((error as Error)?.message || "");
+        if (/Malformed ObjectID|Inconsistent column data/i.test(message)) {
+          return null;
+        }
+        throw error;
+      });
+  };
+
   const ensureOwnerWorkspace = async () => {
-    const existingWorkspace = await prisma.business.findFirst({
-      where: {
-        ownerId: input.userId,
-        deletedAt: null,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: workspaceSelect,
-    });
+    const existingWorkspace = await readOwnerWorkspace();
 
     if (existingWorkspace) {
       await prisma.user
@@ -98,13 +117,25 @@ const createWorkspaceForUser = async (input: {
       return existingWorkspace as WorkspaceSnapshot;
     }
 
-    const createdWorkspace = await prisma.business.create({
-      data: {
-        name: buildWorkspaceName(input.userName),
-        ownerId: input.userId,
-      },
-      select: workspaceSelect,
-    });
+    const createdWorkspace = await prisma.business
+      .create({
+        data: {
+          name: buildWorkspaceName(input.userName),
+          ownerId: input.userId,
+        },
+        select: workspaceSelect,
+      })
+      .catch(async (error) => {
+        const message = String((error as Error)?.message || "");
+        if (/Malformed ObjectID|Inconsistent column data/i.test(message)) {
+          const fallback = await readOwnerWorkspace();
+          if (fallback) {
+            return fallback;
+          }
+        }
+
+        throw error;
+      });
 
     await prisma.user
       .update({

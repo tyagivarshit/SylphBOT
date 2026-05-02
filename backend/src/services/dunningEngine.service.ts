@@ -11,6 +11,16 @@ const toRecord = (value: unknown) =>
     : {};
 
 export const createDunningEngineService = () => {
+  const normalizeRetrySchedule = (input: unknown) => {
+    if (!Array.isArray(input)) {
+      return [] as number[];
+    }
+
+    return input
+      .map((value) => Math.max(1, Math.floor(Number(value))))
+      .filter((value) => Number.isFinite(value));
+  };
+
   const runFailedPaymentLadder = async ({
     businessId,
     now = new Date(),
@@ -64,6 +74,19 @@ export const createDunningEngineService = () => {
           runtime?.controls.commerce.dunningRetryWindowHours ||
             dunningRules.retryWindowHours ||
             24
+        )
+      )
+    );
+    const retryScheduleHours = normalizeRetrySchedule(
+      dunningRules.retryScheduleHours || runtime?.controls.commerce.dunningRetryScheduleHours
+    );
+    const graceWindowHours = Math.max(
+      6,
+      Math.floor(
+        Number(
+          runtime?.controls.commerce.graceWindowHours ||
+            dunningRules.graceWindowHours ||
+            72
         )
       )
     );
@@ -132,9 +155,10 @@ export const createDunningEngineService = () => {
             await subscriptionEngineService.transitionSubscriptionStatus({
               businessId,
               subscriptionKey: subscription.subscriptionKey,
-              nextStatus: "PAST_DUE",
+              nextStatus: "PAUSED",
               metadata: {
                 dunningEscalatedAt: now.toISOString(),
+                dunningEscalation: "auto_suspension",
               },
             }).catch(() => undefined);
           }
@@ -182,7 +206,11 @@ export const createDunningEngineService = () => {
         continue;
       }
 
-      const nextDueAt = new Date(now.getTime() + retryWindowHours * 60 * 60 * 1000);
+      const smartRetryHours =
+        retryScheduleHours[Math.min(currentStep, Math.max(retryScheduleHours.length - 1, 0))] ||
+        retryWindowHours;
+      const smartNextDueAt = new Date(now.getTime() + smartRetryHours * 60 * 60 * 1000);
+      const graceUntil = new Date(now.getTime() + graceWindowHours * 60 * 60 * 1000);
 
       await prisma.invoiceLedger.update({
         where: {
@@ -193,14 +221,38 @@ export const createDunningEngineService = () => {
           retryCount: {
             increment: 1,
           },
-          dueAt: nextDueAt,
+          dueAt: smartNextDueAt,
           metadata: mergeMetadata(invoice.metadata, {
             lastDunningAttemptAt: now.toISOString(),
-            nextRetryAt: nextDueAt.toISOString(),
+            nextRetryAt: smartNextDueAt.toISOString(),
+            retryWindowHours: smartRetryHours,
+            graceUntil: graceUntil.toISOString(),
             dunningStep: currentStep + 1,
           }) as any,
         },
       });
+
+      if (invoice.subscriptionId) {
+        const subscription = await prisma.subscriptionLedger.findUnique({
+          where: {
+            id: invoice.subscriptionId,
+          },
+        });
+
+        if (subscription && subscription.status === "ACTIVE") {
+          await subscriptionEngineService
+            .transitionSubscriptionStatus({
+              businessId,
+              subscriptionKey: subscription.subscriptionKey,
+              nextStatus: "PAST_DUE",
+              metadata: {
+                dunningStep: currentStep + 1,
+                graceUntil: graceUntil.toISOString(),
+              },
+            })
+            .catch(() => undefined);
+        }
+      }
 
       await publishCommerceEvent({
         event: "commerce.dunning.step_executed",
@@ -214,9 +266,34 @@ export const createDunningEngineService = () => {
           invoiceKey: invoice.invoiceKey,
           step: currentStep + 1,
           maxRetries,
-          nextRetryAt: nextDueAt.toISOString(),
+          nextRetryAt: smartNextDueAt.toISOString(),
+          graceUntil: graceUntil.toISOString(),
         },
       });
+
+      const business = await prisma.business.findUnique({
+        where: {
+          id: businessId,
+        },
+        select: {
+          ownerId: true,
+        },
+      });
+
+      if (business?.ownerId) {
+        await prisma.notification
+          .create({
+            data: {
+              userId: business.ownerId,
+              businessId,
+              type: "SYSTEM",
+              title: "Payment retry scheduled",
+              message: `Invoice ${invoice.invoiceKey} retry #${currentStep + 1} scheduled.`,
+              read: false,
+            },
+          })
+          .catch(() => undefined);
+      }
 
       processed += 1;
     }
@@ -226,6 +303,8 @@ export const createDunningEngineService = () => {
       paused: false,
       maxRetries,
       retryWindowHours,
+      retryScheduleHours,
+      graceWindowHours,
       intelligencePolicyVersion: runtime?.policyVersion || null,
     };
   };

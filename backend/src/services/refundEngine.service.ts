@@ -11,8 +11,10 @@ import {
   assertTransition,
   buildDeterministicDigest,
   buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeActor,
+  scopeIdempotencyKey,
   toMinor,
 } from "./commerce/shared";
 
@@ -114,8 +116,12 @@ export const createRefundEngineService = () => {
       toMinor(amountMinor),
       Math.max(0, paymentIntent.capturedMinor || paymentIntent.amountMinor)
     );
+    const rawIdempotency = String(idempotencyKey || "").trim() || null;
     const normalizedIdempotency =
-      String(idempotencyKey || "").trim() ||
+      scopeIdempotencyKey({
+        businessId,
+        idempotencyKey: rawIdempotency,
+      }) ||
       buildDeterministicDigest({
         businessId,
         paymentIntentKey,
@@ -124,11 +130,23 @@ export const createRefundEngineService = () => {
         reason,
       });
 
-    const existing = await prisma.refundLedger.findUnique({
-      where: {
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const existing = rawIdempotency
+      ? await prisma.refundLedger.findFirst({
+          where: {
+            businessId,
+            idempotencyKey: {
+              in: getScopedAndLegacyIdempotencyCandidates({
+                businessId,
+                idempotencyKey: rawIdempotency,
+              }),
+            },
+          },
+        })
+      : await prisma.refundLedger.findUnique({
+          where: {
+            idempotencyKey: normalizedIdempotency,
+          },
+        });
 
     if (existing) {
       return existing;

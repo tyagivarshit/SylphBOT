@@ -7,19 +7,40 @@ import {
   captureExceptionWithContext,
   initializeSentry,
 } from "./observability/sentry";
+import { emitStripeConfigValidation } from "./services/commerce/providers/stripeConfig.service";
+import { reconcilePendingEntitlementSync } from "./services/billingSettlement.service";
 import {
   initCrons,
   initWorkers,
   initQueues,
   shutdown,
 } from "./runtime/lifecycle";
+import { commerceProjectionService } from "./services/commerceProjection.service";
 
 let isShuttingDown = false;
 
 export const startServer = async () => {
   initializeSentry();
   configurePassport();
+  await emitStripeConfigValidation();
   await initQueues();
+  const coldBootReplay = await commerceProjectionService
+    .replayPendingProviderWebhooks({
+      provider: "STRIPE",
+      businessId: null,
+      limit: 100,
+      includeClaimedOlderThanMinutes: 5,
+    })
+    .catch(() => null);
+  const entitlementReplay = await reconcilePendingEntitlementSync({
+    limit: 100,
+  }).catch(() => null);
+  if (coldBootReplay) {
+    logger.info({ coldBootReplay }, "Commerce cold boot replay completed");
+  }
+  if (entitlementReplay && entitlementReplay.pending > 0) {
+    logger.info({ entitlementReplay }, "Commerce entitlement reconcile replay completed");
+  }
   initWorkers({
     authEmail: true,
   });

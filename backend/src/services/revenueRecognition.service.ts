@@ -4,7 +4,9 @@ import { publishCommerceEvent } from "./commerceEvent.service";
 import {
   buildDeterministicDigest,
   buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
   normalizeCurrency,
+  scopeIdempotencyKey,
 } from "./commerce/shared";
 
 export const createRevenueRecognitionService = () => {
@@ -46,7 +48,10 @@ export const createRevenueRecognitionService = () => {
     occurredAt?: Date;
   }) => {
     const normalizedIdempotency =
-      String(idempotencyKey || "").trim() ||
+      scopeIdempotencyKey({
+        businessId,
+        idempotencyKey: idempotencyKey || null,
+      }) ||
       buildDeterministicDigest({
         businessId,
         stage,
@@ -62,12 +67,25 @@ export const createRevenueRecognitionService = () => {
         chargebackId,
         occurredAt: occurredAt.toISOString(),
       });
+    const rawIdempotency = String(idempotencyKey || "").trim() || null;
 
-    const existing = await prisma.revenueRecognitionLedger.findUnique({
-      where: {
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const existing = rawIdempotency
+      ? await prisma.revenueRecognitionLedger.findFirst({
+          where: {
+            businessId,
+            idempotencyKey: {
+              in: getScopedAndLegacyIdempotencyCandidates({
+                businessId,
+                idempotencyKey: rawIdempotency,
+              }),
+            },
+          },
+        })
+      : await prisma.revenueRecognitionLedger.findUnique({
+          where: {
+            idempotencyKey: normalizedIdempotency,
+          },
+        });
 
     if (existing) {
       return existing;

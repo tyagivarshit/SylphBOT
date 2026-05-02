@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runDeveloperPlatformExtensibilitySelfAudit = exports.revokeDeveloperPlatformApiKey = exports.createDeveloperPlatformApiKey = exports.applyDeveloperPlatformOverride = exports.applyDeveloperPlatformPolicy = exports.invokeDeveloperPlatformPackageAction = exports.subscribeDeveloperPlatformEvent = exports.bindDeveloperPlatformSecret = exports.installDeveloperPlatformPackage = exports.publishDeveloperPlatformRelease = exports.publishDeveloperPlatformPackage = exports.registerDeveloperPlatformNamespace = exports.getDeveloperPlatformDashboard = exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
+exports.runDeveloperPlatformExtensibilitySelfAudit = exports.revokeDeveloperPlatformApiKey = exports.createDeveloperPlatformApiKey = exports.applyDeveloperPlatformOverride = exports.applyDeveloperPlatformPolicy = exports.invokeDeveloperPlatformPackageAction = exports.subscribeDeveloperPlatformEvent = exports.bindDeveloperPlatformSecret = exports.installDeveloperPlatformPackage = exports.publishDeveloperPlatformRelease = exports.publishDeveloperPlatformPackage = exports.registerDeveloperPlatformNamespace = exports.getDeveloperPlatformDashboard = exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.generateMetaReviewPack = exports.seedMetaReviewerDemo = exports.runMetaColdBootReconcile = exports.runMetaTokenLifecycle = exports.runMetaDoctor = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
@@ -294,6 +294,8 @@ const connectInstagramHub = async (req, res) => {
             reconnect: Boolean(req.body?.reconnect),
             externalAccountRef: normalizeOptionalString(req.body?.externalAccountRef),
             scopes: Array.isArray(req.body?.scopes) ? req.body.scopes : undefined,
+            metaProof: req.body?.metaProof || undefined,
+            simulate: req.body?.simulate || undefined,
         });
         return res.json({
             success: true,
@@ -325,6 +327,15 @@ const connectWhatsAppHub = async (req, res) => {
             replayToken: normalizeOptionalString(req.body?.replayToken),
             reconnect: Boolean(req.body?.reconnect),
             scenario: normalizeOptionalString(req.body?.scenario),
+            businessManagerId: normalizeOptionalString(req.body?.businessManagerId),
+            wabaId: normalizeOptionalString(req.body?.wabaId),
+            phoneNumberId: normalizeOptionalString(req.body?.phoneNumberId),
+            displayName: normalizeOptionalString(req.body?.displayName),
+            displayNameReviewStatus: normalizeOptionalString(req.body?.displayNameReviewStatus),
+            qualityRating: normalizeOptionalString(req.body?.qualityRating),
+            tier: normalizeOptionalString(req.body?.tier),
+            allowSandboxSlot: req.body?.allowSandboxSlot === true,
+            metaProof: req.body?.metaProof || undefined,
         });
         return res.json({
             success: true,
@@ -547,6 +558,151 @@ const runWhatsAppDoctor = async (req, res) => {
     }
 };
 exports.runWhatsAppDoctor = runWhatsAppDoctor;
+const runMetaDoctor = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const doctor = await (0, saasPackagingConnectHubOS_service_1.runMetaConnectDoctor)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.body?.provider) || "ALL",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            autoResolve: Boolean(req.body?.autoResolve),
+        });
+        return res.json({
+            success: true,
+            data: doctor,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Meta doctor failed",
+            error: String(error?.message || "meta_doctor_failed"),
+        });
+    }
+};
+exports.runMetaDoctor = runMetaDoctor;
+const runMetaTokenLifecycle = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const report = await (0, saasPackagingConnectHubOS_service_1.runMetaTokenLifecycleSweep)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.body?.provider) || "ALL",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            autoRefresh: req.body?.autoRefresh !== false,
+        });
+        return res.json({
+            success: true,
+            data: report,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Meta token lifecycle sweep failed",
+            error: String(error?.message || "meta_token_sweep_failed"),
+        });
+    }
+};
+exports.runMetaTokenLifecycle = runMetaTokenLifecycle;
+const runMetaColdBootReconcile = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.reconcileMetaColdBoot)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            provider: normalizeOptionalString(req.body?.provider) || "ALL",
+            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Cold boot reconcile failed",
+            error: String(error?.message || "cold_boot_reconcile_failed"),
+        });
+    }
+};
+exports.runMetaColdBootReconcile = runMetaColdBootReconcile;
+const seedMetaReviewerDemo = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const result = await (0, saasPackagingConnectHubOS_service_1.seedMetaReviewerMode)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            environment: normalizeOptionalString(req.body?.environment) || "SANDBOX",
+        });
+        return res.json({
+            success: true,
+            data: result,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Reviewer demo seed failed",
+            error: String(error?.message || "reviewer_seed_failed"),
+        });
+    }
+};
+exports.seedMetaReviewerDemo = seedMetaReviewerDemo;
+const generateMetaReviewPack = async (req, res) => {
+    try {
+        const context = await resolveTenantContext(req);
+        if (!context) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+        const pack = await (0, saasPackagingConnectHubOS_service_1.generateMetaAppReviewPack)({
+            businessId: context.businessId,
+            tenantId: context.tenantId,
+            environment: normalizeOptionalString(req.query?.environment) || "LIVE",
+        });
+        return res.json({
+            success: true,
+            data: pack,
+        });
+    }
+    catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: "Review pack generation failed",
+            error: String(error?.message || "review_pack_failed"),
+        });
+    }
+};
+exports.generateMetaReviewPack = generateMetaReviewPack;
 const refreshConnectHubToken = async (req, res) => {
     try {
         const context = await resolveTenantContext(req);

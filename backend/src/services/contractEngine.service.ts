@@ -6,8 +6,10 @@ import {
   PROPOSAL_TRANSITIONS,
   assertTransition,
   buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeActor,
+  scopeIdempotencyKey,
 } from "./commerce/shared";
 
 export const createContractEngineService = () => {
@@ -29,11 +31,21 @@ export const createContractEngineService = () => {
     idempotencyKey?: string | null;
   }) => {
     const normalizedIdempotency = String(idempotencyKey || "").trim() || null;
+    const scopedIdempotency = scopeIdempotencyKey({
+      businessId,
+      idempotencyKey: normalizedIdempotency,
+    });
 
     if (normalizedIdempotency) {
-      const existing = await prisma.contractLedger.findUnique({
+      const existing = await prisma.contractLedger.findFirst({
         where: {
-          idempotencyKey: normalizedIdempotency,
+          businessId,
+          idempotencyKey: {
+            in: getScopedAndLegacyIdempotencyCandidates({
+              businessId,
+              idempotencyKey: normalizedIdempotency,
+            }),
+          },
         },
       });
 
@@ -84,7 +96,7 @@ export const createContractEngineService = () => {
             },
             metadata || undefined
           ) as Prisma.InputJsonValue,
-          idempotencyKey: normalizedIdempotency,
+          idempotencyKey: scopedIdempotency,
         },
       });
 

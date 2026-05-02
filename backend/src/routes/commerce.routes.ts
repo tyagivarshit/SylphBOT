@@ -23,6 +23,11 @@ router.post("/subscription/:subscriptionKey/action", requirePermission("billing:
 router.post("/dunning/run", requirePermission("billing:manage"), CommerceController.runDunning);
 router.post("/refund", requirePermission("billing:manage"), CommerceController.requestRefund);
 router.post("/checkout/recover", requirePermission("billing:manage"), CommerceController.recoverCheckout);
+router.post("/ops/manual-retry", requirePermission("billing:manage"), CommerceController.manualRetryPayment);
+router.post("/ops/manual-credit", requirePermission("billing:manage"), CommerceController.manualCredit);
+router.post("/ops/subscription-override", requirePermission("billing:manage"), CommerceController.manualSubscriptionOverride);
+router.post("/ops/replay-pending-webhooks", requirePermission("billing:manage"), CommerceController.replayPendingWebhooks);
+router.post("/ops/replay-pending-entitlements", requirePermission("billing:manage"), CommerceController.replayPendingEntitlements);
 router.post("/reconcile-webhook", requirePermission("billing:manage"), CommerceController.reconcileWebhook);
 router.get("/projection", requirePermission("billing:view"), CommerceController.getProjection);
 router.post("/chargeback", requirePermission("billing:manage"), CommerceController.openChargeback);

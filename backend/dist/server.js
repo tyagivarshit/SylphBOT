@@ -43,12 +43,33 @@ const env_1 = require("./config/env");
 const socket_server_1 = require("./sockets/socket.server");
 const logger_1 = __importDefault(require("./utils/logger"));
 const sentry_1 = require("./observability/sentry");
+const stripeConfig_service_1 = require("./services/commerce/providers/stripeConfig.service");
+const billingSettlement_service_1 = require("./services/billingSettlement.service");
 const lifecycle_1 = require("./runtime/lifecycle");
+const commerceProjection_service_1 = require("./services/commerceProjection.service");
 let isShuttingDown = false;
 const startServer = async () => {
     (0, sentry_1.initializeSentry)();
     (0, passport_1.configurePassport)();
+    await (0, stripeConfig_service_1.emitStripeConfigValidation)();
     await (0, lifecycle_1.initQueues)();
+    const coldBootReplay = await commerceProjection_service_1.commerceProjectionService
+        .replayPendingProviderWebhooks({
+        provider: "STRIPE",
+        businessId: null,
+        limit: 100,
+        includeClaimedOlderThanMinutes: 5,
+    })
+        .catch(() => null);
+    const entitlementReplay = await (0, billingSettlement_service_1.reconcilePendingEntitlementSync)({
+        limit: 100,
+    }).catch(() => null);
+    if (coldBootReplay) {
+        logger_1.default.info({ coldBootReplay }, "Commerce cold boot replay completed");
+    }
+    if (entitlementReplay && entitlementReplay.pending > 0) {
+        logger_1.default.info({ entitlementReplay }, "Commerce entitlement reconcile replay completed");
+    }
     (0, lifecycle_1.initWorkers)({
         authEmail: true,
     });

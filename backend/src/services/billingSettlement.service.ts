@@ -2,7 +2,9 @@ import type { BillingCycle, Currency, Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { invalidateBillingContextCache } from "../middleware/subscription.middleware";
 import { scheduleBillingEmail } from "../queues/authEmail.queue";
+import { purchaseAddon } from "./addon.service";
 import { buildLedgerKey, mergeMetadata, normalizeBillingCycle, normalizeCurrency } from "./commerce/shared";
+import { processPlanUpgrade } from "./saasPackagingConnectHubOS.service";
 
 const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -26,6 +28,84 @@ const getProposalPlanCode = (proposal: {
   )
     .trim()
     .toUpperCase();
+};
+
+const mapPlanCodeToSaaSTier = (planCode: string) => {
+  const normalized = String(planCode || "").trim().toUpperCase();
+
+  if (normalized === "BASIC") {
+    return "STARTER" as const;
+  }
+
+  if (normalized === "PRO") {
+    return "PRO" as const;
+  }
+
+  if (normalized === "ELITE") {
+    return "ENTERPRISE" as const;
+  }
+
+  return null;
+};
+
+const buildInvoiceNumber = (input: {
+  paymentIntentKey: string;
+  now: Date;
+}) => {
+  const stamp = input.now.toISOString().slice(0, 10).replace(/-/g, "");
+  const tail = String(input.paymentIntentKey || "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(-8)
+    .toUpperCase();
+
+  return `INV-${stamp}-${tail || "AUTO"}`;
+};
+
+const toLineItems = (value: unknown) =>
+  Array.isArray(value)
+    ? value.filter(
+        (entry) => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry)
+      ) as Array<Record<string, unknown>>
+    : [];
+
+const getAddonPurchases = (lineItems: unknown) => {
+  const purchases: Array<{ type: "ai_credits" | "contacts"; credits: number }> = [];
+
+  for (const item of toLineItems(lineItems)) {
+    const type = String(item.type || item.addonType || "")
+      .trim()
+      .toLowerCase();
+    const credits = Math.max(
+      0,
+      Math.floor(Number(item.credits || item.quantity || item.units || 0))
+    );
+
+    if (!credits) {
+      continue;
+    }
+
+    if (type === "ai_credits" || type === "addon_ai_credits") {
+      purchases.push({
+        type: "ai_credits",
+        credits,
+      });
+      continue;
+    }
+
+    if (type === "contacts" || type === "addon_contacts") {
+      purchases.push({
+        type: "contacts",
+        credits,
+      });
+    }
+  }
+
+  return purchases;
+};
+
+const isPendingEntitlementReconcile = (value: unknown) => {
+  const metadata = toRecord(value);
+  return Boolean(metadata.pendingEntitlementReconcile);
 };
 
 const getProposalBillingCycle = (proposal: {
@@ -146,6 +226,10 @@ export const settleSuccessfulCheckout = async (input: {
   const subscriptionIdempotencyKey = `checkout:settlement:subscription:${paymentIntent.id}`;
   const invoiceIdempotencyKey = `checkout:settlement:invoice:${paymentIntent.id}`;
   const periodEnd = resolvePeriodEnd(now, billingCycle);
+  const invoiceNumber = buildInvoiceNumber({
+    paymentIntentKey: paymentIntent.paymentIntentKey,
+    now,
+  });
 
   const settled = await prisma.$transaction(async (tx) => {
     let shouldQueueBillingEmail = false;
@@ -271,9 +355,12 @@ export const settleSuccessfulCheckout = async (input: {
           dueAt: now,
           issuedAt: now,
           paidAt: now,
+          externalInvoiceId: invoiceNumber,
           metadata: {
             source: "checkout_settlement",
             paymentIntentId: paymentIntent.id,
+            invoiceNumber,
+            receiptNumber: `RCT-${invoiceNumber}`,
           } as Prisma.InputJsonValue,
           idempotencyKey: invoiceIdempotencyKey,
         },
@@ -291,6 +378,8 @@ export const settleSuccessfulCheckout = async (input: {
           metadata: mergeMetadata(invoice.metadata, {
             settlementSource: input.source || "billing_settlement",
             paymentIntentId: paymentIntent.id,
+            invoiceNumber: invoice.externalInvoiceId || invoiceNumber,
+            receiptNumber: `RCT-${invoice.externalInvoiceId || invoiceNumber}`,
           }) as Prisma.InputJsonValue,
         },
       });
@@ -367,6 +456,75 @@ export const settleSuccessfulCheckout = async (input: {
     }
   }
 
+  const mappedTier = mapPlanCodeToSaaSTier(planCode);
+  const entitlementReconcileReasons: string[] = [];
+
+  if (mappedTier) {
+    const remainingCycleDays = Math.max(
+      1,
+      Math.floor((periodEnd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
+    );
+    await processPlanUpgrade({
+      businessId: paymentIntent.businessId,
+      toPlan: mappedTier,
+      replayToken: `billing_settlement:${paymentIntent.id}:${planCode}`,
+      remainingCycleDays,
+    }).catch((error) => {
+      entitlementReconcileReasons.push(
+        `plan_upgrade_sync_failed:${String((error as { message?: unknown })?.message || "unknown")}`
+      );
+      return undefined;
+    });
+  }
+
+  const addonPurchases = getAddonPurchases(proposal.lineItems);
+  for (const purchase of addonPurchases) {
+    await purchaseAddon(paymentIntent.businessId, purchase.type, purchase.credits).catch(
+      (error) => {
+        entitlementReconcileReasons.push(
+          `addon_sync_failed:${purchase.type}:${purchase.credits}:${String(
+            (error as { message?: unknown })?.message || "unknown"
+          )}`
+        );
+        return undefined;
+      }
+    );
+  }
+  const pendingEntitlementReconcile = entitlementReconcileReasons.length > 0;
+
+  await Promise.all([
+    prisma.paymentIntentLedger
+      .update({
+        where: {
+          id: paymentIntent.id,
+        },
+        data: {
+          metadata: mergeMetadata(paymentIntent.metadata, {
+            pendingEntitlementReconcile,
+            entitlementReconcileReasons:
+              entitlementReconcileReasons.length > 0 ? entitlementReconcileReasons : null,
+            entitlementReconcileUpdatedAt: new Date().toISOString(),
+          }) as Prisma.InputJsonValue,
+        },
+      })
+      .catch(() => undefined),
+    prisma.subscriptionLedger
+      .update({
+        where: {
+          id: settled.subscription.id,
+        },
+        data: {
+          metadata: mergeMetadata(settled.subscription.metadata, {
+            pendingEntitlementReconcile,
+            entitlementReconcileReasons:
+              entitlementReconcileReasons.length > 0 ? entitlementReconcileReasons : null,
+            entitlementReconcileUpdatedAt: new Date().toISOString(),
+          }) as Prisma.InputJsonValue,
+        },
+      })
+      .catch(() => undefined),
+  ]);
+
   return {
     settled: true,
     paymentIntentId: paymentIntent.id,
@@ -375,5 +533,144 @@ export const settleSuccessfulCheckout = async (input: {
     planCode,
     billingCycle,
     currency,
+    addonCreditsApplied: addonPurchases,
+    pendingEntitlementReconcile,
+    entitlementReconcileReasons,
+  };
+};
+
+export const reconcilePendingEntitlementSync = async ({
+  limit = 100,
+}: {
+  limit?: number;
+} = {}) => {
+  const normalizedLimit = Math.max(1, Math.min(500, Math.floor(Number(limit || 100))));
+  const candidates = await prisma.paymentIntentLedger.findMany({
+    where: {
+      status: "SUCCEEDED",
+      subscriptionId: {
+        not: null,
+      },
+    },
+    include: {
+      proposal: {
+        select: {
+          lineItems: true,
+        },
+      },
+      subscription: true,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    take: Math.max(normalizedLimit * 5, 200),
+  });
+
+  const pending = candidates
+    .filter(
+      (row) =>
+        isPendingEntitlementReconcile(row.metadata) ||
+        isPendingEntitlementReconcile(row.subscription?.metadata)
+    )
+    .slice(0, normalizedLimit);
+
+  let processed = 0;
+  let recovered = 0;
+  let failed = 0;
+  const failureDetails: Array<{ paymentIntentId: string; error: string }> = [];
+
+  for (const row of pending) {
+    const subscription = row.subscription;
+    if (!subscription) {
+      continue;
+    }
+
+    processed += 1;
+    const entitlementReconcileReasons: string[] = [];
+    const mappedTier = mapPlanCodeToSaaSTier(subscription.planCode);
+    const cycleAnchor = subscription.currentPeriodEnd || subscription.renewAt || new Date();
+    const remainingCycleDays = Math.max(
+      1,
+      Math.floor((cycleAnchor.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    );
+
+    if (mappedTier) {
+      await processPlanUpgrade({
+        businessId: row.businessId,
+        toPlan: mappedTier,
+        replayToken: `entitlement_reconcile:${row.id}:${subscription.planCode}`,
+        remainingCycleDays,
+      }).catch((error) => {
+        entitlementReconcileReasons.push(
+          `plan_upgrade_sync_failed:${String((error as { message?: unknown })?.message || "unknown")}`
+        );
+        return undefined;
+      });
+    }
+
+    const addonPurchases = getAddonPurchases(row.proposal?.lineItems);
+    for (const purchase of addonPurchases) {
+      await purchaseAddon(row.businessId, purchase.type, purchase.credits).catch((error) => {
+        entitlementReconcileReasons.push(
+          `addon_sync_failed:${purchase.type}:${purchase.credits}:${String(
+            (error as { message?: unknown })?.message || "unknown"
+          )}`
+        );
+        return undefined;
+      });
+    }
+
+    const pendingEntitlementReconcile = entitlementReconcileReasons.length > 0;
+    if (pendingEntitlementReconcile) {
+      failed += 1;
+      failureDetails.push({
+        paymentIntentId: row.id,
+        error: entitlementReconcileReasons.join(";"),
+      });
+    } else {
+      recovered += 1;
+    }
+
+    await Promise.all([
+      prisma.paymentIntentLedger
+        .update({
+          where: {
+            id: row.id,
+          },
+          data: {
+            metadata: mergeMetadata(row.metadata, {
+              pendingEntitlementReconcile,
+              entitlementReconcileReasons:
+                entitlementReconcileReasons.length > 0 ? entitlementReconcileReasons : null,
+              entitlementReconcileUpdatedAt: new Date().toISOString(),
+            }) as Prisma.InputJsonValue,
+          },
+        })
+        .catch(() => undefined),
+      prisma.subscriptionLedger
+        .update({
+          where: {
+            id: subscription.id,
+          },
+          data: {
+            metadata: mergeMetadata(subscription.metadata, {
+              pendingEntitlementReconcile,
+              entitlementReconcileReasons:
+                entitlementReconcileReasons.length > 0 ? entitlementReconcileReasons : null,
+              entitlementReconcileUpdatedAt: new Date().toISOString(),
+            }) as Prisma.InputJsonValue,
+          },
+        })
+        .catch(() => undefined),
+    ]);
+  }
+
+  return {
+    scanned: candidates.length,
+    pending: pending.length,
+    processed,
+    recovered,
+    failed,
+    failureDetails: failureDetails.slice(0, 20),
   };
 };

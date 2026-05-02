@@ -16,9 +16,13 @@ import {
   assertTransition,
   buildDeterministicDigest,
   buildLedgerKey,
+  compareProviderVersion,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeActor,
+  normalizeProviderVersion,
   normalizeProvider,
+  scopeIdempotencyKey,
   toMinor,
 } from "./commerce/shared";
 
@@ -36,8 +40,10 @@ const mapProviderEventToIntentStatus = (
     case "payment_intent.partially_captured":
       return "PARTIALLY_CAPTURED";
     case "payment_intent.succeeded":
+    case "invoice.paid":
       return "SUCCEEDED";
     case "payment_intent.failed":
+    case "invoice.payment_failed":
       return "FAILED";
     case "checkout.completed":
       return "PROCESSING";
@@ -58,7 +64,10 @@ const mapProviderEventToAttemptStatus = (
     case "payment_intent.succeeded":
       return "SUCCEEDED";
     case "payment_intent.failed":
+    case "invoice.payment_failed":
       return "FAILED";
+    case "invoice.paid":
+      return "SUCCEEDED";
     default:
       return "PROCESSING";
   }
@@ -137,8 +146,12 @@ export const createPaymentIntentService = () => {
       throw new Error(`provider_credential_unavailable:${normalizedProvider}`);
     });
     const adapter = commerceProviderRegistry.resolve(normalizedProvider);
+    const rawIdempotency = String(idempotencyKey || "").trim() || null;
     const normalizedIdempotency =
-      String(idempotencyKey || "").trim() ||
+      scopeIdempotencyKey({
+        businessId,
+        idempotencyKey: rawIdempotency,
+      }) ||
       buildDeterministicDigest({
         businessId,
         proposalKey,
@@ -146,53 +159,105 @@ export const createPaymentIntentService = () => {
         amount: proposal.totalMinor,
       });
 
-    const existing = await prisma.paymentIntentLedger.findUnique({
-      where: {
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const existing = rawIdempotency
+      ? await prisma.paymentIntentLedger.findFirst({
+          where: {
+            businessId,
+            idempotencyKey: {
+              in: getScopedAndLegacyIdempotencyCandidates({
+                businessId,
+                idempotencyKey: rawIdempotency,
+              }),
+            },
+          },
+        })
+      : await prisma.paymentIntentLedger.findUnique({
+          where: {
+            idempotencyKey: normalizedIdempotency,
+          },
+        });
 
     if (existing) {
       return existing;
     }
 
-    const paymentIntent = await prisma.paymentIntentLedger.create({
-      data: {
-        businessId,
-        proposalId: proposal.id,
-        paymentIntentKey: buildLedgerKey("payment_intent"),
-        provider: normalizedProvider,
-        status: "CREATED",
-        source: normalizeActor(source),
-        amountMinor: toMinor(proposal.totalMinor),
-        currency: proposal.currency,
-        metadata: mergeMetadata(
-          {
-            proposalKey,
-            description,
-          },
-          metadata || undefined
-        ) as Prisma.InputJsonValue,
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const paymentIntent = await prisma.$transaction(async (tx) => {
+      const row = await tx.paymentIntentLedger.create({
+        data: {
+          businessId,
+          proposalId: proposal.id,
+          paymentIntentKey: buildLedgerKey("payment_intent"),
+          provider: normalizedProvider,
+          status: "CREATED",
+          source: normalizeActor(source),
+          amountMinor: toMinor(proposal.totalMinor),
+          currency: proposal.currency,
+          metadata: mergeMetadata(
+            {
+              proposalKey,
+              description,
+              planCode:
+                String(toRecord(proposal.pricingSnapshot).planCode || toRecord(proposal.metadata).planCode || "")
+                  .trim()
+                  .toUpperCase() || null,
+              billingCycle:
+                String(
+                  toRecord(proposal.pricingSnapshot).billingCycle ||
+                    toRecord(proposal.metadata).billingCycle ||
+                    "monthly"
+                )
+                  .trim()
+                  .toLowerCase() || "monthly",
+              quantity: Math.max(1, Number(proposal.quantity || 1)),
+              unitPriceMinor: Math.max(0, Number(proposal.unitPriceMinor || 0)),
+              coupon:
+                String(toRecord(proposal.metadata).coupon || toRecord(metadata).coupon || "")
+                  .trim() || null,
+              checkoutType:
+                String(
+                  toRecord(proposal.metadata).checkoutType ||
+                    toRecord(metadata).checkoutType ||
+                    "subscription"
+                )
+                  .trim()
+                  .toLowerCase() || "subscription",
+              trialDays: Math.max(
+                0,
+                Math.floor(
+                  Number(
+                    toRecord(proposal.metadata).trialDays ||
+                      toRecord(metadata).trialDays ||
+                      0
+                  )
+                )
+              ),
+            },
+            metadata || undefined
+          ) as Prisma.InputJsonValue,
+          idempotencyKey: normalizedIdempotency,
+        },
+      });
 
-    await publishCommerceEvent({
-      event: "commerce.payment_intent.created",
-      businessId,
-      aggregateType: "payment_intent_ledger",
-      aggregateId: paymentIntent.id,
-      eventKey: paymentIntent.paymentIntentKey,
-      payload: {
+      await publishCommerceEvent({
+        tx,
+        event: "commerce.payment_intent.created",
         businessId,
-        proposalId: proposal.id,
-        proposalKey,
-        paymentIntentId: paymentIntent.id,
-        paymentIntentKey: paymentIntent.paymentIntentKey,
-        provider: normalizedProvider,
-        amountMinor: paymentIntent.amountMinor,
-        currency: paymentIntent.currency,
-      },
+        aggregateType: "payment_intent_ledger",
+        aggregateId: row.id,
+        eventKey: row.paymentIntentKey,
+        payload: {
+          businessId,
+          proposalId: proposal.id,
+          proposalKey,
+          paymentIntentId: row.id,
+          paymentIntentKey: row.paymentIntentKey,
+          provider: normalizedProvider,
+          amountMinor: row.amountMinor,
+          currency: row.currency,
+        },
+      });
+
+      return row;
     });
 
     try {
@@ -208,6 +273,34 @@ export const createPaymentIntentService = () => {
           proposalKey,
           paymentIntentId: paymentIntent.id,
           paymentIntentKey: paymentIntent.paymentIntentKey,
+          planCode:
+            String(toRecord(paymentIntent.metadata).planCode || toRecord(proposal.pricingSnapshot).planCode || "")
+              .trim()
+              .toUpperCase() || null,
+          billingCycle:
+            String(
+              toRecord(paymentIntent.metadata).billingCycle ||
+                toRecord(proposal.pricingSnapshot).billingCycle ||
+                "monthly"
+            )
+              .trim()
+              .toLowerCase() || "monthly",
+          quantity: Math.max(1, Number(toRecord(paymentIntent.metadata).quantity || proposal.quantity || 1)),
+          unitPriceMinor: Math.max(
+            0,
+            Number(
+              toRecord(paymentIntent.metadata).unitPriceMinor ||
+                proposal.unitPriceMinor ||
+                paymentIntent.amountMinor
+            )
+          ),
+          checkoutType:
+            String(toRecord(paymentIntent.metadata).checkoutType || "subscription")
+              .trim()
+              .toLowerCase() || "subscription",
+          trialDays: Math.max(0, Number(toRecord(paymentIntent.metadata).trialDays || 0)),
+          coupon:
+            String(toRecord(paymentIntent.metadata).coupon || "").trim() || null,
           ...(metadata || {}),
         },
       });
@@ -269,7 +362,7 @@ export const createPaymentIntentService = () => {
 
       return updated;
     } catch (error) {
-      await prisma.paymentIntentLedger.update({
+      const failed = await prisma.paymentIntentLedger.update({
         where: {
           id: paymentIntent.id,
         },
@@ -280,6 +373,23 @@ export const createPaymentIntentService = () => {
           }) as Prisma.InputJsonValue,
         },
       });
+
+      await publishCommerceEvent({
+        event: "commerce.payment_intent.status_changed",
+        businessId,
+        aggregateType: "payment_intent_ledger",
+        aggregateId: failed.id,
+        eventKey: `${failed.paymentIntentKey}:${paymentIntent.status}:FAILED`,
+        payload: {
+          businessId,
+          paymentIntentId: failed.id,
+          paymentIntentKey: failed.paymentIntentKey,
+          provider: failed.provider,
+          from: paymentIntent.status,
+          to: "FAILED",
+          reason: String((error as any)?.message || "provider_checkout_failed"),
+        },
+      }).catch(() => undefined);
 
       throw error;
     }
@@ -313,16 +423,30 @@ export const createPaymentIntentService = () => {
       scope: "payment_intent",
     });
 
+    const baselineCapturedMinor = Math.max(
+      0,
+      Math.floor(Number(paymentIntent.capturedMinor || 0))
+    );
+    const requestedCapturedMinor =
+      capturedMinor !== null && capturedMinor !== undefined
+        ? Math.max(0, Math.floor(Number(capturedMinor)))
+        : baselineCapturedMinor;
+    const nextCapturedMinor =
+      nextStatus === "SUCCEEDED"
+        ? Math.max(
+            baselineCapturedMinor,
+            requestedCapturedMinor,
+            Math.max(0, Math.floor(Number(paymentIntent.amountMinor || 0)))
+          )
+        : Math.max(baselineCapturedMinor, requestedCapturedMinor);
+
     const updated = await prisma.paymentIntentLedger.update({
       where: {
         id: paymentIntent.id,
       },
       data: {
         status: nextStatus,
-        capturedMinor:
-          capturedMinor !== null && capturedMinor !== undefined
-            ? Math.max(0, Math.floor(capturedMinor))
-            : paymentIntent.capturedMinor,
+        capturedMinor: nextCapturedMinor,
         metadata: mergeMetadata(paymentIntent.metadata, metadata || undefined) as Prisma.InputJsonValue,
       },
     });
@@ -352,6 +476,13 @@ export const createPaymentIntentService = () => {
     event: ProviderWebhookEvent;
   }) => {
     const normalized = event;
+    const metadata = toRecord(normalized.metadata);
+    const providerVersion = normalizeProviderVersion(
+      String(
+        metadata.providerVersion ||
+          `${Math.floor(normalized.occurredAt.getTime() / 1000)}:${normalized.providerEventId}`
+      )
+    );
     const attemptDedupeKey = buildDeterministicDigest({
       provider: normalized.provider,
       providerEventId: normalized.providerEventId,
@@ -410,6 +541,34 @@ export const createPaymentIntentService = () => {
       };
     }
 
+    const normalizedProviderPaymentIntentId = String(
+      normalized.providerPaymentIntentId || ""
+    ).trim();
+    const currentProviderPaymentIntentId = String(
+      paymentIntent.providerPaymentIntentId || ""
+    ).trim();
+
+    if (
+      normalized.provider === "STRIPE" &&
+      normalizedProviderPaymentIntentId &&
+      normalizedProviderPaymentIntentId.startsWith("pi_") &&
+      normalizedProviderPaymentIntentId !== currentProviderPaymentIntentId
+    ) {
+      paymentIntent = await prisma.paymentIntentLedger.update({
+        where: {
+          id: paymentIntent.id,
+        },
+        data: {
+          providerPaymentIntentId: normalizedProviderPaymentIntentId,
+          metadata: mergeMetadata(paymentIntent.metadata, {
+            stripeSessionId:
+              String(metadata.stripeSessionId || currentProviderPaymentIntentId).trim() ||
+              null,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+    }
+
     await commerceAuthorityService
       .resolveProviderCredential({
         businessId: paymentIntent.businessId,
@@ -444,6 +603,20 @@ export const createPaymentIntentService = () => {
       };
     }
 
+    const paymentIntentMetadata = toRecord(paymentIntent.metadata);
+    const lastProviderVersion = normalizeProviderVersion(
+      String(paymentIntentMetadata.lastWebhookProviderVersion || "")
+    );
+    const staleByVersion = compareProviderVersion(providerVersion, lastProviderVersion) < 0;
+    const lastOccurredAtMs = Number(
+      paymentIntentMetadata.lastWebhookOccurredAtMs || paymentIntentMetadata.lastWebhookOccurredAt || 0
+    );
+    const staleByTimestamp =
+      Number.isFinite(lastOccurredAtMs) &&
+      lastOccurredAtMs > 0 &&
+      normalized.occurredAt.getTime() < lastOccurredAtMs;
+    const staleEvent = staleByVersion || staleByTimestamp;
+
     const attemptStatus = mapProviderEventToAttemptStatus(normalized);
     await prisma.paymentAttemptLedger.create({
       data: {
@@ -464,7 +637,12 @@ export const createPaymentIntentService = () => {
           attemptStatus === "FAILED"
             ? String(toRecord(normalized.metadata).reason || "provider_failed")
             : null,
-        metadata: normalized.rawPayload as Prisma.InputJsonValue,
+        metadata: mergeMetadata(normalized.rawPayload, {
+          providerVersion,
+          staleEvent,
+          staleByVersion,
+          staleByTimestamp,
+        }) as Prisma.InputJsonValue,
         idempotencyKey: attemptDedupeKey,
       },
     });
@@ -484,6 +662,33 @@ export const createPaymentIntentService = () => {
       },
     });
 
+    if (staleEvent) {
+      await publishCommerceEvent({
+        event: "commerce.webhook.reconciled",
+        businessId: paymentIntent.businessId,
+        aggregateType: "payment_intent_ledger",
+        aggregateId: paymentIntent.id,
+        eventKey: normalized.providerEventId,
+        payload: {
+          businessId: paymentIntent.businessId,
+          paymentIntentId: paymentIntent.id,
+          provider: normalized.provider,
+          providerEventId: normalized.providerEventId,
+          providerType: normalized.type,
+          staleEvent: true,
+          providerVersion,
+          lastProviderVersion,
+        },
+      });
+
+      return {
+        event: normalized,
+        replay: false,
+        unmatched: false,
+        stale: true,
+      };
+    }
+
     const nextStatus = mapProviderEventToIntentStatus(normalized);
 
     if (nextStatus) {
@@ -492,17 +697,45 @@ export const createPaymentIntentService = () => {
           paymentIntentId: paymentIntent.id,
           nextStatus,
           capturedMinor:
-            nextStatus === "SUCCEEDED"
+            nextStatus === "SUCCEEDED" || nextStatus === "PARTIALLY_CAPTURED"
               ? normalized.amountMinor || paymentIntent.amountMinor
               : undefined,
           metadata: {
             lastWebhookProviderEventId: normalized.providerEventId,
             lastWebhookType: normalized.type,
+            lastWebhookProviderVersion: providerVersion,
+            lastWebhookOccurredAt: normalized.occurredAt.toISOString(),
+            lastWebhookOccurredAtMs: normalized.occurredAt.getTime(),
+            lastWebhookProviderCaseId:
+              String(metadata.providerCaseId || "").trim() || null,
+            lastWebhookProviderChargeId:
+              String(metadata.providerChargeId || "").trim() || null,
           },
         });
       } catch {
         // keep replay-safe semantics: do not throw on monotonic reject
       }
+    } else {
+      await prisma.paymentIntentLedger
+        .update({
+          where: {
+            id: paymentIntent.id,
+          },
+          data: {
+            metadata: mergeMetadata(paymentIntent.metadata, {
+              lastWebhookProviderEventId: normalized.providerEventId,
+              lastWebhookType: normalized.type,
+              lastWebhookProviderVersion: providerVersion,
+              lastWebhookOccurredAt: normalized.occurredAt.toISOString(),
+              lastWebhookOccurredAtMs: normalized.occurredAt.getTime(),
+              lastWebhookProviderCaseId:
+                String(metadata.providerCaseId || "").trim() || null,
+              lastWebhookProviderChargeId:
+                String(metadata.providerChargeId || "").trim() || null,
+            }) as Prisma.InputJsonValue,
+          },
+        })
+        .catch(() => undefined);
     }
 
     await publishCommerceEvent({

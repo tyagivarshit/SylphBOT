@@ -8,9 +8,11 @@ import {
   assertTransition,
   buildDeterministicDigest,
   buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeCurrency,
   normalizeProvider,
+  scopeIdempotencyKey,
   toMinor,
 } from "./commerce/shared";
 
@@ -61,8 +63,12 @@ export const createChargebackEngineService = () => {
     metadata?: Record<string, unknown> | null;
     idempotencyKey?: string | null;
   }) => {
+    const rawIdempotency = String(idempotencyKey || "").trim() || null;
     const normalizedIdempotency =
-      String(idempotencyKey || "").trim() ||
+      scopeIdempotencyKey({
+        businessId,
+        idempotencyKey: rawIdempotency,
+      }) ||
       buildDeterministicDigest({
         businessId,
         paymentIntentId,
@@ -71,11 +77,23 @@ export const createChargebackEngineService = () => {
         providerCaseId,
       });
 
-    const existing = await prisma.chargebackLedger.findUnique({
-      where: {
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const existing = rawIdempotency
+      ? await prisma.chargebackLedger.findFirst({
+          where: {
+            businessId,
+            idempotencyKey: {
+              in: getScopedAndLegacyIdempotencyCandidates({
+                businessId,
+                idempotencyKey: rawIdempotency,
+              }),
+            },
+          },
+        })
+      : await prisma.chargebackLedger.findUnique({
+          where: {
+            idempotencyKey: normalizedIdempotency,
+          },
+        });
 
     if (existing) {
       return existing;

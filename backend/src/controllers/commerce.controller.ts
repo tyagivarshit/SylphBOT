@@ -1,10 +1,12 @@
 import { Request, Response } from "express";
+import { purchaseAddon } from "../services/addon.service";
 import { chargebackEngineService } from "../services/chargebackEngine.service";
 import { checkoutRecoveryService } from "../services/checkoutRecovery.service";
 import { commerceAuthorityService } from "../services/commerceAuthority.service";
 import { commerceProjectionService } from "../services/commerceProjection.service";
 import { contractEngineService } from "../services/contractEngine.service";
 import { dunningEngineService } from "../services/dunningEngine.service";
+import { reconcilePendingEntitlementSync } from "../services/billingSettlement.service";
 import { invoiceEngineService } from "../services/invoiceEngine.service";
 import { paymentIntentService } from "../services/paymentIntent.service";
 import { proposalEngineService } from "../services/proposalEngine.service";
@@ -304,7 +306,10 @@ export class CommerceController {
       const businessId = getBusinessId(req);
       const result = await commerceProjectionService.reconcileProviderWebhook({
         provider: req.body?.provider,
-        headers: req.headers as any,
+        headers: {
+          ...(req.headers as any),
+          "x-commerce-manual-reconcile": "true",
+        },
         body: req.body,
         strictBusinessId: businessId || null,
       });
@@ -312,6 +317,52 @@ export class CommerceController {
       return res.json({ success: true, data: result });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message || "webhook_reconcile_failed" });
+    }
+  }
+
+  static async replayPendingWebhooks(req: Request, res: Response) {
+    try {
+      const businessId = getBusinessId(req);
+      const provider = String(req.body?.provider || req.query?.provider || "STRIPE")
+        .trim()
+        .toUpperCase();
+      const limit = Math.max(1, Math.min(500, Math.floor(Number(req.body?.limit || 100))));
+      const includeClaimedOlderThanMinutes = Math.max(
+        1,
+        Math.min(
+          240,
+          Math.floor(Number(req.body?.includeClaimedOlderThanMinutes || 5))
+        )
+      );
+
+      const result = await commerceProjectionService.replayPendingProviderWebhooks({
+        provider,
+        businessId,
+        limit,
+        includeClaimedOlderThanMinutes,
+      });
+
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || "replay_pending_webhooks_failed",
+      });
+    }
+  }
+
+  static async replayPendingEntitlements(req: Request, res: Response) {
+    try {
+      const limit = Math.max(1, Math.min(500, Math.floor(Number(req.body?.limit || 100))));
+      const result = await reconcilePendingEntitlementSync({
+        limit,
+      });
+      return res.json({ success: true, data: result });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || "replay_pending_entitlements_failed",
+      });
     }
   }
 
@@ -412,6 +463,120 @@ export class CommerceController {
       return res.status(400).json({
         success: false,
         message: error.message || "manual_override_failed",
+      });
+    }
+  }
+
+  static async manualRetryPayment(req: Request, res: Response) {
+    try {
+      const businessId = getBusinessId(req);
+      const recovered = await checkoutRecoveryService.recoverCheckout({
+        businessId,
+        paymentIntentKey: req.body?.paymentIntentKey,
+        provider: req.body?.provider || "STRIPE",
+        recoveredBy: req.body?.recoveredBy || "HUMAN",
+      });
+
+      return res.status(201).json({ success: true, data: { recovered } });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || "manual_retry_failed",
+      });
+    }
+  }
+
+  static async manualCredit(req: Request, res: Response) {
+    try {
+      const businessId = getBusinessId(req);
+      const type = String(req.body?.type || "").trim().toLowerCase();
+      const credits = Number(req.body?.credits || req.body?.amount || 0);
+
+      if (!["ai_credits", "contacts"].includes(type)) {
+        return res.status(400).json({
+          success: false,
+          message: "invalid_credit_type",
+        });
+      }
+
+      const result = await purchaseAddon(
+        businessId,
+        type as "ai_credits" | "contacts",
+        credits
+      );
+
+      return res.status(201).json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || "manual_credit_failed",
+      });
+    }
+  }
+
+  static async manualSubscriptionOverride(req: Request, res: Response) {
+    try {
+      const businessId = getBusinessId(req);
+      const subscriptionKey = String(req.body?.subscriptionKey || "").trim();
+      const status = String(req.body?.status || "").trim().toUpperCase();
+      const planCode = String(req.body?.planCode || "").trim().toUpperCase();
+      const quantity = Number(req.body?.quantity || 1);
+
+      if (!subscriptionKey) {
+        return res.status(400).json({
+          success: false,
+          message: "subscriptionKey_required",
+        });
+      }
+
+      if (status) {
+        const subscription = await subscriptionEngineService.transitionSubscriptionStatus({
+          businessId,
+          subscriptionKey,
+          nextStatus: status as any,
+          metadata: {
+            source: "manual_override",
+            reason: req.body?.reason || null,
+          },
+        });
+
+        return res.status(201).json({
+          success: true,
+          data: { subscription },
+        });
+      }
+
+      if (planCode) {
+        const action = req.body?.action === "downgrade" ? "downgrade" : "upgrade";
+        const subscription = await subscriptionEngineService.applyLifecycleAction({
+          businessId,
+          subscriptionKey,
+          action,
+          metadata: {
+            planCode,
+            quantity: Math.max(1, Math.floor(Number.isFinite(quantity) ? quantity : 1)),
+            source: "manual_override",
+            reason: req.body?.reason || null,
+          },
+        });
+
+        return res.status(201).json({
+          success: true,
+          data: { subscription },
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: "subscription_override_payload_invalid",
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || "subscription_override_failed",
       });
     }
   }

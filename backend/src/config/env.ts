@@ -189,9 +189,19 @@ export const env = {
   STRIPE_SECRET_KEY: readEnv("STRIPE_SECRET_KEY", {
     required: false,
   }),
+  STRIPE_PUBLISHABLE_KEY: readEnv("STRIPE_PUBLISHABLE_KEY", {
+    required: false,
+  }),
   STRIPE_WEBHOOK_SECRET: readEnv("STRIPE_WEBHOOK_SECRET", {
     required: false,
   }),
+  STRIPE_EXPECT_MODE: readEnv("STRIPE_EXPECT_MODE", {
+    required: false,
+  }),
+  STRIPE_BILLING_PORTAL_RETURN_URL: readUrl("STRIPE_BILLING_PORTAL_RETURN_URL", {
+    required: false,
+    defaultValue: `${FRONTEND_URL}/billing`,
+  }) as string,
   EARLY_ACCESS_LIMIT: readNumber("EARLY_ACCESS_LIMIT", {
     required: false,
     defaultValue: 50,

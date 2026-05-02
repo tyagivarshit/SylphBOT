@@ -10,10 +10,12 @@ import {
   assertTransition,
   buildDeterministicDigest,
   buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeBillingCycle,
   normalizeCurrency,
   normalizeProvider,
+  scopeIdempotencyKey,
   toMinor,
 } from "./commerce/shared";
 
@@ -29,6 +31,48 @@ const nextPeriodFrom = ({
 }) => new Date(from.getTime() + (billingCycle === "yearly" ? ONE_YEAR_MS : ONE_MONTH_MS));
 
 export const createSubscriptionEngineService = () => {
+  const resolveCatalogUnitPriceMinor = async ({
+    businessId,
+    planCode,
+    currency,
+    billingCycle,
+  }: {
+    businessId: string;
+    planCode: string;
+    currency: string;
+    billingCycle: string;
+  }) => {
+    const rows = await prisma.pricingCatalog.findMany({
+      where: {
+        planCode: String(planCode || "").trim().toUpperCase(),
+        currency: normalizeCurrency(currency),
+        billingCycle: normalizeBillingCycle(billingCycle),
+        isActive: true,
+        OR: [
+          {
+            businessId,
+          },
+          {
+            businessId: null,
+          },
+        ],
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 10,
+    });
+
+    const businessSpecific = rows.find((row) => row.businessId === businessId);
+    const selected = businessSpecific || rows.find((row) => !row.businessId) || null;
+
+    if (!selected) {
+      return null;
+    }
+
+    return toMinor(Number(selected.unitPriceMinor || 0));
+  };
+
   const createFromContract = async ({
     businessId,
     contractKey,
@@ -66,8 +110,12 @@ export const createSubscriptionEngineService = () => {
       throw new Error("contract_not_found");
     }
 
+    const rawIdempotency = String(idempotencyKey || "").trim() || null;
     const normalizedIdempotency =
-      String(idempotencyKey || "").trim() ||
+      scopeIdempotencyKey({
+        businessId,
+        idempotencyKey: rawIdempotency,
+      }) ||
       buildDeterministicDigest({
         businessId,
         contractKey,
@@ -78,11 +126,23 @@ export const createSubscriptionEngineService = () => {
         quantity,
       });
 
-    const existing = await prisma.subscriptionLedger.findUnique({
-      where: {
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const existing = rawIdempotency
+      ? await prisma.subscriptionLedger.findFirst({
+          where: {
+            businessId,
+            idempotencyKey: {
+              in: getScopedAndLegacyIdempotencyCandidates({
+                businessId,
+                idempotencyKey: rawIdempotency,
+              }),
+            },
+          },
+        })
+      : await prisma.subscriptionLedger.findUnique({
+          where: {
+            idempotencyKey: normalizedIdempotency,
+          },
+        });
 
     if (existing) {
       return existing;
@@ -316,15 +376,30 @@ export const createSubscriptionEngineService = () => {
 
     if (action === "upgrade" || action === "downgrade") {
       const planCode = String(metadata?.planCode || subscription.planCode).trim().toUpperCase();
+      const catalogUnitPriceMinor =
+        metadata?.unitPriceMinor === undefined
+          ? await resolveCatalogUnitPriceMinor({
+              businessId,
+              planCode,
+              currency: subscription.currency,
+              billingCycle: subscription.billingCycle,
+            })
+          : null;
       const unitPriceMinor =
         metadata?.unitPriceMinor === undefined
-          ? subscription.unitPriceMinor
+          ? catalogUnitPriceMinor === null
+            ? subscription.unitPriceMinor
+            : catalogUnitPriceMinor
           : toMinor(Number(metadata.unitPriceMinor));
       const quantity =
         metadata?.quantity === undefined
           ? subscription.quantity
           : Math.max(1, Math.floor(Number(metadata.quantity)));
       const amountMinor = unitPriceMinor * quantity;
+      const prorationMinor =
+        metadata?.prorationMinor === undefined || metadata?.prorationMinor === null
+          ? null
+          : toMinor(Number(metadata.prorationMinor));
 
       return prisma.subscriptionLedger.update({
         where: {
@@ -338,6 +413,7 @@ export const createSubscriptionEngineService = () => {
           metadata: mergeMetadata(subscription.metadata, {
             ...(metadata || {}),
             lastPlanAction: action,
+            lastProrationMinor: prorationMinor,
           }) as Prisma.InputJsonValue,
           version: {
             increment: 1,

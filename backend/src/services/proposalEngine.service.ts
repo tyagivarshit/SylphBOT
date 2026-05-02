@@ -11,10 +11,12 @@ import {
   buildDeterministicDigest,
   buildLedgerKey,
   clampPercent,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeActor,
   normalizeBillingCycle,
   normalizeCurrency,
+  scopeIdempotencyKey,
   toMinor,
 } from "./commerce/shared";
 import { toRecord } from "./reception.shared";
@@ -119,11 +121,21 @@ export const createProposalEngineService = () => {
     idempotencyKey?: string | null;
   }) => {
     const normalizedIdempotency = String(idempotencyKey || "").trim() || null;
+    const scopedIdempotency = scopeIdempotencyKey({
+      businessId,
+      idempotencyKey: normalizedIdempotency,
+    });
 
     if (normalizedIdempotency) {
-      const existing = await prisma.proposalLedger.findUnique({
+      const existing = await prisma.proposalLedger.findFirst({
         where: {
-          idempotencyKey: normalizedIdempotency,
+          businessId,
+          idempotencyKey: {
+            in: getScopedAndLegacyIdempotencyCandidates({
+              businessId,
+              idempotencyKey: normalizedIdempotency,
+            }),
+          },
         },
       });
 
@@ -234,7 +246,7 @@ export const createProposalEngineService = () => {
             },
             metadata || undefined
           ) as Prisma.InputJsonValue,
-          idempotencyKey: normalizedIdempotency,
+          idempotencyKey: scopedIdempotency,
         },
       });
 

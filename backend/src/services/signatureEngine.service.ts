@@ -8,8 +8,10 @@ import {
   assertTransition,
   buildDeterministicDigest,
   buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeProvider,
+  scopeIdempotencyKey,
 } from "./commerce/shared";
 
 export const createSignatureEngineService = () => {
@@ -41,10 +43,20 @@ export const createSignatureEngineService = () => {
         contractKey,
         signerEmail: String(signerEmail || "").trim().toLowerCase(),
       });
+    const scopedIdempotency = scopeIdempotencyKey({
+      businessId,
+      idempotencyKey: normalizedIdempotency,
+    });
 
-    const existing = await prisma.signatureLedger.findUnique({
+    const existing = await prisma.signatureLedger.findFirst({
       where: {
-        idempotencyKey: normalizedIdempotency,
+        businessId,
+        idempotencyKey: {
+          in: getScopedAndLegacyIdempotencyCandidates({
+            businessId,
+            idempotencyKey: normalizedIdempotency,
+          }),
+        },
       },
     });
 
@@ -81,7 +93,7 @@ export const createSignatureEngineService = () => {
           signerRole,
           provider: normalizeProvider(provider),
           expiresAt,
-          idempotencyKey: normalizedIdempotency,
+          idempotencyKey: scopedIdempotency || normalizedIdempotency,
           metadata: mergeMetadata(
             {
               contractKey,

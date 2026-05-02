@@ -15,6 +15,11 @@ router.post("/connect-hub/provision", auth_middleware_1.protect, (0, rbac_middle
 router.post("/connect-hub/connect/instagram", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.connectInstagramHub);
 router.post("/connect-hub/connect/whatsapp", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.connectWhatsAppHub);
 router.post("/connect-hub/connect/whatsapp/doctor", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.runWhatsAppDoctor);
+router.post("/connect-hub/connect/meta/doctor", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.runMetaDoctor);
+router.post("/connect-hub/reconcile/cold-boot", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.runMetaColdBootReconcile);
+router.post("/connect-hub/token/sweep", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.runMetaTokenLifecycle);
+router.post("/connect-hub/reviewer/seed", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.seedMetaReviewerDemo);
+router.get("/connect-hub/reviewer/pack", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.generateMetaReviewPack);
 router.get("/connect-hub/diagnostics/:provider", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getIntegrationDiagnostics);
 router.post("/connect-hub/diagnostics/retry", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.retryConnectDiagnostic);
 router.post("/connect-hub/wizard/progress", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.saveConnectHubWizardProgress);

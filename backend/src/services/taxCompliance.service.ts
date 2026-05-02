@@ -1,6 +1,14 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
-import { buildDeterministicDigest, buildLedgerKey, mergeMetadata, normalizeCurrency, toMinor } from "./commerce/shared";
+import {
+  buildDeterministicDigest,
+  buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
+  mergeMetadata,
+  normalizeCurrency,
+  scopeIdempotencyKey,
+  toMinor,
+} from "./commerce/shared";
 
 export const createTaxComplianceService = () => {
   const recordTaxEvent = async ({
@@ -50,7 +58,10 @@ export const createTaxComplianceService = () => {
   }) => {
     const db = tx || prisma;
     const normalizedIdempotency =
-      String(idempotencyKey || "").trim() ||
+      scopeIdempotencyKey({
+        businessId,
+        idempotencyKey: idempotencyKey || null,
+      }) ||
       buildDeterministicDigest({
         businessId,
         eventType,
@@ -71,12 +82,25 @@ export const createTaxComplianceService = () => {
         mappingRef,
         occurredAt: occurredAt.toISOString(),
       });
+    const rawIdempotency = String(idempotencyKey || "").trim() || null;
 
-    const existing = await db.taxComplianceLedger.findUnique({
-      where: {
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const existing = rawIdempotency
+      ? await db.taxComplianceLedger.findFirst({
+          where: {
+            businessId,
+            idempotencyKey: {
+              in: getScopedAndLegacyIdempotencyCandidates({
+                businessId,
+                idempotencyKey: rawIdempotency,
+              }),
+            },
+          },
+        })
+      : await db.taxComplianceLedger.findUnique({
+          where: {
+            idempotencyKey: normalizedIdempotency,
+          },
+        });
 
     if (existing) {
       return existing;

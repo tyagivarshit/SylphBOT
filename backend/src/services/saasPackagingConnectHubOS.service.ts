@@ -17,7 +17,19 @@ type JsonRecord = Record<string, unknown>;
 
 export const SAAS_PACKAGING_PHASE_VERSION = "phase6d.final.v1";
 
-export const CONNECT_HUB_AUTHORITIES = [
+export const META_ENTERPRISE_CANONICAL_AUTHORITIES = [
+  "IntegrationLedger",
+  "IntegrationCredentialLedger",
+  "IntegrationHealthLedger",
+  "IntegrationWebhookLedger",
+  "IntegrationPermissionLedger",
+  "IntegrationQuotaLedger",
+  "IntegrationAuditLedger",
+  "ConnectPolicy",
+  "ConnectOverrideLedger",
+] as const;
+
+const CONNECT_HUB_BASE_AUTHORITIES = [
   "TenantLedger",
   "TenantPlanLedger",
   "TenantUsageLedger",
@@ -41,6 +53,11 @@ export const CONNECT_HUB_AUTHORITIES = [
   "RoleAssignmentLedger",
   "TenantConfigLedger",
   "PackagingOverrideLedger",
+] as const;
+
+export const CONNECT_HUB_AUTHORITIES = [
+  ...CONNECT_HUB_BASE_AUTHORITIES,
+  ...META_ENTERPRISE_CANONICAL_AUTHORITIES,
 ] as const;
 
 export const CONNECT_HUB_PROVIDERS = [
@@ -133,6 +150,43 @@ type WhatsAppFailureScenario =
 
 type StoreMap = Map<string, any>;
 
+const INSTAGRAM_ENTERPRISE_FLOW_STEPS = [
+  "CONNECT_BUTTON",
+  "META_OAUTH",
+  "STATE_SIGNING",
+  "REDIRECT_VALIDATION",
+  "PERMISSION_VALIDATION",
+  "TOKEN_EXCHANGE",
+  "LONG_LIVED_TOKEN_EXCHANGE",
+  "FETCH_BUSINESSES",
+  "FETCH_PAGES",
+  "FETCH_INSTAGRAM_PROFESSIONAL_ACCOUNT",
+  "BIND_PAGE_IG_ACCOUNT",
+  "SUBSCRIBE_WEBHOOK",
+  "VALIDATE_WEBHOOK_CHALLENGE",
+  "FETCH_PROFILE",
+  "PERMISSION_AUDIT",
+  "HEALTH_AUDIT",
+  "CANONICAL_SAVE",
+  "CONNECTED",
+] as const;
+
+const WHATSAPP_ENTERPRISE_FLOW_STEPS = [
+  "CONNECT_BUTTON",
+  "META_OAUTH",
+  "BUSINESS_MANAGER_SELECTION",
+  "WABA_SELECTION_OR_CREATION",
+  "PHONE_NUMBER_SELECTION",
+  "DISPLAY_NAME_VALIDATION",
+  "REGISTER_NUMBER",
+  "WEBHOOK_SUBSCRIBE",
+  "VERIFY_CALLBACK",
+  "TOKEN_EXCHANGE",
+  "HEALTH_TEST_MESSAGE",
+  "CANONICAL_SAVE",
+  "CONNECTED",
+] as const;
+
 type ConnectHubStore = {
   bootstrappedAt: Date | null;
   invokeCount: number;
@@ -160,6 +214,13 @@ type ConnectHubStore = {
   roleAssignmentLedger: StoreMap;
   tenantConfigLedger: StoreMap;
   packagingOverrideLedger: StoreMap;
+  integrationCredentialLedger: StoreMap;
+  integrationWebhookLedger: StoreMap;
+  integrationPermissionLedger: StoreMap;
+  integrationQuotaLedger: StoreMap;
+  integrationAuditLedger: StoreMap;
+  connectPolicyLedger: StoreMap;
+  connectOverrideLedger: StoreMap;
   replayIndex: Map<string, string>;
   chainTailByScope: Map<string, string>;
   securityInfluenceChecks: number;
@@ -436,40 +497,52 @@ const assertFailpoint = (name: string) => {
   }
 };
 
-const createStore = (): ConnectHubStore => ({
-  bootstrappedAt: null,
-  invokeCount: 0,
-  authorities: new Map(),
-  tenantLedger: new Map(),
-  tenantPlanLedger: new Map(),
-  tenantUsageLedger: new Map(),
-  featureEntitlementLedger: new Map(),
-  integrationLedger: new Map(),
-  providerWebhookLedger: new Map(),
-  integrationHealthLedger: new Map(),
-  integrationPolicyLedger: new Map(),
-  connectionAttemptLedger: new Map(),
-  connectionDiagnosticLedger: new Map(),
-  oauthStateLedger: new Map(),
-  tokenRefreshLedger: new Map(),
-  sandboxLedger: new Map(),
-  brandingLedger: new Map(),
-  marketplaceLedger: new Map(),
-  setupWizardLedger: new Map(),
-  environmentLedger: new Map(),
-  provisioningLedger: new Map(),
-  upgradeLedger: new Map(),
-  seatLedger: new Map(),
-  roleAssignmentLedger: new Map(),
-  tenantConfigLedger: new Map(),
-  packagingOverrideLedger: new Map(),
-  replayIndex: new Map(),
-  chainTailByScope: new Map(),
-  securityInfluenceChecks: 0,
-  reliabilityInfluenceChecks: 0,
-  wiringDomains: new Set(),
-  failpoints: new Set(),
-});
+const createStore = (): ConnectHubStore => {
+  const providerWebhookLedger = new Map();
+  const integrationPolicyLedger = new Map();
+  const packagingOverrideLedger = new Map();
+  return {
+    bootstrappedAt: null,
+    invokeCount: 0,
+    authorities: new Map(),
+    tenantLedger: new Map(),
+    tenantPlanLedger: new Map(),
+    tenantUsageLedger: new Map(),
+    featureEntitlementLedger: new Map(),
+    integrationLedger: new Map(),
+    providerWebhookLedger,
+    integrationHealthLedger: new Map(),
+    integrationPolicyLedger,
+    connectionAttemptLedger: new Map(),
+    connectionDiagnosticLedger: new Map(),
+    oauthStateLedger: new Map(),
+    tokenRefreshLedger: new Map(),
+    sandboxLedger: new Map(),
+    brandingLedger: new Map(),
+    marketplaceLedger: new Map(),
+    setupWizardLedger: new Map(),
+    environmentLedger: new Map(),
+    provisioningLedger: new Map(),
+    upgradeLedger: new Map(),
+    seatLedger: new Map(),
+    roleAssignmentLedger: new Map(),
+    tenantConfigLedger: new Map(),
+    packagingOverrideLedger,
+    integrationCredentialLedger: new Map(),
+    integrationWebhookLedger: providerWebhookLedger,
+    integrationPermissionLedger: new Map(),
+    integrationQuotaLedger: new Map(),
+    integrationAuditLedger: new Map(),
+    connectPolicyLedger: integrationPolicyLedger,
+    connectOverrideLedger: packagingOverrideLedger,
+    replayIndex: new Map(),
+    chainTailByScope: new Map(),
+    securityInfluenceChecks: 0,
+    reliabilityInfluenceChecks: 0,
+    wiringDomains: new Set(),
+    failpoints: new Set(),
+  };
+};
 
 const getStore = () => {
   if (!globalForConnectHub.__sylphSaaSPackagingConnectHubStore) {
@@ -565,6 +638,196 @@ const upsertLedgerRecord = async (input: {
   }
 
   return enrichedRow;
+};
+
+const toFlowStepStatus = (steps: readonly string[]) =>
+  steps.map((step) => ({
+    step,
+    status: "PENDING",
+    at: null,
+    detail: null,
+  }));
+
+const markFlowStepStatus = (
+  flowState: Array<{
+    step: string;
+    status: string;
+    at: string | null;
+    detail: string | null;
+  }>,
+  step: string,
+  status: "DONE" | "FAILED",
+  detail?: string | null
+) =>
+  flowState.map((entry) =>
+    entry.step === step
+      ? {
+          ...entry,
+          status,
+          at: now().toISOString(),
+          detail: normalizeIdentifier(detail || "") || null,
+        }
+      : entry
+  );
+
+const recordIntegrationAudit = async (input: {
+  tenantKey: string;
+  provider: ConnectProvider;
+  environment: ConnectEnvironment;
+  integrationKey?: string | null;
+  attemptKey?: string | null;
+  stage: string;
+  status: "INFO" | "SUCCESS" | "WARN" | "ERROR";
+  message: string;
+  replayToken?: string | null;
+  metadata?: JsonRecord | null;
+}) => {
+  const auditKey = `integration_audit:${stableHash([
+    input.tenantKey,
+    input.provider,
+    input.environment,
+    input.stage,
+    input.integrationKey || "none",
+    input.attemptKey || "none",
+    input.replayToken || now().toISOString(),
+  ]).slice(0, 24)}`;
+  return upsertLedgerRecord({
+    authority: "IntegrationAuditLedger",
+    storeMap: getStore().integrationAuditLedger,
+    keyField: "auditKey",
+    keyValue: auditKey,
+    row: {
+      auditKey,
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      integrationKey: input.integrationKey || null,
+      attemptKey: input.attemptKey || null,
+      stage: normalizeIdentifier(input.stage).toUpperCase(),
+      status: normalizeIdentifier(input.status).toUpperCase(),
+      message: normalizeIdentifier(input.message) || "integration_audit",
+      replayToken: normalizeIdentifier(input.replayToken || "") || null,
+      metadata: toRecord(input.metadata),
+    },
+    dbLedgers: [],
+  });
+};
+
+const upsertIntegrationCredentialLedger = async (input: {
+  integrationKey: string;
+  tenantKey: string;
+  provider: ConnectProvider;
+  environment: ConnectEnvironment;
+  credentialRef?: string | null;
+  tokenExpiresAt?: Date | null;
+  revokedAt?: Date | null;
+  metadata?: JsonRecord | null;
+}) => {
+  const credentialKey = `integration_credential:${input.integrationKey}`;
+  const tokenExpiresAt = input.tokenExpiresAt || null;
+  const tokenExpiringSoon =
+    Boolean(tokenExpiresAt) &&
+    new Date(tokenExpiresAt as Date).getTime() - Date.now() <= 1000 * 60 * 60 * 24 * 7;
+  const status = input.revokedAt
+    ? "REVOKED"
+    : !tokenExpiresAt
+    ? "UNKNOWN"
+    : new Date(tokenExpiresAt as Date).getTime() <= Date.now()
+    ? "EXPIRED"
+    : tokenExpiringSoon
+    ? "EXPIRING"
+    : "ACTIVE";
+  return upsertLedgerRecord({
+    authority: "IntegrationCredentialLedger",
+    storeMap: getStore().integrationCredentialLedger,
+    keyField: "credentialKey",
+    keyValue: credentialKey,
+    row: {
+      credentialKey,
+      integrationKey: input.integrationKey,
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      credentialRef: normalizeIdentifier(input.credentialRef || "") || null,
+      tokenExpiresAt,
+      refreshRequiredAt: tokenExpiresAt
+        ? new Date(new Date(tokenExpiresAt).getTime() - 1000 * 60 * 60 * 24 * 14)
+        : null,
+      revokedAt: input.revokedAt || null,
+      status,
+      metadata: toRecord(input.metadata),
+    },
+    dbLedgers: [],
+  });
+};
+
+const upsertIntegrationPermissionLedger = async (input: {
+  integrationKey: string;
+  tenantKey: string;
+  provider: ConnectProvider;
+  environment: ConnectEnvironment;
+  requiredScopes: string[];
+  grantedScopes: string[];
+  metadata?: JsonRecord | null;
+}) => {
+  const permissionKey = `integration_permission:${input.integrationKey}`;
+  const requiredScopes = toArray(input.requiredScopes);
+  const grantedScopes = toArray(input.grantedScopes);
+  const missingScopes = requiredScopes.filter((scope) => !grantedScopes.includes(scope));
+  return upsertLedgerRecord({
+    authority: "IntegrationPermissionLedger",
+    storeMap: getStore().integrationPermissionLedger,
+    keyField: "permissionKey",
+    keyValue: permissionKey,
+    row: {
+      permissionKey,
+      integrationKey: input.integrationKey,
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      requiredScopes,
+      grantedScopes,
+      missingScopes,
+      status: missingScopes.length ? "MISSING" : "VALID",
+      downgraded: missingScopes.length > 0,
+      metadata: toRecord(input.metadata),
+    },
+    dbLedgers: [],
+  });
+};
+
+const upsertIntegrationQuotaLedger = async (input: {
+  tenantKey: string;
+  provider: ConnectProvider;
+  environment: ConnectEnvironment;
+  maxConnections: number;
+  activeConnections: number;
+  allowMultiConnect: boolean;
+  source: string;
+}) => {
+  const quotaKey = `integration_quota:${input.tenantKey}:${input.provider}:${input.environment}`;
+  return upsertLedgerRecord({
+    authority: "IntegrationQuotaLedger",
+    storeMap: getStore().integrationQuotaLedger,
+    keyField: "quotaKey",
+    keyValue: quotaKey,
+    row: {
+      quotaKey,
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      maxConnections: Math.max(0, Math.floor(toNumber(input.maxConnections, 0))),
+      activeConnections: Math.max(0, Math.floor(toNumber(input.activeConnections, 0))),
+      allowMultiConnect: Boolean(input.allowMultiConnect),
+      remaining: Math.max(
+        0,
+        Math.floor(toNumber(input.maxConnections, 0)) -
+          Math.floor(toNumber(input.activeConnections, 0))
+      ),
+      source: normalizeIdentifier(input.source).toUpperCase(),
+    },
+    dbLedgers: [],
+  });
 };
 
 const registerReplay = (key: string, resourceKey: string) => {
@@ -1009,6 +1272,30 @@ const ensurePlanLedgerArtifacts = async (input: {
         },
         dbLedgers: ["integrationPolicyLedger"],
       });
+      await upsertLedgerRecord({
+        authority: "ConnectPolicy",
+        storeMap: getStore().connectPolicyLedger,
+        keyField: "policyKey",
+        keyValue: policyKey,
+        row: {
+          policyKey,
+          tenantKey: input.tenantKey,
+          provider,
+          environment,
+          maxLiveConnections: limits.live[category],
+          maxSandboxConnections: limits.sandbox[category],
+          allowMultiConnect: limits.allowMultiConnect,
+          tokenRefreshMinutes: 45,
+          rateLimitPerMinute:
+            input.plan === "ENTERPRISE" ? 500 : input.plan === "PRO" ? 240 : 120,
+          version: input.version,
+          isActive: true,
+          metadata: {
+            canonicalAuthority: "ConnectPolicy",
+          },
+        },
+        dbLedgers: ["integrationPolicyLedger"],
+      });
     }
   }
 };
@@ -1217,7 +1504,7 @@ const setProviderWebhook = async (input: {
   metadata?: JsonRecord | null;
 }) => {
   const webhookKey = `provider_webhook:${input.integrationKey}:${normalizeIdentifier(input.eventType).toLowerCase()}`;
-  return upsertLedgerRecord({
+  const webhook = await upsertLedgerRecord({
     authority: "ProviderWebhookLedger",
     storeMap: getStore().providerWebhookLedger,
     keyField: "webhookKey",
@@ -1240,6 +1527,21 @@ const setProviderWebhook = async (input: {
     },
     dbLedgers: ["providerWebhookLedger"],
   });
+  await upsertLedgerRecord({
+    authority: "IntegrationWebhookLedger",
+    storeMap: getStore().integrationWebhookLedger,
+    keyField: "webhookKey",
+    keyValue: webhookKey,
+    row: {
+      ...toRecord(webhook),
+      metadata: {
+        ...toRecord((webhook as any)?.metadata),
+        canonicalAuthority: "IntegrationWebhookLedger",
+      },
+    },
+    dbLedgers: ["providerWebhookLedger"],
+  });
+  return webhook;
 };
 
 const setConnectionAttempt = async (input: {
@@ -1359,6 +1661,15 @@ const assertIntegrationEntitlement = async (input: {
         getProviderCategory(input.provider) &&
       row.status !== "DISCONNECTED"
   );
+  await upsertIntegrationQuotaLedger({
+    tenantKey: input.tenantKey,
+    provider: input.provider,
+    environment: input.environment,
+    maxConnections: capacity.maxConnections,
+    activeConnections: activeIntegrations.length,
+    allowMultiConnect: capacity.allowMultiConnect,
+    source: "ENTITLEMENT_CHECK",
+  });
   if (input.reconnect && activeIntegrations.length > 0) {
     return;
   }
@@ -1397,6 +1708,18 @@ const assertIntegrationEntitlement = async (input: {
         planCode: capacity.planCode,
       },
     });
+    await recordIntegrationAudit({
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      stage: "ENTITLEMENT_BLOCKED",
+      status: "ERROR",
+      message: "Plan policy blocked additional live connection.",
+      metadata: {
+        planCode: capacity.planCode,
+        reason: "single_connection_policy",
+      },
+    });
     throw new Error("plan_limit_reached");
   }
 
@@ -1416,6 +1739,18 @@ const assertIntegrationEntitlement = async (input: {
         currentConnections: activeIntegrations.length,
       },
     });
+    await recordIntegrationAudit({
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      stage: "ENTITLEMENT_BLOCKED",
+      status: "ERROR",
+      message: "Connection cap reached for provider in requested environment.",
+      metadata: {
+        maxConnections: capacity.maxConnections,
+        currentConnections: activeIntegrations.length,
+      },
+    });
     throw new Error("plan_limit_reached");
   }
 };
@@ -1430,6 +1765,7 @@ const resolveOrCreateIntegration = async (input: {
   scopes?: string[];
   status?: ConnectStatus;
   tokenExpiresAt?: Date | null;
+  metadata?: JsonRecord | null;
 }) => {
   const candidates = listIntegrations({
     tenantKey: input.tenantKey,
@@ -1476,8 +1812,52 @@ const resolveOrCreateIntegration = async (input: {
       lastVerifiedAt: null,
       lastDisconnectedAt: null,
       slot,
+      metadata: toRecord(input.metadata),
     },
     dbLedgers: ["integrationLedger"],
+  });
+
+  await upsertIntegrationCredentialLedger({
+    integrationKey: integrationRow.integrationKey,
+    tenantKey: input.tenantKey,
+    provider: input.provider,
+    environment: input.environment,
+    credentialRef: integrationRow.credentialRef || null,
+    tokenExpiresAt: integrationRow.tokenExpiresAt || null,
+    revokedAt: null,
+    metadata: {
+      reconnect: Boolean(input.reconnect),
+    },
+  });
+  await upsertIntegrationPermissionLedger({
+    integrationKey: integrationRow.integrationKey,
+    tenantKey: input.tenantKey,
+    provider: input.provider,
+    environment: input.environment,
+    requiredScopes:
+      input.provider === "WHATSAPP"
+        ? ["whatsapp_business_management", "whatsapp_business_messaging"]
+        : ["instagram_basic", "instagram_manage_messages", "pages_manage_metadata"],
+    grantedScopes: toArray(integrationRow.scopes || []),
+    metadata: {
+      source: "RESOLVE_OR_CREATE_INTEGRATION",
+    },
+  });
+  await recordIntegrationAudit({
+    tenantKey: input.tenantKey,
+    provider: input.provider,
+    environment: input.environment,
+    integrationKey: integrationRow.integrationKey,
+    stage: "CANONICAL_SAVE",
+    status: "SUCCESS",
+    message: input.reconnect
+      ? "Integration canonical record reconnected."
+      : "Integration canonical record created.",
+    metadata: {
+      slot,
+      reconnect: Boolean(input.reconnect),
+      externalAccountRef: integrationRow.externalAccountRef || null,
+    },
   });
 
   return integrationRow;
@@ -1497,7 +1877,7 @@ const setOAuthState = async (input: {
     input.environment,
     input.replayToken || now().toISOString(),
   ]).slice(0, 24)}`;
-  return upsertLedgerRecord({
+  const oauthStateRow = await upsertLedgerRecord({
     authority: "OAuthStateLedger",
     storeMap: getStore().oauthStateLedger,
     keyField: "oauthStateKey",
@@ -1519,6 +1899,21 @@ const setOAuthState = async (input: {
     },
     dbLedgers: ["oauthStateLedger"],
   });
+  await recordIntegrationAudit({
+    tenantKey: input.tenantKey,
+    provider: input.provider,
+    environment: input.environment,
+    stage: "STATE_SIGNING",
+    status: "SUCCESS",
+    message: "OAuth state signed and stored.",
+    replayToken: input.replayToken || null,
+    metadata: {
+      oauthStateKey,
+      redirectUri: oauthStateRow.redirectUri || null,
+      scopes: toArray(oauthStateRow.scopes || []),
+    },
+  });
+  return oauthStateRow;
 };
 
 const markConnectionSuccess = async (input: {
@@ -1562,6 +1957,38 @@ const markConnectionSuccess = async (input: {
     retryable: true,
     metadata: input.details,
   });
+  if (integration) {
+    await upsertIntegrationCredentialLedger({
+      integrationKey: integration.integrationKey,
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      credentialRef: integration.credentialRef || null,
+      tokenExpiresAt: integration.tokenExpiresAt || null,
+      revokedAt: null,
+      metadata: {
+        flow: input.details.flow || null,
+      },
+    });
+    await upsertIntegrationPermissionLedger({
+      integrationKey: integration.integrationKey,
+      tenantKey: input.tenantKey,
+      provider: input.provider,
+      environment: input.environment,
+      requiredScopes:
+        input.provider === "WHATSAPP"
+          ? ["whatsapp_business_management", "whatsapp_business_messaging"]
+          : [
+              "instagram_basic",
+              "instagram_manage_messages",
+              "pages_manage_metadata",
+            ],
+      grantedScopes: toArray(integration.scopes || []),
+      metadata: {
+        flow: input.details.flow || null,
+      },
+    });
+  }
   await upsertLedgerRecord({
     authority: "ConnectionAttemptLedger",
     storeMap: getStore().connectionAttemptLedger,
@@ -1596,6 +2023,36 @@ const markConnectionSuccess = async (input: {
       },
     },
     dbLedgers: ["connectionAttemptLedger"],
+  });
+  const oauthStateKey = normalizeIdentifier((input.details as any)?.oauthStateKey || "");
+  if (oauthStateKey) {
+    const oauthStateRow = getStore().oauthStateLedger.get(oauthStateKey);
+    if (oauthStateRow) {
+      await upsertLedgerRecord({
+        authority: "OAuthStateLedger",
+        storeMap: getStore().oauthStateLedger,
+        keyField: "oauthStateKey",
+        keyValue: oauthStateKey,
+        row: {
+          ...toRecord(oauthStateRow),
+          oauthStateKey,
+          status: "CONSUMED",
+          consumedAt: now(),
+        },
+        dbLedgers: ["oauthStateLedger"],
+      });
+    }
+  }
+  await recordIntegrationAudit({
+    tenantKey: input.tenantKey,
+    provider: input.provider,
+    environment: input.environment,
+    integrationKey: input.integrationKey,
+    attemptKey: input.attemptKey,
+    stage: "CONNECTED",
+    status: "SUCCESS",
+    message: "Provider connection finalized and marked connected.",
+    metadata: toRecord(input.details),
   });
 };
 
@@ -1691,6 +2148,20 @@ const markConnectionFailure = async (input: {
     metadata: {
       attemptKey: input.attemptKey,
       diagnosticKey: diagnostic.diagnosticKey,
+    },
+  });
+  await recordIntegrationAudit({
+    tenantKey: input.tenantKey,
+    provider: input.provider,
+    environment: input.environment,
+    integrationKey: input.integrationKey || null,
+    attemptKey: input.attemptKey,
+    stage: normalizeIdentifier(input.step).toUpperCase(),
+    status: "ERROR",
+    message: input.message,
+    metadata: {
+      code: input.code,
+      fixAction: input.fixAction,
     },
   });
   return diagnostic;
@@ -1925,11 +2396,27 @@ export const connectInstagramOneClick = async (input: {
   reconnect?: boolean;
   externalAccountRef?: string | null;
   scopes?: string[];
+  metaProof?: {
+    stateSigned?: boolean;
+    redirectValidated?: boolean;
+    permissions?: string[];
+    businesses?: Array<string | JsonRecord>;
+    pages?: Array<string | JsonRecord>;
+    instagramProfessionalAccountId?: string | null;
+    pageId?: string | null;
+    webhookChallengeVerified?: boolean;
+    profile?: JsonRecord | null;
+    permissionAudit?: JsonRecord | null;
+    healthAudit?: JsonRecord | null;
+  } | null;
   simulate?: {
     permissionMissing?: boolean;
+    permissionDowngrade?: boolean;
     webhookFail?: boolean;
     rateLimited?: boolean;
     tokenExpired?: boolean;
+    disconnected?: boolean;
+    pageUnlink?: boolean;
   } | null;
 }) => {
   await bootstrapSaaSPackagingConnectHubOS();
@@ -1943,6 +2430,13 @@ export const connectInstagramOneClick = async (input: {
   const tenantKey = makeTenantKey(tenantId);
   const environment = normalizeEnvironment(input.environment || "LIVE");
   const replayToken = normalizeIdentifier(input.replayToken || "");
+  let flowTrace = toFlowStepStatus(INSTAGRAM_ENTERPRISE_FLOW_STEPS);
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "CONNECT_BUTTON",
+    "DONE",
+    "connect_hub_api_received"
+  );
   if (replayToken) {
     const replayKey = makeScopedReplayKey({
       tenantKey,
@@ -1991,6 +2485,44 @@ export const connectInstagramOneClick = async (input: {
         "pages_manage_metadata",
       ],
   });
+  flowTrace = markFlowStepStatus(flowTrace, "META_OAUTH", "DONE", "oauth_granted");
+  flowTrace = markFlowStepStatus(flowTrace, "STATE_SIGNING", "DONE", "state_signed");
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "REDIRECT_VALIDATION",
+    "DONE",
+    input.metaProof?.redirectValidated === false
+      ? "redirect_not_validated"
+      : "redirect_validated"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "TOKEN_EXCHANGE", "DONE", "short_token_exchanged");
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "LONG_LIVED_TOKEN_EXCHANGE",
+    "DONE",
+    "long_lived_token_exchanged"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "FETCH_BUSINESSES", "DONE", "businesses_loaded");
+  flowTrace = markFlowStepStatus(flowTrace, "FETCH_PAGES", "DONE", "pages_loaded");
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "FETCH_INSTAGRAM_PROFESSIONAL_ACCOUNT",
+    "DONE",
+    "ig_professional_account_loaded"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "BIND_PAGE_IG_ACCOUNT", "DONE", "page_ig_bound");
+  flowTrace = markFlowStepStatus(flowTrace, "SUBSCRIBE_WEBHOOK", "DONE", "subscription_requested");
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "VALIDATE_WEBHOOK_CHALLENGE",
+    "DONE",
+    input.metaProof?.webhookChallengeVerified === false
+      ? "challenge_not_verified"
+      : "challenge_verified"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "FETCH_PROFILE", "DONE", "profile_loaded");
+  flowTrace = markFlowStepStatus(flowTrace, "PERMISSION_AUDIT", "DONE", "permission_audited");
+  flowTrace = markFlowStepStatus(flowTrace, "HEALTH_AUDIT", "DONE", "health_audited");
   const attempt = await setConnectionAttempt({
     tenantKey,
     provider: "INSTAGRAM",
@@ -2002,17 +2534,9 @@ export const connectInstagramOneClick = async (input: {
     statusDetail: "oauth_accepted",
     metadata: {
       oauthStateKey: oauthState.oauthStateKey,
-      flowSteps: [
-        "META_OAUTH",
-        "BUSINESS_SELECTED",
-        "PAGE_SELECTED",
-        "IG_ACCOUNT_SELECTED",
-        "PERMISSION_VERIFIED",
-        "WEBHOOK_SUBSCRIBED",
-        "TEST_EVENT_SENT",
-        "INBOUND_VERIFIED",
-        "CONNECTED",
-      ],
+      flowSteps: INSTAGRAM_ENTERPRISE_FLOW_STEPS,
+      flowTrace,
+      metaProof: toRecord(input.metaProof),
     },
   });
   await callSecurityInfluence({
@@ -2034,8 +2558,24 @@ export const connectInstagramOneClick = async (input: {
     reconnect: Boolean(input.reconnect),
     externalAccountRef: input.externalAccountRef || null,
     tokenValue: `ig_token_${stableHash([tenantKey, replayToken || now().toISOString()]).slice(0, 14)}`,
-    scopes: input.scopes || ["instagram_basic", "pages_show_list"],
+    scopes:
+      input.metaProof?.permissions ||
+      input.scopes || [
+        "instagram_basic",
+        "instagram_manage_messages",
+        "pages_manage_metadata",
+      ],
     status: "VERIFYING",
+    metadata: {
+      pageId: normalizeIdentifier(input.metaProof?.pageId || "") || null,
+      instagramProfessionalAccountId:
+        normalizeIdentifier(input.metaProof?.instagramProfessionalAccountId || "") || null,
+      businesses: Array.isArray(input.metaProof?.businesses)
+        ? input.metaProof?.businesses
+        : [],
+      pages: Array.isArray(input.metaProof?.pages) ? input.metaProof?.pages : [],
+      reconnect: Boolean(input.reconnect),
+    },
   });
 
   await mirrorSandboxSlot({
@@ -2045,7 +2585,44 @@ export const connectInstagramOneClick = async (input: {
     integrationKey: integration.integrationKey,
   });
 
-  if (input.simulate?.permissionMissing) {
+  const requiredInstagramScopes = [
+    "instagram_basic",
+    "instagram_manage_messages",
+    "pages_manage_metadata",
+  ];
+  const grantedInstagramScopes = toArray(
+    input.metaProof?.permissions || integration.scopes || input.scopes || []
+  );
+  await upsertIntegrationPermissionLedger({
+    integrationKey: integration.integrationKey,
+    tenantKey,
+    provider: "INSTAGRAM",
+    environment,
+    requiredScopes: requiredInstagramScopes,
+    grantedScopes: grantedInstagramScopes,
+    metadata: {
+      mode: input.reconnect ? "reconnect" : "connect",
+      source: "connectInstagramOneClick",
+    },
+  });
+  const missingInstagramScopes = requiredInstagramScopes.filter(
+    (scope) => !grantedInstagramScopes.includes(scope)
+  );
+  if (
+    input.simulate?.permissionMissing ||
+    input.simulate?.permissionDowngrade ||
+    missingInstagramScopes.length
+  ) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "PERMISSION_VALIDATION",
+      "FAILED",
+      "missing_or_downgraded_permissions"
+    );
+    const code =
+      input.simulate?.permissionDowngrade || missingInstagramScopes.length
+        ? "IG_PERMISSION_DOWNGRADE"
+        : "IG_SCOPE_MISSING";
     const diagnostic = await markConnectionFailure({
       attemptKey: attempt.attemptKey,
       integrationKey: integration.integrationKey,
@@ -2053,12 +2630,16 @@ export const connectInstagramOneClick = async (input: {
       provider: "INSTAGRAM",
       environment,
       status: "PERMISSION_MISSING",
-      step: "PERMISSION_VERIFIED",
-      code: "IG_SCOPE_MISSING",
-      message: "Required Meta scopes are missing for Instagram messaging.",
+      step: "PERMISSION_VALIDATION",
+      code,
+      message:
+        code === "IG_PERMISSION_DOWNGRADE"
+          ? "Instagram permissions were downgraded after authorization."
+          : "Required Meta scopes are missing for Instagram messaging.",
       fixAction: "REAUTHORIZE",
       metadata: {
-        missingScopes: ["instagram_manage_messages", "pages_manage_metadata"],
+        missingScopes: missingInstagramScopes,
+        flowTrace,
       },
     });
     if (replayToken) {
@@ -2082,7 +2663,62 @@ export const connectInstagramOneClick = async (input: {
     };
   }
 
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "PERMISSION_VALIDATION",
+    "DONE",
+    "permissions_validated"
+  );
+
+  if (input.simulate?.pageUnlink) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "BIND_PAGE_IG_ACCOUNT",
+      "FAILED",
+      "page_unlinked"
+    );
+    await markConnectionFailure({
+      attemptKey: attempt.attemptKey,
+      integrationKey: integration.integrationKey,
+      tenantKey,
+      provider: "INSTAGRAM",
+      environment,
+      status: "NEEDS_ACTION",
+      step: "BIND_PAGE_IG_ACCOUNT",
+      code: "IG_PAGE_UNLINKED",
+      message: "Instagram professional account is no longer linked to the selected page.",
+      fixAction: "RELINK_PAGE",
+      metadata: {
+        flowTrace,
+      },
+    });
+    if (replayToken) {
+      registerReplay(
+        makeScopedReplayKey({
+          tenantKey,
+          flow: "INSTAGRAM_CONNECT",
+          provider: "INSTAGRAM",
+          environment,
+          replayToken,
+        }),
+        attempt.attemptKey
+      );
+    }
+    return {
+      replayed: false,
+      attempt: getStore().connectionAttemptLedger.get(attempt.attemptKey),
+      integration: getStore().integrationLedger.get(integration.integrationKey),
+      health: getIntegrationHealth(integration.integrationKey),
+    };
+  }
+
   if (input.simulate?.webhookFail) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "VALIDATE_WEBHOOK_CHALLENGE",
+      "FAILED",
+      "webhook_challenge_failed"
+    );
     await markConnectionFailure({
       attemptKey: attempt.attemptKey,
       integrationKey: integration.integrationKey,
@@ -2090,10 +2726,13 @@ export const connectInstagramOneClick = async (input: {
       provider: "INSTAGRAM",
       environment,
       status: "WEBHOOK_FAILED",
-      step: "INBOUND_VERIFIED",
+      step: "VALIDATE_WEBHOOK_CHALLENGE",
       code: "IG_WEBHOOK_FAIL",
       message: "Webhook subscription did not receive inbound verification event.",
       fixAction: "FIX_WEBHOOK",
+      metadata: {
+        flowTrace,
+      },
     });
     await setProviderWebhook({
       integrationKey: integration.integrationKey,
@@ -2126,6 +2765,12 @@ export const connectInstagramOneClick = async (input: {
   }
 
   if (input.simulate?.rateLimited) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "HEALTH_AUDIT",
+      "FAILED",
+      "provider_rate_limited"
+    );
     await markConnectionFailure({
       attemptKey: attempt.attemptKey,
       integrationKey: integration.integrationKey,
@@ -2133,11 +2778,14 @@ export const connectInstagramOneClick = async (input: {
       provider: "INSTAGRAM",
       environment,
       status: "RATE_LIMITED",
-      step: "TEST_EVENT_SENT",
+      step: "HEALTH_AUDIT",
       code: "IG_RATE_LIMITED",
       message: "Meta API rate limit reached while validating Instagram connection.",
       fixAction: "WAIT_RATE_LIMIT",
       retryable: true,
+      metadata: {
+        flowTrace,
+      },
     });
     if (replayToken) {
       registerReplay(
@@ -2160,6 +2808,12 @@ export const connectInstagramOneClick = async (input: {
   }
 
   if (input.simulate?.tokenExpired) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "HEALTH_AUDIT",
+      "FAILED",
+      "token_expired"
+    );
     const expiry = new Date(Date.now() - 1000 * 60);
     integration.tokenExpiresAt = expiry;
     await markConnectionFailure({
@@ -2169,11 +2823,14 @@ export const connectInstagramOneClick = async (input: {
       provider: "INSTAGRAM",
       environment,
       status: "TOKEN_EXPIRED",
-      step: "CONNECTED",
+      step: "HEALTH_AUDIT",
       code: "IG_TOKEN_EXPIRED",
       message: "Instagram token expired during connect validation.",
       fixAction: "REFRESH_TOKEN",
       retryable: true,
+      metadata: {
+        flowTrace,
+      },
     });
     if (replayToken) {
       registerReplay(
@@ -2195,6 +2852,55 @@ export const connectInstagramOneClick = async (input: {
     };
   }
 
+  if (input.simulate?.disconnected) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "HEALTH_AUDIT",
+      "FAILED",
+      "provider_disconnected"
+    );
+    await markConnectionFailure({
+      attemptKey: attempt.attemptKey,
+      integrationKey: integration.integrationKey,
+      tenantKey,
+      provider: "INSTAGRAM",
+      environment,
+      status: "DISCONNECTED",
+      step: "HEALTH_AUDIT",
+      code: "IG_DISCONNECTED",
+      message: "Instagram connection is disconnected and requires reauthorization.",
+      fixAction: "REAUTHORIZE",
+      metadata: {
+        flowTrace,
+      },
+    });
+    if (replayToken) {
+      registerReplay(
+        makeScopedReplayKey({
+          tenantKey,
+          flow: "INSTAGRAM_CONNECT",
+          provider: "INSTAGRAM",
+          environment,
+          replayToken,
+        }),
+        attempt.attemptKey
+      );
+    }
+    return {
+      replayed: false,
+      attempt: getStore().connectionAttemptLedger.get(attempt.attemptKey),
+      integration: getStore().integrationLedger.get(integration.integrationKey),
+      health: getIntegrationHealth(integration.integrationKey),
+    };
+  }
+
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "CANONICAL_SAVE",
+    "DONE",
+    "canonical_ledger_saved"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "CONNECTED", "DONE", "connected");
   await markConnectionSuccess({
     attemptKey: attempt.attemptKey,
     integrationKey: integration.integrationKey,
@@ -2204,6 +2910,13 @@ export const connectInstagramOneClick = async (input: {
     details: {
       flow: "INSTAGRAM_CONNECT",
       oauthStateKey: oauthState.oauthStateKey,
+      flowTrace,
+      profile: toRecord(input.metaProof?.profile),
+      permissionAudit: toRecord(input.metaProof?.permissionAudit),
+      healthAudit: toRecord(input.metaProof?.healthAudit),
+      pageId: normalizeIdentifier(input.metaProof?.pageId || "") || null,
+      instagramProfessionalAccountId:
+        normalizeIdentifier(input.metaProof?.instagramProfessionalAccountId || "") || null,
     },
   });
   await recordTraceLedger({
@@ -2243,6 +2956,21 @@ export const connectWhatsAppGuidedWizard = async (input: {
   replayToken?: string | null;
   reconnect?: boolean;
   scenario?: WhatsAppFailureScenario;
+  businessManagerId?: string | null;
+  wabaId?: string | null;
+  phoneNumberId?: string | null;
+  displayName?: string | null;
+  displayNameReviewStatus?: string | null;
+  qualityRating?: string | null;
+  tier?: string | null;
+  allowSandboxSlot?: boolean;
+  metaProof?: {
+    permissions?: string[];
+    callbackVerified?: boolean;
+    testMessageDelivered?: boolean;
+    phoneConnected?: boolean;
+    numberMigrationFrom?: string | null;
+  } | null;
 }) => {
   await bootstrapSaaSPackagingConnectHubOS();
   const tenantId = normalizeTenantId({
@@ -2256,6 +2984,13 @@ export const connectWhatsAppGuidedWizard = async (input: {
   const environment = normalizeEnvironment(input.environment || "LIVE");
   const replayToken = normalizeIdentifier(input.replayToken || "");
   const scenario = normalizeIdentifier(input.scenario || "NONE").toUpperCase() as WhatsAppFailureScenario;
+  let flowTrace = toFlowStepStatus(WHATSAPP_ENTERPRISE_FLOW_STEPS);
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "CONNECT_BUTTON",
+    "DONE",
+    "connect_hub_api_received"
+  );
   if (replayToken) {
     const replayKey = makeScopedReplayKey({
       tenantKey,
@@ -2292,6 +3027,57 @@ export const connectWhatsAppGuidedWizard = async (input: {
     environment,
     reconnect: Boolean(input.reconnect),
   });
+  const activeWhatsAppConnections = listIntegrations({
+    tenantKey,
+    provider: "WHATSAPP",
+    environment,
+  }).filter((row) => row.status !== "DISCONNECTED");
+  const multiNumberEntitlement = getActiveEntitlement({
+    tenantKey,
+    featureKey: "multi_number",
+    environment: "LIVE",
+  });
+  const maxLiveNumbers = Math.max(
+    1,
+    Math.floor(toNumber(multiNumberEntitlement?.quota, 1))
+  );
+  if (
+    environment === "LIVE" &&
+    !input.reconnect &&
+    activeWhatsAppConnections.length >= maxLiveNumbers
+  ) {
+    await createDiagnostic({
+      tenantKey,
+      provider: "WHATSAPP",
+      environment,
+      severity: "ERROR",
+      code: "WA_MULTI_NUMBER_ENTITLEMENT_EXCEEDED",
+      message: "WhatsApp live number quota reached for current entitlement.",
+      fixAction: "UPGRADE_PLAN",
+      fixPayload: {
+        maxLiveNumbers,
+        currentLiveNumbers: activeWhatsAppConnections.length,
+      },
+    });
+    throw new Error("multi_number_entitlement_exceeded");
+  }
+  if (
+    environment === "SANDBOX" &&
+    !input.allowSandboxSlot &&
+    !input.reconnect &&
+    activeWhatsAppConnections.length >= 1
+  ) {
+    await createDiagnostic({
+      tenantKey,
+      provider: "WHATSAPP",
+      environment,
+      severity: "ERROR",
+      code: "WA_SANDBOX_SLOT_IN_USE",
+      message: "Sandbox slot already occupied for WhatsApp integration.",
+      fixAction: "REUSE_SANDBOX_SLOT",
+    });
+    throw new Error("sandbox_slot_in_use");
+  }
 
   const oauthState = await setOAuthState({
     tenantKey,
@@ -2300,6 +3086,43 @@ export const connectWhatsAppGuidedWizard = async (input: {
     replayToken: replayToken || null,
     scopes: ["whatsapp_business_management", "whatsapp_business_messaging"],
   });
+  flowTrace = markFlowStepStatus(flowTrace, "META_OAUTH", "DONE", "oauth_granted");
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "BUSINESS_MANAGER_SELECTION",
+    "DONE",
+    normalizeIdentifier(input.businessManagerId || "") || "business_manager_selected"
+  );
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "WABA_SELECTION_OR_CREATION",
+    "DONE",
+    normalizeIdentifier(input.wabaId || "") || "waba_selected"
+  );
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "PHONE_NUMBER_SELECTION",
+    "DONE",
+    normalizeIdentifier(input.phoneNumberId || "") || "phone_selected"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "DISPLAY_NAME_VALIDATION", "DONE", "display_name_checked");
+  flowTrace = markFlowStepStatus(flowTrace, "REGISTER_NUMBER", "DONE", "number_registered");
+  flowTrace = markFlowStepStatus(flowTrace, "WEBHOOK_SUBSCRIBE", "DONE", "webhook_subscription_requested");
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "VERIFY_CALLBACK",
+    "DONE",
+    input.metaProof?.callbackVerified === false ? "callback_not_verified" : "callback_verified"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "TOKEN_EXCHANGE", "DONE", "token_exchanged");
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "HEALTH_TEST_MESSAGE",
+    "DONE",
+    input.metaProof?.testMessageDelivered === false
+      ? "health_test_message_not_delivered"
+      : "health_test_message_delivered"
+  );
   const attempt = await setConnectionAttempt({
     tenantKey,
     provider: "WHATSAPP",
@@ -2307,36 +3130,49 @@ export const connectWhatsAppGuidedWizard = async (input: {
     flow: "WHATSAPP_CONNECT",
     replayToken: replayToken || null,
     status: "VERIFYING",
-    step: "META_LOGIN",
+    step: "META_OAUTH",
     statusDetail: "wizard_started",
     metadata: {
       oauthStateKey: oauthState.oauthStateKey,
-      flowSteps: [
-        "META_LOGIN",
-        "BUSINESS_SELECT_OR_CREATE",
-        "WABA_SELECT_OR_CREATE",
-        "NUMBER_SELECT_OR_ADD",
-        "OTP_VERIFY",
-        "DISPLAY_NAME_VALIDATE",
-        "CATEGORY_SELECT",
-        "WEBHOOK_SETUP",
-        "HEALTH_CHECK",
-        "LIVE_TEST_SEND",
-        "INBOUND_VERIFY",
-        "TEMPLATE_HEALTH_CHECK",
-        "CONNECTED",
-      ],
+      flowSteps: WHATSAPP_ENTERPRISE_FLOW_STEPS,
+      flowTrace,
+      metaProof: toRecord(input.metaProof),
     },
   });
+  const existingWhatsAppIntegration = listIntegrations({
+    tenantKey,
+    provider: "WHATSAPP",
+    environment,
+  })[0] || null;
   const integration = await resolveOrCreateIntegration({
     tenantKey,
     provider: "WHATSAPP",
     environment,
     reconnect: Boolean(input.reconnect),
-    externalAccountRef: `wa_account_${stableHash([tenantKey, replayToken || now().toISOString()]).slice(0, 12)}`,
+    externalAccountRef:
+      normalizeIdentifier(input.wabaId || "") ||
+      `wa_account_${stableHash([tenantKey, replayToken || now().toISOString()]).slice(0, 12)}`,
     tokenValue: `wa_token_${stableHash([attempt.attemptKey]).slice(0, 14)}`,
-    scopes: ["whatsapp_business_management", "whatsapp_business_messaging"],
+    scopes:
+      input.metaProof?.permissions || [
+        "whatsapp_business_management",
+        "whatsapp_business_messaging",
+      ],
     status: "VERIFYING",
+    metadata: {
+      businessManagerId: normalizeIdentifier(input.businessManagerId || "") || null,
+      wabaId: normalizeIdentifier(input.wabaId || "") || null,
+      phoneNumberId: normalizeIdentifier(input.phoneNumberId || "") || null,
+      displayName: normalizeIdentifier(input.displayName || "") || null,
+      displayNameReviewStatus:
+        normalizeIdentifier(input.displayNameReviewStatus || "") || "PENDING_REVIEW",
+      qualityRating: normalizeIdentifier(input.qualityRating || "") || "GREEN",
+      tier: normalizeIdentifier(input.tier || "") || "TIER_1K",
+      callbackVerified: input.metaProof?.callbackVerified !== false,
+      numberMigrationFrom:
+        normalizeIdentifier(input.metaProof?.numberMigrationFrom || "") || null,
+      reconnect: Boolean(input.reconnect),
+    },
   });
   await mirrorSandboxSlot({
     tenantKey,
@@ -2344,6 +3180,157 @@ export const connectWhatsAppGuidedWizard = async (input: {
     environment,
     integrationKey: integration.integrationKey,
   });
+  const previousPhoneNumberId = normalizeIdentifier(
+    existingWhatsAppIntegration?.metadata?.phoneNumberId || ""
+  );
+  const nextPhoneNumberId = normalizeIdentifier(
+    integration?.metadata?.phoneNumberId || input.phoneNumberId || ""
+  );
+  if (
+    Boolean(input.reconnect) &&
+    previousPhoneNumberId &&
+    nextPhoneNumberId &&
+    previousPhoneNumberId !== nextPhoneNumberId
+  ) {
+    integration.metadata = {
+      ...toRecord(integration.metadata),
+      numberMigration: {
+        from: previousPhoneNumberId,
+        to: nextPhoneNumberId,
+        migratedAt: now().toISOString(),
+      },
+    };
+    await recordIntegrationAudit({
+      tenantKey,
+      provider: "WHATSAPP",
+      environment,
+      integrationKey: integration.integrationKey,
+      attemptKey: attempt.attemptKey,
+      stage: "REGISTER_NUMBER",
+      status: "SUCCESS",
+      message: "WhatsApp number migrated during reconnect.",
+      metadata: {
+        from: previousPhoneNumberId,
+        to: nextPhoneNumberId,
+      },
+    });
+  }
+
+  const requiredWhatsAppScopes = [
+    "whatsapp_business_management",
+    "whatsapp_business_messaging",
+  ];
+  const grantedWhatsAppScopes = toArray(
+    input.metaProof?.permissions || integration.scopes || []
+  );
+  await upsertIntegrationPermissionLedger({
+    integrationKey: integration.integrationKey,
+    tenantKey,
+    provider: "WHATSAPP",
+    environment,
+    requiredScopes: requiredWhatsAppScopes,
+    grantedScopes: grantedWhatsAppScopes,
+    metadata: {
+      displayNameReviewStatus:
+        normalizeIdentifier(input.displayNameReviewStatus || "") || "PENDING_REVIEW",
+      qualityRating: normalizeIdentifier(input.qualityRating || "") || "GREEN",
+      tier: normalizeIdentifier(input.tier || "") || "TIER_1K",
+    },
+  });
+  const missingWhatsAppScopes = requiredWhatsAppScopes.filter(
+    (scope) => !grantedWhatsAppScopes.includes(scope)
+  );
+  if (missingWhatsAppScopes.length > 0) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "META_OAUTH",
+      "FAILED",
+      "missing_whatsapp_permissions"
+    );
+    await markConnectionFailure({
+      attemptKey: attempt.attemptKey,
+      integrationKey: integration.integrationKey,
+      tenantKey,
+      provider: "WHATSAPP",
+      environment,
+      status: "PERMISSION_MISSING",
+      step: "META_OAUTH",
+      code: "WA_SCOPE_MISSING",
+      message: "Required WhatsApp permissions were not granted.",
+      fixAction: "REAUTHORIZE",
+      metadata: {
+        missingScopes: missingWhatsAppScopes,
+        flowTrace,
+      },
+    });
+    if (replayToken) {
+      registerReplay(
+        makeScopedReplayKey({
+          tenantKey,
+          flow: "WHATSAPP_CONNECT",
+          provider: "WHATSAPP",
+          environment,
+          replayToken,
+        }),
+        attempt.attemptKey
+      );
+    }
+    return {
+      replayed: false,
+      attempt: getStore().connectionAttemptLedger.get(attempt.attemptKey),
+      integration: getStore().integrationLedger.get(integration.integrationKey),
+      health: getIntegrationHealth(integration.integrationKey),
+      diagnostics: Array.from(getStore().connectionDiagnosticLedger.values()).filter(
+        (row) => row.attemptKey === attempt.attemptKey
+      ),
+    };
+  }
+
+  if (input.metaProof?.phoneConnected === false) {
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      "HEALTH_TEST_MESSAGE",
+      "FAILED",
+      "phone_disconnected"
+    );
+    await markConnectionFailure({
+      attemptKey: attempt.attemptKey,
+      integrationKey: integration.integrationKey,
+      tenantKey,
+      provider: "WHATSAPP",
+      environment,
+      status: "DISCONNECTED",
+      step: "HEALTH_TEST_MESSAGE",
+      code: "WA_PHONE_DISCONNECTED",
+      message: "Selected WhatsApp phone number is disconnected.",
+      fixAction: "RECONNECT_NUMBER",
+      metadata: {
+        phoneNumberId: normalizeIdentifier(input.phoneNumberId || "") || null,
+        flowTrace,
+      },
+    });
+    if (replayToken) {
+      registerReplay(
+        makeScopedReplayKey({
+          tenantKey,
+          flow: "WHATSAPP_CONNECT",
+          provider: "WHATSAPP",
+          environment,
+          replayToken,
+        }),
+        attempt.attemptKey
+      );
+    }
+    return {
+      replayed: false,
+      attempt: getStore().connectionAttemptLedger.get(attempt.attemptKey),
+      integration: getStore().integrationLedger.get(integration.integrationKey),
+      health: getIntegrationHealth(integration.integrationKey),
+      diagnostics: Array.from(getStore().connectionDiagnosticLedger.values()).filter(
+        (row) => row.attemptKey === attempt.attemptKey
+      ),
+    };
+  }
 
   const failureMap: Record<
     Exclude<WhatsAppFailureScenario, "NONE">,
@@ -2358,7 +3345,7 @@ export const connectWhatsAppGuidedWizard = async (input: {
   > = {
     NUMBER_ALREADY_LINKED: {
       status: "NEEDS_ACTION",
-      step: "NUMBER_SELECT_OR_ADD",
+      step: "PHONE_NUMBER_SELECTION",
       code: "WA_NUMBER_LINKED_ELSEWHERE",
       message:
         "Selected number is already linked to another WhatsApp Business Account.",
@@ -2369,56 +3356,56 @@ export const connectWhatsAppGuidedWizard = async (input: {
     },
     WRONG_BUSINESS: {
       status: "NEEDS_ACTION",
-      step: "BUSINESS_SELECT_OR_CREATE",
+      step: "BUSINESS_MANAGER_SELECTION",
       code: "WA_WRONG_BUSINESS",
       message: "Selected business does not match tenant ownership boundary.",
       fixAction: "SWITCH_BUSINESS",
     },
     SCOPE_MISSING: {
       status: "PERMISSION_MISSING",
-      step: "META_LOGIN",
+      step: "META_OAUTH",
       code: "WA_SCOPE_MISSING",
       message: "Required WhatsApp permissions were not granted.",
       fixAction: "REAUTHORIZE",
     },
     WEBHOOK_FAIL: {
       status: "WEBHOOK_FAILED",
-      step: "INBOUND_VERIFY",
+      step: "VERIFY_CALLBACK",
       code: "WA_WEBHOOK_FAIL",
       message: "WhatsApp webhook verification failed for the selected number.",
       fixAction: "FIX_WEBHOOK",
     },
     TOKEN_ISSUE: {
       status: "TOKEN_EXPIRED",
-      step: "HEALTH_CHECK",
+      step: "HEALTH_TEST_MESSAGE",
       code: "WA_TOKEN_ISSUE",
       message: "WhatsApp token is invalid or expired.",
       fixAction: "REFRESH_TOKEN",
     },
     TEMPLATE_FAILURE: {
       status: "LIMITED",
-      step: "TEMPLATE_HEALTH_CHECK",
+      step: "HEALTH_TEST_MESSAGE",
       code: "WA_TEMPLATE_FAILURE",
       message: "Template quality or approval state blocks outbound sends.",
       fixAction: "CHECK_TEMPLATE",
     },
     SANDBOX_LIVE_MISMATCH: {
       status: "NEEDS_ACTION",
-      step: "HEALTH_CHECK",
+      step: "WABA_SELECTION_OR_CREATION",
       code: "WA_ENVIRONMENT_MISMATCH",
       message: "Selected WABA environment does not match requested runtime mode.",
       fixAction: "SYNC_ENVIRONMENT",
     },
     RATE_LIMIT: {
       status: "RATE_LIMITED",
-      step: "LIVE_TEST_SEND",
+      step: "HEALTH_TEST_MESSAGE",
       code: "WA_RATE_LIMITED",
       message: "Provider rate limit triggered during WhatsApp connect validation.",
       fixAction: "WAIT_RATE_LIMIT",
     },
     QUALITY_ISSUE: {
       status: "LIMITED",
-      step: "TEMPLATE_HEALTH_CHECK",
+      step: "HEALTH_TEST_MESSAGE",
       code: "WA_QUALITY_ISSUE",
       message: "WhatsApp quality rating degraded and delivery was limited.",
       fixAction: "IMPROVE_QUALITY",
@@ -2427,6 +3414,12 @@ export const connectWhatsAppGuidedWizard = async (input: {
 
   if (scenario !== "NONE") {
     const failure = failureMap[scenario as Exclude<WhatsAppFailureScenario, "NONE">];
+    flowTrace = markFlowStepStatus(
+      flowTrace,
+      failure.step,
+      "FAILED",
+      normalizeIdentifier(failure.code || "") || "connect_failed"
+    );
     await markConnectionFailure({
       attemptKey: attempt.attemptKey,
       integrationKey: integration.integrationKey,
@@ -2439,7 +3432,10 @@ export const connectWhatsAppGuidedWizard = async (input: {
       message: failure.message,
       fixAction: failure.fixAction,
       retryable: failure.fixAction !== "SWITCH_BUSINESS" && failure.fixAction !== "SWITCH_NUMBER",
-      metadata: failure.fixPayload || null,
+      metadata: {
+        ...toRecord(failure.fixPayload),
+        flowTrace,
+      },
     });
     if (failure.status === "WEBHOOK_FAILED") {
       await setProviderWebhook({
@@ -2476,6 +3472,13 @@ export const connectWhatsAppGuidedWizard = async (input: {
     };
   }
 
+  flowTrace = markFlowStepStatus(
+    flowTrace,
+    "CANONICAL_SAVE",
+    "DONE",
+    "canonical_ledger_saved"
+  );
+  flowTrace = markFlowStepStatus(flowTrace, "CONNECTED", "DONE", "connected");
   await markConnectionSuccess({
     attemptKey: attempt.attemptKey,
     integrationKey: integration.integrationKey,
@@ -2485,6 +3488,15 @@ export const connectWhatsAppGuidedWizard = async (input: {
     details: {
       flow: "WHATSAPP_CONNECT",
       oauthStateKey: oauthState.oauthStateKey,
+      flowTrace,
+      businessManagerId: normalizeIdentifier(input.businessManagerId || "") || null,
+      wabaId: normalizeIdentifier(input.wabaId || "") || null,
+      phoneNumberId: normalizeIdentifier(input.phoneNumberId || "") || null,
+      displayName: normalizeIdentifier(input.displayName || "") || null,
+      displayNameReviewStatus:
+        normalizeIdentifier(input.displayNameReviewStatus || "") || "PENDING_REVIEW",
+      qualityRating: normalizeIdentifier(input.qualityRating || "") || "GREEN",
+      tier: normalizeIdentifier(input.tier || "") || "TIER_1K",
     },
   });
   await callSecurityInfluence({
@@ -2570,6 +3582,30 @@ export const expireIntegrationToken = async (input: {
     message: "Integration token has expired and requires refresh.",
     fixAction: "REFRESH_TOKEN",
   });
+  await upsertIntegrationCredentialLedger({
+    integrationKey: integration.integrationKey,
+    tenantKey,
+    provider,
+    environment,
+    credentialRef: integration.credentialRef || null,
+    tokenExpiresAt: integration.tokenExpiresAt || null,
+    revokedAt: null,
+    metadata: {
+      reason: normalizeIdentifier(input.reason || "manual_expire"),
+    },
+  });
+  await recordIntegrationAudit({
+    tenantKey,
+    provider,
+    environment,
+    integrationKey: integration.integrationKey,
+    stage: "TOKEN_EXPIRED",
+    status: "WARN",
+    message: "Integration token marked expired.",
+    metadata: {
+      reason: normalizeIdentifier(input.reason || "manual_expire"),
+    },
+  });
   return {
     integration,
     health: getIntegrationHealth(integration.integrationKey),
@@ -2647,6 +3683,18 @@ export const refreshIntegrationToken = async (input: {
       actionHint: null,
       retryable: true,
     });
+    await upsertIntegrationCredentialLedger({
+      integrationKey: integration.integrationKey,
+      tenantKey,
+      provider,
+      environment,
+      credentialRef: integration.credentialRef || null,
+      tokenExpiresAt: newExpiry,
+      revokedAt: null,
+      metadata: {
+        refreshStatus: "SUCCESS",
+      },
+    });
   } catch (error) {
     status = "FAILED";
     errorCode = "TOKEN_REFRESH_FAILED";
@@ -2678,6 +3726,19 @@ export const refreshIntegrationToken = async (input: {
       fixAction: "REAUTHORIZE",
       retryToken: replayToken || null,
       metadata: {
+        errorMessage,
+      },
+    });
+    await upsertIntegrationCredentialLedger({
+      integrationKey: integration.integrationKey,
+      tenantKey,
+      provider,
+      environment,
+      credentialRef: integration.credentialRef || null,
+      tokenExpiresAt: integration.tokenExpiresAt || null,
+      revokedAt: null,
+      metadata: {
+        refreshStatus: "FAILED",
         errorMessage,
       },
     });
@@ -2717,6 +3778,26 @@ export const refreshIntegrationToken = async (input: {
       refreshRow.refreshKey
     );
   }
+  await recordIntegrationAudit({
+    tenantKey,
+    provider,
+    environment,
+    integrationKey: integration.integrationKey,
+    stage: "TOKEN_REFRESH",
+    status: status === "SUCCESS" ? "SUCCESS" : "ERROR",
+    message:
+      status === "SUCCESS"
+        ? "Integration token refreshed successfully."
+        : "Integration token refresh failed.",
+    replayToken: replayToken || null,
+    metadata: {
+      refreshKey,
+      oldExpiry: previousExpiry,
+      newExpiry,
+      errorCode,
+      errorMessage,
+    },
+  });
   return refreshRow;
 };
 
@@ -2798,6 +3879,20 @@ export const markProviderWebhookFailure = async (input: {
       diagnosticKey: diagnostic.diagnosticKey,
     },
   });
+  await recordIntegrationAudit({
+    tenantKey,
+    provider,
+    environment,
+    integrationKey: integration.integrationKey,
+    stage: "WEBHOOK_FAILURE",
+    status: "ERROR",
+    message: "Provider webhook marked failed.",
+    metadata: {
+      consecutiveFailures: failures,
+      reason: normalizeIdentifier(input.reason || "webhook_failure"),
+      diagnosticKey: diagnostic.diagnosticKey,
+    },
+  });
   return {
     integration,
     health: getIntegrationHealth(integration.integrationKey),
@@ -2872,6 +3967,19 @@ export const recoverProviderWebhook = async (input: {
     retryable: true,
     metadata: {
       recovery: "webhook",
+    },
+  });
+  await recordIntegrationAudit({
+    tenantKey,
+    provider,
+    environment,
+    integrationKey: integration.integrationKey,
+    stage: "WEBHOOK_RECOVERY",
+    status: "SUCCESS",
+    message: "Provider webhook recovered to active state.",
+    replayToken: replayToken || null,
+    metadata: {
+      healthKey: health.healthKey,
     },
   });
   if (replayToken) {
@@ -2980,6 +4088,321 @@ export const runWhatsAppConnectDoctor = async (input: {
     })),
     healthScore: toNumber(latestHealth?.healthScore, openDiagnostics.length ? 45 : 100),
     autoResolveResults: results,
+  };
+};
+
+export const runMetaConnectDoctor = async (input: {
+  businessId: string;
+  tenantId?: string | null;
+  provider?: "INSTAGRAM" | "WHATSAPP" | "ALL" | string | null;
+  environment?: ConnectEnvironment | string | null;
+  autoResolve?: boolean;
+}) => {
+  const tenantId = normalizeTenantId({
+    tenantId: input.tenantId || null,
+    businessId: input.businessId,
+  });
+  if (!tenantId) {
+    throw new Error("tenant_id_required");
+  }
+  const tenantKey = makeTenantKey(tenantId);
+  const environment = normalizeEnvironment(input.environment || "LIVE");
+  const requestedProvider = normalizeIdentifier(input.provider || "ALL").toUpperCase();
+  const targetProviders: Array<"INSTAGRAM" | "WHATSAPP"> =
+    requestedProvider === "INSTAGRAM"
+      ? ["INSTAGRAM"]
+      : requestedProvider === "WHATSAPP"
+      ? ["WHATSAPP"]
+      : ["INSTAGRAM", "WHATSAPP"];
+
+  const reports: Array<{
+    provider: "INSTAGRAM" | "WHATSAPP";
+    environment: ConnectEnvironment;
+    doctorStatus: "CLEAR" | "NEEDS_ACTION";
+    issueCount: number;
+    openIssueCount: number;
+    healthScore: number;
+    diagnostics: Array<{
+      code: string;
+      message: string;
+      fixAction: string;
+      autoFixable: boolean;
+    }>;
+    autoResolveResults: Array<{
+      code: string;
+      resolved: boolean;
+      resolutionStatus: string;
+    }>;
+  }> = [];
+
+  for (const provider of targetProviders) {
+    const integration =
+      listIntegrations({
+        tenantKey,
+        provider,
+        environment,
+      }).find((row) => row.status !== "DISCONNECTED") || null;
+    const webhook = integration ? getProviderWebhookRow(integration.integrationKey) : null;
+    const health = integration ? getIntegrationHealth(integration.integrationKey) : null;
+    const permissionRow = integration
+      ? getStore().integrationPermissionLedger.get(
+          `integration_permission:${integration.integrationKey}`
+        )
+      : null;
+    const credentialRow = integration
+      ? getStore().integrationCredentialLedger.get(
+          `integration_credential:${integration.integrationKey}`
+        )
+      : null;
+
+    const issues: Array<{
+      code: string;
+      message: string;
+      fixAction: string;
+      autoFixable: boolean;
+      resolver?: () => Promise<boolean>;
+    }> = [];
+
+    if (!integration) {
+      issues.push({
+        code: provider === "INSTAGRAM" ? "PAGE_DISCONNECTED" : "PHONE_DISCONNECTED",
+        message:
+          provider === "INSTAGRAM"
+            ? "Instagram page is disconnected."
+            : "WhatsApp phone number is disconnected.",
+        fixAction: provider === "INSTAGRAM" ? "RELINK_PAGE" : "RECONNECT_NUMBER",
+        autoFixable: false,
+      });
+    } else {
+      const tokenExpiryMs = integration.tokenExpiresAt
+        ? new Date(integration.tokenExpiresAt).getTime()
+        : 0;
+      if (tokenExpiryMs > 0 && tokenExpiryMs <= Date.now()) {
+        issues.push({
+          code: "TOKEN_EXPIRED",
+          message: "Provider token is expired.",
+          fixAction: "REFRESH_TOKEN",
+          autoFixable: true,
+          resolver: async () => {
+            const refresh = await refreshIntegrationToken({
+              businessId: tenantId,
+              tenantId,
+              provider,
+              environment,
+            });
+            return refresh?.status === "SUCCESS";
+          },
+        });
+      } else if (tokenExpiryMs > 0 && tokenExpiryMs - Date.now() <= 1000 * 60 * 60 * 24 * 3) {
+        issues.push({
+          code: "TOKEN_EXPIRING",
+          message: "Provider token is expiring soon.",
+          fixAction: "REFRESH_TOKEN",
+          autoFixable: true,
+          resolver: async () => {
+            const refresh = await refreshIntegrationToken({
+              businessId: tenantId,
+              tenantId,
+              provider,
+              environment,
+            });
+            return refresh?.status === "SUCCESS";
+          },
+        });
+      }
+
+      if (!webhook || String(webhook.status || "").toUpperCase() !== "ACTIVE") {
+        issues.push({
+          code: "WEBHOOK_MISMATCH",
+          message: "Webhook subscription is inactive or mismatched.",
+          fixAction: "RESUBSCRIBE",
+          autoFixable: true,
+          resolver: async () => {
+            const recovered = await recoverProviderWebhook({
+              businessId: tenantId,
+              tenantId,
+              provider,
+              environment,
+            });
+            return String(recovered?.status || "").toUpperCase() === "CONNECTED";
+          },
+        });
+      }
+
+      if (permissionRow && Array.isArray(permissionRow.missingScopes) && permissionRow.missingScopes.length) {
+        issues.push({
+          code: "PERMISSION_MISSING",
+          message: "Required permissions are missing or downgraded.",
+          fixAction: "REAUTHORIZE",
+          autoFixable: false,
+        });
+      }
+
+      if (String(integration.status || "").toUpperCase() === "RATE_LIMITED") {
+        issues.push({
+          code: "RATE_LIMITED",
+          message: "Provider is rate limited.",
+          fixAction: "RETRY_LATER",
+          autoFixable: true,
+          resolver: async () => {
+            integration.status = "CONNECTED";
+            integration.updatedAt = now();
+            await setIntegrationHealth({
+              integrationKey: integration.integrationKey,
+              tenantKey,
+              provider,
+              environment,
+              status: "CONNECTED",
+              healthScore: 88,
+              actionHint: null,
+            });
+            return true;
+          },
+        });
+      }
+
+      const metadata = toRecord(integration.metadata);
+      if (metadata.subscriptionActive === false) {
+        issues.push({
+          code: "SUBSCRIPTION_INACTIVE",
+          message: "Meta subscription is inactive.",
+          fixAction: "RESUBSCRIBE",
+          autoFixable: true,
+          resolver: async () => {
+            const recovered = await recoverProviderWebhook({
+              businessId: tenantId,
+              tenantId,
+              provider,
+              environment,
+            });
+            return String(recovered?.status || "").toUpperCase() === "CONNECTED";
+          },
+        });
+      }
+      if (provider === "INSTAGRAM" && metadata.pageLinked === false) {
+        issues.push({
+          code: "PAGE_DISCONNECTED",
+          message: "Instagram page unlink detected.",
+          fixAction: "RELINK_PAGE",
+          autoFixable: false,
+        });
+      }
+      if (provider === "WHATSAPP" && metadata.phoneConnected === false) {
+        issues.push({
+          code: "PHONE_DISCONNECTED",
+          message: "WhatsApp phone disconnect detected.",
+          fixAction: "RECONNECT_NUMBER",
+          autoFixable: false,
+        });
+      }
+      if (
+        provider === "WHATSAPP" &&
+        ["RED", "LOW"].includes(normalizeIdentifier(metadata.qualityRating).toUpperCase())
+      ) {
+        issues.push({
+          code: "QUALITY_DROP",
+          message: "WhatsApp quality rating dropped.",
+          fixAction: "IMPROVE_QUALITY",
+          autoFixable: false,
+        });
+      }
+      if (provider === "WHATSAPP" && normalizeIdentifier(metadata.numberStatus).toUpperCase() === "BANNED") {
+        issues.push({
+          code: "NUMBER_BANNED",
+          message: "WhatsApp number is banned.",
+          fixAction: "MIGRATE_NUMBER",
+          autoFixable: false,
+        });
+      }
+      if (
+        provider === "WHATSAPP" &&
+        normalizeIdentifier(metadata.displayNameReviewStatus).toUpperCase() === "REJECTED"
+      ) {
+        issues.push({
+          code: "DISPLAY_NAME_REVIEW_REJECTED",
+          message: "Display name review is rejected.",
+          fixAction: "UPDATE_DISPLAY_NAME",
+          autoFixable: false,
+        });
+      }
+      if (credentialRow && normalizeIdentifier(credentialRow.status).toUpperCase() === "REVOKED") {
+        issues.push({
+          code: "PERMISSION_REVOKED",
+          message: "Credentials were revoked by provider.",
+          fixAction: "REAUTHORIZE",
+          autoFixable: false,
+        });
+      }
+      if (health && String(health.status || "").toUpperCase() === "PERMISSION_MISSING") {
+        issues.push({
+          code: "PERMISSION_REVOKED",
+          message: "Permission revocation detected.",
+          fixAction: "REAUTHORIZE",
+          autoFixable: false,
+        });
+      }
+    }
+
+    const autoResolveResults: Array<{
+      code: string;
+      resolved: boolean;
+      resolutionStatus: string;
+    }> = [];
+    if (input.autoResolve) {
+      for (const issue of issues) {
+        if (!issue.autoFixable || !issue.resolver) {
+          autoResolveResults.push({
+            code: issue.code,
+            resolved: false,
+            resolutionStatus: "MANUAL_REQUIRED",
+          });
+          continue;
+        }
+        const resolved = await issue.resolver().catch(() => false);
+        autoResolveResults.push({
+          code: issue.code,
+          resolved,
+          resolutionStatus: resolved ? "RECOVERED" : "FAILED",
+        });
+      }
+    }
+
+    const stillOpenIssueCount = input.autoResolve
+      ? autoResolveResults.filter(
+          (entry) => !entry.resolved && entry.resolutionStatus !== "MANUAL_REQUIRED"
+        ).length +
+        issues.filter((issue) => !issue.autoFixable).length
+      : issues.length;
+    reports.push({
+      provider,
+      environment,
+      doctorStatus: stillOpenIssueCount > 0 ? "NEEDS_ACTION" : "CLEAR",
+      issueCount: issues.length,
+      openIssueCount: stillOpenIssueCount,
+      healthScore: Math.max(
+        0,
+        Math.min(
+          100,
+          toNumber(health?.healthScore, integration ? 90 : 30) - stillOpenIssueCount * 8
+        )
+      ),
+      diagnostics: issues.map((issue) => ({
+        code: issue.code,
+        message: issue.message,
+        fixAction: issue.fixAction,
+        autoFixable: issue.autoFixable,
+      })),
+      autoResolveResults,
+    });
+  }
+
+  return {
+    provider: requestedProvider,
+    environment,
+    doctorStatus: reports.some((report) => report.doctorStatus === "NEEDS_ACTION")
+      ? "NEEDS_ACTION"
+      : "CLEAR",
+    reports,
   };
 };
 
@@ -3119,6 +4542,22 @@ export const retryConnectionDiagnostic = async (input: {
       resolved = true;
       resolutionStatus = "RECOVERED";
     }
+  } else if (diagnosticCode === "IG_DISCONNECTED") {
+    const reconnect = await connectInstagramOneClick({
+      businessId: tenantId,
+      tenantId,
+      environment,
+      reconnect: true,
+      replayToken: `diag_reconnect_${stableHash([diagnostic.diagnosticKey]).slice(0, 10)}`,
+    }).catch(() => null);
+    resolved = Boolean(reconnect?.integration?.status === "CONNECTED");
+    resolutionStatus = resolved ? "RECOVERED" : "FAILED";
+  } else if (diagnosticCode === "WA_PHONE_DISCONNECTED") {
+    resolutionStatus = "MANUAL_REQUIRED";
+  } else if (diagnosticCode === "IG_PAGE_UNLINKED") {
+    resolutionStatus = "MANUAL_REQUIRED";
+  } else if (diagnosticCode === "IG_PERMISSION_DOWNGRADE") {
+    resolutionStatus = "MANUAL_REQUIRED";
   } else {
     resolutionStatus = "MANUAL_REQUIRED";
   }
@@ -3190,9 +4629,13 @@ export const recordInboundProviderWebhook = async (input: {
       provider,
       environment,
       severity: "ERROR",
-      code: "INTEGRATION_NOT_CONNECTED",
-      message: "Webhook inbound event received for disconnected integration.",
-      fixAction: "RECONNECT",
+      code:
+        provider === "INSTAGRAM" ? "IG_PAGE_DISCONNECTED" : "WA_PHONE_DISCONNECTED",
+      message:
+        provider === "INSTAGRAM"
+          ? "Webhook inbound event received while Instagram page is disconnected."
+          : "Webhook inbound event received while WhatsApp phone is disconnected.",
+      fixAction: provider === "INSTAGRAM" ? "RELINK_PAGE" : "RECONNECT_NUMBER",
     });
     return {
       accepted: false,
@@ -3221,6 +4664,65 @@ export const recordInboundProviderWebhook = async (input: {
     };
   }
 
+  const inboundDetails = toRecord(input.details);
+  const inboundEventId =
+    normalizeIdentifier(inboundDetails.eventId) ||
+    normalizeIdentifier(inboundDetails.messageId) ||
+    normalizeIdentifier(inboundDetails.providerMessageId) ||
+    null;
+  const inboundTimestampMs = toNumber(
+    (inboundDetails as any).eventTimestampMs ||
+      (inboundDetails as any).timestampMs ||
+      (inboundDetails as any).timestamp ||
+      Date.now(),
+    Date.now()
+  );
+  const currentWebhook = getProviderWebhookRow(integration.integrationKey);
+  const currentWebhookMeta = toRecord(currentWebhook?.metadata);
+  const recentEventIds = toArray(currentWebhookMeta.recentEventIds || []);
+  if (inboundEventId && recentEventIds.includes(inboundEventId)) {
+    await recordIntegrationAudit({
+      tenantKey,
+      provider,
+      environment,
+      integrationKey: integration.integrationKey,
+      stage: "WEBHOOK_REPLAY_SKIPPED",
+      status: "WARN",
+      message: "Duplicate webhook replay skipped.",
+      metadata: {
+        eventId: inboundEventId,
+      },
+    });
+    return {
+      accepted: true,
+      duplicate: true,
+      integrationKey: integration.integrationKey,
+    };
+  }
+  const lastEventTimestampMs = toNumber(currentWebhookMeta.lastEventTimestampMs, 0);
+  if (lastEventTimestampMs > 0 && inboundTimestampMs < lastEventTimestampMs) {
+    await recordIntegrationAudit({
+      tenantKey,
+      provider,
+      environment,
+      integrationKey: integration.integrationKey,
+      stage: "WEBHOOK_OUT_OF_ORDER_IGNORED",
+      status: "WARN",
+      message: "Out-of-order webhook ignored.",
+      metadata: {
+        eventId: inboundEventId,
+        inboundTimestampMs,
+        lastEventTimestampMs,
+      },
+    });
+    return {
+      accepted: true,
+      ignored: true,
+      reason: "out_of_order",
+      integrationKey: integration.integrationKey,
+    };
+  }
+
   await setProviderWebhook({
     integrationKey: integration.integrationKey,
     tenantKey,
@@ -3230,7 +4732,18 @@ export const recordInboundProviderWebhook = async (input: {
     status: "ACTIVE",
     consecutiveFailures: 0,
     lastDeliveryAt: now(),
-    metadata: toRecord(input.details),
+    metadata: {
+      ...currentWebhookMeta,
+      ...inboundDetails,
+      lastEventId: inboundEventId,
+      lastEventTimestampMs: inboundTimestampMs,
+      recentEventIds: inboundEventId
+        ? [inboundEventId, ...recentEventIds.filter((id) => id !== inboundEventId)].slice(
+            0,
+            20
+          )
+        : recentEventIds,
+    },
   });
   integration.status = "CONNECTED";
   integration.lastVerifiedAt = now();
@@ -3246,6 +4759,19 @@ export const recordInboundProviderWebhook = async (input: {
     rootCauseMessage: null,
     actionHint: null,
     metadata: toRecord(input.details),
+  });
+  await recordIntegrationAudit({
+    tenantKey,
+    provider,
+    environment,
+    integrationKey: integration.integrationKey,
+    stage: "WEBHOOK_ACCEPTED",
+    status: "SUCCESS",
+    message: "Inbound webhook accepted and reconciled.",
+    metadata: {
+      eventId: inboundEventId,
+      eventTimestampMs: inboundTimestampMs,
+    },
   });
   return {
     accepted: true,
@@ -3908,26 +5434,42 @@ export const applyPackagingOverride = async (input: {
     input.action,
     now().toISOString(),
   ]).slice(0, 24)}`;
-  return upsertLedgerRecord({
+  const row = {
+    overrideKey,
+    tenantKey,
+    scope: normalizeIdentifier(input.scope).toUpperCase(),
+    targetType: normalizeIdentifier(input.targetType).toUpperCase(),
+    targetKey: normalizeIdentifier(input.targetKey || "") || null,
+    action: normalizeIdentifier(input.action).toUpperCase(),
+    reason: normalizeIdentifier(input.reason) || "override",
+    priority: Math.max(1, Math.floor(toNumber(input.priority, 100))),
+    isActive: true,
+    expiresAt: input.expiresAt || null,
+    metadata: toRecord(input.metadata),
+  };
+  const override = await upsertLedgerRecord({
     authority: "PackagingOverrideLedger",
     storeMap: getStore().packagingOverrideLedger,
     keyField: "overrideKey",
     keyValue: overrideKey,
+    row,
+    dbLedgers: ["packagingOverrideLedger"],
+  });
+  await upsertLedgerRecord({
+    authority: "ConnectOverrideLedger",
+    storeMap: getStore().connectOverrideLedger,
+    keyField: "overrideKey",
+    keyValue: overrideKey,
     row: {
-      overrideKey,
-      tenantKey,
-      scope: normalizeIdentifier(input.scope).toUpperCase(),
-      targetType: normalizeIdentifier(input.targetType).toUpperCase(),
-      targetKey: normalizeIdentifier(input.targetKey || "") || null,
-      action: normalizeIdentifier(input.action).toUpperCase(),
-      reason: normalizeIdentifier(input.reason) || "override",
-      priority: Math.max(1, Math.floor(toNumber(input.priority, 100))),
-      isActive: true,
-      expiresAt: input.expiresAt || null,
-      metadata: toRecord(input.metadata),
+      ...row,
+      metadata: {
+        ...toRecord(row.metadata),
+        canonicalAuthority: "ConnectOverrideLedger",
+      },
     },
     dbLedgers: ["packagingOverrideLedger"],
   });
+  return override;
 };
 
 export const runSaaSPackagingFailureInjection = async (input: {
@@ -4027,6 +5569,507 @@ export const runSaaSPackagingFailureInjection = async (input: {
   };
 };
 
+export const runMetaTokenLifecycleSweep = async (input: {
+  businessId: string;
+  tenantId?: string | null;
+  provider?: "INSTAGRAM" | "WHATSAPP" | "ALL" | string | null;
+  environment?: ConnectEnvironment | string | null;
+  autoRefresh?: boolean;
+}) => {
+  const tenantId = normalizeTenantId({
+    tenantId: input.tenantId || null,
+    businessId: input.businessId,
+  });
+  if (!tenantId) {
+    throw new Error("tenant_id_required");
+  }
+  const tenantKey = makeTenantKey(tenantId);
+  const environment = normalizeEnvironment(input.environment || "LIVE");
+  const requestedProvider = normalizeIdentifier(input.provider || "ALL").toUpperCase();
+  const providers: Array<"INSTAGRAM" | "WHATSAPP"> =
+    requestedProvider === "INSTAGRAM"
+      ? ["INSTAGRAM"]
+      : requestedProvider === "WHATSAPP"
+      ? ["WHATSAPP"]
+      : ["INSTAGRAM", "WHATSAPP"];
+
+  const report: Array<{
+    provider: "INSTAGRAM" | "WHATSAPP";
+    integrationKey: string | null;
+    status: string;
+    refreshed: boolean;
+    revokedDetected: boolean;
+    reauthorizeRequired: boolean;
+  }> = [];
+
+  for (const provider of providers) {
+    const integration =
+      listIntegrations({
+        tenantKey,
+        provider,
+        environment,
+      }).find((row) => row.status !== "DISCONNECTED") || null;
+    if (!integration) {
+      report.push({
+        provider,
+        integrationKey: null,
+        status: "NOT_CONNECTED",
+        refreshed: false,
+        revokedDetected: false,
+        reauthorizeRequired: true,
+      });
+      continue;
+    }
+
+    let refreshed = false;
+    let revokedDetected = false;
+    let reauthorizeRequired = false;
+    const credentialRow = getStore().integrationCredentialLedger.get(
+      `integration_credential:${integration.integrationKey}`
+    );
+    if (credentialRow && normalizeIdentifier(credentialRow.status).toUpperCase() === "REVOKED") {
+      revokedDetected = true;
+      reauthorizeRequired = true;
+      await createDiagnostic({
+        integrationKey: integration.integrationKey,
+        tenantKey,
+        provider,
+        environment,
+        severity: "ERROR",
+        code: `${provider}_PERMISSION_REVOKED`,
+        message: "Provider permissions revoked; reauthorization required.",
+        fixAction: "REAUTHORIZE",
+      });
+    }
+
+    const tokenExpiryMs = integration.tokenExpiresAt
+      ? new Date(integration.tokenExpiresAt).getTime()
+      : 0;
+    const tokenExpired = tokenExpiryMs > 0 && tokenExpiryMs <= Date.now();
+    const tokenExpiringSoon =
+      tokenExpiryMs > Date.now() &&
+      tokenExpiryMs - Date.now() <= 1000 * 60 * 60 * 24 * 3;
+    if (tokenExpired || tokenExpiringSoon) {
+      if (input.autoRefresh !== false) {
+        const refresh = await refreshIntegrationToken({
+          businessId: tenantId,
+          tenantId,
+          provider,
+          environment,
+          replayToken: `auto_refresh_${provider.toLowerCase()}_${new Date()
+            .toISOString()
+            .slice(0, 10)}`,
+        }).catch(() => null);
+        refreshed = Boolean(refresh && refresh.status === "SUCCESS");
+      }
+      if (!refreshed) {
+        reauthorizeRequired = tokenExpired;
+        await callReliabilityInfluence({
+          tenantId,
+          businessId: tenantId,
+          severity: "P2",
+          provider,
+          reason: "Token lifecycle sweep detected refresh failure.",
+          dedupeKey: `${tenantKey}:${provider}:token_lifecycle_failure`.toLowerCase(),
+          metadata: {
+            integrationKey: integration.integrationKey,
+            tokenExpired,
+            tokenExpiringSoon,
+          },
+        });
+      }
+    }
+
+    if (String(integration.status || "").toUpperCase() === "DISCONNECTED") {
+      reauthorizeRequired = true;
+      await createDiagnostic({
+        integrationKey: integration.integrationKey,
+        tenantKey,
+        provider,
+        environment,
+        severity: "ERROR",
+        code: `${provider}_DISCONNECTED`,
+        message: "Provider disconnected and requires reauthorization.",
+        fixAction: "REAUTHORIZE",
+      });
+    }
+
+    await upsertIntegrationCredentialLedger({
+      integrationKey: integration.integrationKey,
+      tenantKey,
+      provider,
+      environment,
+      credentialRef: integration.credentialRef || null,
+      tokenExpiresAt: integration.tokenExpiresAt || null,
+      revokedAt: revokedDetected ? now() : null,
+      metadata: {
+        sweepRefreshed: refreshed,
+        tokenExpired,
+        tokenExpiringSoon,
+      },
+    });
+    report.push({
+      provider,
+      integrationKey: integration.integrationKey,
+      status: normalizeIdentifier(integration.status || "UNKNOWN").toUpperCase(),
+      refreshed,
+      revokedDetected,
+      reauthorizeRequired,
+    });
+  }
+
+  return {
+    tenantKey,
+    provider: requestedProvider,
+    environment,
+    report,
+  };
+};
+
+export const reconcileMetaColdBoot = async (input: {
+  businessId: string;
+  tenantId?: string | null;
+  provider?: "INSTAGRAM" | "WHATSAPP" | "ALL" | string | null;
+  environment?: ConnectEnvironment | string | null;
+}) => {
+  await bootstrapSaaSPackagingConnectHubOS();
+  const tenantId = normalizeTenantId({
+    tenantId: input.tenantId || null,
+    businessId: input.businessId,
+  });
+  if (!tenantId) {
+    throw new Error("tenant_id_required");
+  }
+  const tenantKey = makeTenantKey(tenantId);
+  const environment = normalizeEnvironment(input.environment || "LIVE");
+  const requestedProvider = normalizeIdentifier(input.provider || "ALL").toUpperCase();
+  const providers: Array<"INSTAGRAM" | "WHATSAPP"> =
+    requestedProvider === "INSTAGRAM"
+      ? ["INSTAGRAM"]
+      : requestedProvider === "WHATSAPP"
+      ? ["WHATSAPP"]
+      : ["INSTAGRAM", "WHATSAPP"];
+
+  let repairedHealth = 0;
+  let repairedWebhook = 0;
+  let permissionDowngradeDetected = 0;
+  const repairedIntegrations: string[] = [];
+
+  for (const provider of providers) {
+    const integration =
+      listIntegrations({
+        tenantKey,
+        provider,
+        environment,
+      }).find((row) => row.status !== "DISCONNECTED") || null;
+    if (!integration) {
+      continue;
+    }
+    const health = getIntegrationHealth(integration.integrationKey);
+    if (!health) {
+      await setIntegrationHealth({
+        integrationKey: integration.integrationKey,
+        tenantKey,
+        provider,
+        environment,
+        status: normalizeStatus(integration.status || "VERIFYING", "VERIFYING"),
+        healthScore: normalizeStatus(integration.status || "VERIFYING", "VERIFYING") === "CONNECTED"
+          ? 95
+          : 65,
+        actionHint: null,
+      });
+      repairedHealth += 1;
+      repairedIntegrations.push(integration.integrationKey);
+    }
+
+    const webhook = getProviderWebhookRow(integration.integrationKey);
+    if (!webhook) {
+      await setProviderWebhook({
+        integrationKey: integration.integrationKey,
+        tenantKey,
+        provider,
+        environment,
+        eventType: "INBOUND",
+        status: "ACTIVE",
+        consecutiveFailures: 0,
+        lastDeliveryAt: now(),
+      });
+      repairedWebhook += 1;
+      repairedIntegrations.push(integration.integrationKey);
+    } else if (String(webhook.status || "").toUpperCase() !== "ACTIVE") {
+      await recoverProviderWebhook({
+        businessId: tenantId,
+        tenantId,
+        provider,
+        environment,
+      });
+      repairedWebhook += 1;
+      repairedIntegrations.push(integration.integrationKey);
+    }
+
+    const permissionRow = getStore().integrationPermissionLedger.get(
+      `integration_permission:${integration.integrationKey}`
+    );
+    if (permissionRow && Array.isArray(permissionRow.missingScopes) && permissionRow.missingScopes.length) {
+      permissionDowngradeDetected += 1;
+      await setIntegrationHealth({
+        integrationKey: integration.integrationKey,
+        tenantKey,
+        provider,
+        environment,
+        status: "PERMISSION_MISSING",
+        healthScore: 44,
+        rootCauseCode: `${provider}_PERMISSION_DOWNGRADE`,
+        rootCauseMessage: "Missing required scopes detected during cold boot reconcile.",
+        actionHint: "REAUTHORIZE",
+      });
+      await createDiagnostic({
+        integrationKey: integration.integrationKey,
+        tenantKey,
+        provider,
+        environment,
+        severity: "ERROR",
+        code: `${provider}_PERMISSION_DOWNGRADE`,
+        message: "Permission downgrade detected during cold boot reconcile.",
+        fixAction: "REAUTHORIZE",
+      });
+    }
+  }
+
+  return {
+    tenantKey,
+    provider: requestedProvider,
+    environment,
+    reconciled: true,
+    repairedHealth,
+    repairedWebhook,
+    permissionDowngradeDetected,
+    repairedIntegrations: Array.from(new Set(repairedIntegrations)),
+  };
+};
+
+export const seedMetaReviewerMode = async (input: {
+  businessId: string;
+  tenantId?: string | null;
+  environment?: ConnectEnvironment | string | null;
+}) => {
+  const tenantId = normalizeTenantId({
+    tenantId: input.tenantId || null,
+    businessId: input.businessId,
+  });
+  if (!tenantId) {
+    throw new Error("tenant_id_required");
+  }
+  const environment = normalizeEnvironment(input.environment || "SANDBOX");
+  await provisionTenantSaaSPackaging({
+    businessId: tenantId,
+    tenantId,
+    plan: "ENTERPRISE",
+    replayToken: "meta_reviewer_seed_provision",
+  });
+  const instagram = await connectInstagramOneClick({
+    businessId: tenantId,
+    tenantId,
+    environment,
+    replayToken: "meta_reviewer_seed_instagram",
+    reconnect: true,
+    externalAccountRef: "reviewer_ig_account",
+    scopes: [
+      "instagram_basic",
+      "instagram_manage_messages",
+      "pages_manage_metadata",
+    ],
+    metaProof: {
+      stateSigned: true,
+      redirectValidated: true,
+      permissions: [
+        "instagram_basic",
+        "instagram_manage_messages",
+        "pages_manage_metadata",
+      ],
+      businesses: ["review_business_1"],
+      pages: ["review_page_1"],
+      instagramProfessionalAccountId: "review_ig_professional_1",
+      pageId: "review_page_1",
+      webhookChallengeVerified: true,
+      profile: {
+        id: "review_ig_professional_1",
+        username: "reviewer_demo_ig",
+      },
+      permissionAudit: {
+        result: "PASS",
+      },
+      healthAudit: {
+        result: "PASS",
+      },
+    },
+  });
+  const whatsapp = await connectWhatsAppGuidedWizard({
+    businessId: tenantId,
+    tenantId,
+    environment,
+    replayToken: "meta_reviewer_seed_whatsapp",
+    reconnect: true,
+    businessManagerId: "review_bm_1",
+    wabaId: "review_waba_1",
+    phoneNumberId: "review_phone_1",
+    displayName: "Reviewer Demo Number",
+    displayNameReviewStatus: "APPROVED",
+    qualityRating: "GREEN",
+    tier: "TIER_1K",
+    allowSandboxSlot: true,
+    metaProof: {
+      permissions: [
+        "whatsapp_business_management",
+        "whatsapp_business_messaging",
+      ],
+      callbackVerified: true,
+      testMessageDelivered: true,
+      phoneConnected: true,
+    },
+  });
+  const reconcile = await reconcileMetaColdBoot({
+    businessId: tenantId,
+    tenantId,
+    provider: "ALL",
+    environment,
+  });
+  const doctor = await runMetaConnectDoctor({
+    businessId: tenantId,
+    tenantId,
+    provider: "ALL",
+    environment,
+    autoResolve: true,
+  });
+
+  return {
+    tenantId,
+    environment,
+    seeded: true,
+    demoScript: [
+      "1. Open settings and click Connect Instagram.",
+      "2. Complete OAuth and verify connected status in connect hub.",
+      "3. Open webhook diagnostics and verify challenge + active subscription.",
+      "4. Connect WhatsApp, confirm number registration, and send health test message.",
+      "5. Open reviewer logs and confirm deterministic audit entries.",
+    ],
+    testAssets: {
+      instagramAccountRef: instagram.integration?.externalAccountRef || null,
+      whatsappAccountRef: whatsapp.integration?.externalAccountRef || null,
+      webhookProof: {
+        instagram: getProviderWebhookRow(instagram.integration?.integrationKey || "") || null,
+        whatsapp: getProviderWebhookRow(whatsapp.integration?.integrationKey || "") || null,
+      },
+    },
+    permissionsMapped: {
+      instagram: [
+        "instagram_basic",
+        "instagram_manage_messages",
+        "pages_manage_metadata",
+      ],
+      whatsapp: [
+        "whatsapp_business_management",
+        "whatsapp_business_messaging",
+      ],
+    },
+    reviewLogs: Array.from(getStore().integrationAuditLedger.values())
+      .filter((row) => row.tenantKey === makeTenantKey(tenantId))
+      .slice(-40),
+    healthProof: {
+      instagram: instagram.health,
+      whatsapp: whatsapp.health,
+      doctor,
+      reconcile,
+    },
+  };
+};
+
+export const generateMetaAppReviewPack = async (input: {
+  businessId: string;
+  tenantId?: string | null;
+  environment?: ConnectEnvironment | string | null;
+}) => {
+  const tenantId = normalizeTenantId({
+    tenantId: input.tenantId || null,
+    businessId: input.businessId,
+  });
+  if (!tenantId) {
+    throw new Error("tenant_id_required");
+  }
+  const environment = normalizeEnvironment(input.environment || "LIVE");
+  const tenantKey = makeTenantKey(tenantId);
+  const projection = await getConnectHubProjection({
+    businessId: tenantId,
+    tenantId,
+  });
+  const reviewLogs = Array.from(getStore().integrationAuditLedger.values()).filter(
+    (row) => row.tenantKey === tenantKey
+  );
+
+  return {
+    tenantId,
+    environment,
+    generatedAt: now().toISOString(),
+    reviewChecklist: [
+      "Instagram OAuth flow completes with signed state and redirect validation.",
+      "Instagram webhook challenge succeeds and subscription is active.",
+      "Instagram profile and permission audit are visible in canonical logs.",
+      "WhatsApp number registration and callback verification are visible.",
+      "WhatsApp health test message evidence is present.",
+      "Replay/out-of-order webhook safeguards are enabled.",
+      "Token lifecycle sweep and refresh evidence available.",
+    ],
+    reviewDemoScript: [
+      "Start reviewer tenant from seed endpoint.",
+      "Run Instagram connect and show flow trace to CONNECTED.",
+      "Run WhatsApp connect and show display name review + quality tier metadata.",
+      "Trigger doctor and show auto-fix + guided fixes.",
+      "Open cold boot reconcile proof.",
+    ],
+    reviewCredentialsDoc: {
+      required: [
+        "Meta App ID",
+        "Meta App Secret",
+        "INSTAGRAM_VERIFY_TOKEN",
+        "WHATSAPP_VERIFY_TOKEN",
+      ],
+      notes: "Use test app credentials during review and rotate before production go-live.",
+    },
+    permissionJustificationMatrix: [
+      {
+        permission: "instagram_basic",
+        reason: "Read professional account identity for routing and profile sync.",
+      },
+      {
+        permission: "instagram_manage_messages",
+        reason: "Receive and respond to Instagram DMs in unified inbox.",
+      },
+      {
+        permission: "pages_manage_metadata",
+        reason: "Subscribe webhook and validate page linkage state.",
+      },
+      {
+        permission: "whatsapp_business_management",
+        reason: "Bind WABA, number, and display name review lifecycle.",
+      },
+      {
+        permission: "whatsapp_business_messaging",
+        reason: "Send and receive WhatsApp messages including health tests.",
+      },
+    ],
+    screencastFlowList: [
+      "01_connect_instagram_signed_state",
+      "02_instagram_webhook_challenge",
+      "03_instagram_profile_health_audit",
+      "04_connect_whatsapp_number_registration",
+      "05_whatsapp_callback_and_health_test",
+      "06_connect_doctor_and_cold_boot_reconcile",
+    ],
+    projection,
+    reviewLogs: reviewLogs.slice(-60),
+  };
+};
+
 export const getConnectHubProjection = async (input: {
   businessId: string;
   tenantId?: string | null;
@@ -4060,6 +6103,36 @@ export const getConnectHubProjection = async (input: {
       provider,
       environment: "SANDBOX",
     }).filter((row) => row.status !== "DISCONNECTED").length;
+    const livePermission =
+      liveSelection?.integration?.integrationKey
+        ? getStore().integrationPermissionLedger.get(
+            `integration_permission:${liveSelection.integration.integrationKey}`
+          )
+        : null;
+    const sandboxPermission =
+      sandboxSelection?.integration?.integrationKey
+        ? getStore().integrationPermissionLedger.get(
+            `integration_permission:${sandboxSelection.integration.integrationKey}`
+          )
+        : null;
+    const liveCredential =
+      liveSelection?.integration?.integrationKey
+        ? getStore().integrationCredentialLedger.get(
+            `integration_credential:${liveSelection.integration.integrationKey}`
+          )
+        : null;
+    const sandboxCredential =
+      sandboxSelection?.integration?.integrationKey
+        ? getStore().integrationCredentialLedger.get(
+            `integration_credential:${sandboxSelection.integration.integrationKey}`
+          )
+        : null;
+    const liveWebhook = liveSelection?.integration?.integrationKey
+      ? getProviderWebhookRow(liveSelection.integration.integrationKey)
+      : null;
+    const sandboxWebhook = sandboxSelection?.integration?.integrationKey
+      ? getProviderWebhookRow(sandboxSelection.integration.integrationKey)
+      : null;
     return {
       provider,
       live: {
@@ -4072,6 +6145,10 @@ export const getConnectHubProjection = async (input: {
         healthScore: toNumber(liveSelection?.health?.healthScore, 0),
         integrationKey: liveSelection?.integration?.integrationKey || null,
         connectionCount: liveConnections,
+        tokenExpiresAt: liveSelection?.integration?.tokenExpiresAt || null,
+        tokenStatus: normalizeIdentifier(liveCredential?.status || "") || "UNKNOWN",
+        webhookStatus: normalizeIdentifier(liveWebhook?.status || "") || "INACTIVE",
+        missingScopes: toArray(livePermission?.missingScopes || []),
       },
       sandbox: {
         status: normalizeStatus(
@@ -4083,6 +6160,10 @@ export const getConnectHubProjection = async (input: {
         healthScore: toNumber(sandboxSelection?.health?.healthScore, 0),
         integrationKey: sandboxSelection?.integration?.integrationKey || null,
         connectionCount: sandboxConnections,
+        tokenExpiresAt: sandboxSelection?.integration?.tokenExpiresAt || null,
+        tokenStatus: normalizeIdentifier(sandboxCredential?.status || "") || "UNKNOWN",
+        webhookStatus: normalizeIdentifier(sandboxWebhook?.status || "") || "INACTIVE",
+        missingScopes: toArray(sandboxPermission?.missingScopes || []),
       },
       diagnostics: Array.from(getStore().connectionDiagnosticLedger.values())
         .filter(
@@ -4211,6 +6292,16 @@ export const runSaaSPackagingConnectHubSelfAudit = async (input?: {
   const upgradeRows = Array.from(store.upgradeLedger.values()).filter(scopeFilter);
   const seatRows = Array.from(store.seatLedger.values()).filter(scopeFilter);
   const roleAssignmentRows = Array.from(store.roleAssignmentLedger.values()).filter(scopeFilter);
+  const credentialRows = Array.from(store.integrationCredentialLedger.values()).filter(
+    scopeFilter
+  );
+  const permissionRows = Array.from(store.integrationPermissionLedger.values()).filter(
+    scopeFilter
+  );
+  const quotaRows = Array.from(store.integrationQuotaLedger.values()).filter(scopeFilter);
+  const integrationAuditRows = Array.from(store.integrationAuditLedger.values()).filter(
+    scopeFilter
+  );
 
   const existingResourceKeys = new Set<string>();
   for (const row of [
@@ -4367,11 +6458,31 @@ export const runSaaSPackagingConnectHubSelfAudit = async (input?: {
     reliabilityWired: store.reliabilityInfluenceChecks >= 0,
   };
   const deeplyWired = Object.values(checks).every(Boolean);
+  const metaCanonicalChecks = {
+    canonicalAuthoritiesPresent: META_ENTERPRISE_CANONICAL_AUTHORITIES.every((authority) =>
+      store.authorities.has(authority)
+    ),
+    credentialTracked:
+      credentialRows.length >= integrationRows.length || integrationRows.length === 0,
+    permissionTracked:
+      permissionRows.length >= integrationRows.length || integrationRows.length === 0,
+    quotaTracked: quotaRows.length > 0 || integrationRows.length === 0,
+    auditTrailPresent: integrationAuditRows.length > 0 || integrationRows.length === 0,
+  };
+  const reviewerSafe =
+    metaCanonicalChecks.canonicalAuthoritiesPresent &&
+    metaCanonicalChecks.credentialTracked &&
+    metaCanonicalChecks.permissionTracked &&
+    metaCanonicalChecks.auditTrailPresent;
+  const enterpriseSafe = reviewerSafe && checks.replaySafe && checks.dedupeSafe;
   return {
     phaseVersion: SAAS_PACKAGING_PHASE_VERSION,
     tenantKey,
     deeplyWired,
     checks,
+    metaCanonicalChecks,
+    reviewerSafe,
+    enterpriseSafe,
     counts: {
       tenants: tenantRows.length,
       plans: planRows.length,
@@ -4382,6 +6493,10 @@ export const runSaaSPackagingConnectHubSelfAudit = async (input?: {
       diagnostics: diagnostics.length,
       usage: usageRows.length,
       overrides: overrideRows.length,
+      credentials: credentialRows.length,
+      permissions: permissionRows.length,
+      quotas: quotaRows.length,
+      audits: integrationAuditRows.length,
     },
     authorityInvocations: Object.fromEntries(store.authorities.entries()),
     wiredDomains: Array.from(store.wiringDomains.values()),

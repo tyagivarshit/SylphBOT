@@ -18,6 +18,13 @@ const normalizeIdentifier = (value) => {
     const normalized = String(value || "").trim();
     return normalized || null;
 };
+const toEpochMs = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return Date.now();
+    }
+    return numeric < 10000000000 ? numeric * 1000 : numeric;
+};
 const buildClientLookupOr = ({ pageIds = [], phoneNumberIds = [], }) => [
     ...pageIds.map((pageId) => ({ pageId })),
     ...phoneNumberIds.map((phoneNumberId) => ({ phoneNumberId })),
@@ -179,6 +186,7 @@ router.post("/", async (req, res) => {
             details: {
                 eventId: eventId || null,
                 phoneNumberId: phoneNumberIds[0] || null,
+                eventTimestampMs: toEpochMs(message?.timestamp || body?.entry?.[0]?.time),
             },
         }).catch(() => undefined);
         const lead = await (0, receptionLead_service_1.resolveOrCreateReceptionLead)({

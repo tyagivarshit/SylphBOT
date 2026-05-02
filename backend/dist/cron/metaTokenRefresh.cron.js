@@ -8,6 +8,7 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
+const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
 const log = (...args) => {
     console.log("[META TOKEN CRON]", ...args);
 };
@@ -55,6 +56,18 @@ const startMetaTokenRefreshCron = () => {
                 catch (err) {
                     log("Refresh error for client:", client.id, err.response?.data || err.message);
                 }
+            }
+            const businessIds = Array.from(new Set(clients
+                .map((client) => String(client.businessId || "").trim())
+                .filter(Boolean)));
+            for (const businessId of businessIds) {
+                await (0, saasPackagingConnectHubOS_service_1.runMetaTokenLifecycleSweep)({
+                    businessId,
+                    tenantId: businessId,
+                    provider: "ALL",
+                    environment: "LIVE",
+                    autoRefresh: true,
+                }).catch(() => undefined);
             }
             log("Token refresh cycle complete");
         }

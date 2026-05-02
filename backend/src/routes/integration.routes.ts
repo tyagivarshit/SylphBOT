@@ -29,11 +29,16 @@ import {
   recoverConnectHubWebhook,
   revokeDeveloperPlatformApiKey,
   refreshConnectHubToken,
+  runMetaColdBootReconcile,
+  runMetaDoctor,
+  runMetaTokenLifecycle,
   retryConnectDiagnostic,
   rollbackConnectHubMarketplaceArtifact,
   runDeveloperPlatformExtensibilitySelfAudit,
   runConnectHubSelfAudit,
   runWhatsAppDoctor,
+  seedMetaReviewerDemo,
+  generateMetaReviewPack,
   saveConnectHubWizardProgress,
   subscribeDeveloperPlatformEvent,
   upsertConnectHubBranding,
@@ -73,6 +78,36 @@ router.post(
   protect,
   requirePermission("settings:manage"),
   runWhatsAppDoctor
+);
+router.post(
+  "/connect-hub/connect/meta/doctor",
+  protect,
+  requirePermission("settings:manage"),
+  runMetaDoctor
+);
+router.post(
+  "/connect-hub/reconcile/cold-boot",
+  protect,
+  requirePermission("settings:manage"),
+  runMetaColdBootReconcile
+);
+router.post(
+  "/connect-hub/token/sweep",
+  protect,
+  requirePermission("settings:manage"),
+  runMetaTokenLifecycle
+);
+router.post(
+  "/connect-hub/reviewer/seed",
+  protect,
+  requirePermission("settings:manage"),
+  seedMetaReviewerDemo
+);
+router.get(
+  "/connect-hub/reviewer/pack",
+  protect,
+  requirePermission("settings:view"),
+  generateMetaReviewPack
 );
 router.get(
   "/connect-hub/diagnostics/:provider",

@@ -10,8 +10,10 @@ import {
   assertTransition,
   buildDeterministicDigest,
   buildLedgerKey,
+  getScopedAndLegacyIdempotencyCandidates,
   mergeMetadata,
   normalizeCurrency,
+  scopeIdempotencyKey,
   toMinor,
 } from "./commerce/shared";
 
@@ -19,6 +21,22 @@ const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+
+const buildInvoiceNumber = ({
+  invoiceKey,
+  issuedAt,
+}: {
+  invoiceKey: string;
+  issuedAt: Date;
+}) => {
+  const stamp = issuedAt.toISOString().slice(0, 10).replace(/-/g, "");
+  const tail = String(invoiceKey || "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(-8)
+    .toUpperCase();
+
+  return `INV-${stamp}-${tail || "AUTO"}`;
+};
 
 const getSourceAmount = async ({
   businessId,
@@ -151,36 +169,58 @@ export const createInvoiceEngineService = () => {
     });
 
     const normalizedIdempotency =
-      String(idempotencyKey || "").trim() ||
+      scopeIdempotencyKey({
+        businessId,
+        idempotencyKey: idempotencyKey || null,
+      }) ||
       buildDeterministicDigest({
         businessId,
         source,
       });
+    const rawIdempotency = String(idempotencyKey || "").trim() || null;
 
-    const existing = await prisma.invoiceLedger.findUnique({
-      where: {
-        idempotencyKey: normalizedIdempotency,
-      },
-    });
+    const existing = rawIdempotency
+      ? await prisma.invoiceLedger.findFirst({
+          where: {
+            businessId,
+            idempotencyKey: {
+              in: getScopedAndLegacyIdempotencyCandidates({
+                businessId,
+                idempotencyKey: rawIdempotency,
+              }),
+            },
+          },
+        })
+      : await prisma.invoiceLedger.findUnique({
+          where: {
+            idempotencyKey: normalizedIdempotency,
+          },
+        });
 
     if (existing) {
       return existing;
     }
 
+    const issuedAt = new Date();
+    const invoiceKey = buildLedgerKey("invoice");
     const invoice = await prisma.invoiceLedger.create({
       data: {
         businessId,
         proposalId: source.proposalId,
         contractId: source.contractId,
         subscriptionId: source.subscriptionId,
-        invoiceKey: buildLedgerKey("invoice"),
+        invoiceKey,
         status: "ISSUED",
         currency: source.currency,
         subtotalMinor: toMinor(source.subtotalMinor),
         taxMinor: toMinor(source.taxMinor),
         totalMinor: toMinor(source.totalMinor),
         dueAt: new Date(Date.now() + Math.max(1, dueDays) * 24 * 60 * 60 * 1000),
-        issuedAt: new Date(),
+        issuedAt,
+        externalInvoiceId: buildInvoiceNumber({
+          invoiceKey,
+          issuedAt,
+        }),
         metadata: mergeMetadata(source.metadata, metadata || undefined) as Prisma.InputJsonValue,
         idempotencyKey: normalizedIdempotency,
       },
@@ -290,6 +330,16 @@ export const createInvoiceEngineService = () => {
       paidMinor === null || paidMinor === undefined
         ? invoice.paidMinor
         : Math.max(0, Math.floor(paidMinor));
+    const mergedMetadata = mergeMetadata(invoice.metadata, {
+      ...(metadata || {}),
+      ...(nextStatus === "PAID"
+        ? {
+            receiptNumber:
+              String(toRecord(invoice.metadata).receiptNumber || `RCT-${invoice.externalInvoiceId || invoice.invoiceKey}`)
+                .trim() || null,
+          }
+        : {}),
+    });
 
     const updated = await prisma.invoiceLedger.update({
       where: {
@@ -303,7 +353,7 @@ export const createInvoiceEngineService = () => {
             ? new Date()
             : invoice.paidAt,
         writeOffAt: nextStatus === "WRITTEN_OFF" ? new Date() : invoice.writeOffAt,
-        metadata: mergeMetadata(invoice.metadata, metadata || undefined) as Prisma.InputJsonValue,
+        metadata: mergedMetadata as Prisma.InputJsonValue,
       },
     });
 

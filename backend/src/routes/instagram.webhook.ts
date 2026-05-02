@@ -36,6 +36,14 @@ const normalizeIdentifier = (value?: unknown) => {
   return normalized || null;
 };
 
+const toEpochMs = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return Date.now();
+  }
+  return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+};
+
 const getUniqueIdentifiers = (values: unknown[]) =>
   Array.from(
     new Set(
@@ -474,6 +482,10 @@ router.post("/", async (req: any, res: Response) => {
           details: {
             webhookType: "comment",
             commentId: commentId || null,
+            eventId: commentEventId,
+            eventTimestampMs: toEpochMs(
+              rawCommentValue?.timestamp || change?.value?.timestamp || entry?.time
+            ),
           },
         }).catch(() => undefined);
         await enforceSecurityGovernanceInfluence({
@@ -630,6 +642,9 @@ router.post("/", async (req: any, res: Response) => {
       details: {
         webhookType: "message",
         eventId: eventId || null,
+        eventTimestampMs: toEpochMs(
+          messaging?.timestamp || changeMessage?.timestamp || entry?.time
+        ),
       },
     }).catch(() => undefined);
     await enforceSecurityGovernanceInfluence({

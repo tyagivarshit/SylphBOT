@@ -2798,3 +2798,141 @@ BILLING_PROJECTION_READY {
       "syscall": "getaddrinfo",
       "hostname": "liberal-ram-77657.upstash.io"
     }
+[06:38:16] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "34f15c70-d80d-419e-810a-1454a7cbcec4"
+    [35mcorrelationId[39m: "34f15c70-d80d-419e-810a-1454a7cbcec4"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "34f15c70-d80d-419e-810a-1454a7cbcec4"
+    [35mroute[39m: "/health"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 30
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[06:38:20] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "94210e8a-d62d-4ab5-9f8b-7d3dc308061d"
+    [35mcorrelationId[39m: "94210e8a-d62d-4ab5-9f8b-7d3dc308061d"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "94210e8a-d62d-4ab5-9f8b-7d3dc308061d"
+    [35mroute[39m: "/api/auth/verify-email?token=invalid-smoke-token"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 66
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null
+[06:38:25] [31mERROR[39m: [36mUnhandled request error[39m
+    [35mtraceId[39m: "3450b639-6e69-4e95-8f71-a83746a45cbe"
+    [35mcorrelationId[39m: "3450b639-6e69-4e95-8f71-a83746a45cbe"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "3450b639-6e69-4e95-8f71-a83746a45cbe"
+    [35mroute[39m: "/api/oauth/meta/callback?code=test&state=invalid"
+    [35msource[39m: "http"
+    [35mpath[39m: "/api/oauth/meta/callback?code=test&state=invalid"
+    [35mmethod[39m: "GET"
+    error: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+    err: {
+      "type": "AppError",
+      "message": "Missing session",
+      "stack":
+          Error: Missing session
+              at unauthorized (D:\sylph-ai\backend\dist\utils\AppError.js:23:52)
+              at protect (D:\sylph-ai\backend\dist\middleware\auth.middleware.js:145:47)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+              at trimPrefix (D:\sylph-ai\backend\node_modules\router\index.js:342:13)
+              at D:\sylph-ai\backend\node_modules\router\index.js:297:9
+              at processParams (D:\sylph-ai\backend\node_modules\router\index.js:582:12)
+              at next (D:\sylph-ai\backend\node_modules\router\index.js:291:5)
+              at read (D:\sylph-ai\backend\node_modules\body-parser\lib\read.js:53:5)
+              at jsonParser (D:\sylph-ai\backend\node_modules\body-parser\lib\types\json.js:88:5)
+              at Layer.handleRequest (D:\sylph-ai\backend\node_modules\router\lib\layer.js:152:17)
+      "statusCode": 401,
+      "isOperational": true,
+      "code": "UNAUTHORIZED"
+    }
+[06:38:25] [32mINFO[39m: [36mRequest completed[39m
+    [35mtraceId[39m: "3450b639-6e69-4e95-8f71-a83746a45cbe"
+    [35mcorrelationId[39m: "3450b639-6e69-4e95-8f71-a83746a45cbe"
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "http"
+    [35mphase[39m: "reception"
+    [35mversion[39m: "phase6a.v1"
+    [35mrequestId[39m: "3450b639-6e69-4e95-8f71-a83746a45cbe"
+    [35mroute[39m: "/api/oauth/meta/callback?code=test&state=invalid"
+    [35msource[39m: "http"
+    [35mstatusCode[39m: 401
+    [35mdurationMs[39m: 8
+    [35mmethod[39m: "GET"
+    [35mip[39m: "::ffff:127.0.0.1"
+    [35muserId[39m: null
+    [35mbusinessId[39m: null

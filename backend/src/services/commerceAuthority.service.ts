@@ -506,7 +506,11 @@ export const createCommerceAuthorityService = () => {
     });
 
     if (existing) {
-      if (existing.processedAt || existing.resolutionState === "PROCESSED") {
+      if (
+        existing.processedAt ||
+        existing.resolutionState === "PROCESSED" ||
+        existing.resolutionState === "REPLAYED"
+      ) {
         return {
           state: "REPLAYED",
           row: {
@@ -524,8 +528,9 @@ export const createCommerceAuthorityService = () => {
       const stale =
         now.getTime() - new Date(existing.updatedAt).getTime() >
         IDEMPOTENCY_INFLIGHT_TIMEOUT_MS;
+      const failed = existing.resolutionState === "FAILED";
 
-      if (!stale) {
+      if (!stale && !failed) {
         return {
           state: "INFLIGHT",
           row: {
@@ -551,6 +556,7 @@ export const createCommerceAuthorityService = () => {
           metadata: mergeMetadata(existing.metadata, {
             ...(metadata || {}),
             reclaimedAt: now.toISOString(),
+            reclaimReason: failed ? "failed_replay" : "stale_claim",
           }) as Prisma.InputJsonValue,
         },
       });

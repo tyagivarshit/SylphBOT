@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BillingController = void 0;
+const crypto_1 = __importDefault(require("crypto"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const env_1 = require("../config/env");
 const billingGeo_service_1 = require("../services/billingGeo.service");
@@ -17,6 +18,7 @@ const usage_service_1 = require("../services/usage.service");
 const tenant_service_1 = require("../services/tenant.service");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
 const stripe_service_1 = require("../services/stripe.service");
+const stripeConfig_service_1 = require("../services/commerce/providers/stripeConfig.service");
 const EMPTY_USAGE_SUMMARY = {
     aiCallsUsed: 0,
     messagesUsed: 0,
@@ -76,6 +78,9 @@ const EMPTY_BILLING_CONTEXT = {
     allowEarly: false,
     remainingEarly: 0,
 };
+const toRecord = (value) => value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 const mapInvoiceForClient = (invoice) => ({
     id: invoice.invoiceKey,
     invoiceKey: invoice.invoiceKey,
@@ -121,6 +126,113 @@ async function getUserContext(req) {
     };
 }
 class BillingController {
+    static async reconcileRecentPortalState(businessId) {
+        const latestSubscription = await prisma_1.default.subscriptionLedger.findFirst({
+            where: {
+                businessId,
+                provider: "STRIPE",
+                providerSubscriptionId: {
+                    not: null,
+                },
+            },
+            orderBy: {
+                updatedAt: "desc",
+            },
+            select: {
+                id: true,
+                providerSubscriptionId: true,
+                metadata: true,
+            },
+        });
+        if (!latestSubscription?.providerSubscriptionId) {
+            return {
+                attempted: false,
+                reason: "subscription_missing",
+            };
+        }
+        const metadata = toRecord(latestSubscription.metadata);
+        const portalLastOpenedAt = new Date(String(metadata.portalLastOpenedAt || ""));
+        const hasRecentPortalActivity = !Number.isNaN(portalLastOpenedAt.getTime()) &&
+            Date.now() - portalLastOpenedAt.getTime() <= 2 * 60 * 60 * 1000;
+        if (!hasRecentPortalActivity) {
+            return {
+                attempted: false,
+                reason: "portal_inactive",
+            };
+        }
+        (0, stripeConfig_service_1.assertStripeConfigReady)();
+        const stripeSubscription = await stripe_service_1.stripe.subscriptions
+            .retrieve(latestSubscription.providerSubscriptionId)
+            .catch(() => null);
+        if (!stripeSubscription) {
+            return {
+                attempted: true,
+                reconciled: false,
+                reason: "provider_subscription_unavailable",
+            };
+        }
+        const firstItem = Array.isArray(stripeSubscription.items?.data)
+            ? stripeSubscription.items.data[0]
+            : null;
+        const replayToken = crypto_1.default
+            .createHash("sha256")
+            .update(JSON.stringify({
+            id: stripeSubscription.id,
+            status: stripeSubscription.status,
+            quantity: firstItem?.quantity || 1,
+            current_period_start: stripeSubscription.current_period_start || null,
+            current_period_end: stripeSubscription.current_period_end || null,
+            cancel_at: stripeSubscription.cancel_at || null,
+            cancel_at_period_end: Boolean(stripeSubscription.cancel_at_period_end),
+            trial_end: stripeSubscription.trial_end || null,
+        }))
+            .digest("hex")
+            .slice(0, 16);
+        const created = Math.floor(Date.now() / 1000);
+        await commerceProjection_service_1.commerceProjectionService.reconcileProviderWebhook({
+            provider: "STRIPE",
+            strictBusinessId: businessId,
+            body: {
+                id: `manual_portal_sync_${stripeSubscription.id}_${replayToken}`,
+                type: "customer.subscription.updated",
+                created,
+                data: {
+                    object: {
+                        id: stripeSubscription.id,
+                        status: stripeSubscription.status,
+                        currency: stripeSubscription.currency,
+                        metadata: stripeSubscription.metadata || {},
+                        quantity: firstItem?.quantity || 1,
+                        current_period_start: stripeSubscription.current_period_start || null,
+                        current_period_end: stripeSubscription.current_period_end || null,
+                        cancel_at: stripeSubscription.cancel_at || null,
+                        cancel_at_period_end: Boolean(stripeSubscription.cancel_at_period_end),
+                        trial_end: stripeSubscription.trial_end || null,
+                        items: {
+                            data: firstItem
+                                ? [
+                                    {
+                                        id: firstItem.id,
+                                        quantity: firstItem.quantity,
+                                        price: {
+                                            id: typeof firstItem.price === "string"
+                                                ? firstItem.price
+                                                : firstItem.price?.id || null,
+                                        },
+                                    },
+                                ]
+                                : [],
+                        },
+                    },
+                },
+            },
+        });
+        return {
+            attempted: true,
+            reconciled: true,
+            subscriptionId: stripeSubscription.id,
+        };
+    }
     static async buildBillingResponse(businessId, req) {
         if (!businessId) {
             return {
@@ -210,8 +322,37 @@ class BillingController {
     }
     static async handleCheckout(req, res) {
         try {
-            const { plan, coupon, quantity } = req.body;
+            const { plan, coupon } = req.body;
+            const requestedQuantity = Number(req.body?.seats || req.body?.quantity || 1);
+            const quantity = Math.max(1, Math.floor(Number.isFinite(requestedQuantity) ? requestedQuantity : 1));
             const billing = String(req.body?.billing || "monthly");
+            const checkoutTypeInput = String(req.body?.checkoutType || req.body?.action || (coupon ? "coupon" : "subscription"))
+                .trim()
+                .toLowerCase();
+            const checkoutType = new Set([
+                "subscription",
+                "one_time",
+                "trial",
+                "coupon",
+                "upgrade",
+                "downgrade",
+                "addon",
+            ]).has(checkoutTypeInput)
+                ? checkoutTypeInput
+                : "subscription";
+            const trialDays = checkoutType === "trial"
+                ? Math.max(1, Math.min(30, Math.floor(Number(req.body?.trialDays || pricing_config_1.TRIAL_DAYS))))
+                : 0;
+            const addonLineItems = Array.isArray(req.body?.lineItems)
+                ? req.body.lineItems
+                : Array.isArray(req.body?.addons)
+                    ? req.body.addons.map((item, index) => ({
+                        type: String(item?.type || item?.addonType || "").trim().toLowerCase(),
+                        credits: Math.max(0, Math.floor(Number(item?.credits || item?.quantity || 0))),
+                        label: String(item?.label || `addon_${index + 1}`).trim(),
+                    }))
+                    : [];
+            const couponCode = String(coupon || req.body?.couponId || "").trim() || null;
             const normalizedPlan = String(plan || "").trim().toUpperCase();
             const normalizedBilling = billing === "yearly"
                 ? "yearly"
@@ -249,20 +390,62 @@ class BillingController {
             const unitPrice = normalizedBilling === "yearly"
                 ? pricingPlan.yearlyPrice[currency]
                 : pricingPlan.monthlyPrice[currency];
+            const explicitUnitAmountMinor = Number(req.body?.unitAmountMinor || req.body?.amountMinor || 0);
+            const customUnitPriceMinor = Number.isFinite(explicitUnitAmountMinor) && explicitUnitAmountMinor > 0
+                ? Math.floor(explicitUnitAmountMinor)
+                : Math.round(Number(unitPrice || 0) * 100);
+            const activeSubscription = await prisma_1.default.subscriptionLedger.findFirst({
+                where: {
+                    businessId,
+                    status: {
+                        in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
+                    },
+                },
+                orderBy: {
+                    updatedAt: "desc",
+                },
+            });
+            const subscriptionMeta = (activeSubscription?.metadata || {});
+            const checkoutFingerprint = crypto_1.default
+                .createHash("sha256")
+                .update(JSON.stringify({
+                businessId,
+                normalizedPlan,
+                normalizedBilling,
+                currency,
+                quantity,
+                checkoutType,
+                trialDays,
+                couponCode,
+                addonLineItems,
+                activeSubscriptionKey: activeSubscription?.subscriptionKey || null,
+                prorationBehavior: req.body?.prorationBehavior || null,
+            }))
+                .digest("hex")
+                .slice(0, 24);
             const proposal = await proposalEngine_service_1.proposalEngineService.createProposal({
                 businessId,
                 planCode: normalizedPlan,
                 billingCycle: normalizedBilling,
                 currency,
-                quantity: Math.max(1, Number(quantity || 1)),
-                customUnitPriceMinor: Math.round(Number(unitPrice || 0) * 100),
+                quantity,
+                customUnitPriceMinor,
+                lineItems: addonLineItems,
                 source: "SELF",
                 requestedBy: "SELF",
                 metadata: {
                     checkoutSource: "billing_controller",
-                    coupon: coupon || null,
+                    checkoutType,
+                    trialDays,
+                    coupon: couponCode,
+                    prorationBehavior: String(req.body?.prorationBehavior || "").trim().toLowerCase() || null,
+                    providerSubscriptionId: String(req.body?.providerSubscriptionId || activeSubscription?.providerSubscriptionId || "").trim() ||
+                        null,
+                    stripeCustomerId: String(req.body?.stripeCustomerId || subscriptionMeta.stripeCustomerId || "").trim() ||
+                        null,
+                    seatBased: quantity > 1,
                 },
-                idempotencyKey: `checkout:proposal:${businessId}:${normalizedPlan}:${normalizedBilling}:${currency}`,
+                idempotencyKey: `checkout:proposal:${businessId}:${checkoutFingerprint}`,
             });
             const readyProposal = proposal.status === "APPROVED" || proposal.status === "SENT"
                 ? proposal
@@ -279,12 +462,21 @@ class BillingController {
                 successUrl: `${env_1.env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
                 cancelUrl: `${env_1.env.FRONTEND_URL}/billing/cancel?plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
                 metadata: {
-                    coupon: coupon || null,
+                    coupon: couponCode,
                     origin: "billing_controller",
                     planCode: normalizedPlan,
                     billingCycle: normalizedBilling,
+                    quantity,
+                    checkoutType,
+                    trialDays,
+                    providerSubscriptionId: String(req.body?.providerSubscriptionId || activeSubscription?.providerSubscriptionId || "").trim() ||
+                        null,
+                    stripeCustomerId: String(req.body?.stripeCustomerId || subscriptionMeta.stripeCustomerId || "").trim() ||
+                        null,
+                    prorationBehavior: String(req.body?.prorationBehavior || "").trim().toLowerCase() || null,
+                    seatBased: quantity > 1,
                 },
-                idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${req.requestId || Date.now()}`,
+                idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutFingerprint}`,
             });
             return res.json({
                 success: true,
@@ -303,7 +495,8 @@ class BillingController {
             if (error.message?.includes("Currency cannot be changed") ||
                 error.message?.includes("Invalid plan") ||
                 error.message?.includes("Invalid billing") ||
-                error.message?.includes("proposal_not_checkout_ready")) {
+                error.message?.includes("proposal_not_checkout_ready") ||
+                error.message?.includes("stripe_config_invalid")) {
                 return res.status(400).json({
                     success: false,
                     message: error.message,
@@ -366,6 +559,9 @@ class BillingController {
     static async getBilling(req, res) {
         try {
             const { businessId } = await getUserContext(req);
+            if (businessId) {
+                await BillingController.reconcileRecentPortalState(businessId).catch(() => undefined);
+            }
             res.setHeader("Cache-Control", "no-store");
             return res.json(await BillingController.buildBillingResponse(businessId, req));
         }
@@ -405,7 +601,7 @@ class BillingController {
                     message: "Business context is required",
                 });
             }
-            const paymentIntent = await prisma_1.default.paymentIntentLedger.findFirst({
+            const directMatch = await prisma_1.default.paymentIntentLedger.findFirst({
                 where: {
                     businessId,
                     provider: "STRIPE",
@@ -415,6 +611,7 @@ class BillingController {
                     id: true,
                     paymentIntentKey: true,
                     providerPaymentIntentId: true,
+                    metadata: true,
                     proposal: {
                         select: {
                             proposalKey: true,
@@ -422,12 +619,50 @@ class BillingController {
                     },
                 },
             });
+            const paymentIntent = directMatch ||
+                (await prisma_1.default.paymentIntentLedger
+                    .findMany({
+                    where: {
+                        businessId,
+                        provider: "STRIPE",
+                    },
+                    orderBy: {
+                        updatedAt: "desc",
+                    },
+                    take: 50,
+                    select: {
+                        id: true,
+                        paymentIntentKey: true,
+                        providerPaymentIntentId: true,
+                        metadata: true,
+                        proposal: {
+                            select: {
+                                proposalKey: true,
+                            },
+                        },
+                    },
+                })
+                    .then((rows) => rows.find((row) => {
+                    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+                        ? row.metadata
+                        : {};
+                    const providerMetadata = metadata.providerMetadata &&
+                        typeof metadata.providerMetadata === "object" &&
+                        !Array.isArray(metadata.providerMetadata)
+                        ? metadata.providerMetadata
+                        : {};
+                    return (String(metadata.stripeSessionId || "").trim() === sessionId ||
+                        String(providerMetadata.stripeSessionId || "").trim() === sessionId);
+                })));
             if (!paymentIntent?.providerPaymentIntentId) {
                 return res.status(403).json({
                     success: false,
                     message: "Checkout session does not belong to this user",
                 });
             }
+            (0, stripeConfig_service_1.assertStripeConfigReady)({
+                requireWebhookSecret: true,
+            });
             const session = await stripe_service_1.stripe.checkout.sessions
                 .retrieve(sessionId)
                 .catch(() => null);
@@ -475,10 +710,121 @@ class BillingController {
         }
     }
     static async createPortal(req, res) {
-        return res.status(410).json({
-            success: false,
-            message: "billing_portal_deprecated_use_canonical_commerce",
-        });
+        try {
+            const { businessId } = await getUserContext(req);
+            if (!businessId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Business context is required",
+                });
+            }
+            const subscription = await prisma_1.default.subscriptionLedger.findFirst({
+                where: {
+                    businessId,
+                    provider: "STRIPE",
+                    status: {
+                        in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
+                    },
+                },
+                orderBy: {
+                    updatedAt: "desc",
+                },
+            });
+            if (!subscription) {
+                return res.status(400).json({
+                    success: false,
+                    message: "No Stripe subscription found",
+                });
+            }
+            (0, stripeConfig_service_1.assertStripeConfigReady)({
+                requireWebhookSecret: true,
+            });
+            const subscriptionMetadata = subscription.metadata &&
+                typeof subscription.metadata === "object" &&
+                !Array.isArray(subscription.metadata)
+                ? subscription.metadata
+                : {};
+            let stripeCustomerId = String(req.body?.customerId || subscriptionMetadata.stripeCustomerId || "").trim() ||
+                null;
+            if (!stripeCustomerId) {
+                const recentPaymentIntent = await prisma_1.default.paymentIntentLedger.findFirst({
+                    where: {
+                        businessId,
+                        provider: "STRIPE",
+                        status: "SUCCEEDED",
+                    },
+                    orderBy: {
+                        updatedAt: "desc",
+                    },
+                    select: {
+                        metadata: true,
+                    },
+                });
+                const metadata = recentPaymentIntent?.metadata &&
+                    typeof recentPaymentIntent.metadata === "object" &&
+                    !Array.isArray(recentPaymentIntent.metadata)
+                    ? recentPaymentIntent.metadata
+                    : {};
+                const providerMetadata = metadata.providerMetadata &&
+                    typeof metadata.providerMetadata === "object" &&
+                    !Array.isArray(metadata.providerMetadata)
+                    ? metadata.providerMetadata
+                    : {};
+                stripeCustomerId =
+                    String(metadata.stripeCustomerId ||
+                        providerMetadata.stripeCustomerId ||
+                        "").trim() || null;
+            }
+            if (!stripeCustomerId && subscription.providerSubscriptionId) {
+                const stripeSubscription = await stripe_service_1.stripe.subscriptions
+                    .retrieve(subscription.providerSubscriptionId)
+                    .catch(() => null);
+                stripeCustomerId =
+                    typeof stripeSubscription?.customer === "string"
+                        ? stripeSubscription.customer
+                        : null;
+            }
+            if (!stripeCustomerId) {
+                return res.status(409).json({
+                    success: false,
+                    message: "stripe_customer_missing_for_portal",
+                });
+            }
+            await prisma_1.default.subscriptionLedger
+                .update({
+                where: {
+                    id: subscription.id,
+                },
+                data: {
+                    metadata: {
+                        ...subscriptionMetadata,
+                        stripeCustomerId,
+                        portalLastOpenedAt: new Date().toISOString(),
+                    },
+                },
+            })
+                .catch(() => undefined);
+            const returnUrl = String(req.body?.returnUrl || "").trim() ||
+                env_1.env.STRIPE_BILLING_PORTAL_RETURN_URL ||
+                `${env_1.env.FRONTEND_URL}/billing`;
+            const session = await stripe_service_1.stripe.billingPortal.sessions.create({
+                customer: stripeCustomerId,
+                return_url: returnUrl,
+            }, {
+                idempotencyKey: `portal:${businessId}:${stripeCustomerId}`,
+            });
+            return res.json({
+                success: true,
+                url: session.url,
+            });
+        }
+        catch (error) {
+            console.error("Create billing portal error:", error);
+            return res.status(500).json({
+                success: false,
+                message: error?.message || "billing_portal_failed",
+            });
+        }
     }
     static async cancelSubscription(req, res) {
         try {

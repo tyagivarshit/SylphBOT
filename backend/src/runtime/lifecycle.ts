@@ -49,6 +49,7 @@ import { startHumanReminderCron } from "../cron/humanReminder.cron";
 import { startAppointmentOpsCron } from "../cron/appointmentOps.cron";
 import { startCalendarSyncCron } from "../cron/calendarSync.cron";
 import { startIntelligenceLoopCron } from "../cron/intelligenceLoop.cron";
+import { startCommerceReconcileCron } from "../cron/commerceReconcile.cron";
 import { initRevenueBrainEventQueues } from "../services/revenueBrain/eventBus.service";
 import { shutdownLearningQueue } from "../services/learningQueue.service";
 import {
@@ -229,6 +230,7 @@ export const initCrons = () => {
     startAppointmentOpsCron(),
     startCalendarSyncCron(),
     startIntelligenceLoopCron(),
+    startCommerceReconcileCron(),
   ];
 
   return globalForLifecycle.__sylphCronTasks;

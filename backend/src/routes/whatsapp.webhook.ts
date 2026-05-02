@@ -21,6 +21,14 @@ const normalizeIdentifier = (value?: unknown) => {
   return normalized || null;
 };
 
+const toEpochMs = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return Date.now();
+  }
+  return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+};
+
 const buildClientLookupOr = ({
   pageIds = [],
   phoneNumberIds = [],
@@ -250,6 +258,7 @@ router.post("/", async (req: any, res: Response) => {
       details: {
         eventId: eventId || null,
         phoneNumberId: phoneNumberIds[0] || null,
+        eventTimestampMs: toEpochMs(message?.timestamp || body?.entry?.[0]?.time),
       },
     }).catch(() => undefined);
     const lead = await resolveOrCreateReceptionLead({

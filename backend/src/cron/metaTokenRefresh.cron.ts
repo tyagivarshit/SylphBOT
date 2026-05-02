@@ -2,6 +2,7 @@ import cron from "node-cron";
 import axios from "axios";
 import prisma from "../config/prisma";
 import { encrypt, decrypt } from "../utils/encrypt";
+import { runMetaTokenLifecycleSweep } from "../services/saasPackagingConnectHubOS.service";
 
 const log = (...args: any[]) => {
   console.log("[META TOKEN CRON]", ...args);
@@ -76,6 +77,23 @@ export const startMetaTokenRefreshCron = () => {
 
         }
 
+      }
+
+      const businessIds = Array.from(
+        new Set(
+          clients
+            .map((client) => String((client as any).businessId || "").trim())
+            .filter(Boolean)
+        )
+      );
+      for (const businessId of businessIds) {
+        await runMetaTokenLifecycleSweep({
+          businessId,
+          tenantId: businessId,
+          provider: "ALL",
+          environment: "LIVE",
+          autoRefresh: true,
+        }).catch(() => undefined);
       }
 
       log("Token refresh cycle complete");

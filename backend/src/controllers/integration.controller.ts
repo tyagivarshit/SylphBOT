@@ -18,6 +18,11 @@ import {
   provisionTenantSaaSPackaging,
   recoverProviderWebhook,
   refreshIntegrationToken,
+  runMetaConnectDoctor,
+  runMetaTokenLifecycleSweep,
+  reconcileMetaColdBoot,
+  seedMetaReviewerMode,
+  generateMetaAppReviewPack,
   rollbackMarketplaceArtifact,
   retryConnectionDiagnostic,
   runSaaSPackagingConnectHubSelfAudit,
@@ -392,6 +397,8 @@ export const connectInstagramHub = async (req: any, res: any) => {
       reconnect: Boolean(req.body?.reconnect),
       externalAccountRef: normalizeOptionalString(req.body?.externalAccountRef),
       scopes: Array.isArray(req.body?.scopes) ? req.body.scopes : undefined,
+      metaProof: req.body?.metaProof || undefined,
+      simulate: req.body?.simulate || undefined,
     });
 
     return res.json({
@@ -424,6 +431,15 @@ export const connectWhatsAppHub = async (req: any, res: any) => {
       replayToken: normalizeOptionalString(req.body?.replayToken),
       reconnect: Boolean(req.body?.reconnect),
       scenario: normalizeOptionalString(req.body?.scenario) as any,
+      businessManagerId: normalizeOptionalString(req.body?.businessManagerId),
+      wabaId: normalizeOptionalString(req.body?.wabaId),
+      phoneNumberId: normalizeOptionalString(req.body?.phoneNumberId),
+      displayName: normalizeOptionalString(req.body?.displayName),
+      displayNameReviewStatus: normalizeOptionalString(req.body?.displayNameReviewStatus),
+      qualityRating: normalizeOptionalString(req.body?.qualityRating),
+      tier: normalizeOptionalString(req.body?.tier),
+      allowSandboxSlot: req.body?.allowSandboxSlot === true,
+      metaProof: req.body?.metaProof || undefined,
     });
 
     return res.json({
@@ -649,6 +665,146 @@ export const runWhatsAppDoctor = async (req: any, res: any) => {
       success: false,
       message: "WhatsApp doctor failed",
       error: String((error as Error)?.message || "whatsapp_doctor_failed"),
+    });
+  }
+};
+
+export const runMetaDoctor = async (req: any, res: any) => {
+  try {
+    const context = await resolveTenantContext(req);
+    if (!context) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+    const doctor = await runMetaConnectDoctor({
+      businessId: context.businessId,
+      tenantId: context.tenantId,
+      provider: normalizeOptionalString(req.body?.provider) || "ALL",
+      environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+      autoResolve: Boolean(req.body?.autoResolve),
+    });
+    return res.json({
+      success: true,
+      data: doctor,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Meta doctor failed",
+      error: String((error as Error)?.message || "meta_doctor_failed"),
+    });
+  }
+};
+
+export const runMetaTokenLifecycle = async (req: any, res: any) => {
+  try {
+    const context = await resolveTenantContext(req);
+    if (!context) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+    const report = await runMetaTokenLifecycleSweep({
+      businessId: context.businessId,
+      tenantId: context.tenantId,
+      provider: normalizeOptionalString(req.body?.provider) || "ALL",
+      environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+      autoRefresh: req.body?.autoRefresh !== false,
+    });
+    return res.json({
+      success: true,
+      data: report,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Meta token lifecycle sweep failed",
+      error: String((error as Error)?.message || "meta_token_sweep_failed"),
+    });
+  }
+};
+
+export const runMetaColdBootReconcile = async (req: any, res: any) => {
+  try {
+    const context = await resolveTenantContext(req);
+    if (!context) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+    const result = await reconcileMetaColdBoot({
+      businessId: context.businessId,
+      tenantId: context.tenantId,
+      provider: normalizeOptionalString(req.body?.provider) || "ALL",
+      environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+    });
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Cold boot reconcile failed",
+      error: String((error as Error)?.message || "cold_boot_reconcile_failed"),
+    });
+  }
+};
+
+export const seedMetaReviewerDemo = async (req: any, res: any) => {
+  try {
+    const context = await resolveTenantContext(req);
+    if (!context) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+    const result = await seedMetaReviewerMode({
+      businessId: context.businessId,
+      tenantId: context.tenantId,
+      environment: normalizeOptionalString(req.body?.environment) || "SANDBOX",
+    });
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Reviewer demo seed failed",
+      error: String((error as Error)?.message || "reviewer_seed_failed"),
+    });
+  }
+};
+
+export const generateMetaReviewPack = async (req: any, res: any) => {
+  try {
+    const context = await resolveTenantContext(req);
+    if (!context) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+    const pack = await generateMetaAppReviewPack({
+      businessId: context.businessId,
+      tenantId: context.tenantId,
+      environment: normalizeOptionalString(req.query?.environment) || "LIVE",
+    });
+    return res.json({
+      success: true,
+      data: pack,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Review pack generation failed",
+      error: String((error as Error)?.message || "review_pack_failed"),
     });
   }
 };

@@ -51,6 +51,18 @@ const inferProviderFromHeaders = (
   return normalizeProvider(forced);
 };
 
+const parseMaybeJsonBody = (body: unknown) => {
+  if (!Buffer.isBuffer(body)) {
+    return body;
+  }
+
+  try {
+    return JSON.parse(body.toString("utf8"));
+  } catch {
+    return body;
+  }
+};
+
 export const parseCommerceProviderWebhook = async ({
   provider,
   headers,
@@ -66,7 +78,10 @@ export const parseCommerceProviderWebhook = async ({
   const adapter = resolveCommerceProviderAdapter(resolvedProvider);
   return adapter.parseWebhook({
     headers,
-    body,
+    body:
+      resolvedProvider === "STRIPE"
+        ? body
+        : parseMaybeJsonBody(body),
   });
 };
 

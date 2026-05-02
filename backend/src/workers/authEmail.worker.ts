@@ -2,6 +2,8 @@ import { Worker } from "bullmq";
 import { getWorkerRedisConnection } from "../config/redis";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import {
+  sendBillingEmail,
+  sendOnboardingEmail,
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "../services/authEmail.service";
@@ -35,6 +37,21 @@ export const initAuthEmailWorker = () => {
         return;
       }
 
+      if (job.data.type === "onboarding") {
+        await sendOnboardingEmail(job.data.to, job.data.workspaceName || null);
+        return;
+      }
+
+      if (job.data.type === "billing") {
+        await sendBillingEmail({
+          to: job.data.to,
+          plan: job.data.plan,
+          amountMinor: job.data.amountMinor,
+          currency: job.data.currency,
+        });
+        return;
+      }
+
       await sendPasswordResetEmail(job.data.to, job.data.link);
     }),
     {
@@ -54,13 +71,59 @@ export const initAuthEmailWorker = () => {
   });
 
   worker.on("failed", (job, error) => {
+    const maxAttempts = Number(job?.opts?.attempts || 1);
+    const attemptsMade = Number(job?.attemptsMade || 0);
+    const deadLettered = attemptsMade >= maxAttempts;
+
     console.error("[EMAIL_QUEUE] failed", {
       id: job?.id,
       name: job?.name,
       type: job?.data?.type,
       to: job?.data?.to,
+      attemptsMade,
+      maxAttempts,
+      deadLettered,
       error: error.message,
     });
+
+    if (!deadLettered || !job?.data) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        if (job.data.type === "verify") {
+          await sendVerificationEmail(job.data.to, job.data.link);
+        } else if (job.data.type === "reset") {
+          await sendPasswordResetEmail(job.data.to, job.data.link);
+        } else if (job.data.type === "onboarding") {
+          await sendOnboardingEmail(job.data.to, job.data.workspaceName || null);
+        } else if (job.data.type === "billing") {
+          await sendBillingEmail({
+            to: job.data.to,
+            plan: job.data.plan,
+            amountMinor: job.data.amountMinor,
+            currency: job.data.currency,
+          });
+        }
+
+        console.info("[EMAIL_QUEUE] dead-letter fallback direct send succeeded", {
+          id: job.id,
+          type: job.data.type,
+          to: job.data.to,
+        });
+      } catch (directSendError) {
+        console.error("[EMAIL_QUEUE] dead-letter fallback direct send failed", {
+          id: job.id,
+          type: job.data.type,
+          to: job.data.to,
+          error:
+            directSendError instanceof Error
+              ? directSendError.message
+              : "Unknown fallback send error",
+        });
+      }
+    })();
   });
 
   globalForAuthEmailWorker.__sylphAuthEmailWorker = worker;

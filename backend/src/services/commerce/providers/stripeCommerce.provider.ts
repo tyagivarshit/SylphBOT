@@ -81,6 +81,45 @@ const mapStripeWebhookType = (type: string): ProviderWebhookEvent["type"] => {
   }
 };
 
+const getHeaderValue = (
+  headers: Record<string, unknown> | null | undefined,
+  key: string
+) => {
+  if (!headers) {
+    return null;
+  }
+
+  for (const [headerKey, value] of Object.entries(headers)) {
+    if (headerKey.toLowerCase() !== key.toLowerCase()) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      return String(value[0] || "").trim() || null;
+    }
+
+    return String(value || "").trim() || null;
+  }
+
+  return null;
+};
+
+const parseRawStripeEventBody = (body: unknown) => {
+  if (Buffer.isBuffer(body)) {
+    try {
+      return JSON.parse(body.toString("utf8")) as Stripe.Event;
+    } catch {
+      throw new Error("stripe_webhook_payload_invalid_json");
+    }
+  }
+
+  if (body && typeof body === "object") {
+    return body as Stripe.Event;
+  }
+
+  throw new Error("stripe_webhook_payload_invalid");
+};
+
 export const stripeCommerceProvider: CommerceProviderAdapter = {
   provider: "STRIPE",
 
@@ -154,14 +193,43 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     };
   },
 
-  parseWebhook: async ({ body }) => {
-    const event = body as Stripe.Event;
+  parseWebhook: async ({ headers, body }) => {
+    const signature = getHeaderValue(headers, "stripe-signature");
+    const webhookSecret = String(env.STRIPE_WEBHOOK_SECRET || "").trim();
+
+    let event: Stripe.Event;
+
+    if (Buffer.isBuffer(body)) {
+      if (!webhookSecret) {
+        throw new Error("stripe_webhook_secret_missing");
+      }
+
+      if (!signature) {
+        throw new Error("stripe_webhook_signature_missing");
+      }
+
+      event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    } else {
+      event = parseRawStripeEventBody(body);
+    }
+
     const raw = toRecord(event?.data?.object || body);
-    const type = mapStripeWebhookType(String(event?.type || "unknown"));
+    const stripeType = String(event?.type || "unknown");
+    let type = mapStripeWebhookType(stripeType);
+
+    if (stripeType === "checkout.session.completed") {
+      const paymentStatus = String(raw.payment_status || "").trim().toLowerCase();
+      if (paymentStatus === "paid") {
+        type = "payment_intent.succeeded";
+      }
+    }
+
+    const isCheckoutSession = stripeType.startsWith("checkout.session.");
 
     const providerPaymentIntentId =
       String(
-        raw.payment_intent ||
+        (isCheckoutSession ? raw.id : raw.payment_intent) ||
+          raw.payment_intent ||
           raw.id ||
           raw.session_id ||
           raw.checkout_session_id ||

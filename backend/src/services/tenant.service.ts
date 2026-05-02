@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import prisma from "../config/prisma";
+import { withDistributedLock } from "./distributedLock.service";
 
 type WorkspaceSnapshot = {
   id: string;
@@ -70,26 +71,63 @@ const createWorkspaceForUser = async (input: {
   userId: string;
   userName?: string | null;
 }) => {
-  const createdWorkspace = await prisma.business.create({
-    data: {
-      name: buildWorkspaceName(input.userName),
-      ownerId: input.userId,
-    },
-    select: workspaceSelect,
-  });
-
-  await prisma.user
-    .update({
+  const ensureOwnerWorkspace = async () => {
+    const existingWorkspace = await prisma.business.findFirst({
       where: {
-        id: input.userId,
+        ownerId: input.userId,
+        deletedAt: null,
       },
-      data: {
-        businessId: createdWorkspace.id,
+      orderBy: {
+        createdAt: "asc",
       },
-    })
-    .catch(() => undefined);
+      select: workspaceSelect,
+    });
 
-  return createdWorkspace as WorkspaceSnapshot;
+    if (existingWorkspace) {
+      await prisma.user
+        .update({
+          where: {
+            id: input.userId,
+          },
+          data: {
+            businessId: existingWorkspace.id,
+          },
+        })
+        .catch(() => undefined);
+
+      return existingWorkspace as WorkspaceSnapshot;
+    }
+
+    const createdWorkspace = await prisma.business.create({
+      data: {
+        name: buildWorkspaceName(input.userName),
+        ownerId: input.userId,
+      },
+      select: workspaceSelect,
+    });
+
+    await prisma.user
+      .update({
+        where: {
+          id: input.userId,
+        },
+        data: {
+          businessId: createdWorkspace.id,
+        },
+      })
+      .catch(() => undefined);
+
+    return createdWorkspace as WorkspaceSnapshot;
+  };
+
+  return withDistributedLock({
+    key: `auth:workspace-bootstrap:${input.userId}`,
+    ttlMs: 15_000,
+    waitMs: 5_000,
+    pollMs: 75,
+    onUnavailable: ensureOwnerWorkspace,
+    run: async () => ensureOwnerWorkspace(),
+  });
 };
 
 export const resolveUserWorkspaceIdentity = async (input: {

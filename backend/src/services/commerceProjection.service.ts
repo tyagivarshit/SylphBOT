@@ -7,6 +7,8 @@ import { invoiceEngineService } from "./invoiceEngine.service";
 import { paymentIntentService } from "./paymentIntent.service";
 import { refundEngineService } from "./refundEngine.service";
 import { subscriptionEngineService } from "./subscriptionEngine.service";
+import { settleSuccessfulCheckout } from "./billingSettlement.service";
+import { invalidateBillingContextCache } from "../middleware/subscription.middleware";
 
 const sum = (values: number[]) => values.reduce((acc, value) => acc + value, 0);
 const toRecord = (value: unknown) =>
@@ -199,6 +201,44 @@ export const createCommerceProjectionService = () => {
       }).catch(() => undefined);
     }
 
+    if (
+      event.type === "payment_intent.succeeded" ||
+      event.type === "checkout.completed"
+    ) {
+      try {
+        await settleSuccessfulCheckout({
+          paymentIntentId: paymentIntent?.id || null,
+          providerPaymentIntentId: event.providerPaymentIntentId || null,
+          paymentIntentKey:
+            String(event.metadata?.paymentIntentKey || "").trim() || null,
+          providerSubscriptionId: event.providerSubscriptionId || null,
+          occurredAt: event.occurredAt,
+          source: "provider_webhook",
+        });
+      } catch (error) {
+        await commerceAuthorityService
+          .markExternalIdempotencyFailed({
+            id: claim.row.id,
+            providerVersion,
+            error: String(
+              (error as { message?: unknown })?.message ||
+                error ||
+                "checkout_settlement_failed"
+            ),
+            metadata: {
+              provider: parsed.provider,
+              providerType: parsed.type,
+              businessId,
+              paymentIntentId: paymentIntent?.id || null,
+              stage: "checkout_settlement",
+            },
+          })
+          .catch(() => undefined);
+
+        throw error;
+      }
+    }
+
     if (event.type === "invoice.payment_failed") {
       const invoice = event.providerInvoiceId
         ? await prisma.invoiceLedger.findFirst({
@@ -225,6 +265,8 @@ export const createCommerceProjectionService = () => {
             providerInvoiceId: event.providerInvoiceId,
           },
         }).catch(() => undefined);
+
+        await invalidateBillingContextCache(businessId).catch(() => undefined);
       }
     }
 
@@ -247,6 +289,8 @@ export const createCommerceProjectionService = () => {
             providerEventId: event.providerEventId,
           },
         }).catch(() => undefined);
+
+        await invalidateBillingContextCache(businessId).catch(() => undefined);
       }
     }
 
@@ -269,6 +313,8 @@ export const createCommerceProjectionService = () => {
             providerEventId: event.providerEventId,
           },
         }).catch(() => undefined);
+
+        await invalidateBillingContextCache(businessId).catch(() => undefined);
       }
     }
 

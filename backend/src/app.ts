@@ -252,7 +252,7 @@ app.use((req, res, next) => {
 
 app.use(
   "/api/webhooks/commerce",
-  express.json({ limit: "1mb" }),
+  express.raw({ type: "*/*", limit: "1mb" }),
   commerceWebhookRoutes
 );
 
@@ -475,7 +475,7 @@ app.use("/api/audit", protect, auditRoutes);
 app.use("/api/search", protect, searchRoutes);
 app.use("/api/security", protect, securityRoutes);
 app.use("/api/integrations", protect, integrationRoutes);
-app.use("/api/oauth", protect, oauthRoutes);
+app.use("/api/oauth", oauthRoutes);
 app.use("/api/booking", protect, attachBillingContext, bookingRoutes);
 app.use(
   "/api/availability",

@@ -28,6 +28,7 @@ const startWorkerRuntime = async () => {
             revenueBrainEvents: true,
             aiPartition: true,
             followup: true,
+            authEmail: true,
             appointmentOps: true,
             calendarSync: true,
             receptionRuntime: true,

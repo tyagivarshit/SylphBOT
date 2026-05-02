@@ -31,24 +31,6 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       );
     }
 
-    const requestUserId = String(req.user?.id || "").trim();
-    const requestBusinessId = String(req.user?.businessId || "").trim();
-
-    if (
-      !requestUserId ||
-      !requestBusinessId ||
-      oauthState.userId !== requestUserId ||
-      oauthState.businessId !== requestBusinessId
-    ) {
-      return res.redirect(
-        buildSettingsRedirect({
-          integration: "error",
-          reason: "oauth_state_mismatch",
-          platform: oauthState.platform.toLowerCase(),
-        })
-      );
-    }
-
     if (!code) {
       return res.redirect(
         buildSettingsRedirect({

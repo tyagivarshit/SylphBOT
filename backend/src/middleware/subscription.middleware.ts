@@ -7,7 +7,18 @@ import { env } from "../config/env";
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
 
-const getKey = (businessId: string) => `sub:${businessId}`;
+export const getBillingCacheKey = (businessId: string) => `sub:${businessId}`;
+
+export const invalidateBillingContextCache = async (businessId: string) => {
+  const normalizedBusinessId = String(businessId || "").trim();
+
+  if (!normalizedBusinessId) {
+    return false;
+  }
+
+  await redis.del(getBillingCacheKey(normalizedBusinessId)).catch(() => undefined);
+  return true;
+};
 
 export type BillingContext = {
   subscription: any | null;
@@ -71,7 +82,7 @@ const mapCanonicalSubscription = (row: any) => ({
 });
 
 const getCachedSubscription = async (businessId: string) => {
-  const cacheKey = getKey(businessId);
+  const cacheKey = getBillingCacheKey(businessId);
   const cached = await redis.get(cacheKey).catch(() => null);
 
   if (cached) {

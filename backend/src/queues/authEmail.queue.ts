@@ -6,8 +6,10 @@ import {
   createResilientQueue,
 } from "./queue.defaults";
 import {
-  queuePasswordResetEmail,
-  queueVerificationEmail,
+  sendBillingEmail,
+  sendOnboardingEmail,
+  sendPasswordResetEmail,
+  sendVerificationEmail,
 } from "../services/authEmail.service";
 
 export type AuthEmailJobData =
@@ -20,6 +22,19 @@ export type AuthEmailJobData =
       type: "reset";
       to: string;
       link: string;
+    }
+  | {
+      type: "onboarding";
+      to: string;
+      workspaceName?: string | null;
+    }
+  | {
+      type: "billing";
+      to: string;
+      plan: string;
+      amountMinor: number;
+      currency: string;
+      reference?: string | null;
     };
 
 const AUTH_EMAIL_QUEUE_NAME = "authEmail";
@@ -50,14 +65,10 @@ export const initAuthEmailQueue = () => {
 
 export const getAuthEmailQueue = () => initAuthEmailQueue();
 
-const createJobId = (
-  type: AuthEmailJobData["type"],
-  to: string,
-  link: string
-) =>
+const createJobId = (type: AuthEmailJobData["type"], seed: string) =>
   `${type}-${crypto
     .createHash("sha256")
-    .update(`${to}:${link}`)
+    .update(seed)
     .digest("hex")}`;
 
 export const enqueueVerificationEmail = async (
@@ -73,7 +84,7 @@ export const enqueueVerificationEmail = async (
       link,
     },
     {
-      jobId: createJobId("verify", to, link),
+      jobId: createJobId("verify", `${to}:${link}`),
     }
   );
 };
@@ -91,51 +102,141 @@ export const enqueuePasswordResetEmail = async (
       link,
     },
     {
-      jobId: createJobId("reset", to, link),
+      jobId: createJobId("reset", `${to}:${link}`),
     }
   );
+};
+
+export const enqueueOnboardingEmail = async (
+  to: string,
+  workspaceName?: string | null
+) => {
+  console.log("[EMAIL_QUEUE] Adding email job", { type: "onboarding", to });
+  return getAuthEmailQueue().add(
+    "onboarding-email",
+    {
+      type: "onboarding",
+      to,
+      workspaceName: workspaceName || null,
+    },
+    {
+      jobId: createJobId("onboarding", `${to}:${workspaceName || ""}`),
+    }
+  );
+};
+
+export const enqueueBillingEmail = async (input: {
+  to: string;
+  plan: string;
+  amountMinor: number;
+  currency: string;
+  reference?: string | null;
+}) => {
+  console.log("[EMAIL_QUEUE] Adding email job", {
+    type: "billing",
+    to: input.to,
+    plan: input.plan,
+  });
+  return getAuthEmailQueue().add(
+    "billing-email",
+    {
+      type: "billing",
+      to: input.to,
+      plan: input.plan,
+      amountMinor: input.amountMinor,
+      currency: input.currency,
+      reference: input.reference || null,
+    },
+    {
+      jobId: createJobId(
+        "billing",
+        `${input.to}:${input.plan}:${input.amountMinor}:${input.currency}:${input.reference || ""}`
+      ),
+    }
+  );
+};
+
+const runWithQueueFallback = async (input: {
+  type: AuthEmailJobData["type"];
+  to: string;
+  enqueue: () => Promise<unknown>;
+  fallback: () => Promise<void>;
+}) => {
+  try {
+    const job = await input.enqueue();
+
+    if (job) {
+      return;
+    }
+  } catch (error) {
+    console.error("[EMAIL_QUEUE] enqueue failed, using direct fallback", {
+      type: input.type,
+      to: input.to,
+      error: error instanceof Error ? error.message : "Unknown queue error",
+    });
+  }
+
+  try {
+    await input.fallback();
+  } catch (error) {
+    console.error("[EMAIL_QUEUE] direct fallback send failed", {
+      type: input.type,
+      to: input.to,
+      error:
+        error instanceof Error ? error.message : "Unknown direct fallback error",
+    });
+  }
 };
 
 export const scheduleVerificationEmail = async (
   to: string,
   link: string
 ) => {
-  try {
-    const job = await enqueueVerificationEmail(to, link);
-
-    if (job) {
-      return;
-    }
-  } catch (error) {
-    console.error("[EMAIL_QUEUE] enqueue failed, using direct fallback", {
-      type: "verify",
-      to,
-      error: error instanceof Error ? error.message : "Unknown queue error",
-    });
-  }
-
-  queueVerificationEmail(to, link);
+  return runWithQueueFallback({
+    type: "verify",
+    to,
+    enqueue: () => enqueueVerificationEmail(to, link),
+    fallback: () => sendVerificationEmail(to, link),
+  });
 };
 
 export const schedulePasswordResetEmail = async (
   to: string,
   link: string
 ) => {
-  try {
-    const job = await enqueuePasswordResetEmail(to, link);
+  return runWithQueueFallback({
+    type: "reset",
+    to,
+    enqueue: () => enqueuePasswordResetEmail(to, link),
+    fallback: () => sendPasswordResetEmail(to, link),
+  });
+};
 
-    if (job) {
-      return;
-    }
-  } catch (error) {
-    console.error("[EMAIL_QUEUE] enqueue failed, using direct fallback", {
-      type: "reset",
-      to,
-      error: error instanceof Error ? error.message : "Unknown queue error",
-    });
-  }
+export const scheduleOnboardingEmail = async (
+  to: string,
+  workspaceName?: string | null
+) => {
+  return runWithQueueFallback({
+    type: "onboarding",
+    to,
+    enqueue: () => enqueueOnboardingEmail(to, workspaceName),
+    fallback: () => sendOnboardingEmail(to, workspaceName),
+  });
+};
 
-  queuePasswordResetEmail(to, link);
+export const scheduleBillingEmail = async (input: {
+  to: string;
+  plan: string;
+  amountMinor: number;
+  currency: string;
+  reference?: string | null;
+}) => {
+  return runWithQueueFallback({
+    type: "billing",
+    to: input.to,
+    enqueue: () => enqueueBillingEmail(input),
+    fallback: () => sendBillingEmail(input),
+  });
 };
 
 export const closeAuthEmailQueue = async () => {

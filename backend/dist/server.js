@@ -49,6 +49,9 @@ const startServer = async () => {
     (0, sentry_1.initializeSentry)();
     (0, passport_1.configurePassport)();
     await (0, lifecycle_1.initQueues)();
+    (0, lifecycle_1.initWorkers)({
+        authEmail: true,
+    });
     if (process.env.ENABLE_CRON === "true") {
         (0, lifecycle_1.initCrons)();
     }

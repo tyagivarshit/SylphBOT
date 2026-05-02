@@ -177,12 +177,13 @@ export async function resetPassword(token: string, password: string) {
 
 export async function logoutUser() {
   clearUserCache();
+  const response = await authRequest("/logout", {
+    method: "POST",
+  });
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("auth:refresh"));
   }
 
-  return authRequest("/logout", {
-    method: "POST",
-  });
+  return response;
 }

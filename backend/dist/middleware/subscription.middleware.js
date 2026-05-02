@@ -3,14 +3,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.attachBillingContext = exports.loadBillingContext = void 0;
+exports.attachBillingContext = exports.loadBillingContext = exports.invalidateBillingContextCache = exports.getBillingCacheKey = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const plan_config_1 = require("../config/plan.config");
 const env_1 = require("../config/env");
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
-const getKey = (businessId) => `sub:${businessId}`;
+const getBillingCacheKey = (businessId) => `sub:${businessId}`;
+exports.getBillingCacheKey = getBillingCacheKey;
+const invalidateBillingContextCache = async (businessId) => {
+    const normalizedBusinessId = String(businessId || "").trim();
+    if (!normalizedBusinessId) {
+        return false;
+    }
+    await redis_1.default.del((0, exports.getBillingCacheKey)(normalizedBusinessId)).catch(() => undefined);
+    return true;
+};
+exports.invalidateBillingContextCache = invalidateBillingContextCache;
 const getBaseContext = () => ({
     subscription: null,
     plan: null,
@@ -54,7 +64,7 @@ const mapCanonicalSubscription = (row) => ({
     },
 });
 const getCachedSubscription = async (businessId) => {
-    const cacheKey = getKey(businessId);
+    const cacheKey = (0, exports.getBillingCacheKey)(businessId);
     const cached = await redis_1.default.get(cacheKey).catch(() => null);
     if (cached) {
         try {

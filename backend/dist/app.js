@@ -203,7 +203,7 @@ app.use((req, res, next) => {
     });
     next();
 });
-app.use("/api/webhooks/commerce", express_1.default.json({ limit: "1mb" }), commerceWebhook_routes_1.default);
+app.use("/api/webhooks/commerce", express_1.default.raw({ type: "*/*", limit: "1mb" }), commerceWebhook_routes_1.default);
 app.use("/api/webhook/whatsapp", express_1.default.raw({ type: "application/json" }), whatsapp_webhook_1.default);
 app.use("/api/webhook/instagram", express_1.default.raw({
     type: "application/json",
@@ -354,7 +354,7 @@ app.use("/api/audit", auth_middleware_1.protect, audit_routes_1.default);
 app.use("/api/search", auth_middleware_1.protect, search_routes_1.default);
 app.use("/api/security", auth_middleware_1.protect, security_routes_1.default);
 app.use("/api/integrations", auth_middleware_1.protect, integration_routes_1.default);
-app.use("/api/oauth", auth_middleware_1.protect, oauth_routes_1.default);
+app.use("/api/oauth", oauth_routes_1.default);
 app.use("/api/booking", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, booking_routes_1.default);
 app.use("/api/availability", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, availability_routes_1.default);
 app.use("/api/inbox/intake", auth_middleware_1.protect, receptionIntake_routes_1.default);

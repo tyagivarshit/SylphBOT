@@ -17,6 +17,7 @@ const audit_service_1 = require("../services/audit.service");
 const securityAlert_service_1 = require("../services/securityAlert.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
 const authBootstrap_service_1 = require("../services/authBootstrap.service");
+const distributedLock_service_1 = require("../services/distributedLock.service");
 /* ======================================
 UTILS
 ====================================== */
@@ -244,59 +245,88 @@ VERIFY EMAIL
 ====================================== */
 const verifyEmail = async (req, res, next) => {
     try {
-        const token = hashToken(req.query.token);
+        const rawToken = String(req.query.token || "").trim();
+        if (!rawToken) {
+            throw (0, AppError_1.badRequest)("Verification token is required");
+        }
+        const token = hashToken(rawToken);
+        let onboardingEmailTarget = null;
         const user = await prisma_1.default.user.findFirst({
             where: {
                 verifyToken: token,
                 verifyTokenExpiry: { gt: new Date() },
             },
-        });
-        /* ✅ IDEMPOTENT */
-        if (!user) {
-            return res.json({ success: true });
-        }
-        const updatedUser = await prisma_1.default.user.update({
-            where: { id: user.id },
-            data: {
-                isVerified: true,
-                verifyToken: null,
-                verifyTokenExpiry: null,
+            select: {
+                id: true,
             },
         });
-        /* ======================================
-        🔥 DUPLICATE PREVENTION (ADDED)
-        ====================================== */
-        let existingBusiness = await prisma_1.default.business.findFirst({
-            where: { ownerId: updatedUser.id },
-            select: { id: true },
-        });
-        let business = existingBusiness;
-        if (!existingBusiness) {
-            business = await prisma_1.default.business.create({
-                data: {
-                    name: `${updatedUser.name || "My"} Workspace`,
-                    ownerId: updatedUser.id,
-                },
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid or expired verification link",
             });
         }
-        /* ======================================
-        🔥 LINK USER → BUSINESS
-        ====================================== */
-        await prisma_1.default.user.update({
-            where: { id: updatedUser.id },
-            data: {
-                businessId: business.id,
+        await (0, distributedLock_service_1.withDistributedLock)({
+            key: `auth:verify-email:${user.id}`,
+            ttlMs: 15000,
+            waitMs: 5000,
+            pollMs: 75,
+            run: async () => {
+                const current = await prisma_1.default.user.findUnique({
+                    where: {
+                        id: user.id,
+                    },
+                    select: {
+                        id: true,
+                        email: true,
+                        name: true,
+                        avatar: true,
+                        businessId: true,
+                        isVerified: true,
+                    },
+                });
+                if (!current) {
+                    return;
+                }
+                const shouldSendOnboardingEmail = !current.isVerified;
+                const updatedUser = current.isVerified
+                    ? current
+                    : await prisma_1.default.user.update({
+                        where: { id: current.id },
+                        data: {
+                            isVerified: true,
+                            verifyToken: null,
+                            verifyTokenExpiry: null,
+                        },
+                        select: {
+                            id: true,
+                            email: true,
+                            name: true,
+                            avatar: true,
+                            businessId: true,
+                            isVerified: true,
+                        },
+                    });
+                const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
+                    userId: updatedUser.id,
+                    preferredBusinessId: updatedUser.businessId || null,
+                    profileSeed: {
+                        email: updatedUser.email,
+                        name: updatedUser.name,
+                        avatar: updatedUser.avatar || null,
+                    },
+                });
+                if (shouldSendOnboardingEmail && updatedUser.email) {
+                    onboardingEmailTarget = {
+                        email: updatedUser.email,
+                        workspaceName: bootstrap.identity.workspace?.name || null,
+                    };
+                }
             },
         });
-        await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
-            userId: updatedUser.id,
-            preferredBusinessId: business.id,
-            profileSeed: {
-                email: updatedUser.email,
-                name: updatedUser.name,
-                avatar: updatedUser.avatar || null,
-            },
-        });
+        if (onboardingEmailTarget?.email) {
+            void (0, authEmail_queue_1.scheduleOnboardingEmail)(onboardingEmailTarget.email, onboardingEmailTarget.workspaceName);
+        }
         res.json({ success: true });
     }
     catch (err) {

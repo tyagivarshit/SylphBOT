@@ -1294,3 +1294,1507 @@ BILLING_PROJECTION_READY {
     [35mdurationMs[39m: 2440
     [35mmethod[39m: "GET"
     [35mip[39m: "::ffff:127.0.0.1"
+[17:05:18] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[17:05:18] [33mWARN[39m: [36mRedis fallback mode enabled[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 0
+[17:05:18] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[17:05:20] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+[17:05:20] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+[17:05:32] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[17:05:32] [33mWARN[39m: [36mRedis fallback mode enabled[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 0
+[17:05:32] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[17:05:33] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:05:33] [33mWARN[39m: [36mRedis circuit OPEN[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 6
+[17:05:33] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:05:33] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:05:33] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:05:34] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:05:34] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:05:36] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:05:36] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[17:06:05] [32mINFO[39m: [36mRedis circuit CLOSED[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+[17:06:05] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+[17:06:05] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+[18:56:25] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[18:56:25] [33mWARN[39m: [36mRedis fallback mode enabled[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 0
+[18:56:25] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[18:56:26] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+[18:56:26] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+[19:28:52] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[19:28:52] [33mWARN[39m: [36mRedis fallback mode enabled[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 0
+[19:28:52] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[19:28:53] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[19:28:53] [33mWARN[39m: [36mRedis circuit OPEN[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 6
+[19:28:53] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[19:28:54] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[19:28:54] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[19:28:55] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[19:28:55] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[23:29:17] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[23:29:17] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[23:29:21] [32mINFO[39m: [36mRedis circuit CLOSED[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+[23:29:21] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+[23:29:21] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+[04:17:42] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[04:17:42] [33mWARN[39m: [36mRedis fallback mode enabled[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 0
+[04:17:42] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[04:17:43] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+[04:17:43] [32mINFO[39m: [36mRedis client connected[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+[04:28:56] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[04:28:56] [33mWARN[39m: [36mRedis fallback mode enabled[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 0
+[04:28:56] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "read ECONNRESET",
+      "stack":
+          Error: read ECONNRESET
+              at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20)
+              at TLSWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -4077,
+      "code": "ECONNRESET",
+      "syscall": "read"
+    }
+[04:28:56] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[04:28:56] [33mWARN[39m: [36mRedis circuit OPEN[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mfailures[39m: 6
+[04:28:56] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[04:28:57] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[04:28:57] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[04:28:58] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[04:28:58] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[04:29:00] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[04:29:00] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[05:55:15] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "shared"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }
+[05:55:15] [31mERROR[39m: [36mRedis client error[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    [35mlabel[39m: "queue"
+    err: {
+      "type": "Error",
+      "message": "getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io",
+      "stack":
+          Error: getaddrinfo ENOTFOUND liberal-ram-77657.upstash.io
+              at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
+              at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)
+      "errno": -3008,
+      "code": "ENOTFOUND",
+      "syscall": "getaddrinfo",
+      "hostname": "liberal-ram-77657.upstash.io"
+    }

@@ -100,6 +100,48 @@ const extractFirstWhatsAppPhoneNumberId = (payload: any) => {
   return null;
 };
 
+const collectWhatsAppPhoneNumbers = (payload: any) => {
+  const queue = [payload];
+  const visited = new Set<any>();
+  const numbers: Array<{ id: string; displayPhoneNumber: string | null }> = [];
+
+  while (queue.length) {
+    const node = queue.shift();
+
+    if (!node || typeof node !== "object" || visited.has(node)) {
+      continue;
+    }
+
+    visited.add(node);
+
+    const phoneNumbers = getMetaDataArray((node as any).phone_numbers);
+
+    for (const phoneNumber of phoneNumbers) {
+      const id = normalizeOptionalString(phoneNumber?.id);
+
+      if (!id) {
+        continue;
+      }
+
+      numbers.push({
+        id,
+        displayPhoneNumber:
+          normalizeOptionalString(phoneNumber?.display_phone_number) || null,
+      });
+    }
+
+    for (const child of Object.values(node)) {
+      if (child && typeof child === "object") {
+        queue.push(child);
+      }
+    }
+  }
+
+  return Array.from(
+    new Map(numbers.map((entry) => [entry.id, entry])).values()
+  );
+};
+
 const fetchInstagramConnection = async (accessToken: string) => {
   const pagesRes = await axios.get(
     "https://graph.facebook.com/v19.0/me/accounts",
@@ -131,7 +173,11 @@ const fetchInstagramConnection = async (accessToken: string) => {
   };
 };
 
-const fetchWhatsAppPhoneNumberId = async (accessToken: string) => {
+const fetchWhatsAppPhoneNumberId = async (
+  accessToken: string,
+  preferredPhoneNumberId?: string | null
+) => {
+  const preferred = normalizeOptionalString(preferredPhoneNumberId);
   const lookupRequests = [
     {
       label: "me/businesses",
@@ -159,15 +205,22 @@ const fetchWhatsAppPhoneNumberId = async (accessToken: string) => {
         params: lookup.params,
       });
 
-      const phoneNumberId = extractFirstWhatsAppPhoneNumberId(response.data);
+      const phoneNumbers = collectWhatsAppPhoneNumbers(response.data);
+      const preferredMatch = preferred
+        ? phoneNumbers.find((phoneNumber) => phoneNumber.id === preferred)
+        : null;
+      const fallbackPhoneNumberId = extractFirstWhatsAppPhoneNumberId(response.data);
+      const resolvedPhoneNumberId =
+        preferredMatch?.id || fallbackPhoneNumberId;
 
-      if (phoneNumberId) {
+      if (resolvedPhoneNumberId) {
         console.log("WHATSAPP CONNECT IDENTIFIERS", {
           source: lookup.label,
-          phoneNumberId,
+          phoneNumberId: resolvedPhoneNumberId,
+          preferredPhoneNumberId: preferred || null,
         });
 
-        return phoneNumberId;
+        return resolvedPhoneNumberId;
       }
     } catch (error: any) {
       console.log("WHATSAPP CONNECT LOOKUP FAILED", {
@@ -615,6 +668,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       pricingInfo,
       faqKnowledge,
       salesInstructions,
+      phoneNumberId,
     } = req.body || {};
 
     const oauthState = verifyMetaOAuthState(state);
@@ -737,34 +791,14 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
       connectedClients.push(instagramClient);
       await queueOnboardingDemoForClient(businessId, instagramClient);
-
-      if (allowedPlatforms.includes("WHATSAPP")) {
-        const phoneNumberId = await fetchWhatsAppPhoneNumberId(longToken);
-
-        if (phoneNumberId) {
-          const whatsappClient = await upsertConnectedClient({
-            businessId,
-            platform: "WHATSAPP",
-            phoneNumberId,
-            accessToken: encrypt(longToken),
-          }).catch((error) => {
-            console.log("WHATSAPP CLIENT UPSERT FAILED", {
-              businessId,
-              phoneNumberId,
-              message: getAxiosErrorMessage(error),
-            });
-            return null;
-          });
-
-          if (whatsappClient) {
-            connectedClients.push(whatsappClient);
-          }
-        }
-      }
     } else {
-      const phoneNumberId = await fetchWhatsAppPhoneNumberId(longToken);
+      const selectedPhoneNumberId = normalizeOptionalString(phoneNumberId);
+      const resolvedPhoneNumberId = await fetchWhatsAppPhoneNumberId(
+        longToken,
+        selectedPhoneNumberId
+      );
 
-      if (!phoneNumberId) {
+      if (!resolvedPhoneNumberId) {
         return res.status(400).json({
           success: false,
           data: null,
@@ -775,7 +809,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       const whatsappClient = await upsertConnectedClient({
         businessId,
         platform: "WHATSAPP",
-        phoneNumberId,
+        phoneNumberId: resolvedPhoneNumberId,
         accessToken: encrypt(longToken),
       });
 
@@ -1373,12 +1407,29 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
     }
 
     const redirectUri = `${metaRuntime.backendUrl}/api/oauth/meta/callback`;
-    const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${metaRuntime.appId}&redirect_uri=${redirectUri}&scope=pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_messages,whatsapp_business_management&response_type=code&state=${state}`;
+    const oauthUrl = new URL("https://www.facebook.com/v19.0/dialog/oauth");
+    oauthUrl.searchParams.set("client_id", metaRuntime.appId);
+    oauthUrl.searchParams.set("redirect_uri", redirectUri);
+    oauthUrl.searchParams.set("response_type", "code");
+    oauthUrl.searchParams.set("state", state);
+    oauthUrl.searchParams.set(
+      "scope",
+      [
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_manage_metadata",
+        "instagram_basic",
+        "instagram_manage_messages",
+        "whatsapp_business_management",
+        "whatsapp_business_messaging",
+        "business_management",
+      ].join(",")
+    );
 
     return res.json({
       success: true,
       data: {
-        url,
+        url: oauthUrl.toString(),
         state,
         platform,
         mode,

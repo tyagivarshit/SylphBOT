@@ -16,6 +16,7 @@ const pricing_config_1 = require("../config/pricing.config");
 const usage_service_1 = require("../services/usage.service");
 const tenant_service_1 = require("../services/tenant.service");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
+const stripe_service_1 = require("../services/stripe.service");
 const EMPTY_USAGE_SUMMARY = {
     aiCallsUsed: 0,
     messagesUsed: 0,
@@ -275,13 +276,15 @@ class BillingController {
                 provider: "STRIPE",
                 source: "SELF",
                 description: `${normalizedPlan} ${normalizedBilling} plan checkout`,
-                successUrl: `${env_1.env.FRONTEND_URL}/billing/success?proposal=${readyProposal.proposalKey}`,
-                cancelUrl: `${env_1.env.FRONTEND_URL}/billing/cancel?proposal=${readyProposal.proposalKey}`,
+                successUrl: `${env_1.env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
+                cancelUrl: `${env_1.env.FRONTEND_URL}/billing/cancel?plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
                 metadata: {
                     coupon: coupon || null,
                     origin: "billing_controller",
+                    planCode: normalizedPlan,
+                    billingCycle: normalizedBilling,
                 },
-                idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}`,
+                idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${req.requestId || Date.now()}`,
             });
             return res.json({
                 success: true,
@@ -409,8 +412,14 @@ class BillingController {
                     providerPaymentIntentId: sessionId,
                 },
                 select: {
+                    id: true,
                     paymentIntentKey: true,
                     providerPaymentIntentId: true,
+                    proposal: {
+                        select: {
+                            proposalKey: true,
+                        },
+                    },
                 },
             });
             if (!paymentIntent?.providerPaymentIntentId) {
@@ -419,19 +428,36 @@ class BillingController {
                     message: "Checkout session does not belong to this user",
                 });
             }
+            const session = await stripe_service_1.stripe.checkout.sessions
+                .retrieve(sessionId)
+                .catch(() => null);
+            const paymentStatus = String(session?.payment_status || "").trim().toLowerCase();
+            if (session && paymentStatus !== "paid") {
+                return res.status(409).json({
+                    success: false,
+                    message: "Payment is still pending confirmation",
+                });
+            }
             await commerceProjection_service_1.commerceProjectionService.reconcileProviderWebhook({
                 provider: "STRIPE",
                 strictBusinessId: businessId,
                 body: {
                     id: `manual_confirm_${paymentIntent.providerPaymentIntentId}`,
-                    type: "checkout.session.completed",
+                    type: session ? "checkout.session.completed" : "payment_intent.succeeded",
                     created: Math.floor(Date.now() / 1000),
                     data: {
                         object: {
                             id: paymentIntent.providerPaymentIntentId,
+                            payment_status: session?.payment_status || "paid",
+                            amount_total: session?.amount_total || null,
+                            currency: session?.currency || null,
+                            subscription: typeof session?.subscription === "string"
+                                ? session.subscription
+                                : session?.subscription?.id || null,
                             metadata: {
                                 businessId,
                                 paymentIntentKey: paymentIntent.paymentIntentKey,
+                                proposalKey: paymentIntent.proposal?.proposalKey || null,
                             },
                         },
                     },
@@ -486,6 +512,7 @@ class BillingController {
                     requestedBy: "SELF",
                 },
             });
+            await (0, subscription_middleware_1.invalidateBillingContextCache)(businessId);
             return res.json({
                 success: true,
                 message: "Subscription cancellation submitted",

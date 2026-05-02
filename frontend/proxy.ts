@@ -37,13 +37,15 @@ export function proxy(request: NextRequest) {
   }
 
   const accessToken = request.cookies.get("accessToken")?.value;
+  const refreshToken = request.cookies.get("refreshToken")?.value;
+  const hasSessionCookie = Boolean(accessToken || refreshToken);
   const isPublic = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
 
-  if (!accessToken && !isPublic) {
+  if (!hasSessionCookie && !isPublic) {
     return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
-  if (accessToken && isPublic) {
+  if (hasSessionCookie && isPublic) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

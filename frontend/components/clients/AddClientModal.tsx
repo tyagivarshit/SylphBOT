@@ -5,13 +5,6 @@ import { X } from "lucide-react"
 import { apiFetch } from "@/lib/apiClient"
 import { fetchClientConnectionStatus } from "@/lib/userApi"
 
-declare global {
-  interface Window {
-    FB: any
-    fbAsyncInit: any
-  }
-}
-
 const defaultConnections = {
   instagram: {
     connected: false,
@@ -24,8 +17,6 @@ const defaultConnections = {
 }
 
 export default function AddClientModal({ onClose, onConnected }: any) {
-  const APP_ID = process.env.NEXT_PUBLIC_META_APP_ID
-  const CONFIG_ID = process.env.NEXT_PUBLIC_WHATSAPP_CONFIG_ID
   const [connections, setConnections] = useState(defaultConnections)
   const [connecting, setConnecting] = useState<string | null>(null)
 
@@ -51,79 +42,51 @@ export default function AddClientModal({ onClose, onConnected }: any) {
 
   useEffect(() => {
     void loadConnections()
-
-    window.fbAsyncInit = function () {
-      window.FB.init({
-        appId: APP_ID,
-        cookie: true,
-        xfbml: true,
-        version: "v19.0",
-      })
-    }
   }, [])
 
-  const connectWhatsApp = () => {
-    if (connections.whatsapp.connected && connections.whatsapp.healthy) {
+  const connectMeta = async (platformKey: "instagram" | "whatsapp") => {
+    if (
+      (platformKey === "instagram" &&
+        connections.instagram.connected &&
+        connections.instagram.healthy) ||
+      (platformKey === "whatsapp" &&
+        connections.whatsapp.connected &&
+        connections.whatsapp.healthy)
+    ) {
       return
     }
 
-    setConnecting("whatsapp")
-
-    window.FB.login(
-      async function (response: any) {
-        if (!response.authResponse) {
-          setConnecting(null)
-          return
+    try {
+      setConnecting(platformKey)
+      const query = new URLSearchParams({
+        platform: platformKey.toUpperCase(),
+        mode: "connect",
+      })
+      const response = await apiFetch<{ url?: string }>(
+        `/api/clients/oauth/meta?${query.toString()}`,
+        {
+          credentials: "include",
         }
+      )
 
-        try {
-          const accessToken = response.authResponse.accessToken
-
-          await apiFetch("/api/clients", {
-            method: "POST",
-            body: JSON.stringify({
-              platform: "WHATSAPP",
-              accessToken,
-            }),
-          })
-
-          await loadConnections()
-          await onConnected?.()
-
-          alert("WhatsApp connected successfully")
-
-          onClose()
-        } catch (err) {
-          console.error("WhatsApp connect error", err)
-          setConnecting(null)
-        }
-      },
-      {
-        config_id: CONFIG_ID,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: {
-          setup: {
-            channel: "WHATSAPP",
-          },
-        },
+      if (!response.success || !response.data?.url) {
+        throw new Error(response.message || "Failed to start connection")
       }
-    )
+
+      await onConnected?.()
+      window.location.assign(response.data.url)
+    } catch (err) {
+      console.error(`${platformKey} connect error`, err)
+      setConnecting(null)
+    }
+  }
+
+  const connectWhatsApp = () => {
+    void connectMeta("whatsapp")
   }
 
   const connectInstagram = () => {
-    if (connections.instagram.connected && connections.instagram.healthy) {
-      return
-    }
-
-    setConnecting("instagram")
-
-    const url = `https://www.facebook.com/v19.0/dialog/oauth?
-client_id=${APP_ID}
-&redirect_uri=${window.location.origin}/integrations/meta/callback
-&scope=pages_show_list,pages_messaging,instagram_basic,instagram_manage_messages`
-
-    window.location.href = url
+    void connectMeta("instagram")
   }
 
   const whatsappLabel = connections.whatsapp.connected

@@ -80,7 +80,13 @@ export const setAuthCookies = (
 
 export const clearAuthCookies = (res: Response, req?: Request) => {
   const options = getAuthCookieOptions(req);
+  const { domain, ...hostOnlyOptions } = options;
 
   res.clearCookie("accessToken", options);
   res.clearCookie("refreshToken", options);
+
+  if (domain) {
+    res.clearCookie("accessToken", hostOnlyOptions);
+    res.clearCookie("refreshToken", hostOnlyOptions);
+  }
 };

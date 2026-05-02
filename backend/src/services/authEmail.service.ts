@@ -316,6 +316,37 @@ If you did not request this change, you can ignore this email and your password 
 Need help? Reply to ${EMAIL_SUPPORT_EMAIL}.
 `.trim();
 
+const buildOnboardingText = (workspaceName?: string | null) => `
+Welcome to ${APP_NAME}
+
+Your workspace is now active${workspaceName ? `: ${workspaceName}` : ""}.
+You're ready to connect channels, configure automations, and start handling leads.
+
+Open your workspace:
+${process.env.FRONTEND_URL || "https://app.automexiaai.in"}
+
+Need help? Reply to ${EMAIL_SUPPORT_EMAIL}.
+`.trim();
+
+const buildBillingText = ({
+  plan,
+  amountMinor,
+  currency,
+}: {
+  plan: string;
+  amountMinor: number;
+  currency: string;
+}) => `
+Payment confirmed for ${APP_NAME}
+
+Plan: ${plan}
+Amount: ${String(currency || "INR").toUpperCase()} ${(Math.max(0, Number(amountMinor || 0)) / 100).toFixed(2)}
+
+You can review your billing details inside your workspace billing page.
+
+Need help? Reply to ${EMAIL_SUPPORT_EMAIL}.
+`.trim();
+
 export const sendVerificationEmail = async (
   to: string,
   verifyLink: string
@@ -397,5 +428,100 @@ export const queuePasswordResetEmail = (
   runInBackground(
     `password reset email to ${to}`,
     sendPasswordResetEmail(to, resetLink)
+  );
+};
+
+export const sendOnboardingEmail = async (
+  to: string,
+  workspaceName?: string | null
+) => {
+  await sendEmail({
+    to,
+    subject: `Welcome to ${APP_NAME}`,
+    html: buildEmailShell({
+      preview: "Your Automexia AI workspace is now active.",
+      eyebrow: "Workspace onboarding",
+      title: "Your workspace is ready",
+      intro:
+        "You’re fully set up. Connect Instagram or WhatsApp, review billing, and launch your first automation flow.",
+      details: workspaceName ? [`Workspace: ${workspaceName}`] : undefined,
+      ctaText: "Open workspace",
+      ctaUrl: process.env.FRONTEND_URL || "https://app.automexiaai.in",
+      rawLinkLabel:
+        "If the button does not open, copy and paste this link into your browser:",
+      rawLinkUrl: process.env.FRONTEND_URL || "https://app.automexiaai.in",
+      footnote:
+        "This onboarding message confirms that your account is now active.",
+    }),
+    text: buildOnboardingText(workspaceName),
+    category: "onboarding-email",
+  });
+};
+
+export const queueOnboardingEmail = (
+  to: string,
+  workspaceName?: string | null
+) => {
+  runInBackground(
+    `onboarding email to ${to}`,
+    sendOnboardingEmail(to, workspaceName)
+  );
+};
+
+export const sendBillingEmail = async ({
+  to,
+  plan,
+  amountMinor,
+  currency,
+}: {
+  to: string;
+  plan: string;
+  amountMinor: number;
+  currency: string;
+}) => {
+  const normalizedPlan = String(plan || "PAID").trim().toUpperCase();
+  const normalizedCurrency = String(currency || "INR").trim().toUpperCase();
+  const normalizedAmountMinor = Math.max(0, Number(amountMinor || 0));
+
+  await sendEmail({
+    to,
+    subject: `${APP_NAME} payment confirmed`,
+    html: buildEmailShell({
+      preview: "Your Automexia AI payment was successful.",
+      eyebrow: "Billing update",
+      title: "Payment received",
+      intro:
+        "Your payment was processed successfully and your premium access is now active.",
+      details: [
+        `Plan: ${normalizedPlan}`,
+        `Amount: ${normalizedCurrency} ${(normalizedAmountMinor / 100).toFixed(2)}`,
+      ],
+      ctaText: "Open billing",
+      ctaUrl: `${process.env.FRONTEND_URL || "https://app.automexiaai.in"}/billing`,
+      rawLinkLabel:
+        "If the button does not open, copy and paste this link into your browser:",
+      rawLinkUrl: `${process.env.FRONTEND_URL || "https://app.automexiaai.in"}/billing`,
+      footnote:
+        "Your latest invoice and subscription details are available in the billing dashboard.",
+    }),
+    text: buildBillingText({
+      plan: normalizedPlan,
+      amountMinor: normalizedAmountMinor,
+      currency: normalizedCurrency,
+    }),
+    category: "billing-email",
+  });
+};
+
+export const queueBillingEmail = (input: {
+  to: string;
+  plan: string;
+  amountMinor: number;
+  currency: string;
+  reference?: string | null;
+}) => {
+  runInBackground(
+    `billing email to ${input.to}`,
+    sendBillingEmail(input)
   );
 };

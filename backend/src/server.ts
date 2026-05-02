@@ -9,6 +9,7 @@ import {
 } from "./observability/sentry";
 import {
   initCrons,
+  initWorkers,
   initQueues,
   shutdown,
 } from "./runtime/lifecycle";
@@ -19,6 +20,9 @@ export const startServer = async () => {
   initializeSentry();
   configurePassport();
   await initQueues();
+  initWorkers({
+    authEmail: true,
+  });
 
   if (process.env.ENABLE_CRON === "true") {
     initCrons();

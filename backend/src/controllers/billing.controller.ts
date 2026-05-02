@@ -5,6 +5,7 @@ import { resolveBillingCurrency } from "../services/billingGeo.service";
 import {
   loadBillingContext,
   type BillingContext,
+  invalidateBillingContextCache,
 } from "../middleware/subscription.middleware";
 import { commerceProjectionService } from "../services/commerceProjection.service";
 import { paymentIntentService } from "../services/paymentIntent.service";
@@ -19,6 +20,7 @@ import {
 import { getUsageOverview } from "../services/usage.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import { withTimeoutFallback } from "../utils/boundedTimeout";
+import { stripe } from "../services/stripe.service";
 
 const EMPTY_USAGE_SUMMARY = {
   aiCallsUsed: 0,
@@ -328,13 +330,15 @@ export class BillingController {
         provider: "STRIPE",
         source: "SELF",
         description: `${normalizedPlan} ${normalizedBilling} plan checkout`,
-        successUrl: `${env.FRONTEND_URL}/billing/success?proposal=${readyProposal.proposalKey}`,
-        cancelUrl: `${env.FRONTEND_URL}/billing/cancel?proposal=${readyProposal.proposalKey}`,
+        successUrl: `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
+        cancelUrl: `${env.FRONTEND_URL}/billing/cancel?plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
         metadata: {
           coupon: coupon || null,
           origin: "billing_controller",
+          planCode: normalizedPlan,
+          billingCycle: normalizedBilling,
         },
-        idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}`,
+        idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${req.requestId || Date.now()}`,
       });
 
       return res.json({
@@ -484,8 +488,14 @@ export class BillingController {
           providerPaymentIntentId: sessionId,
         },
         select: {
+          id: true,
           paymentIntentKey: true,
           providerPaymentIntentId: true,
+          proposal: {
+            select: {
+              proposalKey: true,
+            },
+          },
         },
       });
 
@@ -496,19 +506,39 @@ export class BillingController {
         });
       }
 
+      const session = await stripe.checkout.sessions
+        .retrieve(sessionId)
+        .catch(() => null);
+      const paymentStatus = String(session?.payment_status || "").trim().toLowerCase();
+
+      if (session && paymentStatus !== "paid") {
+        return res.status(409).json({
+          success: false,
+          message: "Payment is still pending confirmation",
+        });
+      }
+
       await commerceProjectionService.reconcileProviderWebhook({
         provider: "STRIPE",
         strictBusinessId: businessId,
         body: {
           id: `manual_confirm_${paymentIntent.providerPaymentIntentId}`,
-          type: "checkout.session.completed",
+          type: session ? "checkout.session.completed" : "payment_intent.succeeded",
           created: Math.floor(Date.now() / 1000),
           data: {
             object: {
               id: paymentIntent.providerPaymentIntentId,
+              payment_status: session?.payment_status || "paid",
+              amount_total: session?.amount_total || null,
+              currency: session?.currency || null,
+              subscription:
+                typeof session?.subscription === "string"
+                  ? session.subscription
+                  : session?.subscription?.id || null,
               metadata: {
                 businessId,
                 paymentIntentKey: paymentIntent.paymentIntentKey,
+                proposalKey: paymentIntent.proposal?.proposalKey || null,
               },
             },
           },
@@ -570,6 +600,7 @@ export class BillingController {
           requestedBy: "SELF",
         },
       });
+      await invalidateBillingContextCache(businessId);
 
       return res.json({
         success: true,

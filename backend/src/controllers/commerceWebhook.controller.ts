@@ -28,9 +28,13 @@ export const commerceWebhook = async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
-    return res.status(500).json({
+    const message = String(error?.message || "commerce_webhook_failed");
+    const isBadRequest =
+      /signature|payload_invalid|secret_missing|provider_required/i.test(message);
+
+    return res.status(isBadRequest ? 400 : 500).json({
       success: false,
-      message: error?.message || "commerce_webhook_failed",
+      message,
     });
   }
 };

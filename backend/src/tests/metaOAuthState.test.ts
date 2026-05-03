@@ -20,6 +20,8 @@ export const metaOAuthStateTests: TestCase[] = [
         workspaceId: "workspace_1",
         platform: "INSTAGRAM",
         mode: "reconnect",
+        preferredFacebookPageId: "fb_page_1",
+        preferredInstagramProfessionalAccountId: "ig_prof_1",
       });
 
       const payload = verifyMetaOAuthState(state);
@@ -30,6 +32,11 @@ export const metaOAuthStateTests: TestCase[] = [
       assert.equal(payload!.workspaceId, "workspace_1");
       assert.equal(payload!.platform, "INSTAGRAM");
       assert.equal(payload!.mode, "reconnect");
+      assert.equal(payload!.preferredFacebookPageId, "fb_page_1");
+      assert.equal(
+        payload!.preferredInstagramProfessionalAccountId,
+        "ig_prof_1"
+      );
     },
   },
   {

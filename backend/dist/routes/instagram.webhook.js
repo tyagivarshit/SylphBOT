@@ -26,13 +26,6 @@ const normalizeIdentifier = (value) => {
     const normalized = String(value || "").trim();
     return normalized || null;
 };
-const toEpochMs = (value) => {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric <= 0) {
-        return Date.now();
-    }
-    return numeric < 10000000000 ? numeric * 1000 : numeric;
-};
 const getUniqueIdentifiers = (values) => Array.from(new Set(values
     .map((value) => normalizeIdentifier(value))
     .filter((value) => Boolean(value))));
@@ -372,8 +365,6 @@ router.post("/", async (req, res) => {
                     details: {
                         webhookType: "comment",
                         commentId: commentId || null,
-                        eventId: commentEventId,
-                        eventTimestampMs: toEpochMs(rawCommentValue?.timestamp || change?.value?.timestamp || entry?.time),
                     },
                 }).catch(() => undefined);
                 await (0, securityGovernanceOS_service_1.enforceSecurityGovernanceInfluence)({
@@ -509,7 +500,6 @@ router.post("/", async (req, res) => {
             details: {
                 webhookType: "message",
                 eventId: eventId || null,
-                eventTimestampMs: toEpochMs(messaging?.timestamp || changeMessage?.timestamp || entry?.time),
             },
         }).catch(() => undefined);
         await (0, securityGovernanceOS_service_1.enforceSecurityGovernanceInfluence)({

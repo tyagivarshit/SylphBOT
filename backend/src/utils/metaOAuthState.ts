@@ -14,6 +14,8 @@ export type MetaOAuthStatePayload = {
   workspaceId: string;
   platform: MetaOAuthPlatform;
   mode: MetaOAuthMode;
+  preferredFacebookPageId?: string | null;
+  preferredInstagramProfessionalAccountId?: string | null;
 };
 
 const getStateSecret = () =>
@@ -64,6 +66,14 @@ const decodePayload = (value: string): MetaOAuthStatePayload | null => {
       workspaceId: parsed.workspaceId,
       platform,
       mode: normalizeMode(parsed.mode),
+      preferredFacebookPageId:
+        typeof parsed?.preferredFacebookPageId === "string"
+          ? parsed.preferredFacebookPageId
+          : null,
+      preferredInstagramProfessionalAccountId:
+        typeof parsed?.preferredInstagramProfessionalAccountId === "string"
+          ? parsed.preferredInstagramProfessionalAccountId
+          : null,
     };
   } catch {
     return null;
@@ -93,7 +103,14 @@ export const createMetaOAuthState = (input: {
   workspaceId?: string;
   platform: MetaOAuthPlatform;
   mode?: MetaOAuthMode;
+  preferredFacebookPageId?: string | null;
+  preferredInstagramProfessionalAccountId?: string | null;
 }) => {
+  const normalizeOptionalString = (value?: string | null) => {
+    const normalized = String(value || "").trim();
+    return normalized || null;
+  };
+
   const payload: MetaOAuthStatePayload = {
     nonce: crypto.randomBytes(24).toString("hex"),
     issuedAt: Date.now(),
@@ -102,6 +119,12 @@ export const createMetaOAuthState = (input: {
     workspaceId: String(input.workspaceId || input.businessId || "").trim(),
     platform: input.platform,
     mode: normalizeMode(input.mode),
+    preferredFacebookPageId: normalizeOptionalString(
+      input.preferredFacebookPageId
+    ),
+    preferredInstagramProfessionalAccountId: normalizeOptionalString(
+      input.preferredInstagramProfessionalAccountId
+    ),
   };
 
   const encoded = encodePayload(payload);

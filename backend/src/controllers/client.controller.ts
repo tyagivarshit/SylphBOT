@@ -18,7 +18,12 @@ import {
 import {
   connectInstagramOneClick,
   connectWhatsAppGuidedWizard,
+  runMetaConnectDoctor,
 } from "../services/saasPackagingConnectHubOS.service";
+import {
+  recordObservabilityEvent,
+  recordTraceLedger,
+} from "../services/reliability/reliabilityOS.service";
 
 /*
 ---------------------------------------------------
@@ -53,6 +58,466 @@ const createClientControllerError = (message: string, code: string) => {
   const error = new Error(message) as Error & { code?: string };
   error.code = code;
   return error;
+};
+
+type InstagramConnectStage =
+  | "IG_OAUTH_STARTED"
+  | "IG_CALLBACK_RECEIVED"
+  | "IG_STATE_VERIFIED"
+  | "IG_CODE_EXCHANGED"
+  | "IG_LONG_TOKEN_EXCHANGED"
+  | "IG_BUSINESSES_FETCHED"
+  | "IG_PAGES_FETCHED"
+  | "IG_VALID_PAIRS_RESOLVED"
+  | "IG_PAIR_SELECTED"
+  | "IG_PAIR_VALIDATED"
+  | "IG_PERMISSION_AUDITED"
+  | "IG_ENTITLEMENT_AUDITED"
+  | "IG_WEBHOOK_SUBSCRIBED"
+  | "IG_WEBHOOK_VERIFIED"
+  | "IG_HEALTH_AUDITED"
+  | "IG_CANONICAL_SAVED"
+  | "IG_CONNECT_SUCCESS"
+  | "IG_CONNECT_FAILED";
+
+type MetaActionCode =
+  | "ACCOUNT_PERSONAL"
+  | "NO_LINKED_PAGE"
+  | "NO_LINKED_IG_ACCOUNT"
+  | "MISSING_PERMISSION"
+  | "TOKEN_EXPIRED"
+  | "TOKEN_REVOKED"
+  | "PAGE_ROLE_REMOVED"
+  | "WEBHOOK_INACTIVE"
+  | "RATE_LIMITED"
+  | "ACCOUNT_RESTRICTED"
+  | "QUOTA_EXCEEDED"
+  | "PAIR_SELECTION_REQUIRED"
+  | "UNKNOWN";
+
+type ActionableFailurePayload = {
+  reasonCode: MetaActionCode;
+  problem: string;
+  cause: string;
+  fix: string;
+  cta: {
+    label: string;
+    action: string;
+  };
+  helpLink: string;
+  missingPermission?: string | null;
+  retryAfterSeconds?: number | null;
+};
+
+type MetaOAuthFailureOptions = {
+  stage: InstagramConnectStage;
+  reason: string;
+  code: string;
+  statusCode?: number;
+  metadata?: Record<string, unknown>;
+};
+
+class MetaOAuthFlowError extends Error {
+  stage: InstagramConnectStage;
+  reason: string;
+  code: string;
+  statusCode: number;
+  metadata: Record<string, unknown> | null;
+
+  constructor(options: MetaOAuthFailureOptions) {
+    super(options.reason);
+    this.stage = options.stage;
+    this.reason = options.reason;
+    this.code = options.code;
+    this.statusCode = options.statusCode || 400;
+    this.metadata = options.metadata || null;
+  }
+}
+
+const buildInstagramTraceId = (nonce?: string | null) => {
+  const normalizedNonce = String(nonce || "").trim();
+  return normalizedNonce
+    ? `ig_connect_${normalizedNonce}`
+    : `ig_connect_${Date.now()}`;
+};
+
+const recordInstagramConnectStage = async (input: {
+  traceId: string;
+  businessId: string;
+  stage: InstagramConnectStage;
+  status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+  metadata?: Record<string, unknown>;
+  provider?: "INSTAGRAM";
+  endedAt?: Date | null;
+}) => {
+  const provider = input.provider || "INSTAGRAM";
+  const metadata = input.metadata || {};
+  const severity = input.status === "FAILED" ? "error" : "info";
+
+  await recordTraceLedger({
+    traceId: input.traceId,
+    correlationId: input.traceId,
+    businessId: input.businessId,
+    tenantId: input.businessId,
+    stage: input.stage,
+    status: input.status,
+    metadata: {
+      provider,
+      ...metadata,
+    },
+    endedAt: input.endedAt || null,
+  }).catch(() => undefined);
+
+  await recordObservabilityEvent({
+    businessId: input.businessId,
+    tenantId: input.businessId,
+    eventType: `meta.instagram.connect.${input.stage.toLowerCase()}`,
+    message:
+      input.status === "FAILED"
+        ? `Instagram connect failed at ${input.stage}`
+        : `Instagram connect stage ${input.stage} ${input.status.toLowerCase()}`,
+    severity,
+    context: {
+      traceId: input.traceId,
+      correlationId: input.traceId,
+      provider,
+      component: "meta-oauth-connect",
+      phase: "connect",
+    },
+    metadata: {
+      status: input.status,
+      ...metadata,
+    },
+  }).catch(() => undefined);
+};
+
+type InstagramPagePair = {
+  facebookPageId: string;
+  facebookPageName: string | null;
+  instagramProfessionalAccountId: string;
+  instagramUsername: string | null;
+  instagramName: string | null;
+  instagramAccountType: string | null;
+};
+
+const META_HELP_LINKS: Record<MetaActionCode, string> = {
+  ACCOUNT_PERSONAL:
+    "https://help.instagram.com/502981923235522",
+  NO_LINKED_PAGE:
+    "https://www.facebook.com/business/help/898752960195806",
+  NO_LINKED_IG_ACCOUNT:
+    "https://www.facebook.com/business/help/898752960195806",
+  MISSING_PERMISSION:
+    "https://developers.facebook.com/docs/permissions/reference",
+  TOKEN_EXPIRED:
+    "https://developers.facebook.com/docs/facebook-login/guides/access-tokens",
+  TOKEN_REVOKED:
+    "https://developers.facebook.com/docs/facebook-login/guides/access-tokens",
+  PAGE_ROLE_REMOVED:
+    "https://www.facebook.com/business/help/442345745885606",
+  WEBHOOK_INACTIVE:
+    "https://developers.facebook.com/docs/messenger-platform/webhooks",
+  RATE_LIMITED:
+    "https://developers.facebook.com/docs/graph-api/overview/rate-limiting",
+  ACCOUNT_RESTRICTED:
+    "https://www.facebook.com/business/help",
+  QUOTA_EXCEEDED:
+    "https://app.automexiaai.in/billing",
+  PAIR_SELECTION_REQUIRED:
+    "https://www.facebook.com/business/help/898752960195806",
+  UNKNOWN:
+    "https://www.facebook.com/business/help",
+};
+
+const resolveMetaActionCode = ({
+  code,
+  reason,
+}: {
+  code?: string | null;
+  reason?: string | null;
+}): MetaActionCode => {
+  const normalizedCode = String(code || "").trim().toUpperCase();
+  const normalizedReason = String(reason || "").trim().toLowerCase();
+
+  if (
+    normalizedCode === "ACCOUNT_PERSONAL" ||
+    normalizedCode.includes("PERSONAL")
+  ) {
+    return "ACCOUNT_PERSONAL";
+  }
+
+  if (
+    normalizedCode.includes("NO_LINKED_PAGE") ||
+    normalizedCode.includes("IG_PAGES_FETCH_FAILED") ||
+    normalizedReason.includes("no linked page")
+  ) {
+    return "NO_LINKED_PAGE";
+  }
+
+  if (
+    normalizedCode.includes("NO_LINKED_IG_ACCOUNT") ||
+    normalizedReason.includes("no instagram professional account")
+  ) {
+    return "NO_LINKED_IG_ACCOUNT";
+  }
+
+  if (
+    normalizedCode.includes("PERMISSION") ||
+    normalizedReason.includes("permission")
+  ) {
+    return "MISSING_PERMISSION";
+  }
+
+  if (
+    normalizedCode.includes("TOKEN_EXPIRED") ||
+    normalizedReason.includes("token has expired") ||
+    normalizedReason.includes("session has expired")
+  ) {
+    return "TOKEN_EXPIRED";
+  }
+
+  if (
+    normalizedCode.includes("TOKEN_REVOKED") ||
+    normalizedReason.includes("token was revoked") ||
+    normalizedReason.includes("invalid oauth access token")
+  ) {
+    return "TOKEN_REVOKED";
+  }
+
+  if (
+    normalizedCode.includes("PAGE_ROLE_REMOVED") ||
+    normalizedReason.includes("missing page role")
+  ) {
+    return "PAGE_ROLE_REMOVED";
+  }
+
+  if (
+    normalizedCode.includes("WEBHOOK") ||
+    normalizedReason.includes("webhook")
+  ) {
+    return "WEBHOOK_INACTIVE";
+  }
+
+  if (
+    normalizedCode.includes("RATE_LIMIT") ||
+    normalizedReason.includes("rate limit")
+  ) {
+    return "RATE_LIMITED";
+  }
+
+  if (
+    normalizedCode.includes("RESTRICTED") ||
+    normalizedReason.includes("restricted")
+  ) {
+    return "ACCOUNT_RESTRICTED";
+  }
+
+  if (
+    normalizedCode.includes("ENTITLEMENT") ||
+    normalizedCode.includes("PLAN_LIMIT") ||
+    normalizedCode.includes("QUOTA") ||
+    normalizedReason.includes("quota")
+  ) {
+    return "QUOTA_EXCEEDED";
+  }
+
+  if (
+    normalizedCode.includes("PAIR_SELECTION_REQUIRED") ||
+    normalizedReason.includes("select")
+  ) {
+    return "PAIR_SELECTION_REQUIRED";
+  }
+
+  return "UNKNOWN";
+};
+
+const buildActionableFailurePayload = (input: {
+  code?: string | null;
+  reason?: string | null;
+  missingPermission?: string | null;
+  retryAfterSeconds?: number | null;
+}): ActionableFailurePayload => {
+  const reasonCode = resolveMetaActionCode({
+    code: input.code,
+    reason: input.reason,
+  });
+
+  const shared = {
+    reasonCode,
+    helpLink: META_HELP_LINKS[reasonCode],
+  };
+
+  if (reasonCode === "ACCOUNT_PERSONAL") {
+    return {
+      ...shared,
+      problem: "Instagram account type is not eligible.",
+      cause: "The connected Instagram account is Personal.",
+      fix: "Switch Instagram account type to Professional (Business or Creator).",
+      cta: {
+        label: "Open Account Type Guide",
+        action: "OPEN_GUIDE",
+      },
+    };
+  }
+
+  if (reasonCode === "NO_LINKED_PAGE") {
+    return {
+      ...shared,
+      problem: "No Facebook Page available for Instagram messaging.",
+      cause: "The authenticated user has no valid Page access in this workspace context.",
+      fix: "Grant Page access in Meta Business settings, then reconnect.",
+      cta: {
+        label: "Reconnect",
+        action: "RECONNECT",
+      },
+    };
+  }
+
+  if (reasonCode === "NO_LINKED_IG_ACCOUNT") {
+    return {
+      ...shared,
+      problem: "No Instagram Professional account is linked to a Facebook Page.",
+      cause: "Meta returned Pages, but none had a linked Professional Instagram account.",
+      fix: "Link Instagram Professional account to a Facebook Page, then retry.",
+      cta: {
+        label: "Open Linking Guide",
+        action: "OPEN_GUIDE",
+      },
+    };
+  }
+
+  if (reasonCode === "MISSING_PERMISSION") {
+    return {
+      ...shared,
+      problem: "Required Meta permissions are missing.",
+      cause:
+        input.missingPermission
+          ? `Missing permission: ${input.missingPermission}.`
+          : "One or more permissions were revoked or not granted.",
+      fix: "Reconnect and grant all requested permissions.",
+      cta: {
+        label: "Reconnect with Permissions",
+        action: "RECONNECT",
+      },
+      missingPermission: input.missingPermission || null,
+    };
+  }
+
+  if (reasonCode === "TOKEN_EXPIRED") {
+    return {
+      ...shared,
+      problem: "Access token has expired.",
+      cause: "Meta token is no longer valid for API calls.",
+      fix: "Reconnect to issue a fresh long-lived token.",
+      cta: {
+        label: "Reconnect",
+        action: "RECONNECT",
+      },
+    };
+  }
+
+  if (reasonCode === "TOKEN_REVOKED") {
+    return {
+      ...shared,
+      problem: "Access token was revoked.",
+      cause: "Meta invalidated the integration credentials.",
+      fix: "Reconnect and re-authorize access.",
+      cta: {
+        label: "Reconnect",
+        action: "RECONNECT",
+      },
+    };
+  }
+
+  if (reasonCode === "PAGE_ROLE_REMOVED") {
+    return {
+      ...shared,
+      problem: "Page role access is missing.",
+      cause: "The authenticating user no longer has required Page permissions.",
+      fix: "Restore Page role access in Meta Business and reconnect.",
+      cta: {
+        label: "Open Page Role Guide",
+        action: "OPEN_GUIDE",
+      },
+    };
+  }
+
+  if (reasonCode === "WEBHOOK_INACTIVE") {
+    return {
+      ...shared,
+      problem: "Webhook subscription is inactive.",
+      cause: "Meta webhook subscription could not be verified as active.",
+      fix: "Run automatic webhook repair, then retry.",
+      cta: {
+        label: "Repair Automatically",
+        action: "REPAIR_WEBHOOK",
+      },
+    };
+  }
+
+  if (reasonCode === "RATE_LIMITED") {
+    return {
+      ...shared,
+      problem: "Meta API rate limit reached.",
+      cause: "Provider temporarily throttled connect validation requests.",
+      fix: "Retry after cooldown period.",
+      cta: {
+        label: "Retry",
+        action: "RETRY",
+      },
+      retryAfterSeconds: input.retryAfterSeconds || 60,
+    };
+  }
+
+  if (reasonCode === "ACCOUNT_RESTRICTED") {
+    return {
+      ...shared,
+      problem: "Meta account is restricted.",
+      cause: "Provider policy restrictions block this integration action.",
+      fix: "Resolve restrictions in Meta account quality and reconnect.",
+      cta: {
+        label: "Open Restriction Guide",
+        action: "OPEN_GUIDE",
+      },
+    };
+  }
+
+  if (reasonCode === "QUOTA_EXCEEDED") {
+    return {
+      ...shared,
+      problem: "Plan quota reached for this integration.",
+      cause: "Current workspace entitlement blocks additional connections.",
+      fix: "Upgrade plan or disconnect an existing slot.",
+      cta: {
+        label: "Upgrade Plan",
+        action: "UPGRADE_PLAN",
+      },
+    };
+  }
+
+  if (reasonCode === "PAIR_SELECTION_REQUIRED") {
+    return {
+      ...shared,
+      problem: "Multiple valid Instagram assets were found.",
+      cause: "More than one Facebook Page and Instagram Professional pair is available.",
+      fix: "Select the exact Page and Instagram pair, then reconnect.",
+      cta: {
+        label: "Select Pair",
+        action: "SELECT_PAIR",
+      },
+    };
+  }
+
+  return {
+    ...shared,
+    problem: "Instagram connection failed.",
+    cause: String(input.reason || "Unknown provider failure"),
+    fix: "Retry connection and review diagnostics.",
+    cta: {
+      label: "Retry",
+      action: "RETRY",
+    },
+  };
 };
 
 const getMetaOAuthRuntimeConfig = () => {
@@ -146,34 +611,119 @@ const collectWhatsAppPhoneNumbers = (payload: any) => {
   );
 };
 
-const fetchInstagramConnection = async (accessToken: string) => {
-  const pagesRes = await axios.get(
-    "https://graph.facebook.com/v19.0/me/accounts",
-    {
-      params: {
-        fields: "id,name,access_token,instagram_business_account",
-        access_token: accessToken,
-      },
-    }
-  );
-
-  const page = getMetaDataArray(pagesRes.data)?.[0];
-  const facebookPageId = normalizeOptionalString(page?.id);
-  const pageId =
-    normalizeOptionalString(page?.instagram_business_account?.id) ||
-    facebookPageId;
-  const pageAccessToken =
-    normalizeOptionalString(page?.access_token) || normalizeOptionalString(accessToken);
-
-  console.log("INSTAGRAM CONNECT IDENTIFIERS", {
-    facebookPageId,
-    pageId,
+const fetchMetaBusinesses = async (accessToken: string) => {
+  const response = await axios.get("https://graph.facebook.com/v19.0/me/businesses", {
+    params: {
+      fields: "id,name",
+      access_token: accessToken,
+    },
   });
 
+  return getMetaDataArray(response.data).map((business) => ({
+    id: normalizeOptionalString(business?.id),
+    name: normalizeOptionalString(business?.name),
+  }));
+};
+
+const isProfessionalInstagramAccount = (accountType?: string | null) => {
+  const normalized = String(accountType || "").trim().toUpperCase();
+  return normalized === "BUSINESS" || normalized === "CREATOR";
+};
+
+const fetchInstagramConnection = async (accessToken: string) => {
+  const pagesRes = await axios.get("https://graph.facebook.com/v19.0/me/accounts", {
+    params: {
+      fields: "id,name,access_token,instagram_business_account{id,username}",
+      access_token: accessToken,
+    },
+  });
+
+  const pages = getMetaDataArray(pagesRes.data);
+  const allPairs: InstagramPagePair[] = [];
+  const validPairs: InstagramPagePair[] = [];
+  const pagesWithoutInstagram: Array<{
+    facebookPageId: string;
+    facebookPageName: string | null;
+  }> = [];
+  const pageAccessTokenByFacebookPageId: Record<string, string> = {};
+
+  for (const page of pages) {
+    const facebookPageId = normalizeOptionalString(page?.id);
+    const facebookPageName = normalizeOptionalString(page?.name);
+    const pageAccessToken =
+      normalizeOptionalString(page?.access_token) ||
+      normalizeOptionalString(accessToken);
+
+    if (facebookPageId && pageAccessToken) {
+      pageAccessTokenByFacebookPageId[facebookPageId] = pageAccessToken;
+    }
+
+    if (!facebookPageId) {
+      continue;
+    }
+
+    let instagramProfessionalAccountId = normalizeOptionalString(
+      page?.instagram_business_account?.id
+    );
+    let instagramUsername = normalizeOptionalString(
+      page?.instagram_business_account?.username
+    );
+    let instagramName: string | null = null;
+    let instagramAccountType: string | null = null;
+
+    if (instagramProfessionalAccountId && pageAccessToken) {
+      try {
+        const igProfileRes = await axios.get(
+          `https://graph.facebook.com/v19.0/${instagramProfessionalAccountId}`,
+          {
+            params: {
+              fields: "id,username,name,account_type",
+              access_token: pageAccessToken,
+            },
+          }
+        );
+
+        instagramUsername =
+          normalizeOptionalString(igProfileRes.data?.username) || instagramUsername;
+        instagramName = normalizeOptionalString(igProfileRes.data?.name);
+        instagramAccountType = normalizeOptionalString(
+          igProfileRes.data?.account_type
+        );
+      } catch {
+        // Keep base pair metadata if profile enrichment fails.
+      }
+    }
+
+    if (!instagramProfessionalAccountId) {
+      pagesWithoutInstagram.push({
+        facebookPageId,
+        facebookPageName,
+      });
+      continue;
+    }
+
+    const pair: InstagramPagePair = {
+      facebookPageId,
+      facebookPageName,
+      instagramProfessionalAccountId,
+      instagramUsername,
+      instagramName,
+      instagramAccountType,
+    };
+
+    allPairs.push(pair);
+
+    if (isProfessionalInstagramAccount(instagramAccountType)) {
+      validPairs.push(pair);
+    }
+  }
+
   return {
-    facebookPageId,
-    pageId,
-    pageAccessToken,
+    pagesFound: pages.length,
+    allPairs,
+    validPairs,
+    pagesWithoutInstagram,
+    pageAccessTokenByFacebookPageId,
   };
 };
 
@@ -616,6 +1166,15 @@ export const createClient = async (req: Request, res: Response) => {
 
     platform = platform.toUpperCase();
 
+    if (platform === "INSTAGRAM" || platform === "WHATSAPP") {
+      return res.status(409).json({
+        success: false,
+        data: null,
+        message: "Use the canonical Meta OAuth connect flow",
+        code: "META_LEGACY_CONNECT_PATH_DISABLED",
+      });
+    }
+
     const subscription = await getSubscription(businessId);
     const allowedPlatforms = await getAllowedPlatforms(
       businessId,
@@ -647,9 +1206,19 @@ export const createClient = async (req: Request, res: Response) => {
 
     if (platform === "INSTAGRAM" && !resolvedPageId) {
       const instagramConnection = await fetchInstagramConnection(accessToken);
+      const fallbackPair = instagramConnection.validPairs[0] || null;
+      const fallbackPageToken =
+        fallbackPair &&
+        instagramConnection.pageAccessTokenByFacebookPageId[
+          fallbackPair.facebookPageId
+        ]
+          ? instagramConnection.pageAccessTokenByFacebookPageId[
+              fallbackPair.facebookPageId
+            ]
+          : null;
 
-      resolvedPageId = instagramConnection.pageId;
-      accessToken = instagramConnection.pageAccessToken || accessToken;
+      resolvedPageId = fallbackPair?.instagramProfessionalAccountId || null;
+      accessToken = fallbackPageToken || accessToken;
     }
 
     if (platform === "WHATSAPP" && !resolvedPhoneNumberId) {
@@ -745,6 +1314,9 @@ META OAUTH CONNECT (INSTAGRAM)
 */
 
 export const metaOAuthConnect = async (req: Request, res: Response) => {
+  let instagramTraceId = buildInstagramTraceId(null);
+  let instagramBusinessId: string | null = getRequestBusinessId(req);
+
   try {
     const userId = (req as any).user?.id;
     const requestBusinessId = getRequestBusinessId(req);
@@ -757,11 +1329,29 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       faqKnowledge,
       salesInstructions,
       phoneNumberId,
+      facebookPageId,
+      instagramProfessionalAccountId,
     } = req.body || {};
 
     const oauthState = verifyMetaOAuthState(state);
 
+    instagramTraceId = buildInstagramTraceId(oauthState?.nonce || null);
+    instagramBusinessId = oauthState?.businessId || requestBusinessId || null;
+
+    const failInstagramConnect = (options: MetaOAuthFailureOptions): never => {
+      throw new MetaOAuthFlowError(options);
+    };
+
     if (!userId || !requestBusinessId || !code || !oauthState) {
+      if (oauthState?.platform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_STATE_VERIFIED",
+          reason: "Invalid OAuth callback contract",
+          code: "IG_INVALID_OAUTH_CALLBACK_CONTRACT",
+          statusCode: 400,
+        });
+      }
+
       return res.status(400).json({
         success: false,
         data: null,
@@ -774,6 +1364,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       oauthState.businessId !== requestBusinessId ||
       oauthState.workspaceId !== requestBusinessId
     ) {
+      if (oauthState.platform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_STATE_VERIFIED",
+          reason: "OAuth state mismatch",
+          code: "IG_OAUTH_STATE_MISMATCH",
+          statusCode: 403,
+        });
+      }
+
       return res.status(403).json({
         success: false,
         data: null,
@@ -783,11 +1382,33 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     const businessId = oauthState.businessId;
     const targetPlatform = oauthState.platform;
+    instagramBusinessId = businessId;
+
+    if (targetPlatform === "INSTAGRAM") {
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_CALLBACK_RECEIVED",
+        status: "COMPLETED",
+        metadata: {
+          mode: oauthState.mode,
+        },
+      });
+    }
 
     const subscription = await getSubscription(businessId);
     const allowedPlatforms = await getAllowedPlatforms(businessId, subscription);
 
     if (!allowedPlatforms.includes(targetPlatform)) {
+      if (targetPlatform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_ENTITLEMENT_AUDITED",
+          reason: `${targetPlatform} integration not allowed in your workspace`,
+          code: "IG_ENTITLEMENT_BLOCKED",
+          statusCode: 403,
+        });
+      }
+
       return res.status(403).json({
         success: false,
         data: null,
@@ -798,6 +1419,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     const metaRuntime = getMetaOAuthRuntimeConfig();
 
     if (!metaRuntime?.appSecret) {
+      if (targetPlatform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_CODE_EXCHANGED",
+          reason: "Meta OAuth is not configured on this server",
+          code: "IG_META_OAUTH_CONFIG_MISSING",
+          statusCode: 500,
+        });
+      }
+
       return res.status(500).json({
         success: false,
         data: null,
@@ -807,21 +1437,70 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     const redirectUri = `${metaRuntime.backendUrl}/api/oauth/meta/callback`;
 
-    const shortTokenRes = await axios.get(
-      "https://graph.facebook.com/v19.0/oauth/access_token",
-      {
-        params: {
-          client_id: metaRuntime.appId,
-          client_secret: metaRuntime.appSecret,
-          redirect_uri: redirectUri,
-          code,
+    if (targetPlatform === "INSTAGRAM") {
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_STATE_VERIFIED",
+        status: "COMPLETED",
+        metadata: {
+          platform: targetPlatform,
+          mode: oauthState.mode,
+          workspaceId: oauthState.workspaceId,
         },
+      });
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_ENTITLEMENT_AUDITED",
+        status: "COMPLETED",
+        metadata: {
+          allowedPlatforms,
+        },
+      });
+    }
+
+    let shortTokenRes: any;
+
+    try {
+      shortTokenRes = await axios.get(
+        "https://graph.facebook.com/v19.0/oauth/access_token",
+        {
+          params: {
+            client_id: metaRuntime.appId,
+            client_secret: metaRuntime.appSecret,
+            redirect_uri: redirectUri,
+            code,
+          },
+        }
+      );
+    } catch (error: any) {
+      if (targetPlatform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_CODE_EXCHANGED",
+          reason: getAxiosErrorMessage(error),
+          code: "IG_CODE_EXCHANGE_FAILED",
+          statusCode: Number(error?.response?.status || 400),
+          metadata: {
+            providerError: error?.response?.data || null,
+          },
+        });
       }
-    );
+      throw error;
+    }
 
     const shortToken = normalizeOptionalString(shortTokenRes.data?.access_token);
 
     if (!shortToken) {
+      if (targetPlatform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_CODE_EXCHANGED",
+          reason: "Meta token exchange failed",
+          code: "IG_SHORT_TOKEN_MISSING",
+          statusCode: 400,
+        });
+      }
+
       return res.status(400).json({
         success: false,
         data: null,
@@ -829,25 +1508,69 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
     }
 
-    const longTokenRes = await axios.get(
-      "https://graph.facebook.com/v19.0/oauth/access_token",
-      {
-        params: {
-          grant_type: "fb_exchange_token",
-          client_id: metaRuntime.appId,
-          client_secret: metaRuntime.appSecret,
-          fb_exchange_token: shortToken,
-        },
+    if (targetPlatform === "INSTAGRAM") {
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_CODE_EXCHANGED",
+        status: "COMPLETED",
+      });
+    }
+
+    let longTokenRes: any;
+
+    try {
+      longTokenRes = await axios.get(
+        "https://graph.facebook.com/v19.0/oauth/access_token",
+        {
+          params: {
+            grant_type: "fb_exchange_token",
+            client_id: metaRuntime.appId,
+            client_secret: metaRuntime.appSecret,
+            fb_exchange_token: shortToken,
+          },
+        }
+      );
+    } catch (error: any) {
+      if (targetPlatform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_LONG_TOKEN_EXCHANGED",
+          reason: getAxiosErrorMessage(error),
+          code: "IG_LONG_TOKEN_EXCHANGE_FAILED",
+          statusCode: Number(error?.response?.status || 400),
+          metadata: {
+            providerError: error?.response?.data || null,
+          },
+        });
       }
-    );
+      throw error;
+    }
 
     const longToken = normalizeOptionalString(longTokenRes.data?.access_token);
 
     if (!longToken) {
+      if (targetPlatform === "INSTAGRAM") {
+        failInstagramConnect({
+          stage: "IG_LONG_TOKEN_EXCHANGED",
+          reason: "Unable to resolve long lived token",
+          code: "IG_LONG_TOKEN_MISSING",
+          statusCode: 400,
+        });
+      }
+
       return res.status(400).json({
         success: false,
         data: null,
         message: "Unable to resolve long lived token",
+      });
+    }
+
+    if (targetPlatform === "INSTAGRAM") {
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_LONG_TOKEN_EXCHANGED",
+        status: "COMPLETED",
       });
     }
 
@@ -856,45 +1579,321 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     const connectReplayToken = `meta_oauth_${oauthState.nonce}`;
 
     if (targetPlatform === "INSTAGRAM") {
-      const instagramConnection = await fetchInstagramConnection(longToken);
+      let businesses: Array<{ id: string | null; name: string | null }> = [];
 
-      if (!instagramConnection.pageId) {
-        return res.status(400).json({
-          success: false,
-          data: null,
-          message: "No Instagram page found",
+      try {
+        businesses = await fetchMetaBusinesses(longToken);
+      } catch (error: any) {
+        failInstagramConnect({
+          stage: "IG_BUSINESSES_FETCHED",
+          reason: getAxiosErrorMessage(error),
+          code: "IG_BUSINESSES_FETCH_FAILED",
+          statusCode: Number(error?.response?.status || 400),
+          metadata: {
+            providerError: error?.response?.data || null,
+          },
         });
       }
 
-      const instagramAccessToken = instagramConnection.pageAccessToken || longToken;
-      const webhookSubscribed = await subscribeInstagramPageWebhook(
-        instagramConnection.facebookPageId,
-        instagramAccessToken
-      );
-      const profileSnapshot = await fetchInstagramProfileSnapshot(
-        instagramConnection.pageId,
-        instagramAccessToken
-      );
-
-      const instagramClient = await upsertConnectedClient({
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
         businessId,
-        platform: "INSTAGRAM",
-        pageId: instagramConnection.pageId,
-        accessToken: encrypt(instagramAccessToken),
-        aiTone,
-        businessInfo,
-        pricingInfo,
-        faqKnowledge,
-        salesInstructions,
+        stage: "IG_BUSINESSES_FETCHED",
+        status: "COMPLETED",
+        metadata: {
+          businessesFound: businesses.length,
+        },
       });
 
-      await connectInstagramOneClick({
+      const requestedFacebookPageId =
+        normalizeOptionalString(facebookPageId) ||
+        normalizeOptionalString(oauthState.preferredFacebookPageId);
+      const requestedInstagramProfessionalAccountId =
+        normalizeOptionalString(instagramProfessionalAccountId) ||
+        normalizeOptionalString(
+          oauthState.preferredInstagramProfessionalAccountId
+        );
+
+      let instagramConnection: Awaited<
+        ReturnType<typeof fetchInstagramConnection>
+      > | null = null;
+
+      try {
+        instagramConnection = await fetchInstagramConnection(longToken);
+      } catch (error: any) {
+        failInstagramConnect({
+          stage: "IG_PAGES_FETCHED",
+          reason: getAxiosErrorMessage(error),
+          code: "IG_PAGES_FETCH_FAILED",
+          statusCode: Number(error?.response?.status || 400),
+          metadata: {
+            providerError: error?.response?.data || null,
+          },
+        });
+      }
+
+      if (!instagramConnection) {
+        failInstagramConnect({
+          stage: "IG_PAGES_FETCHED",
+          reason: "Unable to fetch Instagram pages",
+          code: "IG_PAGES_FETCH_FAILED",
+          statusCode: 400,
+        });
+      }
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_PAGES_FETCHED",
+        status: "COMPLETED",
+        metadata: {
+          pagesFound: instagramConnection.pagesFound,
+        },
+      });
+
+      const validPairs = Array.isArray(instagramConnection.validPairs)
+        ? instagramConnection.validPairs
+        : [];
+      const allPairs = Array.isArray(instagramConnection.allPairs)
+        ? instagramConnection.allPairs
+        : [];
+      const personalPairs = allPairs.filter(
+        (pair) =>
+          String(pair.instagramAccountType || "")
+            .trim()
+            .toUpperCase() === "PERSONAL"
+      );
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_VALID_PAIRS_RESOLVED",
+        status: "COMPLETED",
+        metadata: {
+          pagesFound: instagramConnection.pagesFound,
+          pairsFound: allPairs.length,
+          validPairs: validPairs.length,
+          personalPairs: personalPairs.length,
+        },
+      });
+
+      if (!validPairs.length) {
+        if (personalPairs.length) {
+          failInstagramConnect({
+            stage: "IG_PAIR_VALIDATED",
+            reason:
+              "Connected Instagram account type is Personal. Professional account required.",
+            code: "ACCOUNT_PERSONAL",
+            statusCode: 400,
+          });
+        }
+
+        if (instagramConnection.pagesWithoutInstagram.length > 0) {
+          failInstagramConnect({
+            stage: "IG_PAIR_VALIDATED",
+            reason:
+              "No Instagram Professional account is linked to your Facebook Page.",
+            code: "NO_LINKED_IG_ACCOUNT",
+            statusCode: 400,
+          });
+        }
+
+        failInstagramConnect({
+          stage: "IG_PAIR_VALIDATED",
+          reason:
+            "No eligible Facebook Page and Instagram Professional account pair was found.",
+          code:
+            instagramConnection.pagesFound > 0
+              ? "NO_LINKED_PAGE"
+              : "PAGE_ROLE_REMOVED",
+          statusCode: 400,
+        });
+      }
+
+      if (
+        validPairs.length > 1 &&
+        !requestedFacebookPageId &&
+        !requestedInstagramProfessionalAccountId
+      ) {
+        failInstagramConnect({
+          stage: "IG_PAIR_SELECTED",
+          reason:
+            "Multiple valid Page and Instagram pairs found. Select one pair to continue.",
+          code: "PAIR_SELECTION_REQUIRED",
+          statusCode: 409,
+          metadata: {
+            validPairs,
+          },
+        });
+      }
+
+      let selectedPair: InstagramPagePair | null = null;
+
+      if (requestedFacebookPageId || requestedInstagramProfessionalAccountId) {
+        selectedPair =
+          validPairs.find(
+            (pair) =>
+              (!requestedFacebookPageId ||
+                pair.facebookPageId === requestedFacebookPageId) &&
+              (!requestedInstagramProfessionalAccountId ||
+                pair.instagramProfessionalAccountId ===
+                  requestedInstagramProfessionalAccountId)
+          ) || null;
+
+        if (!selectedPair) {
+          failInstagramConnect({
+            stage: "IG_PAIR_SELECTED",
+            reason:
+              "Selected Page and Instagram account pair is not available in granted assets.",
+            code: "NO_LINKED_PAGE",
+            statusCode: 400,
+            metadata: {
+              requestedFacebookPageId,
+              requestedInstagramProfessionalAccountId,
+            },
+          });
+        }
+      } else {
+        selectedPair = validPairs[0];
+      }
+
+      if (!selectedPair) {
+        failInstagramConnect({
+          stage: "IG_PAIR_SELECTED",
+          reason: "Unable to resolve a valid Instagram asset pair.",
+          code: "NO_LINKED_IG_ACCOUNT",
+          statusCode: 400,
+        });
+      }
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_PAIR_SELECTED",
+        status: "COMPLETED",
+        metadata: {
+          facebookPageId: selectedPair.facebookPageId,
+          instagramProfessionalAccountId:
+            selectedPair.instagramProfessionalAccountId,
+        },
+      });
+
+      if (!isProfessionalInstagramAccount(selectedPair.instagramAccountType)) {
+        failInstagramConnect({
+          stage: "IG_PAIR_VALIDATED",
+          reason:
+            "Selected Instagram account must be Professional (Business or Creator).",
+          code: "ACCOUNT_PERSONAL",
+          statusCode: 400,
+          metadata: {
+            instagramAccountType: selectedPair.instagramAccountType,
+          },
+        });
+      }
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_PAIR_VALIDATED",
+        status: "COMPLETED",
+        metadata: {
+          instagramAccountType: selectedPair.instagramAccountType,
+        },
+      });
+
+      const requiredInstagramPermissions = [
+        "instagram_basic",
+        "instagram_manage_messages",
+        "pages_manage_metadata",
+        "pages_show_list",
+      ];
+      const missingPermissions = requiredInstagramPermissions.filter(
+        (scope) => !grantedPermissions.includes(scope)
+      );
+
+      if (missingPermissions.length) {
+        failInstagramConnect({
+          stage: "IG_PERMISSION_AUDITED",
+          reason: `Missing required permissions: ${missingPermissions.join(", ")}`,
+          code: "IG_PERMISSION_MISSING",
+          statusCode: 400,
+          metadata: {
+            missingPermissions,
+            grantedPermissions,
+          },
+        });
+      }
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_PERMISSION_AUDITED",
+        status: "COMPLETED",
+        metadata: {
+          grantedPermissions,
+        },
+      });
+
+      const instagramAccessToken =
+        instagramConnection.pageAccessTokenByFacebookPageId[
+          selectedPair.facebookPageId
+        ] || longToken;
+      const webhookSubscribed = await subscribeInstagramPageWebhook(
+        selectedPair.facebookPageId,
+        instagramAccessToken
+      );
+
+      if (!webhookSubscribed) {
+        failInstagramConnect({
+          stage: "IG_WEBHOOK_SUBSCRIBED",
+          reason: "Instagram webhook subscription failed",
+          code: "IG_WEBHOOK_SUBSCRIBE_FAILED",
+          statusCode: 400,
+          metadata: {
+            facebookPageId: selectedPair.facebookPageId,
+          },
+        });
+      }
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_WEBHOOK_SUBSCRIBED",
+        status: "COMPLETED",
+        metadata: {
+          facebookPageId: selectedPair.facebookPageId,
+        },
+      });
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_WEBHOOK_VERIFIED",
+        status: "COMPLETED",
+      });
+
+      const profileSnapshot = await fetchInstagramProfileSnapshot(
+        selectedPair.instagramProfessionalAccountId,
+        instagramAccessToken
+      );
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_HEALTH_AUDITED",
+        status: "COMPLETED",
+        metadata: {
+          profileResolved: Boolean(profileSnapshot),
+        },
+      });
+
+      const connectResult = await connectInstagramOneClick({
         businessId,
         tenantId: businessId,
         environment: "LIVE",
         replayToken: connectReplayToken,
         reconnect: oauthState.mode === "reconnect",
-        externalAccountRef: instagramConnection.pageId,
+        externalAccountRef: selectedPair.instagramProfessionalAccountId,
         scopes: grantedPermissions.length
           ? grantedPermissions
           : [
@@ -910,19 +1909,22 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             : [
                 "instagram_basic",
                 "instagram_manage_messages",
-                "pages_manage_metadata",
-              ],
-          businesses: [],
-          pages: [
-            {
-              facebookPageId: instagramConnection.facebookPageId,
-              instagramPageId: instagramConnection.pageId,
-            },
-          ],
-          instagramProfessionalAccountId: instagramConnection.pageId,
-          pageId: instagramConnection.pageId,
+              "pages_manage_metadata",
+            ],
+          businesses,
+          pages: validPairs.map((pair) => ({
+            facebookPageId: pair.facebookPageId,
+            instagramPageId: pair.instagramProfessionalAccountId,
+            instagramAccountType: pair.instagramAccountType,
+          })),
+          instagramProfessionalAccountId:
+            selectedPair.instagramProfessionalAccountId,
+          pageId: selectedPair.facebookPageId,
           webhookChallengeVerified: webhookSubscribed,
-          profile: profileSnapshot || {},
+          profile: {
+            ...(profileSnapshot || {}),
+            accountType: selectedPair.instagramAccountType || null,
+          },
           permissionAudit: {
             grantedPermissions,
             required: [
@@ -935,12 +1937,65 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             webhookSubscribed,
           },
         },
-      }).catch((error) => {
-        console.error("Connect hub Instagram canonical sync failed", error);
+      });
+
+      if (connectResult.integration?.status !== "CONNECTED") {
+        failInstagramConnect({
+          stage: "IG_CANONICAL_SAVED",
+          reason:
+            normalizeOptionalString(connectResult.attempt?.errorMessage) ||
+            normalizeOptionalString(connectResult.health?.rootCauseMessage) ||
+            "Instagram canonical connect did not reach CONNECTED status",
+          code:
+            normalizeOptionalString(connectResult.attempt?.errorCode) ||
+            normalizeOptionalString(connectResult.health?.rootCauseCode) ||
+            "IG_CANONICAL_SAVE_FAILED",
+          statusCode: 400,
+          metadata: {
+            attemptStatus: connectResult.attempt?.status || null,
+            attemptStep: connectResult.attempt?.step || null,
+          },
+        });
+      }
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_CANONICAL_SAVED",
+        status: "COMPLETED",
+        metadata: {
+          integrationKey: connectResult.integration?.integrationKey || null,
+          attemptKey: connectResult.attempt?.attemptKey || null,
+        },
+      });
+
+      const instagramClient = await upsertConnectedClient({
+        businessId,
+        platform: "INSTAGRAM",
+        pageId: selectedPair.instagramProfessionalAccountId,
+        accessToken: encrypt(instagramAccessToken),
+        aiTone,
+        businessInfo,
+        pricingInfo,
+        faqKnowledge,
+        salesInstructions,
       });
 
       connectedClients.push(instagramClient);
       await queueOnboardingDemoForClient(businessId, instagramClient);
+
+      await recordInstagramConnectStage({
+        traceId: instagramTraceId,
+        businessId,
+        stage: "IG_CONNECT_SUCCESS",
+        status: "COMPLETED",
+        metadata: {
+          clientId: instagramClient.id,
+          pageId: instagramClient.pageId,
+          facebookPageId: selectedPair.facebookPageId,
+        },
+        endedAt: new Date(),
+      });
     } else {
       const selectedPhoneNumberId = normalizeOptionalString(phoneNumberId);
       const resolvedPhoneNumberId = await fetchWhatsAppPhoneNumberId(
@@ -960,14 +2015,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         resolvedPhoneNumberId,
         longToken
       );
-      const whatsappClient = await upsertConnectedClient({
-        businessId,
-        platform: "WHATSAPP",
-        phoneNumberId: resolvedPhoneNumberId,
-        accessToken: encrypt(longToken),
-      });
-
-      await connectWhatsAppGuidedWizard({
+      const connectResult = await connectWhatsAppGuidedWizard({
         businessId,
         tenantId: businessId,
         environment: "LIVE",
@@ -998,8 +2046,36 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             normalizeOptionalString(phoneProfile?.status)?.toUpperCase() !==
             "DISCONNECTED",
         },
-      }).catch((error) => {
-        console.error("Connect hub WhatsApp canonical sync failed", error);
+      });
+
+      if (connectResult.integration?.status !== "CONNECTED") {
+        return res.status(400).json({
+          success: false,
+          data: {
+            platform: "WHATSAPP",
+            stage: "WA_CONNECT_FAILED",
+            reason:
+              normalizeOptionalString(connectResult.attempt?.errorMessage) ||
+              normalizeOptionalString(connectResult.health?.rootCauseMessage) ||
+              "WhatsApp canonical connect did not reach CONNECTED status",
+            code:
+              normalizeOptionalString(connectResult.attempt?.errorCode) ||
+              normalizeOptionalString(connectResult.health?.rootCauseCode) ||
+              "WA_CANONICAL_SAVE_FAILED",
+          },
+          message: "WhatsApp connect failed",
+          code:
+            normalizeOptionalString(connectResult.attempt?.errorCode) ||
+            normalizeOptionalString(connectResult.health?.rootCauseCode) ||
+            "WA_CANONICAL_SAVE_FAILED",
+        });
+      }
+
+      const whatsappClient = await upsertConnectedClient({
+        businessId,
+        platform: "WHATSAPP",
+        phoneNumberId: resolvedPhoneNumberId,
+        accessToken: encrypt(longToken),
       });
 
       connectedClients.push(whatsappClient);
@@ -1034,6 +2110,83 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       message: `${targetPlatform} connected successfully`,
     });
   } catch (error: any) {
+    if (error instanceof MetaOAuthFlowError) {
+      const doctorReport = instagramBusinessId
+        ? await runMetaConnectDoctor({
+            businessId: instagramBusinessId,
+            tenantId: instagramBusinessId,
+            provider: "INSTAGRAM",
+            environment: "LIVE",
+            autoResolve: true,
+          }).catch(() => null)
+        : null;
+      const doctorInstagramReport = Array.isArray((doctorReport as any)?.reports)
+        ? (doctorReport as any).reports.find(
+            (report: any) => String(report?.provider || "").toUpperCase() === "INSTAGRAM"
+          )
+        : null;
+      const doctorPrimaryDiagnostic = Array.isArray(doctorInstagramReport?.diagnostics)
+        ? doctorInstagramReport.diagnostics[0] || null
+        : null;
+      const missingPermission =
+        Array.isArray((error.metadata as any)?.missingPermissions) &&
+        (error.metadata as any).missingPermissions.length
+          ? String((error.metadata as any).missingPermissions[0] || "")
+          : null;
+      const actionable = buildActionableFailurePayload({
+        code: error.code || doctorPrimaryDiagnostic?.code || "UNKNOWN",
+        reason: error.reason || doctorPrimaryDiagnostic?.message || "Unknown error",
+        missingPermission: missingPermission || null,
+        retryAfterSeconds: 60,
+      });
+      const validPairs =
+        Array.isArray((error.metadata as any)?.validPairs) &&
+        (error.metadata as any).validPairs.length
+          ? (error.metadata as any).validPairs
+          : [];
+
+      if (instagramBusinessId) {
+        await recordInstagramConnectStage({
+          traceId: instagramTraceId,
+          businessId: instagramBusinessId,
+          stage: "IG_CONNECT_FAILED",
+          status: "FAILED",
+          metadata: {
+            failingStage: error.stage,
+            reason: error.reason,
+            code: error.code,
+            ...(error.metadata || {}),
+          },
+          endedAt: new Date(),
+        });
+      }
+
+      console.error("IG_CONNECT_FAILED", {
+        traceId: instagramTraceId,
+        stage: error.stage,
+        reason: error.reason,
+        code: error.code,
+        metadata: error.metadata,
+      });
+
+      return res.status(error.statusCode).json({
+        success: false,
+        data: {
+          platform: "INSTAGRAM",
+          stage: error.stage,
+          reason: error.reason,
+          code: error.code,
+          traceId: instagramTraceId,
+          actionable,
+          connectDoctor: doctorReport,
+          requiresPairSelection: actionable.reasonCode === "PAIR_SELECTION_REQUIRED",
+          validPairs,
+        },
+        message: error.reason,
+        code: error.code,
+      });
+    }
+
     if (error.code === "CLIENT_UNIQUE_KEY_REQUIRED") {
       return res.status(400).json({
         success: false,
@@ -1550,6 +2703,12 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
       normalizeOptionalString(req.query.platform)
     );
     const mode = parseMetaOAuthMode(normalizeOptionalString(req.query.mode));
+    const preferredFacebookPageId = normalizeOptionalString(
+      req.query.facebookPageId
+    );
+    const preferredInstagramProfessionalAccountId = normalizeOptionalString(
+      req.query.instagramAccountId
+    );
 
     if (!platform) {
       return res.status(400).json({
@@ -1576,7 +2735,11 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
       workspaceId: businessId,
       platform,
       mode,
+      preferredFacebookPageId,
+      preferredInstagramProfessionalAccountId,
     });
+    const parsedState = verifyMetaOAuthState(state);
+    const traceId = buildInstagramTraceId(parsedState?.nonce || null);
 
     if (mode === "reconnect") {
       console.info("Reconnect triggered", {
@@ -1587,7 +2750,7 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
 
     const metaRuntime = getMetaOAuthRuntimeConfig();
 
-    if (!metaRuntime) {
+    if (!metaRuntime || !metaRuntime.appSecret) {
       return res.status(500).json({
         success: false,
         data: null,
@@ -1615,6 +2778,22 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
       ].join(",")
     );
 
+    if (platform === "INSTAGRAM") {
+      await recordInstagramConnectStage({
+        traceId,
+        businessId,
+        stage: "IG_OAUTH_STARTED",
+        status: "COMPLETED",
+        metadata: {
+          mode,
+          platform,
+          workspaceId: businessId,
+          preferredFacebookPageId,
+          preferredInstagramProfessionalAccountId,
+        },
+      });
+    }
+
     return res.json({
       success: true,
       data: {
@@ -1623,6 +2802,8 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
         platform,
         mode,
         workspaceId: businessId,
+        preferredFacebookPageId,
+        preferredInstagramProfessionalAccountId,
       },
     });
   } catch (error) {

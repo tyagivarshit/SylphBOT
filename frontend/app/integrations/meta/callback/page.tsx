@@ -15,6 +15,16 @@ type PairOption = {
   instagramAccountType?: string | null;
 };
 
+type WhatsAppPhoneOption = {
+  phoneNumberId: string;
+  displayPhoneNumber?: string | null;
+  verifiedName?: string | null;
+  businessManagerId?: string | null;
+  businessManagerName?: string | null;
+  wabaId?: string | null;
+  wabaName?: string | null;
+};
+
 type ActionableFailure = {
   reasonCode: string;
   problem: string;
@@ -42,6 +52,7 @@ type ConnectDoctorReport = {
 };
 
 type FailurePayload = {
+  platform: "instagram" | "whatsapp";
   stage: string;
   reason: string;
   code: string;
@@ -49,6 +60,8 @@ type FailurePayload = {
   connectDoctor?: ConnectDoctorReport | null;
   requiresPairSelection?: boolean;
   validPairs?: PairOption[];
+  requiresPhoneSelection?: boolean;
+  availablePhoneNumbers?: WhatsAppPhoneOption[];
 };
 
 const buildSettingsRedirect = (params: Record<string, string>) => {
@@ -66,14 +79,16 @@ const buildSettingsRedirect = (params: Record<string, string>) => {
 const buildFallbackFailure = (
   reason: string,
   stage = "IG_CONNECT_FAILED",
-  code = "UNKNOWN"
+  code = "UNKNOWN",
+  platform: "instagram" | "whatsapp" = "instagram"
 ): FailurePayload => ({
+  platform,
   stage,
   reason,
   code,
   actionable: {
     reasonCode: "UNKNOWN",
-    problem: "Instagram connection failed.",
+    problem: "Meta connection failed.",
     cause: reason,
     fix: "Retry connection and review diagnostics.",
     cta: {
@@ -85,13 +100,17 @@ const buildFallbackFailure = (
   connectDoctor: null,
   requiresPairSelection: false,
   validPairs: [],
+  requiresPhoneSelection: false,
+  availablePhoneNumbers: [],
 });
 
 const buildProviderDeniedFailure = (input: {
+  platform: "instagram" | "whatsapp";
   stage: string;
   reason: string;
   errorCode: string;
 }): FailurePayload => ({
+  platform: input.platform,
   stage: input.stage,
   reason: input.reason,
   code: input.errorCode,
@@ -109,6 +128,8 @@ const buildProviderDeniedFailure = (input: {
   connectDoctor: null,
   requiresPairSelection: false,
   validPairs: [],
+  requiresPhoneSelection: false,
+  availablePhoneNumbers: [],
 });
 
 const readString = (value: unknown) => {
@@ -117,25 +138,41 @@ const readString = (value: unknown) => {
 };
 
 const readFailurePayload = (input: unknown): FailurePayload => {
-  const root = input && typeof input === "object" ? (input as any) : {};
+  const root =
+    input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const dataCandidate = root.data;
   const data =
-    root.data && typeof root.data === "object" ? (root.data as any) : {};
+    dataCandidate && typeof dataCandidate === "object"
+      ? (dataCandidate as Record<string, unknown>)
+      : {};
+  const platformValue = readString(data.platform || root.platform).toLowerCase();
+  const platform: "instagram" | "whatsapp" =
+    platformValue === "whatsapp" ? "whatsapp" : "instagram";
+  const actionableCandidate = data.actionable;
   const actionable =
-    data.actionable && typeof data.actionable === "object"
-      ? (data.actionable as ActionableFailure)
+    actionableCandidate && typeof actionableCandidate === "object"
+      ? (actionableCandidate as ActionableFailure)
       : null;
   const fallback = buildFallbackFailure(
-    readString(data.reason || root.message || "Instagram connect failed")
+    readString(data.reason || root.message || "Meta connect failed"),
+    "IG_CONNECT_FAILED",
+    "UNKNOWN",
+    platform
   );
 
   return {
+    platform,
     stage: readString(data.stage || "IG_CONNECT_FAILED"),
-    reason: readString(data.reason || root.message || "Instagram connect failed"),
+    reason: readString(data.reason || root.message || "Meta connect failed"),
     code: readString(data.code || root.code || "UNKNOWN"),
     actionable: actionable || fallback.actionable,
     connectDoctor: data.connectDoctor || null,
     requiresPairSelection: Boolean(data.requiresPairSelection),
     validPairs: Array.isArray(data.validPairs) ? (data.validPairs as PairOption[]) : [],
+    requiresPhoneSelection: Boolean(data.requiresPhoneSelection),
+    availablePhoneNumbers: Array.isArray(data.availablePhoneNumbers)
+      ? (data.availablePhoneNumbers as WhatsAppPhoneOption[])
+      : [],
   };
 };
 
@@ -147,6 +184,7 @@ function MetaCallbackContent() {
   const [failure, setFailure] = useState<FailurePayload | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [selectedPairKey, setSelectedPairKey] = useState<string>("");
+  const [selectedPhoneNumberId, setSelectedPhoneNumberId] = useState<string>("");
 
   useEffect(() => {
     if (connectStartedRef.current) {
@@ -157,7 +195,9 @@ function MetaCallbackContent() {
 
     const code = searchParams.get("code") || "";
     const state = searchParams.get("state") || "";
-    const platform = (searchParams.get("platform") || "").toLowerCase();
+    const platformParam = (searchParams.get("platform") || "").toLowerCase();
+    const platform: "instagram" | "whatsapp" =
+      platformParam === "whatsapp" ? "whatsapp" : "instagram";
     const providerError = readString(searchParams.get("error"));
     const providerReason = readString(
       searchParams.get("error_reason") || searchParams.get("reason")
@@ -169,6 +209,7 @@ function MetaCallbackContent() {
     if (providerError || providerReason) {
       setFailure(
         buildProviderDeniedFailure({
+          platform,
           stage: failureStage,
           reason:
             providerDescription ||
@@ -187,7 +228,8 @@ function MetaCallbackContent() {
         buildFallbackFailure(
           "OAuth callback payload is missing required parameters.",
           failureStage || "IG_CALLBACK_RECEIVED",
-          "OAUTH_CALLBACK_PAYLOAD_MISSING"
+          "OAUTH_CALLBACK_PAYLOAD_MISSING",
+          platform
         )
       );
       setLoading(false);
@@ -216,6 +258,11 @@ function MetaCallbackContent() {
               ? `${resolvedFailure.validPairs[0].facebookPageId}:${resolvedFailure.validPairs[0].instagramProfessionalAccountId}`
               : ""
           );
+          setSelectedPhoneNumberId(
+            resolvedFailure.availablePhoneNumbers?.length
+              ? resolvedFailure.availablePhoneNumbers[0].phoneNumberId
+              : ""
+          );
           setLoading(false);
           return;
         }
@@ -235,9 +282,10 @@ function MetaCallbackContent() {
       } catch {
         setFailure(
           buildFallbackFailure(
-            "Network failure while finalizing Instagram connect.",
+            "Network failure while finalizing Meta connect.",
             "IG_CONNECT_FAILED",
-            "NETWORK_FAILURE"
+            "NETWORK_FAILURE",
+            platform
           )
         );
         setLoading(false);
@@ -252,24 +300,34 @@ function MetaCallbackContent() {
       return [];
     }
 
-    const instagramReport = failure.connectDoctor.reports.find(
-      (report) => String(report.provider || "").toUpperCase() === "INSTAGRAM"
+    const provider = failure.platform === "whatsapp" ? "WHATSAPP" : "INSTAGRAM";
+    const providerReport = failure.connectDoctor.reports.find(
+      (report) => String(report.provider || "").toUpperCase() === provider
     );
 
-    return Array.isArray(instagramReport?.diagnostics)
-      ? instagramReport.diagnostics
+    return Array.isArray(providerReport?.diagnostics)
+      ? providerReport.diagnostics
       : [];
   }, [failure]);
 
-  const startReconnect = async (pair?: PairOption) => {
+  const startReconnect = async (options?: {
+    pair?: PairOption;
+    phoneNumberId?: string;
+    platform?: "instagram" | "whatsapp";
+  }) => {
+    const reconnectPlatform = options?.platform || failure?.platform || "instagram";
     const query = new URLSearchParams({
-      platform: "instagram",
+      platform: reconnectPlatform.toUpperCase(),
       mode: "reconnect",
     });
 
-    if (pair) {
-      query.set("facebookPageId", pair.facebookPageId);
-      query.set("instagramAccountId", pair.instagramProfessionalAccountId);
+    if (options?.pair) {
+      query.set("facebookPageId", options.pair.facebookPageId);
+      query.set("instagramAccountId", options.pair.instagramProfessionalAccountId);
+    }
+
+    if (options?.phoneNumberId) {
+      query.set("phoneNumberId", options.phoneNumberId);
     }
 
     const response = await apiFetch<{
@@ -286,10 +344,11 @@ function MetaCallbackContent() {
   };
 
   const runAutoRepair = async () => {
+    const provider = failure?.platform === "whatsapp" ? "WHATSAPP" : "INSTAGRAM";
     await apiFetch("/api/integrations/connect-hub/connect/meta/doctor", {
       method: "POST",
       body: JSON.stringify({
-        provider: "INSTAGRAM",
+        provider,
         environment: "LIVE",
         autoResolve: true,
       }),
@@ -330,14 +389,32 @@ function MetaCallbackContent() {
         if (!pair) {
           throw new Error("Select a Facebook Page and Instagram pair to continue.");
         }
-        await startReconnect(pair);
+        await startReconnect({
+          pair,
+          platform: "instagram",
+        });
+        return;
+      }
+
+      if (action === "SELECT_PHONE_NUMBER") {
+        if (!selectedPhoneNumberId) {
+          throw new Error("Select a WhatsApp mobile number to continue.");
+        }
+
+        await startReconnect({
+          phoneNumberId: selectedPhoneNumberId,
+          platform: "whatsapp",
+        });
         return;
       }
 
       await startReconnect();
-    } catch (error: any) {
+    } catch (error: unknown) {
       const reason =
-        String(error?.message || "Action failed. Please retry.").trim() ||
+        String(
+          (error instanceof Error ? error.message : "") ||
+            "Action failed. Please retry."
+        ).trim() ||
         "Action failed. Please retry.";
       setFailure((current) =>
         current
@@ -372,10 +449,12 @@ function MetaCallbackContent() {
     );
   }
 
+  const providerLabel = failure.platform === "whatsapp" ? "WhatsApp" : "Instagram";
+
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-10">
       <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-900">Instagram Connect Needs Action</h1>
+        <h1 className="text-xl font-semibold text-slate-900">{providerLabel} Connect Needs Action</h1>
         <p className="mt-2 text-sm text-slate-600">Problem: {failure.actionable.problem}</p>
         <p className="mt-2 text-sm text-slate-700">Cause: {failure.actionable.cause}</p>
         <p className="mt-2 text-sm text-slate-700">How to fix: {failure.actionable.fix}</p>
@@ -404,9 +483,48 @@ function MetaCallbackContent() {
                       onChange={(event) => setSelectedPairKey(event.target.value)}
                     />
                     <span className="text-slate-700">
-                      {pair.facebookPageName || pair.facebookPageId} <-> @
+                      {pair.facebookPageName || pair.facebookPageId} {"-> @"}
                       {pair.instagramUsername || pair.instagramProfessionalAccountId} (
                       {pair.instagramAccountType || "UNKNOWN"})
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {failure.requiresPhoneSelection && failure.availablePhoneNumbers?.length ? (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-medium text-slate-900">
+              Select WhatsApp mobile number
+            </p>
+            <div className="mt-3 space-y-2">
+              {failure.availablePhoneNumbers.map((phone) => {
+                const value = phone.phoneNumberId;
+                const line =
+                  phone.verifiedName ||
+                  phone.displayPhoneNumber ||
+                  phone.phoneNumberId;
+                const detail = [phone.businessManagerName, phone.wabaName]
+                  .filter(Boolean)
+                  .join(" - ");
+
+                return (
+                  <label
+                    key={value}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm"
+                  >
+                    <input
+                      type="radio"
+                      name="phoneNumber"
+                      value={value}
+                      checked={selectedPhoneNumberId === value}
+                      onChange={(event) => setSelectedPhoneNumberId(event.target.value)}
+                    />
+                    <span className="text-slate-700">
+                      {line} ({phone.phoneNumberId})
+                      {detail ? ` - ${detail}` : ""}
                     </span>
                   </label>
                 );

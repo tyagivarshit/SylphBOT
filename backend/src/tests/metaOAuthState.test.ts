@@ -22,6 +22,7 @@ export const metaOAuthStateTests: TestCase[] = [
         mode: "reconnect",
         preferredFacebookPageId: "fb_page_1",
         preferredInstagramProfessionalAccountId: "ig_prof_1",
+        preferredPhoneNumberId: "wa_phone_1",
       });
 
       const payload = verifyMetaOAuthState(state);
@@ -37,6 +38,7 @@ export const metaOAuthStateTests: TestCase[] = [
         payload!.preferredInstagramProfessionalAccountId,
         "ig_prof_1"
       );
+      assert.equal(payload!.preferredPhoneNumberId, "wa_phone_1");
     },
   },
   {

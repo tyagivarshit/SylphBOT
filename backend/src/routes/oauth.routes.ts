@@ -20,16 +20,56 @@ const buildMetaCallbackRedirect = (params?: Record<string, string>) => {
   return url.toString();
 };
 
-const buildInstagramTraceId = (nonce?: string | null) => {
+const buildMetaTraceId = (nonce?: string | null) => {
   const normalizedNonce = String(nonce || "").trim();
   return normalizedNonce
-    ? `ig_connect_${normalizedNonce}`
-    : `ig_connect_${Date.now()}`;
+    ? `meta_connect_${normalizedNonce}`
+    : `meta_connect_${Date.now()}`;
+};
+
+const getProviderStage = (
+  provider: "INSTAGRAM" | "WHATSAPP",
+  stage:
+    | "CALLBACK_RECEIVED"
+    | "STATE_VERIFIED"
+    | "CONNECT_FAILED"
+    | "CODE_EXCHANGED"
+) => {
+  if (provider === "WHATSAPP") {
+    if (stage === "CALLBACK_RECEIVED") {
+      return "WA_CALLBACK_RECEIVED";
+    }
+
+    if (stage === "STATE_VERIFIED") {
+      return "WA_STATE_VERIFIED";
+    }
+
+    if (stage === "CONNECT_FAILED") {
+      return "WA_CONNECT_FAILED";
+    }
+
+    return "WA_CODE_EXCHANGED";
+  }
+
+  if (stage === "CALLBACK_RECEIVED") {
+    return "IG_CALLBACK_RECEIVED";
+  }
+
+  if (stage === "STATE_VERIFIED") {
+    return "IG_STATE_VERIFIED";
+  }
+
+  if (stage === "CONNECT_FAILED") {
+    return "IG_CONNECT_FAILED";
+  }
+
+  return "IG_CODE_EXCHANGED";
 };
 
 const recordMetaCallbackStage = async (input: {
   businessId: string;
   traceId: string;
+  provider: "INSTAGRAM" | "WHATSAPP";
   stage: string;
   status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
   metadata?: Record<string, unknown>;
@@ -52,13 +92,13 @@ const recordMetaCallbackStage = async (input: {
   await recordObservabilityEvent({
     businessId: input.businessId,
     tenantId: input.businessId,
-    eventType: `meta.instagram.callback.${input.stage.toLowerCase()}`,
-    message: `Instagram callback stage ${input.stage}`,
+    eventType: `meta.${input.provider.toLowerCase()}.callback.${input.stage.toLowerCase()}`,
+    message: `${input.provider} callback stage ${input.stage}`,
     severity,
     context: {
       traceId: input.traceId,
       correlationId: input.traceId,
-      provider: "INSTAGRAM",
+      provider: input.provider,
       component: "meta-oauth-callback",
       phase: "connect",
     },
@@ -85,54 +125,58 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         buildMetaCallbackRedirect({
           integration: "error",
           reason: "invalid_oauth_state",
-          stage: "IG_STATE_VERIFIED",
+          stage: getProviderStage("INSTAGRAM", "STATE_VERIFIED"),
           platform: "instagram",
         })
       );
     }
 
-    const traceId = buildInstagramTraceId(oauthState.nonce);
+    const traceId = buildMetaTraceId(oauthState.nonce);
+    const provider = oauthState.platform === "WHATSAPP" ? "WHATSAPP" : "INSTAGRAM";
+    const callbackReceivedStage = getProviderStage(provider, "CALLBACK_RECEIVED");
+    const stateVerifiedStage = getProviderStage(provider, "STATE_VERIFIED");
+    const connectFailedStage = getProviderStage(provider, "CONNECT_FAILED");
+    const codeExchangedStage = getProviderStage(provider, "CODE_EXCHANGED");
 
-    if (oauthState.platform === "INSTAGRAM") {
-      await recordMetaCallbackStage({
-        businessId: oauthState.businessId,
-        traceId,
-        stage: "IG_CALLBACK_RECEIVED",
-        status: "COMPLETED",
-        metadata: {
-          mode: oauthState.mode,
-        },
-      });
-      await recordMetaCallbackStage({
-        businessId: oauthState.businessId,
-        traceId,
-        stage: "IG_STATE_VERIFIED",
-        status: "COMPLETED",
-      });
-    }
+    await recordMetaCallbackStage({
+      businessId: oauthState.businessId,
+      traceId,
+      provider,
+      stage: callbackReceivedStage,
+      status: "COMPLETED",
+      metadata: {
+        mode: oauthState.mode,
+      },
+    });
+    await recordMetaCallbackStage({
+      businessId: oauthState.businessId,
+      traceId,
+      provider,
+      stage: stateVerifiedStage,
+      status: "COMPLETED",
+    });
 
     if (providerError) {
-      if (oauthState.platform === "INSTAGRAM") {
-        await recordMetaCallbackStage({
-          businessId: oauthState.businessId,
-          traceId,
-          stage: "IG_CONNECT_FAILED",
-          status: "FAILED",
-          metadata: {
-            failingStage: "IG_CALLBACK_RECEIVED",
-            reason: providerErrorDescription || providerErrorReason || providerError,
-            code: "IG_PROVIDER_DENIED",
-          },
-          endedAt: new Date(),
-        });
-      }
+      await recordMetaCallbackStage({
+        businessId: oauthState.businessId,
+        traceId,
+        provider,
+        stage: connectFailedStage,
+        status: "FAILED",
+        metadata: {
+          failingStage: callbackReceivedStage,
+          reason: providerErrorDescription || providerErrorReason || providerError,
+          code: `${provider === "WHATSAPP" ? "WA" : "IG"}_PROVIDER_DENIED`,
+        },
+        endedAt: new Date(),
+      });
 
       return res.redirect(
         buildMetaCallbackRedirect({
           platform: oauthState.platform.toLowerCase(),
           mode: oauthState.mode,
           state: rawState,
-          stage: "IG_CALLBACK_RECEIVED",
+          stage: callbackReceivedStage,
           error: providerError,
           error_reason: providerErrorReason || "oauth_provider_denied",
           error_description:
@@ -147,20 +191,19 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     }
 
     if (!code) {
-      if (oauthState.platform === "INSTAGRAM") {
-        await recordMetaCallbackStage({
-          businessId: oauthState.businessId,
-          traceId,
-          stage: "IG_CONNECT_FAILED",
-          status: "FAILED",
-          metadata: {
-            failingStage: "IG_CODE_EXCHANGED",
-            reason: "Meta callback did not include authorization code",
-            code: "IG_OAUTH_CODE_MISSING",
-          },
-          endedAt: new Date(),
-        });
-      }
+      await recordMetaCallbackStage({
+        businessId: oauthState.businessId,
+        traceId,
+        provider,
+        stage: connectFailedStage,
+        status: "FAILED",
+        metadata: {
+          failingStage: codeExchangedStage,
+          reason: "Meta callback did not include authorization code",
+          code: `${provider === "WHATSAPP" ? "WA" : "IG"}_OAUTH_CODE_MISSING`,
+        },
+        endedAt: new Date(),
+      });
 
       return res.redirect(
         buildMetaCallbackRedirect({
@@ -168,7 +211,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
           mode: oauthState.mode,
           state: rawState,
           reason: "oauth_code_missing",
-          stage: "IG_CODE_EXCHANGED",
+          stage: codeExchangedStage,
           integration: "error",
         })
       );
@@ -188,7 +231,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       buildMetaCallbackRedirect({
         integration: "error",
         reason: "oauth_callback_failed",
-        stage: "IG_CALLBACK_RECEIVED",
+        stage: getProviderStage("INSTAGRAM", "CALLBACK_RECEIVED"),
         platform: "instagram",
       })
     );

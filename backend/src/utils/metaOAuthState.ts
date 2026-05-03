@@ -16,6 +16,7 @@ export type MetaOAuthStatePayload = {
   mode: MetaOAuthMode;
   preferredFacebookPageId?: string | null;
   preferredInstagramProfessionalAccountId?: string | null;
+  preferredPhoneNumberId?: string | null;
 };
 
 const getStateSecret = () =>
@@ -74,6 +75,10 @@ const decodePayload = (value: string): MetaOAuthStatePayload | null => {
         typeof parsed?.preferredInstagramProfessionalAccountId === "string"
           ? parsed.preferredInstagramProfessionalAccountId
           : null,
+      preferredPhoneNumberId:
+        typeof parsed?.preferredPhoneNumberId === "string"
+          ? parsed.preferredPhoneNumberId
+          : null,
     };
   } catch {
     return null;
@@ -105,6 +110,7 @@ export const createMetaOAuthState = (input: {
   mode?: MetaOAuthMode;
   preferredFacebookPageId?: string | null;
   preferredInstagramProfessionalAccountId?: string | null;
+  preferredPhoneNumberId?: string | null;
 }) => {
   const normalizeOptionalString = (value?: string | null) => {
     const normalized = String(value || "").trim();
@@ -125,6 +131,7 @@ export const createMetaOAuthState = (input: {
     preferredInstagramProfessionalAccountId: normalizeOptionalString(
       input.preferredInstagramProfessionalAccountId
     ),
+    preferredPhoneNumberId: normalizeOptionalString(input.preferredPhoneNumberId),
   };
 
   const encoded = encodePayload(payload);

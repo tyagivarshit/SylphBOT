@@ -16,8 +16,8 @@ router.get("/plans", billing_controller_1.BillingController.getPlans);
 /* ======================================
 GET CURRENT BILLING
 ====================================== */
-router.get("/", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:view"), subscription_middleware_1.attachBillingContext, billing_controller_1.BillingController.getBilling);
-router.get("/current", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:view"), subscription_middleware_1.attachBillingContext, billing_controller_1.BillingController.getBilling);
+router.get("/", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:view"), billing_controller_1.BillingController.getBilling);
+router.get("/current", auth_middleware_1.protect, tenant_middleware_1.requireBusinessContext, (0, rbac_middleware_1.requirePermission)("billing:view"), billing_controller_1.BillingController.getBilling);
 /* ======================================
 CHECKOUT
 ====================================== */

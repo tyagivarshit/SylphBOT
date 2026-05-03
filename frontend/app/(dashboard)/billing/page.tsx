@@ -71,6 +71,10 @@ type PlansResponse = {
     description: string;
   }>;
   trialDays?: number;
+  meta?: {
+    degraded?: boolean;
+    reason?: string | null;
+  } | null;
 };
 
 type BillingApiResponse = {
@@ -78,6 +82,16 @@ type BillingApiResponse = {
   invoices?: Invoice[];
   billing?: BillingContext | null;
   currency?: Currency;
+  meta?: {
+    degraded?: boolean;
+    reason?: string | null;
+  } | null;
+};
+
+type BillingSnapshot = {
+  savedAt: number;
+  billingData: BillingApiResponse;
+  plansData: PlansResponse;
 };
 
 const DEFAULT_BILLING_CONTEXT: BillingContext = {
@@ -85,6 +99,71 @@ const DEFAULT_BILLING_CONTEXT: BillingContext = {
   status: "INACTIVE",
   allowEarly: false,
   remainingEarly: 0,
+};
+
+const BILLING_SNAPSHOT_KEY = "billing_page_snapshot_v1";
+
+const readCachedSnapshot = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(BILLING_SNAPSHOT_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as BillingSnapshot;
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    if (!parsed.billingData || !parsed.plansData) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedSnapshot = (snapshot: BillingSnapshot) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(BILLING_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {
+    // No-op: local cache is best effort only.
+  }
+};
+
+const fetchJsonWithRetry = async <T,>(url: string, retries = 2) => {
+  let attempt = 0;
+  let lastError: Error | null = null;
+
+  while (attempt <= retries) {
+    try {
+      return await fetchJson<T>(url);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Request failed");
+      attempt += 1;
+
+      if (attempt > retries) {
+        break;
+      }
+
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, 350 * attempt)
+      );
+    }
+  }
+
+  throw lastError || new Error("Request failed");
 };
 
 const formatMoney = (amount: number, currency: Currency) =>
@@ -145,56 +224,99 @@ function BillingPageContent() {
   const [pageLoading, setPageLoading] = useState(true);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
 
+  const applyBillingState = useCallback((billingData: BillingApiResponse) => {
+    setSubscription(billingData.subscription || null);
+    setInvoices(Array.isArray(billingData.invoices) ? billingData.invoices : []);
+    setBillingContext(billingData.billing || DEFAULT_BILLING_CONTEXT);
+
+    const nextCurrency =
+      billingData.subscription?.currency || billingData.currency || "INR";
+
+    setCurrency(nextCurrency);
+    setLockedCurrency(billingData.subscription?.currency || null);
+
+    if (
+      billingData.subscription?.billingCycle === "monthly" ||
+      billingData.subscription?.billingCycle === "yearly"
+    ) {
+      setBilling(billingData.subscription.billingCycle);
+    }
+  }, []);
+
+  const applyPlansState = useCallback((plansData: PlansResponse) => {
+    setPlansResponse({
+      plans: Array.isArray(plansData.plans) ? plansData.plans : [],
+      addons: Array.isArray(plansData.addons) ? plansData.addons : [],
+      trialDays: plansData.trialDays || 7,
+    });
+  }, []);
+
   const loadBilling = useCallback(async () => {
     try {
       setPageLoading(true);
       setLoadWarning(null);
+      const cachedSnapshot = readCachedSnapshot();
 
       const [billingResult, plansResult] = await Promise.allSettled([
-        fetchJson<BillingApiResponse>("/api/billing"),
-        fetchJson<PlansResponse>("/api/billing/plans"),
+        fetchJsonWithRetry<BillingApiResponse>("/api/billing", 2),
+        fetchJsonWithRetry<PlansResponse>("/api/billing/plans", 1),
       ]);
 
       const warnings: string[] = [];
+      let resolvedBillingData: BillingApiResponse | null = null;
+      let resolvedPlansData: PlansResponse | null = null;
 
       if (billingResult.status === "fulfilled") {
-        const billingData = billingResult.value;
+        resolvedBillingData = billingResult.value;
+        applyBillingState(resolvedBillingData);
 
-        setSubscription(billingData.subscription || null);
-        setInvoices(billingData.invoices || []);
-        setBillingContext(billingData.billing || DEFAULT_BILLING_CONTEXT);
-
-        const nextCurrency =
-          billingData.subscription?.currency || billingData.currency || "INR";
-
-        setCurrency(nextCurrency);
-        setLockedCurrency(billingData.subscription?.currency || null);
-
-        if (billingData.subscription?.billingCycle) {
-          setBilling(billingData.subscription.billingCycle);
+        if (resolvedBillingData.meta?.degraded) {
+          warnings.push("Live billing sync is delayed. Showing safe fallback data.");
         }
       } else {
-        warnings.push("Billing summary is temporarily unavailable.");
-        setSubscription(null);
-        setInvoices([]);
-        setBillingContext(DEFAULT_BILLING_CONTEXT);
-        setLockedCurrency(null);
+        const fallback = cachedSnapshot?.billingData || null;
+        if (fallback) {
+          resolvedBillingData = fallback;
+          applyBillingState(fallback);
+          warnings.push("Live billing summary is temporarily delayed. Showing your latest saved snapshot.");
+        } else {
+          warnings.push("Billing summary is temporarily unavailable.");
+          setSubscription(null);
+          setInvoices([]);
+          setBillingContext(DEFAULT_BILLING_CONTEXT);
+          setLockedCurrency(null);
+        }
       }
 
       if (plansResult.status === "fulfilled") {
-        const plansData = plansResult.value;
+        resolvedPlansData = plansResult.value;
+        applyPlansState(resolvedPlansData);
 
-        setPlansResponse({
-          plans: plansData.plans || [],
-          addons: plansData.addons || [],
-          trialDays: plansData.trialDays || 7,
-        });
+        const degradedMeta = plansResult.value?.meta;
+        if (degradedMeta?.degraded) {
+          warnings.push("Plan catalog is running in recovery mode.");
+        }
       } else {
-        warnings.push("Plan catalog is temporarily unavailable.");
-        setPlansResponse({
-          plans: [],
-          addons: [],
-          trialDays: 7,
+        const fallback = cachedSnapshot?.plansData || null;
+        if (fallback) {
+          resolvedPlansData = fallback;
+          applyPlansState(fallback);
+          warnings.push("Plan catalog sync is delayed. Showing your latest saved plan list.");
+        } else {
+          warnings.push("Plan catalog is temporarily unavailable.");
+          setPlansResponse({
+            plans: [],
+            addons: [],
+            trialDays: 7,
+          });
+        }
+      }
+
+      if (resolvedBillingData && resolvedPlansData) {
+        writeCachedSnapshot({
+          savedAt: Date.now(),
+          billingData: resolvedBillingData,
+          plansData: resolvedPlansData,
         });
       }
 
@@ -216,7 +338,7 @@ function BillingPageContent() {
     } finally {
       setPageLoading(false);
     }
-  }, []);
+  }, [applyBillingState, applyPlansState]);
 
   useEffect(() => {
     void loadBilling();

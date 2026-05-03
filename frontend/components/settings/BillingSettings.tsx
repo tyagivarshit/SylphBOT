@@ -22,6 +22,34 @@ type BillingResponse = {
     messagesUsed?: number;
     followupsUsed?: number;
   } | null;
+  meta?: {
+    degraded?: boolean;
+    reason?: string | null;
+  } | null;
+};
+
+const FALLBACK_BILLING: BillingResponse = {
+  subscription: {
+    status: "INACTIVE",
+    stripeSubscriptionId: null,
+    plan: {
+      name: "FREE PLAN",
+      type: "LOCKED",
+    },
+  },
+  billing: {
+    status: "INACTIVE",
+    planKey: "FREE_LOCKED",
+  },
+  usage: {
+    aiCallsUsed: 0,
+    messagesUsed: 0,
+    followupsUsed: 0,
+  },
+  meta: {
+    degraded: true,
+    reason: "settings_billing_fallback",
+  },
 };
 
 export default function BillingSettings() {
@@ -36,7 +64,7 @@ export default function BillingSettings() {
       });
 
       if (!response.success || !response.data) {
-        throw new Error(response.message || "Failed to load billing");
+        return FALLBACK_BILLING;
       }
 
       return response.data;
@@ -46,6 +74,7 @@ export default function BillingSettings() {
   const subscription = data?.subscription;
   const billing = data?.billing;
   const isPaidSubscription = Boolean(subscription?.stripeSubscriptionId);
+  const billingDegraded = Boolean(data?.meta?.degraded);
 
   const portalMutation = useMutation({
     mutationFn: async () => {
@@ -55,7 +84,7 @@ export default function BillingSettings() {
       });
 
       if (!response.success || !response.data?.url) {
-        throw new Error(response.message || "Portal failed");
+        throw new Error(response.message || "Billing portal is temporarily unavailable");
       }
 
       return response.data.url as string;
@@ -118,6 +147,11 @@ export default function BillingSettings() {
         <p className="text-sm text-gray-500 mt-1">
           Manage your subscription and billing
         </p>
+        {billingDegraded ? (
+          <p className="mt-2 text-xs text-amber-700">
+            Live billing sync is delayed. Safe fallback data is shown.
+          </p>
+        ) : null}
       </div>
 
       <div className="border border-blue-100 rounded-2xl p-5 flex items-center justify-between bg-white/70 backdrop-blur-xl hover:shadow-md transition gap-4">

@@ -24,7 +24,6 @@ router.get(
   protect,
   requireBusinessContext,
   requirePermission("billing:view"),
-  attachBillingContext,
   BillingController.getBilling
 );
 router.get(
@@ -32,7 +31,6 @@ router.get(
   protect,
   requireBusinessContext,
   requirePermission("billing:view"),
-  attachBillingContext,
   BillingController.getBilling
 );
 

@@ -84,6 +84,54 @@ const EMPTY_BILLING_CONTEXT: BillingContext = {
   allowEarly: false,
   remainingEarly: 0,
 };
+
+type PlanRow = {
+  id: string;
+  name: string;
+  type: string;
+  priceIdINR: string | null;
+  priceIdUSD: string | null;
+};
+
+const mapPublicPlans = (plans: PlanRow[] = []) => {
+  const planMap = new Map(
+    plans.map((plan) => [String(plan.type || plan.name).toUpperCase(), plan])
+  );
+
+  return getPublicPricingPlans().map((plan) => {
+    const existing =
+      planMap.get(plan.key) || planMap.get(plan.label.toUpperCase());
+
+    return {
+      id: existing?.id || plan.key,
+      name: plan.label,
+      type: existing?.type || plan.key,
+      priceIdINR: existing?.priceIdINR || null,
+      priceIdUSD: existing?.priceIdUSD || null,
+      description: plan.description,
+      popular: Boolean(plan.popular),
+      monthlyPrice: plan.monthlyPrice,
+      yearlyPrice: plan.yearlyPrice,
+      limits: plan.limits,
+      features: plan.features,
+    };
+  });
+};
+
+const buildPlansPayload = (input?: {
+  plans?: PlanRow[];
+  degraded?: boolean;
+  reason?: string | null;
+}) => ({
+  success: true,
+  trialDays: TRIAL_DAYS,
+  addons: getAddonCatalog(),
+  plans: mapPublicPlans(input?.plans || []),
+  meta: {
+    degraded: Boolean(input?.degraded),
+    reason: String(input?.reason || "").trim() || null,
+  },
+});
 const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -281,6 +329,73 @@ export class BillingController {
     };
   }
 
+  private static async resolveStripeCustomerIdForPortal(input: {
+    businessId: string;
+    email: string;
+    subscriptionProviderId?: string | null;
+  }) {
+    const normalizedBusinessId = String(input.businessId || "").trim();
+    const normalizedEmail = String(input.email || "").trim().toLowerCase();
+
+    if (!normalizedBusinessId || !normalizedEmail) {
+      return null;
+    }
+
+    const customers = await stripe.customers
+      .list({
+        email: normalizedEmail,
+        limit: 10,
+      })
+      .then((response) => (Array.isArray(response.data) ? response.data : []))
+      .catch(() => []);
+
+    if (!customers.length) {
+      return null;
+    }
+
+    const customerWithBusinessId =
+      customers.find((customer) => {
+        const metadata = toRecord(customer.metadata);
+        const customerBusinessId = String(metadata.businessId || "").trim();
+        return customerBusinessId && customerBusinessId === normalizedBusinessId;
+      }) || null;
+
+    if (customerWithBusinessId?.id) {
+      return customerWithBusinessId.id;
+    }
+
+    const customerWithSubscription =
+      input.subscriptionProviderId &&
+      (await Promise.all(
+        customers.map(async (customer) => {
+          if (!customer.id || !input.subscriptionProviderId) {
+            return false;
+          }
+
+          const subscriptions = await stripe.subscriptions
+            .list({
+              customer: customer.id,
+              status: "all",
+              limit: 10,
+            })
+            .catch(() => ({ data: [] } as { data: Array<{ id?: string }> }));
+
+          return subscriptions.data.some(
+            (subscription) => String(subscription.id || "").trim() === input.subscriptionProviderId
+          );
+        })
+      ).then((matches) => {
+        const index = matches.findIndex(Boolean);
+        return index >= 0 ? customers[index] : null;
+      }));
+
+    if (customerWithSubscription?.id) {
+      return customerWithSubscription.id;
+    }
+
+    return customers[0]?.id || null;
+  }
+
   private static async buildBillingResponse(
     businessId: string | null,
     req: Request
@@ -293,6 +408,10 @@ export class BillingController {
         usage: EMPTY_USAGE_SUMMARY,
         currency: resolveBillingCurrency(req),
         invoices: [],
+        meta: {
+          degraded: false,
+          reason: null,
+        },
       };
     }
 
@@ -344,20 +463,32 @@ export class BillingController {
 
     const billingContext = billingContextResult.value;
     const usage = usageResult.value;
-    const invoices = invoicesResult.value.map(mapInvoiceForClient);
+    const invoicesRaw = Array.isArray(invoicesResult.value)
+      ? invoicesResult.value
+      : [];
+    const invoices = invoicesRaw.map(mapInvoiceForClient);
+    const degraded =
+      billingContextResult.timedOut ||
+      billingContextResult.failed ||
+      usageResult.timedOut ||
+      usageResult.failed ||
+      invoicesResult.timedOut ||
+      invoicesResult.failed;
+    const reasons = [
+      billingContextResult.timedOut ? "context_timeout" : null,
+      billingContextResult.failed ? "context_failed" : null,
+      usageResult.timedOut ? "usage_timeout" : null,
+      usageResult.failed ? "usage_failed" : null,
+      invoicesResult.timedOut ? "invoices_timeout" : null,
+      invoicesResult.failed ? "invoices_failed" : null,
+    ].filter(Boolean);
 
     console.info("BILLING_PROJECTION_READY", {
       businessId,
       contextTimedOut: billingContextResult.timedOut,
       usageTimedOut: usageResult.timedOut,
       invoicesTimedOut: invoicesResult.timedOut,
-      usedFallback:
-        billingContextResult.timedOut ||
-        billingContextResult.failed ||
-        usageResult.timedOut ||
-        usageResult.failed ||
-        invoicesResult.timedOut ||
-        invoicesResult.failed,
+      usedFallback: degraded,
     });
 
     return {
@@ -374,6 +505,10 @@ export class BillingController {
         : EMPTY_USAGE_SUMMARY,
       currency: billingContext.subscription?.currency || resolveBillingCurrency(req),
       invoices,
+      meta: {
+        degraded,
+        reason: reasons.length ? reasons.join(",") : null,
+      },
     };
   }
 
@@ -452,12 +587,22 @@ export class BillingController {
         });
       }
 
+      assertStripeConfigReady();
+
       const currency = resolveBillingCurrency(req);
       const pricingPlan = getPricingPlanConfig(normalizedPlan);
       const unitPrice =
         normalizedBilling === "yearly"
           ? pricingPlan.yearlyPrice[currency]
           : pricingPlan.monthlyPrice[currency];
+
+      if (!Number.isFinite(Number(unitPrice)) || Number(unitPrice) <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Pricing is not configured for ${normalizedPlan} (${currency}, ${normalizedBilling})`,
+        });
+      }
+
       const explicitUnitAmountMinor = Number(req.body?.unitAmountMinor || req.body?.amountMinor || 0);
       const customUnitPriceMinor =
         Number.isFinite(explicitUnitAmountMinor) && explicitUnitAmountMinor > 0
@@ -578,12 +723,19 @@ export class BillingController {
         error.message?.includes("Currency cannot be changed") ||
         error.message?.includes("Invalid plan") ||
         error.message?.includes("Invalid billing") ||
-        error.message?.includes("proposal_not_checkout_ready") ||
-        error.message?.includes("stripe_config_invalid")
+        error.message?.includes("proposal_not_checkout_ready")
       ) {
         return res.status(400).json({
           success: false,
           message: error.message,
+        });
+      }
+
+      if (error.message?.includes("stripe_config_invalid")) {
+        return res.status(503).json({
+          success: false,
+          code: "BILLING_PROVIDER_UNAVAILABLE",
+          message: "Billing provider is temporarily unavailable. Please retry shortly.",
         });
       }
 
@@ -613,40 +765,25 @@ export class BillingController {
         },
       });
 
-      const planMap = new Map(
-        plans.map((plan) => [String(plan.type || plan.name).toUpperCase(), plan])
+      return res.json(
+        buildPlansPayload({
+          plans: plans.map((plan) => ({
+            id: plan.id,
+            name: plan.name,
+            type: String(plan.type || "").trim(),
+            priceIdINR: plan.priceIdINR,
+            priceIdUSD: plan.priceIdUSD,
+          })),
+        })
       );
-
-      return res.json({
-        success: true,
-        trialDays: TRIAL_DAYS,
-        addons: getAddonCatalog(),
-        plans: getPublicPricingPlans().map((plan) => {
-          const existing =
-            planMap.get(plan.key) || planMap.get(plan.label.toUpperCase());
-
-          return {
-            id: existing?.id || plan.key,
-            name: plan.label,
-            type: existing?.type || plan.key,
-            priceIdINR: existing?.priceIdINR || null,
-            priceIdUSD: existing?.priceIdUSD || null,
-            description: plan.description,
-            popular: Boolean(plan.popular),
-            monthlyPrice: plan.monthlyPrice,
-            yearlyPrice: plan.yearlyPrice,
-            limits: plan.limits,
-            features: plan.features,
-          };
-        }),
-      });
     } catch (error) {
       console.error("Get plans error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch plans",
-      });
+      return res.json(
+        buildPlansPayload({
+          degraded: true,
+          reason: "plans_fallback",
+        })
+      );
     }
   }
 
@@ -668,10 +805,18 @@ export class BillingController {
       }
 
       console.error("Billing fetch error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch billing",
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        success: true,
+        subscription: null,
+        billing: EMPTY_BILLING_CONTEXT,
+        usage: EMPTY_USAGE_SUMMARY,
+        currency: resolveBillingCurrency(req),
+        invoices: [],
+        meta: {
+          degraded: true,
+          reason: "billing_projection_failed",
+        },
       });
     }
   }
@@ -772,9 +917,7 @@ export class BillingController {
         });
       }
 
-      assertStripeConfigReady({
-        requireWebhookSecret: true,
-      });
+      assertStripeConfigReady();
 
       const session = await stripe.checkout.sessions
         .retrieve(sessionId)
@@ -820,6 +963,14 @@ export class BillingController {
     } catch (error: any) {
       console.error("Confirm checkout error:", error);
 
+      if (error?.message?.includes("stripe_config_invalid")) {
+        return res.status(503).json({
+          success: false,
+          code: "BILLING_PROVIDER_UNAVAILABLE",
+          message: "Billing confirmation is temporarily unavailable. Please retry shortly.",
+        });
+      }
+
       return res.status(500).json({
         success: false,
         message: error.message || "Checkout confirmation failed",
@@ -829,7 +980,7 @@ export class BillingController {
 
   static async createPortal(req: Request, res: Response) {
     try {
-      const { businessId } = await getUserContext(req);
+      const { businessId, email } = await getUserContext(req);
 
       if (!businessId) {
         return res.status(403).json({
@@ -858,9 +1009,7 @@ export class BillingController {
         });
       }
 
-      assertStripeConfigReady({
-        requireWebhookSecret: true,
-      });
+      assertStripeConfigReady();
 
       const subscriptionMetadata =
         subscription.metadata &&
@@ -920,6 +1069,14 @@ export class BillingController {
       }
 
       if (!stripeCustomerId) {
+        stripeCustomerId = await BillingController.resolveStripeCustomerIdForPortal({
+          businessId,
+          email,
+          subscriptionProviderId: subscription.providerSubscriptionId,
+        });
+      }
+
+      if (!stripeCustomerId) {
         return res.status(409).json({
           success: false,
           message: "stripe_customer_missing_for_portal",
@@ -961,6 +1118,15 @@ export class BillingController {
       });
     } catch (error: any) {
       console.error("Create billing portal error:", error);
+
+      if (error?.message?.includes("stripe_config_invalid")) {
+        return res.status(503).json({
+          success: false,
+          code: "BILLING_PROVIDER_UNAVAILABLE",
+          message: "Billing portal is temporarily unavailable. Please retry shortly.",
+        });
+      }
+
       return res.status(500).json({
         success: false,
         message: error?.message || "billing_portal_failed",

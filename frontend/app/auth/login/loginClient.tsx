@@ -142,23 +142,6 @@ export default function LoginClient({
     }
   };
 
-  if (authLoading) {
-    return (
-      <div className="brand-app brand-auth-shell">
-        <div className="brand-auth-grid">
-          <div className="flex items-center justify-center lg:col-start-2">
-            <div className="brand-auth-card w-full max-w-xl rounded-[32px] p-8 text-center">
-              <div className="mx-auto h-10 w-10 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" />
-              <p className="mt-4 text-sm text-slate-500">
-                Preparing your Automexia workspace...
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <AuthShell
       title="Welcome back"
@@ -189,7 +172,7 @@ export default function LoginClient({
 
       <button
         onClick={handleGoogleLogin}
-        disabled={Boolean(loading)}
+        disabled={Boolean(loading) || authLoading}
         className="brand-social-button disabled:cursor-not-allowed disabled:opacity-60"
       >
         <FcGoogle size={18} />
@@ -252,10 +235,14 @@ export default function LoginClient({
 
         <button
           type="submit"
-          disabled={Boolean(loading)}
+          disabled={Boolean(loading) || authLoading}
           className="brand-button-primary w-full"
         >
-          {loading === "email" ? "Signing you in..." : "Sign in to workspace"}
+          {loading === "email"
+            ? "Signing you in..."
+            : authLoading
+            ? "Checking session..."
+            : "Sign in to workspace"}
         </button>
       </form>
     </AuthShell>

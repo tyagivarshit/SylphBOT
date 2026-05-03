@@ -4,7 +4,10 @@ import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { memo, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
+import { prefetchDashboardRoute } from "@/lib/dashboardRoutePrefetch";
+import { useAuth } from "@/context/AuthContext";
 
 import {
   LayoutDashboard,
@@ -90,6 +93,8 @@ function isActiveRoute(pathname: string, href: string) {
 function SidebarComponent({ open, setOpen }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -187,7 +192,14 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
                     <Link
                       key={item.name}
                       href={item.href as any}
-                      onMouseEnter={() => router.prefetch(item.href)}
+                      onMouseEnter={() => {
+                        router.prefetch(item.href);
+                        void prefetchDashboardRoute(
+                          queryClient,
+                          item.href as string,
+                          user?.businessId || null
+                        );
+                      }}
                       onClick={() => setOpen(false)}
                       className={`
                         flex items-center gap-3 rounded-2xl px-3.5 py-3 text-[13px] font-medium transition-all duration-200

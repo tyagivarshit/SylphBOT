@@ -232,7 +232,7 @@ app.use((req, res, next) => {
 app.use(monitoringMiddleware);
 
 app.use((req, res, next) => {
-  res.setTimeout(15000, () => {
+  res.setTimeout(9000, () => {
     req.logger?.error(
       {
         statusCode: 408,

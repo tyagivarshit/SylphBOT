@@ -17,9 +17,14 @@ export type ApiResponse<T = any> = {
   networkError?: boolean;
 };
 
-const REQUEST_TIMEOUT_MS = 10000;
+export type ApiRequestInit = RequestInit & {
+  timeoutMs?: number;
+};
+
+const REQUEST_TIMEOUT_MS = 7000;
 const SERVER_ERROR_TOAST_MESSAGE = "Something went wrong. Please try again.";
 let lastServerErrorToastAt = 0;
+const inflightRequests = new Map<string, Promise<ApiResponse<unknown>>>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -218,7 +223,7 @@ const resolveRequestBody = (
 
 const buildAxiosConfig = (
   path: string,
-  options: RequestInit
+  options: ApiRequestInit
 ): AxiosRequestConfig => {
   const headers = headersToObject(options.headers);
   const rawBody = options.body as BodyInit | null | undefined;
@@ -229,6 +234,7 @@ const buildAxiosConfig = (
     headers,
     data: resolveRequestBody(rawBody, headers),
     signal: options.signal ?? undefined,
+    timeout: typeof options.timeoutMs === "number" ? options.timeoutMs : REQUEST_TIMEOUT_MS,
     validateStatus: () => true,
   };
 };
@@ -267,7 +273,7 @@ export const getApiErrorMessage = (
 
 async function coreRequest<T>(
   path: string,
-  options: RequestInit,
+  options: ApiRequestInit,
   retry = false
 ): Promise<ApiResponse<T>> {
   try {
@@ -346,7 +352,26 @@ async function coreRequest<T>(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function apiFetch<T = any>(
   path: string,
-  options: RequestInit = {}
+  options: ApiRequestInit = {}
 ): Promise<ApiResponse<T>> {
-  return coreRequest<T>(path, options);
+  const method = String(options.method || "GET").trim().toUpperCase() || "GET";
+  const canDedupe = method === "GET" && options.body == null;
+
+  if (!canDedupe) {
+    return coreRequest<T>(path, options);
+  }
+
+  const dedupeKey = `${method}:${normalizeApiPath(path)}`;
+  const existing = inflightRequests.get(dedupeKey) as Promise<ApiResponse<T>> | undefined;
+
+  if (existing) {
+    return existing;
+  }
+
+  const requestPromise = coreRequest<T>(path, options).finally(() => {
+    inflightRequests.delete(dedupeKey);
+  });
+
+  inflightRequests.set(dedupeKey, requestPromise as Promise<ApiResponse<unknown>>);
+  return requestPromise;
 }

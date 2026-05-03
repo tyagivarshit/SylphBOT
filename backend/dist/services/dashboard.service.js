@@ -10,6 +10,7 @@ const plan_config_1 = require("../config/plan.config");
 const pricing_config_1 = require("../config/pricing.config");
 const usage_service_1 = require("./usage.service");
 const subscriptionAuthority_service_1 = require("./subscriptionAuthority.service");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 const EMPTY_USAGE = {
     warning: false,
     warningMessage: null,
@@ -25,75 +26,138 @@ const EMPTY_USAGE = {
         },
     },
 };
+const DASHBOARD_STATS_CACHE_TTL_MS = 8000;
+const dashboardStatsCache = new Map();
 const getSettledValue = (result, fallback) => result.status === "fulfilled" ? result.value : fallback;
 class DashboardService {
     static async getStats(businessId) {
-        const now = new Date();
-        const todayStart = (0, date_fns_1.startOfDay)(now);
-        const monthStart = (0, date_fns_1.startOfMonth)(now);
-        const baseFilter = { businessId };
-        const [subscription, coreMetrics, usageOverview, timeline] = await Promise.all([
-            (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId).catch(() => null),
-            Promise.allSettled([
-                prisma_1.default.lead.count({ where: baseFilter }),
-                prisma_1.default.lead.count({
-                    where: {
-                        ...baseFilter,
-                        createdAt: { gte: todayStart },
-                    },
-                }),
-                prisma_1.default.lead.count({
-                    where: {
-                        ...baseFilter,
-                        createdAt: { gte: monthStart },
-                    },
-                }),
-                prisma_1.default.message.count({
-                    where: {
-                        lead: { businessId },
-                        createdAt: { gte: todayStart },
-                    },
-                }),
-                prisma_1.default.lead.count({
-                    where: {
-                        ...baseFilter,
-                        stage: "QUALIFIED",
-                    },
-                }),
-            ]),
-            (0, usage_service_1.getUsageOverview)(businessId).catch(() => EMPTY_USAGE),
-            Promise.allSettled([
-                this.getLeadsGrowth(businessId),
-                this.getMessagesGrowth(businessId),
-                this.getRecentActivity(businessId),
-            ]),
-        ]);
-        const planKey = (0, plan_config_1.getPlanKey)(subscription?.plan || null);
-        const aiCallsUsed = usageOverview?.usage?.ai?.used ?? 0;
-        const aiLimit = usageOverview?.usage?.ai?.dailyLimit ?? 0;
-        const isUnlimited = aiLimit === -1;
-        const usagePercent = isUnlimited || aiLimit <= 0 ? 0 : Math.min(aiCallsUsed / aiLimit, 1);
-        return {
-            totalLeads: getSettledValue(coreMetrics[0], 0),
-            leadsToday: getSettledValue(coreMetrics[1], 0),
-            leadsThisMonth: getSettledValue(coreMetrics[2], 0),
-            messagesToday: getSettledValue(coreMetrics[3], 0),
-            qualifiedLeads: getSettledValue(coreMetrics[4], 0),
-            aiCallsUsed,
-            aiCallsLimit: aiLimit,
-            aiCallsRemaining: usageOverview?.ai?.remaining ?? 0,
-            usagePercent,
-            nearLimit: Boolean(usageOverview?.warning),
-            warning: Boolean(usageOverview?.warning),
-            warningMessage: usageOverview?.warningMessage || null,
-            isUnlimited,
-            plan: (0, pricing_config_1.getPricingPlanLabel)(planKey),
-            planKey,
-            premiumLocked: planKey === "LOCKED" || planKey === "FREE_LOCKED",
-            chartData: getSettledValue(timeline[0], []),
-            messagesChart: getSettledValue(timeline[1], []),
-            recentActivity: getSettledValue(timeline[2], []),
-        };
+        const nowMs = Date.now();
+        const cached = dashboardStatsCache.get(businessId);
+        if (cached?.value && cached.expiresAt > nowMs) {
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "CACHE_HIT",
+                businessId,
+                route: "dashboard_stats",
+                metadata: {
+                    cache: "memory_dashboard_stats",
+                },
+            });
+            return cached.value;
+        }
+        if (cached?.promise) {
+            return cached.promise;
+        }
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "CACHE_MISS",
+            businessId,
+            route: "dashboard_stats",
+            metadata: {
+                cache: "memory_dashboard_stats",
+            },
+        });
+        const computePromise = (async () => {
+            const startedAt = Date.now();
+            const now = new Date();
+            const todayStart = (0, date_fns_1.startOfDay)(now);
+            const monthStart = (0, date_fns_1.startOfMonth)(now);
+            const baseFilter = { businessId };
+            const [subscription, coreMetrics, usageOverview, timeline] = await Promise.all([
+                (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId).catch(() => null),
+                Promise.allSettled([
+                    prisma_1.default.lead.count({ where: baseFilter }),
+                    prisma_1.default.lead.count({
+                        where: {
+                            ...baseFilter,
+                            createdAt: { gte: todayStart },
+                        },
+                    }),
+                    prisma_1.default.lead.count({
+                        where: {
+                            ...baseFilter,
+                            createdAt: { gte: monthStart },
+                        },
+                    }),
+                    prisma_1.default.message.count({
+                        where: {
+                            lead: { businessId },
+                            createdAt: { gte: todayStart },
+                        },
+                    }),
+                    prisma_1.default.lead.count({
+                        where: {
+                            ...baseFilter,
+                            stage: "QUALIFIED",
+                        },
+                    }),
+                ]),
+                (0, usage_service_1.getUsageOverview)(businessId).catch(() => EMPTY_USAGE),
+                Promise.allSettled([
+                    this.getLeadsGrowth(businessId),
+                    this.getMessagesGrowth(businessId),
+                    this.getRecentActivity(businessId),
+                ]),
+            ]);
+            const planKey = (0, plan_config_1.getPlanKey)(subscription?.plan || null);
+            const aiCallsUsed = usageOverview?.usage?.ai?.used ?? 0;
+            const aiLimit = usageOverview?.usage?.ai?.dailyLimit ?? 0;
+            const isUnlimited = aiLimit === -1;
+            const usagePercent = isUnlimited || aiLimit <= 0 ? 0 : Math.min(aiCallsUsed / aiLimit, 1);
+            const result = {
+                totalLeads: getSettledValue(coreMetrics[0], 0),
+                leadsToday: getSettledValue(coreMetrics[1], 0),
+                leadsThisMonth: getSettledValue(coreMetrics[2], 0),
+                messagesToday: getSettledValue(coreMetrics[3], 0),
+                qualifiedLeads: getSettledValue(coreMetrics[4], 0),
+                aiCallsUsed,
+                aiCallsLimit: aiLimit,
+                aiCallsRemaining: usageOverview?.ai?.remaining ?? 0,
+                usagePercent,
+                nearLimit: Boolean(usageOverview?.warning),
+                warning: Boolean(usageOverview?.warning),
+                warningMessage: usageOverview?.warningMessage || null,
+                isUnlimited,
+                plan: (0, pricing_config_1.getPricingPlanLabel)(planKey),
+                planKey,
+                premiumLocked: planKey === "LOCKED" || planKey === "FREE_LOCKED",
+                chartData: getSettledValue(timeline[0], []),
+                messagesChart: getSettledValue(timeline[1], []),
+                recentActivity: getSettledValue(timeline[2], []),
+            };
+            const durationMs = Date.now() - startedAt;
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "PROJECTION_MS",
+                value: durationMs,
+                businessId,
+                route: "dashboard_stats",
+            });
+            if (durationMs >= 700) {
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "DB_SLOW",
+                    value: durationMs,
+                    businessId,
+                    route: "dashboard_stats",
+                });
+            }
+            dashboardStatsCache.set(businessId, {
+                value: result,
+                expiresAt: Date.now() + DASHBOARD_STATS_CACHE_TTL_MS,
+            });
+            return result;
+        })().finally(() => {
+            const latest = dashboardStatsCache.get(businessId);
+            if (latest?.promise) {
+                dashboardStatsCache.set(businessId, {
+                    value: latest.value,
+                    expiresAt: latest.expiresAt,
+                });
+            }
+        });
+        dashboardStatsCache.set(businessId, {
+            value: cached?.value,
+            expiresAt: cached?.expiresAt || 0,
+            promise: computePromise,
+        });
+        return computePromise;
     }
     static async getLeadsList(businessId, page, limit, stage, search) {
         try {
@@ -278,17 +342,25 @@ class DashboardService {
     }
     static async getActiveConversations(businessId) {
         try {
-            const leads = await prisma_1.default.lead.findMany({
-                where: {
-                    businessId,
-                    lastMessageAt: { not: null },
-                },
-                select: { unreadCount: true },
-            });
+            const [active, waitingReplies] = await Promise.all([
+                prisma_1.default.lead.count({
+                    where: {
+                        businessId,
+                        lastMessageAt: { not: null },
+                    },
+                }),
+                prisma_1.default.lead.count({
+                    where: {
+                        businessId,
+                        lastMessageAt: { not: null },
+                        unreadCount: { gt: 0 },
+                    },
+                }),
+            ]);
             return {
-                active: leads.length,
-                waitingReplies: leads.filter((lead) => lead.unreadCount > 0).length,
-                resolved: leads.filter((lead) => lead.unreadCount === 0).length,
+                active,
+                waitingReplies,
+                resolved: Math.max(active - waitingReplies, 0),
             };
         }
         catch (error) {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma";
 import { unauthorized } from "../utils/AppError";
 import crypto from "crypto";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   generateAccessToken,
   verifyAccessToken,
@@ -15,9 +16,23 @@ import { updateRequestContext } from "../observability/requestContext";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import {
   authorizeSuspiciousSessionChallenge,
-  issueSessionLedger,
   trackSessionAnomaly,
 } from "../services/security/securityGovernanceOS.service";
+
+const AUTH_CONTEXT_CACHE_TTL_MS = 15_000;
+const SESSION_ANOMALY_RECHECK_MS = 10_000;
+
+type CachedAuthContext = {
+  userId: string;
+  role: string;
+  email?: string;
+  businessId: string | null;
+  tokenVersion: number;
+  expiresAt: number;
+};
+
+const authContextCache = new Map<string, CachedAuthContext>();
+const sessionAnomalyCheckedAt = new Map<string, number>();
 
 const hashToken = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
@@ -76,6 +91,30 @@ const getSessionKeyFromRequest = (req: Request) => {
   return raw ? hashToken(raw) : null;
 };
 
+const resolveBusinessId = async (input: {
+  userId: string;
+  userBusinessId: string | null;
+  preferredBusinessId?: string | null;
+}) => {
+  const fastPathBusinessId =
+    String(input.userBusinessId || "").trim() ||
+    String(input.preferredBusinessId || "").trim() ||
+    null;
+
+  if (fastPathBusinessId) {
+    return fastPathBusinessId;
+  }
+
+  const identity = await resolveUserWorkspaceIdentity({
+    userId: input.userId,
+    preferredBusinessId: input.preferredBusinessId || null,
+    bootstrapWorkspaceIfMissing: false,
+    persistResolvedBusinessId: false,
+  });
+
+  return identity.businessId;
+};
+
 const enforceSessionAnomalyGuard = async (req: Request, input: {
   userId: string;
   businessId: string | null;
@@ -85,19 +124,12 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
     return;
   }
 
-  await issueSessionLedger({
-    businessId: input.businessId,
-    tenantId: input.businessId,
-    userId: input.userId,
-    sessionKey,
-    ip: getIpAddress(req),
-    userAgent: getUserAgent(req),
-    deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-    metadata: {
-      source: "auth.middleware",
-      requestId: req.requestId || null,
-    },
-  }).catch(() => undefined);
+  const now = Date.now();
+  const lastCheckedAt = sessionAnomalyCheckedAt.get(sessionKey) || 0;
+  if (now - lastCheckedAt < SESSION_ANOMALY_RECHECK_MS) {
+    return;
+  }
+  sessionAnomalyCheckedAt.set(sessionKey, now);
 
   const anomaly = await trackSessionAnomaly({
     sessionKey,
@@ -142,6 +174,8 @@ export const protect = async (
   res: Response,
   next: NextFunction
 ) => {
+  const startedAt = Date.now();
+
   try {
     if (req.user?.id && typeof req.user.role === "string") {
       bindAuthenticatedContext(req, {
@@ -149,6 +183,15 @@ export const protect = async (
         role: req.user.role,
         email: req.user.email,
         businessId: req.user.businessId || null,
+      });
+      emitPerformanceMetric({
+        name: "AUTH_MS",
+        value: Date.now() - startedAt,
+        businessId: req.user.businessId || null,
+        route: req.originalUrl,
+        metadata: {
+          source: "prebound",
+        },
       });
       return next();
     }
@@ -182,6 +225,15 @@ export const protect = async (
           role: String(testRole || "OWNER").trim() || "OWNER",
           businessId: testBusinessId.trim(),
         });
+        emitPerformanceMetric({
+          name: "AUTH_MS",
+          value: Date.now() - startedAt,
+          businessId: testBusinessId.trim(),
+          route: req.originalUrl,
+          metadata: {
+            source: "integration_bypass",
+          },
+        });
 
         return next();
       }
@@ -196,8 +248,57 @@ export const protect = async (
 
     if (accessToken) {
       const decoded = verifyAccessToken(accessToken);
+      const accessTokenKey = hashToken(accessToken);
 
       if (decoded?.id && typeof decoded.tokenVersion === "number") {
+        const cachedContext = authContextCache.get(accessTokenKey);
+
+        if (
+          cachedContext &&
+          cachedContext.expiresAt > Date.now() &&
+          cachedContext.tokenVersion === decoded.tokenVersion
+        ) {
+          bindAuthenticatedContext(req, {
+            id: cachedContext.userId,
+            role: cachedContext.role,
+            email: cachedContext.email,
+            businessId: cachedContext.businessId,
+          });
+
+          await enforceSessionAnomalyGuard(req, {
+            userId: cachedContext.userId,
+            businessId: cachedContext.businessId,
+          });
+
+          emitPerformanceMetric({
+            name: "CACHE_HIT",
+            businessId: cachedContext.businessId,
+            route: req.originalUrl,
+            metadata: {
+              cache: "auth_context",
+            },
+          });
+          emitPerformanceMetric({
+            name: "AUTH_MS",
+            value: Date.now() - startedAt,
+            businessId: cachedContext.businessId,
+            route: req.originalUrl,
+            metadata: {
+              source: "access_token_cache",
+            },
+          });
+
+          return next();
+        }
+
+        emitPerformanceMetric({
+          name: "CACHE_MISS",
+          route: req.originalUrl,
+          metadata: {
+            cache: "auth_context",
+          },
+        });
+
         const user = await getUserWithBusiness(decoded.id);
 
         if (
@@ -206,21 +307,41 @@ export const protect = async (
           !user.deletedAt &&
           user.tokenVersion === decoded.tokenVersion
         ) {
-          const identity = await resolveUserWorkspaceIdentity({
+          const businessId = await resolveBusinessId({
             userId: user.id,
-            preferredBusinessId: decoded.businessId,
+            userBusinessId: user.businessId || null,
+            preferredBusinessId: decoded.businessId || null,
           });
 
           bindAuthenticatedContext(req, {
             id: user.id,
             role: user.role,
             email: user.email,
-            businessId: identity.businessId,
+            businessId,
           });
 
           await enforceSessionAnomalyGuard(req, {
             userId: user.id,
-            businessId: identity.businessId,
+            businessId,
+          });
+
+          authContextCache.set(accessTokenKey, {
+            userId: user.id,
+            role: user.role,
+            email: user.email,
+            businessId,
+            tokenVersion: user.tokenVersion,
+            expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+          });
+
+          emitPerformanceMetric({
+            name: "AUTH_MS",
+            value: Date.now() - startedAt,
+            businessId,
+            route: req.originalUrl,
+            metadata: {
+              source: "access_token_db",
+            },
           });
 
           return next();
@@ -265,14 +386,16 @@ export const protect = async (
       throw unauthorized("Invalid session");
     }
 
-    const identity = await resolveUserWorkspaceIdentity({
+    const businessId = await resolveBusinessId({
       userId: user.id,
+      userBusinessId: user.businessId || null,
+      preferredBusinessId: null,
     });
 
     const newAccessToken = generateAccessToken(
       user.id,
       user.role,
-      identity.businessId,
+      businessId,
       user.tokenVersion
     );
 
@@ -285,12 +408,31 @@ export const protect = async (
       id: user.id,
       role: user.role,
       email: user.email,
-      businessId: identity.businessId,
+      businessId,
     });
 
     await enforceSessionAnomalyGuard(req, {
       userId: user.id,
-      businessId: identity.businessId,
+      businessId,
+    });
+
+    authContextCache.set(hashToken(newAccessToken), {
+      userId: user.id,
+      role: user.role,
+      email: user.email,
+      businessId,
+      tokenVersion: user.tokenVersion,
+      expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+    });
+
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      businessId,
+      route: req.originalUrl,
+      metadata: {
+        source: "refresh_token",
+      },
     });
 
     return next();

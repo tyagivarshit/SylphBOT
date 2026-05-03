@@ -22,6 +22,7 @@ const fetchBilling = async () => {
   }>("/api/billing", {
     credentials: "include",
     cache: "no-store",
+    timeoutMs: 1800,
   });
 
   if (!response.success || !response.data) {
@@ -46,8 +47,10 @@ export function usePlan() {
     queryKey: ["billing"],
     queryFn: fetchBilling,
 
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 20,
     refetchOnWindowFocus: false,
+    refetchInterval: 1000 * 45,
+    refetchIntervalInBackground: true,
     retry: 1,
   })
 

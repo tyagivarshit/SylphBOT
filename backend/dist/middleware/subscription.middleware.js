@@ -8,8 +8,11 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const plan_config_1 = require("../config/plan.config");
 const env_1 = require("../config/env");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
+const EARLY_ACCESS_CACHE_TTL_MS = 30000;
+const earlyAccessCache = new Map();
 const getBillingCacheKey = (businessId) => `sub:${businessId}`;
 exports.getBillingCacheKey = getBillingCacheKey;
 const invalidateBillingContextCache = async (businessId) => {
@@ -67,6 +70,14 @@ const getCachedSubscription = async (businessId) => {
     const cacheKey = (0, exports.getBillingCacheKey)(businessId);
     const cached = await redis_1.default.get(cacheKey).catch(() => null);
     if (cached) {
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "CACHE_HIT",
+            businessId,
+            route: "subscription_context",
+            metadata: {
+                cache: "redis_subscription",
+            },
+        });
         try {
             return JSON.parse(cached);
         }
@@ -74,6 +85,14 @@ const getCachedSubscription = async (businessId) => {
             await redis_1.default.del(cacheKey).catch(() => undefined);
         }
     }
+    (0, performanceMetrics_1.emitPerformanceMetric)({
+        name: "CACHE_MISS",
+        businessId,
+        route: "subscription_context",
+        metadata: {
+            cache: "redis_subscription",
+        },
+    });
     const canonical = await prisma_1.default.subscriptionLedger
         .findFirst({
         where: {
@@ -95,6 +114,29 @@ const getCachedSubscription = async (businessId) => {
     return subscription;
 };
 const getEarlyAccessSnapshot = async (subscription) => {
+    const cacheKey = subscription?.businessId
+        ? String(subscription.businessId)
+        : "__global__";
+    const cached = earlyAccessCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "CACHE_HIT",
+            businessId: subscription?.businessId || null,
+            route: "early_access_projection",
+            metadata: {
+                cache: "memory_early_access",
+            },
+        });
+        return cached.value;
+    }
+    (0, performanceMetrics_1.emitPerformanceMetric)({
+        name: "CACHE_MISS",
+        businessId: subscription?.businessId || null,
+        route: "early_access_projection",
+        metadata: {
+            cache: "memory_early_access",
+        },
+    });
     try {
         const plans = await prisma_1.default.plan.findMany({
             where: {
@@ -107,11 +149,16 @@ const getEarlyAccessSnapshot = async (subscription) => {
             },
         });
         const totalEarlyUsed = plans.reduce((acc, plan) => acc + (plan.earlyUsed || 0), 0);
-        return {
+        const value = {
             allowEarly: totalEarlyUsed < EARLY_ACCESS_LIMIT &&
                 !subscription?.stripeSubscriptionId,
             remainingEarly: Math.max(EARLY_ACCESS_LIMIT - totalEarlyUsed, 0),
         };
+        earlyAccessCache.set(cacheKey, {
+            value,
+            expiresAt: Date.now() + EARLY_ACCESS_CACHE_TTL_MS,
+        });
+        return value;
     }
     catch {
         return {
@@ -121,6 +168,7 @@ const getEarlyAccessSnapshot = async (subscription) => {
     }
 };
 const loadBillingContext = async (businessId) => {
+    const startedAt = Date.now();
     const cachedSubscription = await getCachedSubscription(businessId).catch(() => null);
     const subscription = cachedSubscription;
     const now = new Date();
@@ -169,6 +217,16 @@ const loadBillingContext = async (businessId) => {
     }));
     context.allowEarly = earlyAccess.allowEarly;
     context.remainingEarly = earlyAccess.remainingEarly;
+    (0, performanceMetrics_1.emitPerformanceMetric)({
+        name: "PROJECTION_MS",
+        value: Date.now() - startedAt,
+        businessId,
+        route: "billing_context",
+        metadata: {
+            planKey: context.planKey,
+            status: context.status,
+        },
+    });
     return {
         subscription,
         context,

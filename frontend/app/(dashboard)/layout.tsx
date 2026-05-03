@@ -48,8 +48,12 @@ function AuthStateCard({ message }: { message: string }) {
     <div className="brand-app brand-shell">
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="brand-panel-strong w-full max-w-md rounded-[32px] p-8 text-center">
-          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
-          <p className="mt-4 text-sm text-slate-500">{message}</p>
+          <div className="space-y-3">
+            <div className="h-2 w-24 animate-pulse rounded-full bg-slate-200/80 mx-auto" />
+            <div className="h-2 w-40 animate-pulse rounded-full bg-slate-200/70 mx-auto" />
+            <div className="h-2 w-32 animate-pulse rounded-full bg-slate-200/60 mx-auto" />
+          </div>
+          <p className="mt-5 text-sm text-slate-500">{message}</p>
         </div>
       </div>
     </div>
@@ -224,7 +228,7 @@ export default function DashboardLayout({
   );
 
   if (loading) {
-    return <AuthStateCard message="Loading your Automexia workspace..." />;
+    return <AuthStateCard message="Preparing your workspace..." />;
   }
 
   if (!user) {

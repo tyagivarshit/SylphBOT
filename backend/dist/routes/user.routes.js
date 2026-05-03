@@ -15,6 +15,7 @@ const tenant_service_1 = require("../services/tenant.service");
 const rbac_middleware_1 = require("../middleware/rbac.middleware");
 const rateLimit_middleware_1 = require("../middleware/rateLimit.middleware");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 const router = express_1.default.Router();
 const safeUserSelect = {
     id: true,
@@ -25,6 +26,21 @@ const safeUserSelect = {
     avatar: true,
     businessId: true,
 };
+const USER_ME_CACHE_TTL_MS = 10000;
+const currentUserCache = new Map();
+const buildCurrentUserCacheKey = (userId, preferredBusinessId) => `${String(userId || "").trim()}:${String(preferredBusinessId || "").trim()}`;
+const invalidateCurrentUserCache = (userId) => {
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) {
+        currentUserCache.clear();
+        return;
+    }
+    for (const key of currentUserCache.keys()) {
+        if (key.startsWith(`${normalizedUserId}:`)) {
+            currentUserCache.delete(key);
+        }
+    }
+};
 const buildDeletedEmail = (email) => {
     const [local, domain = "deleted.local"] = email.split("@");
     return `${local}+deleted_${Date.now()}@${domain}`;
@@ -34,17 +50,56 @@ const getUserRecord = async (userId) => prisma_1.default.user.findUnique({
     select: safeUserSelect,
 });
 const getCurrentUser = async (userId, preferredBusinessId) => {
-    const [user, identity] = await Promise.all([
-        getUserRecord(userId),
-        (0, tenant_service_1.resolveUserWorkspaceIdentity)({
-            userId,
-            preferredBusinessId: preferredBusinessId || null,
-        }),
-    ]);
+    const user = await getUserRecord(userId);
     if (!user) {
         return null;
     }
-    const businessId = identity.businessId;
+    const preferredBusiness = String(preferredBusinessId || "").trim() || null;
+    const linkedBusiness = String(user.businessId || "").trim() || null;
+    let businessId = preferredBusiness || linkedBusiness || null;
+    let workspace = null;
+    if (businessId) {
+        workspace = await prisma_1.default.business.findUnique({
+            where: {
+                id: businessId,
+            },
+            select: {
+                id: true,
+                name: true,
+                website: true,
+                industry: true,
+                teamSize: true,
+                type: true,
+                timezone: true,
+                deletedAt: true,
+            },
+        });
+        if (!workspace || workspace.deletedAt) {
+            workspace = null;
+            businessId = null;
+        }
+    }
+    if (!businessId || !workspace) {
+        const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId,
+            preferredBusinessId: preferredBusinessId || null,
+            bootstrapWorkspaceIfMissing: false,
+            persistResolvedBusinessId: false,
+        });
+        businessId = identity.businessId;
+        workspace = identity.workspace
+            ? {
+                id: identity.workspace.id,
+                name: identity.workspace.name,
+                website: identity.workspace.website,
+                industry: identity.workspace.industry,
+                teamSize: identity.workspace.teamSize,
+                type: identity.workspace.type,
+                timezone: identity.workspace.timezone,
+                deletedAt: identity.workspace.deletedAt,
+            }
+            : null;
+    }
     const clientsResult = businessId
         ? await (0, boundedTimeout_1.withTimeoutFallback)({
             label: "user_me_clients_projection",
@@ -77,21 +132,21 @@ const getCurrentUser = async (userId, preferredBusinessId) => {
     return {
         ...user,
         businessId,
-        business: identity.workspace
+        business: workspace
             ? {
-                id: identity.workspace.id,
-                name: identity.workspace.name,
-                website: identity.workspace.website,
-                industry: identity.workspace.industry,
-                teamSize: identity.workspace.teamSize,
-                type: identity.workspace.type,
-                timezone: identity.workspace.timezone,
+                id: workspace.id,
+                name: workspace.name,
+                website: workspace.website,
+                industry: workspace.industry,
+                teamSize: workspace.teamSize,
+                type: workspace.type,
+                timezone: workspace.timezone,
             }
             : null,
-        workspace: identity.workspace
+        workspace: workspace
             ? {
-                id: identity.workspace.id,
-                name: identity.workspace.name,
+                id: workspace.id,
+                name: workspace.name,
             }
             : null,
         connectedAccounts: {
@@ -115,9 +170,31 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized" });
         }
+        const cacheKey = buildCurrentUserCacheKey(userId, req.user?.businessId || null);
+        const cached = currentUserCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "CACHE_HIT",
+                businessId: req.user?.businessId || null,
+                route: "user_me",
+                metadata: {
+                    cache: "memory_user_me",
+                },
+            });
+            res.setHeader("Cache-Control", "no-store");
+            return res.json(cached.value);
+        }
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "CACHE_MISS",
+            businessId: req.user?.businessId || null,
+            route: "user_me",
+            metadata: {
+                cache: "memory_user_me",
+            },
+        });
         const userHydration = await (0, boundedTimeout_1.withTimeoutFallback)({
             label: "user_me_hydration",
-            timeoutMs: 4000,
+            timeoutMs: 2500,
             task: getCurrentUser(userId, req.user?.businessId || null),
             fallback: null,
         });
@@ -133,6 +210,10 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                 timedOut: userHydration.timedOut,
             });
         }
+        currentUserCache.set(cacheKey, {
+            value: user,
+            expiresAt: Date.now() + USER_ME_CACHE_TTL_MS,
+        });
         return res.json(user);
     }
     catch (err) {
@@ -227,6 +308,7 @@ router.patch("/update", auth_middleware_1.protect, async (req, res) => {
             });
         }
         const updatedUser = await getCurrentUser(userId, identity.businessId);
+        invalidateCurrentUserCache(userId);
         return res.json(updatedUser);
     }
     catch (err) {
@@ -267,6 +349,7 @@ router.post("/upload-avatar", auth_middleware_1.protect, upload_1.default.single
             },
         });
         const updatedUser = await getCurrentUser(userId, req.user?.businessId || null);
+        invalidateCurrentUserCache(userId);
         return res.json(updatedUser);
     }
     catch (err) {
@@ -321,6 +404,7 @@ router.post("/change-password", auth_middleware_1.protect, async (req, res) => {
             }),
         ]);
         (0, authCookies_1.clearAuthCookies)(res, req);
+        invalidateCurrentUserCache(userId);
         return res.json({
             success: true,
             message: "Password updated. Please log in again.",
@@ -463,6 +547,7 @@ router.delete("/delete-account", auth_middleware_1.protect, async (req, res) => 
             });
         });
         (0, authCookies_1.clearAuthCookies)(res, req);
+        invalidateCurrentUserCache(userId);
         return res.json({
             success: true,
             message: "Account deleted successfully",

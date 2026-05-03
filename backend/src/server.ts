@@ -54,7 +54,7 @@ export const startServer = async () => {
   initSocket(server);
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
-  server.requestTimeout = 15000;
+  server.requestTimeout = 9000;
 
   const shutdownServer = async (signal: string, exitCode = 0) => {
     if (isShuttingDown) {

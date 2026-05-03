@@ -14,6 +14,7 @@ import {
   verifyGoogleOAuthState,
 } from "../utils/googleOAuthState";
 import { ensureAuthBootstrapContext } from "../services/authBootstrap.service";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 /* ======================================
 UTILS
@@ -35,6 +36,33 @@ const buildAuthErrorUrl = (
   url.searchParams.set("authError", authError);
   url.searchParams.set("error", "google_auth_failed");
   return url.toString();
+};
+
+const pruneRefreshTokens = async (userId: string, retainCount = 4) => {
+  const staleTokens = await prisma.refreshToken.findMany({
+    where: {
+      userId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    skip: Math.max(0, retainCount),
+    select: {
+      id: true,
+    },
+  });
+
+  if (!staleTokens.length) {
+    return;
+  }
+
+  await prisma.refreshToken.deleteMany({
+    where: {
+      id: {
+        in: staleTokens.map((token) => token.id),
+      },
+    },
+  });
 };
 
 /* ======================================
@@ -75,6 +103,7 @@ GOOGLE CALLBACK
 ====================================== */
 
 export const googleCallback = async (req: Request, res: Response) => {
+  const startedAt = Date.now();
   try {
     const user = req.user as any;
     const state = verifyGoogleOAuthState(req.query.state);
@@ -126,22 +155,7 @@ export const googleCallback = async (req: Request, res: Response) => {
     );
     const refreshToken = hashToken(refreshRaw);
 
-    const count = await prisma.refreshToken.count({
-      where: { userId: bootstrap.user.id },
-    });
-
-    if (count >= 5) {
-      const oldest = await prisma.refreshToken.findFirst({
-        where: { userId: bootstrap.user.id },
-        orderBy: { createdAt: "asc" },
-      });
-
-      if (oldest) {
-        await prisma.refreshToken.delete({
-          where: { id: oldest.id },
-        });
-      }
-    }
+    await pruneRefreshTokens(bootstrap.user.id, 4);
 
     await prisma.refreshToken.create({
       data: {
@@ -159,6 +173,15 @@ export const googleCallback = async (req: Request, res: Response) => {
       userId: bootstrap.user.id,
       businessId: bootstrap.identity.businessId,
       source: bootstrap.identity.source,
+    });
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      businessId: bootstrap.identity.businessId,
+      route: "auth.google_callback",
+      metadata: {
+        source: "google_oauth",
+      },
     });
 
     return res.redirect(`${redirectOrigin}/dashboard`);

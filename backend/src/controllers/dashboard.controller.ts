@@ -106,7 +106,7 @@ export class DashboardController {
       async (businessId) => DashboardService.getStats(businessId),
       {
         timeoutLabel: "dashboard_stats_projection",
-        timeoutMs: 4500,
+        timeoutMs: 1800,
         fallback: {
           totalLeads: 0,
           leadsToday: 0,
@@ -162,7 +162,7 @@ export class DashboardController {
       },
       {
         timeoutLabel: "dashboard_leads_projection",
-        timeoutMs: 3500,
+        timeoutMs: 1700,
         fallback: {
           leads: [],
           pagination: {
@@ -190,7 +190,7 @@ export class DashboardController {
       },
       {
         timeoutLabel: "dashboard_lead_detail_projection",
-        timeoutMs: 3500,
+        timeoutMs: 1700,
         fallback: null,
       }
     );
@@ -212,7 +212,7 @@ export class DashboardController {
       },
       {
         timeoutLabel: "dashboard_lead_stage_projection",
-        timeoutMs: 3500,
+        timeoutMs: 1700,
         fallback: null,
       }
     );
@@ -225,7 +225,7 @@ export class DashboardController {
       async (businessId) => DashboardService.getActiveConversations(businessId),
       {
         timeoutLabel: "dashboard_conversation_projection",
-        timeoutMs: 3500,
+        timeoutMs: 1600,
         fallback: {
           active: 0,
           waitingReplies: 0,

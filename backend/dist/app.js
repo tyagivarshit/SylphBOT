@@ -189,7 +189,7 @@ app.use((req, res, next) => {
 });
 app.use(monitoring_middleware_1.monitoringMiddleware);
 app.use((req, res, next) => {
-    res.setTimeout(15000, () => {
+    res.setTimeout(9000, () => {
         req.logger?.error({
             statusCode: 408,
         }, "Request timeout");

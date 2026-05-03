@@ -31,6 +31,7 @@ import {
 } from "../services/security/securityGovernanceOS.service";
 import { ensureAuthBootstrapContext } from "../services/authBootstrap.service";
 import { withDistributedLock } from "../services/distributedLock.service";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 /* ======================================
 UTILS
@@ -113,11 +114,39 @@ const writeAuthAuditLog = (
     requestId: req.requestId || null,
   });
 
+const pruneRefreshTokens = async (userId: string, retainCount = 4) => {
+  const staleTokens = await prisma.refreshToken.findMany({
+    where: {
+      userId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    skip: Math.max(0, retainCount),
+    select: {
+      id: true,
+    },
+  });
+
+  if (!staleTokens.length) {
+    return;
+  }
+
+  await prisma.refreshToken.deleteMany({
+    where: {
+      id: {
+        in: staleTokens.map((token) => token.id),
+      },
+    },
+  });
+};
+
 /* ======================================
 REGISTER
 ====================================== */
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
+  const startedAt = Date.now();
   try {
     await checkGlobalLimit(getIP(req));
 
@@ -178,6 +207,15 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       verificationRequired: true,
     });
 
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      route: "auth.register",
+      metadata: {
+        status: "verification_required",
+      },
+    });
+
     void scheduleVerificationEmail(email, verifyLink);
 
   } catch (err) {
@@ -190,6 +228,7 @@ LOGIN
 ====================================== */
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
+  const startedAt = Date.now();
   try {
     await checkGlobalLimit(getIP(req));
 
@@ -257,22 +296,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       bootstrap.user.tokenVersion
     );
 
-    const count = await prisma.refreshToken.count({
-      where: { userId: bootstrap.user.id },
-    });
-
-    if (count >= 5) {
-      const oldest = await prisma.refreshToken.findFirst({
-        where: { userId: bootstrap.user.id },
-        orderBy: { createdAt: "asc" },
-      });
-
-      if (oldest) {
-        await prisma.refreshToken.delete({
-          where: { id: oldest.id },
-        });
-      }
-    }
+    await pruneRefreshTokens(bootstrap.user.id, 4);
 
     await prisma.refreshToken.create({
       data: {
@@ -317,6 +341,16 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         email: bootstrap.user.email,
         name: bootstrap.user.name,
         businessId,
+      },
+    });
+
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      businessId,
+      route: "auth.login",
+      metadata: {
+        source: "password",
       },
     });
 
@@ -560,6 +594,7 @@ GET ME
 ====================================== */
 
 export const getMe = async (req: any, res: Response, next: NextFunction) => {
+  const startedAt = Date.now();
   try {
     if (!req.user?.id) throw unauthorized("Not authenticated");
 
@@ -584,6 +619,13 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
       },
     });
 
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      businessId: bootstrap.identity.businessId,
+      route: "auth.me",
+    });
+
   } catch (err) {
     next(err);
   }
@@ -594,6 +636,7 @@ LOGOUT
 ====================================== */
 
 export const logout = async (req: any, res: Response, next: NextFunction) => {
+  const startedAt = Date.now();
   try {
     await prisma.refreshToken.deleteMany({
       where: { userId: req.user.id },
@@ -608,6 +651,13 @@ export const logout = async (req: any, res: Response, next: NextFunction) => {
     clearAuthCookies(res, req);
 
     res.json({ success: true });
+
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      businessId: req.user?.businessId || null,
+      route: "auth.logout",
+    });
 
   } catch (err) {
     next(err);

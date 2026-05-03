@@ -19,6 +19,7 @@ const tenant_service_1 = require("../services/tenant.service");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
 const stripe_service_1 = require("../services/stripe.service");
 const stripeConfig_service_1 = require("../services/commerce/providers/stripeConfig.service");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 const EMPTY_USAGE_SUMMARY = {
     aiCallsUsed: 0,
     messagesUsed: 0,
@@ -144,10 +145,15 @@ async function getUserContext(req) {
     if (!user) {
         throw new Error("Unauthorized");
     }
-    const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
-        userId,
-        preferredBusinessId: req.user?.businessId || user.businessId || null,
-    });
+    const businessIdHint = String(req.user?.businessId || user.businessId || "").trim() || null;
+    const identity = businessIdHint
+        ? {
+            businessId: businessIdHint,
+        }
+        : await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+            userId,
+            preferredBusinessId: req.user?.businessId || user.businessId || null,
+        });
     return {
         userId,
         businessId: identity.businessId,
@@ -309,6 +315,7 @@ class BillingController {
         return customers[0]?.id || null;
     }
     static async buildBillingResponse(businessId, req) {
+        const startedAt = Date.now();
         if (!businessId) {
             return {
                 success: true,
@@ -326,7 +333,7 @@ class BillingController {
         const [billingContextResult, usageResult, invoicesResult] = await Promise.all([
             (0, boundedTimeout_1.withTimeoutFallback)({
                 label: "billing_context_projection",
-                timeoutMs: 3500,
+                timeoutMs: 2200,
                 task: (0, subscription_middleware_1.loadBillingContext)(businessId),
                 fallback: {
                     subscription: null,
@@ -335,13 +342,13 @@ class BillingController {
             }),
             (0, boundedTimeout_1.withTimeoutFallback)({
                 label: "billing_usage_projection",
-                timeoutMs: 3500,
+                timeoutMs: 2200,
                 task: (0, usage_service_1.getUsageOverview)(businessId),
                 fallback: null,
             }),
             (0, boundedTimeout_1.withTimeoutFallback)({
                 label: "billing_invoice_projection",
-                timeoutMs: 2500,
+                timeoutMs: 1800,
                 task: prisma_1.default.invoiceLedger.findMany({
                     where: {
                         businessId,
@@ -395,6 +402,24 @@ class BillingController {
             invoicesTimedOut: invoicesResult.timedOut,
             usedFallback: degraded,
         });
+        const durationMs = Date.now() - startedAt;
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "PROJECTION_MS",
+            value: durationMs,
+            businessId,
+            route: "billing_projection",
+            metadata: {
+                degraded,
+            },
+        });
+        if (durationMs >= 900) {
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "DB_SLOW",
+                value: durationMs,
+                businessId,
+                route: "billing_projection",
+            });
+        }
         return {
             success: true,
             subscription: billingContext.subscription,
@@ -655,7 +680,15 @@ class BillingController {
         try {
             const { businessId } = await getUserContext(req);
             if (businessId) {
-                await BillingController.reconcileRecentPortalState(businessId).catch(() => undefined);
+                void (0, boundedTimeout_1.withTimeoutFallback)({
+                    label: "billing_portal_reconcile",
+                    timeoutMs: 900,
+                    task: BillingController.reconcileRecentPortalState(businessId),
+                    fallback: {
+                        attempted: false,
+                        reason: "reconcile_skipped",
+                    },
+                }).catch(() => undefined);
             }
             res.setHeader("Cache-Control", "no-store");
             return res.json(await BillingController.buildBillingResponse(businessId, req));

@@ -81,7 +81,7 @@ const startServer = async () => {
     (0, socket_server_1.initSocket)(server);
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
-    server.requestTimeout = 15000;
+    server.requestTimeout = 9000;
     const shutdownServer = async (signal, exitCode = 0) => {
         if (isShuttingDown) {
             return;

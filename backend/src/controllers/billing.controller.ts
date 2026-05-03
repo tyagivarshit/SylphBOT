@@ -23,6 +23,7 @@ import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import { withTimeoutFallback } from "../utils/boundedTimeout";
 import { stripe } from "../services/stripe.service";
 import { assertStripeConfigReady } from "../services/commerce/providers/stripeConfig.service";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 const EMPTY_USAGE_SUMMARY = {
   aiCallsUsed: 0,
@@ -195,10 +196,15 @@ async function getUserContext(req: Request): Promise<UserContext> {
     throw new Error("Unauthorized");
   }
 
-  const identity = await resolveUserWorkspaceIdentity({
-    userId,
-    preferredBusinessId: req.user?.businessId || user.businessId || null,
-  });
+  const businessIdHint = String(req.user?.businessId || user.businessId || "").trim() || null;
+  const identity = businessIdHint
+    ? {
+        businessId: businessIdHint,
+      }
+    : await resolveUserWorkspaceIdentity({
+        userId,
+        preferredBusinessId: req.user?.businessId || user.businessId || null,
+      });
 
   return {
     userId,
@@ -400,6 +406,7 @@ export class BillingController {
     businessId: string | null,
     req: Request
   ) {
+    const startedAt = Date.now();
     if (!businessId) {
       return {
         success: true,
@@ -418,7 +425,7 @@ export class BillingController {
     const [billingContextResult, usageResult, invoicesResult] = await Promise.all([
       withTimeoutFallback({
         label: "billing_context_projection",
-        timeoutMs: 3500,
+        timeoutMs: 2200,
         task: loadBillingContext(businessId),
         fallback: {
           subscription: null,
@@ -427,13 +434,13 @@ export class BillingController {
       }),
       withTimeoutFallback({
         label: "billing_usage_projection",
-        timeoutMs: 3500,
+        timeoutMs: 2200,
         task: getUsageOverview(businessId),
         fallback: null,
       }),
       withTimeoutFallback({
         label: "billing_invoice_projection",
-        timeoutMs: 2500,
+        timeoutMs: 1800,
         task: prisma.invoiceLedger.findMany({
           where: {
             businessId,
@@ -490,6 +497,25 @@ export class BillingController {
       invoicesTimedOut: invoicesResult.timedOut,
       usedFallback: degraded,
     });
+
+    const durationMs = Date.now() - startedAt;
+    emitPerformanceMetric({
+      name: "PROJECTION_MS",
+      value: durationMs,
+      businessId,
+      route: "billing_projection",
+      metadata: {
+        degraded,
+      },
+    });
+    if (durationMs >= 900) {
+      emitPerformanceMetric({
+        name: "DB_SLOW",
+        value: durationMs,
+        businessId,
+        route: "billing_projection",
+      });
+    }
 
     return {
       success: true,
@@ -791,7 +817,15 @@ export class BillingController {
     try {
       const { businessId } = await getUserContext(req);
       if (businessId) {
-        await BillingController.reconcileRecentPortalState(businessId).catch(() => undefined);
+        void withTimeoutFallback({
+          label: "billing_portal_reconcile",
+          timeoutMs: 900,
+          task: BillingController.reconcileRecentPortalState(businessId),
+          fallback: {
+            attempted: false,
+            reason: "reconcile_skipped",
+          },
+        }).catch(() => undefined);
       }
       res.setHeader("Cache-Control", "no-store");
 

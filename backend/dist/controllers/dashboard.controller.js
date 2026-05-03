@@ -65,7 +65,7 @@ class DashboardController {
     static async getStats(req, res) {
         return baseHandler(req, res, async (businessId) => dashboard_service_1.DashboardService.getStats(businessId), {
             timeoutLabel: "dashboard_stats_projection",
-            timeoutMs: 4500,
+            timeoutMs: 1800,
             fallback: {
                 totalLeads: 0,
                 leadsToday: 0,
@@ -107,7 +107,7 @@ class DashboardController {
             };
         }, {
             timeoutLabel: "dashboard_leads_projection",
-            timeoutMs: 3500,
+            timeoutMs: 1700,
             fallback: {
                 leads: [],
                 pagination: {
@@ -128,7 +128,7 @@ class DashboardController {
             return dashboard_service_1.DashboardService.getLeadDetail(businessId, id);
         }, {
             timeoutLabel: "dashboard_lead_detail_projection",
-            timeoutMs: 3500,
+            timeoutMs: 1700,
             fallback: null,
         });
     }
@@ -142,14 +142,14 @@ class DashboardController {
             return dashboard_service_1.DashboardService.updateLeadStage(businessId, id, stage);
         }, {
             timeoutLabel: "dashboard_lead_stage_projection",
-            timeoutMs: 3500,
+            timeoutMs: 1700,
             fallback: null,
         });
     }
     static async getActiveConversations(req, res) {
         return baseHandler(req, res, async (businessId) => dashboard_service_1.DashboardService.getActiveConversations(businessId), {
             timeoutLabel: "dashboard_conversation_projection",
-            timeoutMs: 3500,
+            timeoutMs: 1600,
             fallback: {
                 active: 0,
                 waitingReplies: 0,

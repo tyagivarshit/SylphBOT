@@ -11,6 +11,7 @@ const generateToken_1 = require("../utils/generateToken");
 const authCookies_1 = require("../utils/authCookies");
 const googleOAuthState_1 = require("../utils/googleOAuthState");
 const authBootstrap_service_1 = require("../services/authBootstrap.service");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 /* ======================================
 UTILS
 ====================================== */
@@ -23,6 +24,30 @@ const buildAuthErrorUrl = (redirectOrigin, authError) => {
     url.searchParams.set("authError", authError);
     url.searchParams.set("error", "google_auth_failed");
     return url.toString();
+};
+const pruneRefreshTokens = async (userId, retainCount = 4) => {
+    const staleTokens = await prisma_1.default.refreshToken.findMany({
+        where: {
+            userId,
+        },
+        orderBy: {
+            createdAt: "desc",
+        },
+        skip: Math.max(0, retainCount),
+        select: {
+            id: true,
+        },
+    });
+    if (!staleTokens.length) {
+        return;
+    }
+    await prisma_1.default.refreshToken.deleteMany({
+        where: {
+            id: {
+                in: staleTokens.map((token) => token.id),
+            },
+        },
+    });
 };
 /* ======================================
 GOOGLE INIT
@@ -50,6 +75,7 @@ exports.googleAuth = googleAuth;
 GOOGLE CALLBACK
 ====================================== */
 const googleCallback = async (req, res) => {
+    const startedAt = Date.now();
     try {
         const user = req.user;
         const state = (0, googleOAuthState_1.verifyGoogleOAuthState)(req.query.state);
@@ -76,20 +102,7 @@ const googleCallback = async (req, res) => {
         const accessToken = (0, generateToken_1.generateAccessToken)(bootstrap.user.id, bootstrap.user.role, bootstrap.identity.businessId, bootstrap.user.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(bootstrap.user.id, bootstrap.user.tokenVersion);
         const refreshToken = hashToken(refreshRaw);
-        const count = await prisma_1.default.refreshToken.count({
-            where: { userId: bootstrap.user.id },
-        });
-        if (count >= 5) {
-            const oldest = await prisma_1.default.refreshToken.findFirst({
-                where: { userId: bootstrap.user.id },
-                orderBy: { createdAt: "asc" },
-            });
-            if (oldest) {
-                await prisma_1.default.refreshToken.delete({
-                    where: { id: oldest.id },
-                });
-            }
-        }
+        await pruneRefreshTokens(bootstrap.user.id, 4);
         await prisma_1.default.refreshToken.create({
             data: {
                 token: refreshToken,
@@ -104,6 +117,15 @@ const googleCallback = async (req, res) => {
             userId: bootstrap.user.id,
             businessId: bootstrap.identity.businessId,
             source: bootstrap.identity.source,
+        });
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "AUTH_MS",
+            value: Date.now() - startedAt,
+            businessId: bootstrap.identity.businessId,
+            route: "auth.google_callback",
+            metadata: {
+                source: "google_oauth",
+            },
         });
         return res.redirect(`${redirectOrigin}/dashboard`);
     }

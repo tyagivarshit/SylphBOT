@@ -18,6 +18,7 @@ const securityAlert_service_1 = require("../services/securityAlert.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
 const authBootstrap_service_1 = require("../services/authBootstrap.service");
 const distributedLock_service_1 = require("../services/distributedLock.service");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 /* ======================================
 UTILS
 ====================================== */
@@ -65,10 +66,35 @@ const writeAuthAuditLog = (req, input) => (0, audit_service_1.createAuditLog)({
     userAgent: String(getUA(req)),
     requestId: req.requestId || null,
 });
+const pruneRefreshTokens = async (userId, retainCount = 4) => {
+    const staleTokens = await prisma_1.default.refreshToken.findMany({
+        where: {
+            userId,
+        },
+        orderBy: {
+            createdAt: "desc",
+        },
+        skip: Math.max(0, retainCount),
+        select: {
+            id: true,
+        },
+    });
+    if (!staleTokens.length) {
+        return;
+    }
+    await prisma_1.default.refreshToken.deleteMany({
+        where: {
+            id: {
+                in: staleTokens.map((token) => token.id),
+            },
+        },
+    });
+};
 /* ======================================
 REGISTER
 ====================================== */
 const register = async (req, res, next) => {
+    const startedAt = Date.now();
     try {
         await checkGlobalLimit(getIP(req));
         const name = String(req.body.name || "").trim();
@@ -118,6 +144,14 @@ const register = async (req, res, next) => {
             success: true,
             verificationRequired: true,
         });
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "AUTH_MS",
+            value: Date.now() - startedAt,
+            route: "auth.register",
+            metadata: {
+                status: "verification_required",
+            },
+        });
         void (0, authEmail_queue_1.scheduleVerificationEmail)(email, verifyLink);
     }
     catch (err) {
@@ -129,6 +163,7 @@ exports.register = register;
 LOGIN
 ====================================== */
 const login = async (req, res, next) => {
+    const startedAt = Date.now();
     try {
         await checkGlobalLimit(getIP(req));
         const email = normalizeEmail(String(req.body.email || ""));
@@ -179,20 +214,7 @@ const login = async (req, res, next) => {
         const businessId = bootstrap.identity.businessId;
         const accessToken = (0, generateToken_1.generateAccessToken)(bootstrap.user.id, bootstrap.user.role, businessId, bootstrap.user.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(bootstrap.user.id, bootstrap.user.tokenVersion);
-        const count = await prisma_1.default.refreshToken.count({
-            where: { userId: bootstrap.user.id },
-        });
-        if (count >= 5) {
-            const oldest = await prisma_1.default.refreshToken.findFirst({
-                where: { userId: bootstrap.user.id },
-                orderBy: { createdAt: "asc" },
-            });
-            if (oldest) {
-                await prisma_1.default.refreshToken.delete({
-                    where: { id: oldest.id },
-                });
-            }
-        }
+        await pruneRefreshTokens(bootstrap.user.id, 4);
         await prisma_1.default.refreshToken.create({
             data: {
                 token: hashToken(refreshRaw),
@@ -232,6 +254,15 @@ const login = async (req, res, next) => {
                 email: bootstrap.user.email,
                 name: bootstrap.user.name,
                 businessId,
+            },
+        });
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "AUTH_MS",
+            value: Date.now() - startedAt,
+            businessId,
+            route: "auth.login",
+            metadata: {
+                source: "password",
             },
         });
     }
@@ -429,6 +460,7 @@ exports.resetPassword = resetPassword;
 GET ME
 ====================================== */
 const getMe = async (req, res, next) => {
+    const startedAt = Date.now();
     try {
         if (!req.user?.id)
             throw (0, AppError_1.unauthorized)("Not authenticated");
@@ -450,6 +482,12 @@ const getMe = async (req, res, next) => {
                 businessId: bootstrap.identity.businessId,
             },
         });
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "AUTH_MS",
+            value: Date.now() - startedAt,
+            businessId: bootstrap.identity.businessId,
+            route: "auth.me",
+        });
     }
     catch (err) {
         next(err);
@@ -460,6 +498,7 @@ exports.getMe = getMe;
 LOGOUT
 ====================================== */
 const logout = async (req, res, next) => {
+    const startedAt = Date.now();
     try {
         await prisma_1.default.refreshToken.deleteMany({
             where: { userId: req.user.id },
@@ -471,6 +510,12 @@ const logout = async (req, res, next) => {
         });
         (0, authCookies_1.clearAuthCookies)(res, req);
         res.json({ success: true });
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "AUTH_MS",
+            value: Date.now() - startedAt,
+            businessId: req.user?.businessId || null,
+            route: "auth.logout",
+        });
     }
     catch (err) {
         next(err);

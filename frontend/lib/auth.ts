@@ -15,7 +15,7 @@ type CurrentUserResponse = {
 
 let currentUserCache: User | null = null;
 let fetchingPromise: Promise<ApiResponse<CurrentUserResponse>> | null = null;
-const AUTH_RETRY_DELAY_MS = 300;
+const AUTH_RETRY_DELAY_MS = 120;
 
 export function clearUserCache() {
   currentUserCache = null;
@@ -47,7 +47,7 @@ export function buildGoogleAuthUrl(redirectTo?: string) {
 
 const shouldRetryCurrentUser = (
   response: ApiResponse<CurrentUserResponse>
-) => response.unauthorized || response.networkError;
+) => response.networkError;
 
 const fetchCurrentUserWithRetry = async () => {
   const firstAttempt = await authRequest<CurrentUserResponse>("/me");

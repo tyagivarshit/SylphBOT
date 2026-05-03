@@ -1,3 +1,5 @@
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
+
 export class TimeoutExceededError extends Error {
   readonly code: string;
   readonly label: string;
@@ -46,18 +48,54 @@ export const withTimeoutFallback = async <T>(input: {
   task: Promise<T>;
   fallback: TimeoutFallback<T>;
 }) => {
+  const startedAt = Date.now();
+
   try {
-    return {
-      value: await withTimeout({
-        label: input.label,
+    const value = await withTimeout({
+      label: input.label,
+      timeoutMs: input.timeoutMs,
+      task: input.task,
+    });
+
+    emitPerformanceMetric({
+      name: "PROJECTION_MS",
+      value: Date.now() - startedAt,
+      route: input.label,
+      metadata: {
         timeoutMs: input.timeoutMs,
-        task: input.task,
-      }),
+        status: "ok",
+      },
+    });
+
+    return {
+      value,
       timedOut: false,
       failed: false,
     };
   } catch (error) {
     const timedOut = error instanceof TimeoutExceededError;
+
+    if (timedOut) {
+      emitPerformanceMetric({
+        name: "TIMEOUT_PREVENTED",
+        value: Date.now() - startedAt,
+        route: input.label,
+        metadata: {
+          timeoutMs: input.timeoutMs,
+        },
+      });
+    }
+
+    emitPerformanceMetric({
+      name: "PROJECTION_MS",
+      value: Date.now() - startedAt,
+      route: input.label,
+      metadata: {
+        timeoutMs: input.timeoutMs,
+        status: timedOut ? "timed_out" : "failed",
+      },
+    });
+
     return {
       value: await resolveFallback(input.fallback),
       timedOut,

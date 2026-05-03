@@ -1,10 +1,12 @@
 import type { NextFunction, Request, Response } from "express";
 import { captureExceptionWithContext } from "../observability/sentry";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   recordObservabilityEvent,
   recordTraceLedger,
 } from "../services/reliability/reliabilityOS.service";
 import { getRequestBusinessId } from "../services/tenant.service";
+import { monitoringConfig } from "../config/monitoring.config";
 
 export const monitoringMiddleware = (
   req: Request,
@@ -74,6 +76,31 @@ export const monitoringMiddleware = (
         route: req.originalUrl,
       },
     }).catch(() => undefined);
+
+    emitPerformanceMetric({
+      name: "API_MS",
+      value: durationMs,
+      businessId,
+      route: req.originalUrl,
+      metadata: {
+        method: req.method,
+        statusCode,
+      },
+    });
+
+    if (durationMs >= monitoringConfig.slowRequestMs) {
+      emitPerformanceMetric({
+        name: "DB_SLOW",
+        value: durationMs,
+        businessId,
+        route: req.originalUrl,
+        metadata: {
+          method: req.method,
+          statusCode,
+          thresholdMs: monitoringConfig.slowRequestMs,
+        },
+      });
+    }
 
     if (statusCode >= 500) {
       captureExceptionWithContext(

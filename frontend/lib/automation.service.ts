@@ -63,6 +63,7 @@ export type CreateCommentTriggerInput = {
 export async function getAutomationFlows(): Promise<AutomationFlow[]> {
   const response = await apiFetch<AutomationFlow[]>("/api/automation/flows", {
     cache: "no-store",
+    timeoutMs: 1800,
   });
 
   if (response.limited || response.upgradeRequired) {

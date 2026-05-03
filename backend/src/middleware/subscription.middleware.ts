@@ -3,9 +3,22 @@ import prisma from "../config/prisma";
 import redis from "../config/redis";
 import { getPlanKey } from "../config/plan.config";
 import { env } from "../config/env";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 const CACHE_TTL = 60 * 3;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
+const EARLY_ACCESS_CACHE_TTL_MS = 30_000;
+
+const earlyAccessCache = new Map<
+  string,
+  {
+    value: {
+      allowEarly: boolean;
+      remainingEarly: number;
+    };
+    expiresAt: number;
+  }
+>();
 
 export const getBillingCacheKey = (businessId: string) => `sub:${businessId}`;
 
@@ -86,12 +99,29 @@ const getCachedSubscription = async (businessId: string) => {
   const cached = await redis.get(cacheKey).catch(() => null);
 
   if (cached) {
+    emitPerformanceMetric({
+      name: "CACHE_HIT",
+      businessId,
+      route: "subscription_context",
+      metadata: {
+        cache: "redis_subscription",
+      },
+    });
     try {
       return JSON.parse(cached);
     } catch {
       await redis.del(cacheKey).catch(() => undefined);
     }
   }
+
+  emitPerformanceMetric({
+    name: "CACHE_MISS",
+    businessId,
+    route: "subscription_context",
+    metadata: {
+      cache: "redis_subscription",
+    },
+  });
 
   const canonical = await prisma.subscriptionLedger
     .findFirst({
@@ -122,6 +152,32 @@ const getCachedSubscription = async (businessId: string) => {
 };
 
 const getEarlyAccessSnapshot = async (subscription: any | null) => {
+  const cacheKey = subscription?.businessId
+    ? String(subscription.businessId)
+    : "__global__";
+  const cached = earlyAccessCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    emitPerformanceMetric({
+      name: "CACHE_HIT",
+      businessId: subscription?.businessId || null,
+      route: "early_access_projection",
+      metadata: {
+        cache: "memory_early_access",
+      },
+    });
+    return cached.value;
+  }
+
+  emitPerformanceMetric({
+    name: "CACHE_MISS",
+    businessId: subscription?.businessId || null,
+    route: "early_access_projection",
+    metadata: {
+      cache: "memory_early_access",
+    },
+  });
+
   try {
     const plans = await prisma.plan.findMany({
       where: {
@@ -139,7 +195,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
       0
     );
 
-    return {
+    const value = {
       allowEarly:
         totalEarlyUsed < EARLY_ACCESS_LIMIT &&
         !subscription?.stripeSubscriptionId,
@@ -148,6 +204,13 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
         0
       ),
     };
+
+    earlyAccessCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + EARLY_ACCESS_CACHE_TTL_MS,
+    });
+
+    return value;
   } catch {
     return {
       allowEarly: false,
@@ -157,6 +220,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
 };
 
 export const loadBillingContext = async (businessId: string) => {
+  const startedAt = Date.now();
   const cachedSubscription = await getCachedSubscription(businessId).catch(
     () => null
   );
@@ -215,6 +279,17 @@ export const loadBillingContext = async (businessId: string) => {
 
   context.allowEarly = earlyAccess.allowEarly;
   context.remainingEarly = earlyAccess.remainingEarly;
+
+  emitPerformanceMetric({
+    name: "PROJECTION_MS",
+    value: Date.now() - startedAt,
+    businessId,
+    route: "billing_context",
+    metadata: {
+      planKey: context.planKey,
+      status: context.status,
+    },
+  });
 
   return {
     subscription,

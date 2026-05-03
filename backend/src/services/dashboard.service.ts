@@ -5,6 +5,7 @@ import { getPlanKey } from "../config/plan.config";
 import { getPricingPlanLabel } from "../config/pricing.config";
 import { getUsageOverview } from "./usage.service";
 import { getCanonicalSubscriptionSnapshot } from "./subscriptionAuthority.service";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 type UsageOverviewSafe = {
   warning: boolean;
@@ -38,11 +39,52 @@ const EMPTY_USAGE: UsageOverviewSafe = {
   },
 };
 
+const DASHBOARD_STATS_CACHE_TTL_MS = 8_000;
+
+const dashboardStatsCache = new Map<
+  string,
+  {
+    value?: Record<string, unknown>;
+    expiresAt: number;
+    promise?: Promise<Record<string, unknown>>;
+  }
+>();
+
 const getSettledValue = <T>(result: PromiseSettledResult<T>, fallback: T) =>
   result.status === "fulfilled" ? result.value : fallback;
 
 export class DashboardService {
   static async getStats(businessId: string) {
+    const nowMs = Date.now();
+    const cached = dashboardStatsCache.get(businessId);
+
+    if (cached?.value && cached.expiresAt > nowMs) {
+      emitPerformanceMetric({
+        name: "CACHE_HIT",
+        businessId,
+        route: "dashboard_stats",
+        metadata: {
+          cache: "memory_dashboard_stats",
+        },
+      });
+      return cached.value;
+    }
+
+    if (cached?.promise) {
+      return cached.promise;
+    }
+
+    emitPerformanceMetric({
+      name: "CACHE_MISS",
+      businessId,
+      route: "dashboard_stats",
+      metadata: {
+        cache: "memory_dashboard_stats",
+      },
+    });
+
+    const computePromise = (async () => {
+      const startedAt = Date.now();
     const now = new Date();
     const todayStart = startOfDay(now);
     const monthStart = startOfMonth(now);
@@ -93,7 +135,7 @@ export class DashboardService {
     const usagePercent =
       isUnlimited || aiLimit <= 0 ? 0 : Math.min(aiCallsUsed / aiLimit, 1);
 
-    return {
+      const result = {
       totalLeads: getSettledValue(coreMetrics[0], 0),
       leadsToday: getSettledValue(coreMetrics[1], 0),
       leadsThisMonth: getSettledValue(coreMetrics[2], 0),
@@ -116,7 +158,47 @@ export class DashboardService {
       chartData: getSettledValue(timeline[0], []),
       messagesChart: getSettledValue(timeline[1], []),
       recentActivity: getSettledValue(timeline[2], []),
-    };
+      };
+
+      const durationMs = Date.now() - startedAt;
+      emitPerformanceMetric({
+        name: "PROJECTION_MS",
+        value: durationMs,
+        businessId,
+        route: "dashboard_stats",
+      });
+      if (durationMs >= 700) {
+        emitPerformanceMetric({
+          name: "DB_SLOW",
+          value: durationMs,
+          businessId,
+          route: "dashboard_stats",
+        });
+      }
+
+      dashboardStatsCache.set(businessId, {
+        value: result,
+        expiresAt: Date.now() + DASHBOARD_STATS_CACHE_TTL_MS,
+      });
+
+      return result;
+    })().finally(() => {
+      const latest = dashboardStatsCache.get(businessId);
+      if (latest?.promise) {
+        dashboardStatsCache.set(businessId, {
+          value: latest.value,
+          expiresAt: latest.expiresAt,
+        });
+      }
+    });
+
+    dashboardStatsCache.set(businessId, {
+      value: cached?.value,
+      expiresAt: cached?.expiresAt || 0,
+      promise: computePromise,
+    });
+
+    return computePromise;
   }
 
   static async getLeadsList(
@@ -334,18 +416,26 @@ export class DashboardService {
 
   static async getActiveConversations(businessId: string) {
     try {
-      const leads = await prisma.lead.findMany({
-        where: {
-          businessId,
-          lastMessageAt: { not: null },
-        },
-        select: { unreadCount: true },
-      });
+      const [active, waitingReplies] = await Promise.all([
+        prisma.lead.count({
+          where: {
+            businessId,
+            lastMessageAt: { not: null },
+          },
+        }),
+        prisma.lead.count({
+          where: {
+            businessId,
+            lastMessageAt: { not: null },
+            unreadCount: { gt: 0 },
+          },
+        }),
+      ]);
 
       return {
-        active: leads.length,
-        waitingReplies: leads.filter((lead) => lead.unreadCount > 0).length,
-        resolved: leads.filter((lead) => lead.unreadCount === 0).length,
+        active,
+        waitingReplies,
+        resolved: Math.max(active - waitingReplies, 0),
       };
     } catch (error) {
       console.error("Dashboard getActiveConversations error", error);

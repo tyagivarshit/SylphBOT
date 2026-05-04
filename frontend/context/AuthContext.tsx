@@ -10,7 +10,6 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchCurrentUser, type CurrentUser } from "@/lib/userApi";
-import { apiFetch } from "@/lib/apiClient";
 
 export type AuthUser = CurrentUser & {
   role?: string;
@@ -40,8 +39,6 @@ export const AuthProvider = ({
   const [loading, setLoading] = useState(true);
 
   const hasFetched = useRef(false);
-  const bootHydrationInFlight = useRef<Promise<void> | null>(null);
-  const bootHydrationUserIdRef = useRef<string | null>(null);
 
   const recordMetric = useCallback(
     (name: string, valueMs: number, metadata?: Record<string, unknown>) => {
@@ -58,108 +55,6 @@ export const AuthProvider = ({
       console.info(name, payload);
     },
     []
-  );
-
-  const warmWorkspaceHydration = useCallback(
-    async (nextUser: AuthUser) => {
-      if (!nextUser?.id) {
-        return;
-      }
-
-      if (
-        bootHydrationInFlight.current &&
-        bootHydrationUserIdRef.current === nextUser.id
-      ) {
-        return bootHydrationInFlight.current;
-      }
-
-      const task = (async () => {
-        const startedAt = performance.now();
-
-        const [dashboard, billing, automation, integrations, profile] =
-          await Promise.allSettled([
-            apiFetch("/api/dashboard/stats", {
-              cache: "no-store",
-              timeoutMs: 3600,
-            }),
-            apiFetch("/api/billing", {
-              cache: "no-store",
-              timeoutMs: 3800,
-            }),
-            apiFetch("/api/automation/flows", {
-              cache: "no-store",
-              timeoutMs: 3200,
-            }),
-            apiFetch("/api/clients", {
-              cache: "no-store",
-              timeoutMs: 3200,
-            }),
-            apiFetch("/api/user/profile", {
-              cache: "no-store",
-              timeoutMs: 2800,
-            }),
-          ]);
-
-        if (
-          billing.status === "fulfilled" &&
-          billing.value.success &&
-          billing.value.data
-        ) {
-          queryClient.setQueryData(["billing"], billing.value.data);
-        }
-
-        if (
-          integrations.status === "fulfilled" &&
-          integrations.value.success &&
-          Array.isArray(integrations.value.data)
-        ) {
-          queryClient.setQueryData(["integrations"], integrations.value.data);
-        }
-
-        if (
-          profile.status === "fulfilled" &&
-          profile.value.success &&
-          profile.value.data &&
-          typeof profile.value.data === "object"
-        ) {
-          queryClient.setQueryData(["profile"], profile.value.data);
-        }
-
-        const hydratedSections = [
-          dashboard.status === "fulfilled" && dashboard.value.success
-            ? "dashboard"
-            : null,
-          billing.status === "fulfilled" && billing.value.success
-            ? "billing"
-            : null,
-          automation.status === "fulfilled" && automation.value.success
-            ? "automation"
-            : null,
-          integrations.status === "fulfilled" && integrations.value.success
-            ? "integrations"
-            : null,
-          profile.status === "fulfilled" && profile.value.success
-            ? "profile"
-            : null,
-        ].filter(Boolean);
-
-        recordMetric("APP_BOOT_MS", performance.now() - startedAt, {
-          userId: nextUser.id,
-          hydratedSections,
-        });
-      })()
-        .catch(() => undefined)
-        .finally(() => {
-          if (bootHydrationInFlight.current === task) {
-            bootHydrationInFlight.current = null;
-          }
-        });
-
-      bootHydrationUserIdRef.current = nextUser.id;
-      bootHydrationInFlight.current = task;
-      return task;
-    },
-    [queryClient, recordMetric]
   );
 
   const persistAuthState = (nextUser: AuthUser | null) => {
@@ -209,7 +104,6 @@ export const AuthProvider = ({
       setUser(nextUser);
       persistAuthState(nextUser);
       queryClient.setQueryData(["me"], nextUser);
-      void warmWorkspaceHydration(nextUser);
       return nextUser;
     } catch {
       setUser(null);
@@ -223,7 +117,7 @@ export const AuthProvider = ({
         setLoading(false);
       }
     }
-  }, [queryClient, recordMetric, warmWorkspaceHydration]);
+  }, [queryClient, recordMetric]);
 
   useEffect(() => {
     if (hasFetched.current) return;

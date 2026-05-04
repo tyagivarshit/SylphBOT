@@ -42,15 +42,15 @@ export function useDashboard() {
   const statsQuery = useQuery({
     queryKey: ["dashboard-stats", user?.businessId],
     queryFn: getDashboardStats,
-    enabled: !!user?.businessId, // ✅ FIXED
+    enabled: !!user,
   });
 
   /* ================= LEADS ================= */
 
   const leadsQuery = useQuery({
     queryKey: ["dashboard-leads", user?.businessId],
-    queryFn: () => getRecentLeads(), 
-    enabled: !!user?.businessId, // ✅ FIXED
+    queryFn: () => getRecentLeads(),
+    enabled: !!user,
   });
 
   const statsRes: any = statsQuery.data;

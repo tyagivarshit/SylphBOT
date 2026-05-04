@@ -17,6 +17,8 @@ const subscriptionAuthority_service_1 = require("../services/subscriptionAuthori
 const metaOAuthState_1 = require("../utils/metaOAuthState");
 const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
 const reliabilityOS_service_1 = require("../services/reliability/reliabilityOS.service");
+const META_OAUTH_CONNECT_TIMEOUT_MS = 45000;
+const META_GRAPH_TIMEOUT_MS = 12000;
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
@@ -494,6 +496,7 @@ const fetchWhatsAppPhoneCandidates = async (accessToken) => {
         try {
             const response = await axios_1.default.get(lookup.url, {
                 params: lookup.params,
+                timeout: META_GRAPH_TIMEOUT_MS,
             });
             const businessNodes = extractBusinessNodesFromPayload(response.data);
             for (const businessNode of businessNodes) {
@@ -527,6 +530,7 @@ const fetchMetaBusinesses = async (accessToken) => {
             fields: "id,name",
             access_token: accessToken,
         },
+        timeout: META_GRAPH_TIMEOUT_MS,
     });
     return getMetaDataArray(response.data).map((business) => ({
         id: normalizeOptionalString(business?.id),
@@ -543,6 +547,7 @@ const fetchInstagramConnection = async (accessToken) => {
             fields: "id,name,access_token,instagram_business_account{id,username},connected_instagram_account{id,username}",
             access_token: accessToken,
         },
+        timeout: META_GRAPH_TIMEOUT_MS,
     });
     const pages = getMetaDataArray(pagesRes.data);
     const allPairs = [];
@@ -573,6 +578,7 @@ const fetchInstagramConnection = async (accessToken) => {
                         fields: "id,username,name,account_type",
                         access_token: pageAccessToken,
                     },
+                    timeout: META_GRAPH_TIMEOUT_MS,
                 });
                 instagramUsername =
                     normalizeOptionalString(igProfileRes.data?.username) || instagramUsername;
@@ -617,6 +623,7 @@ const fetchMetaGrantedPermissions = async (accessToken) => {
             params: {
                 access_token: accessToken,
             },
+            timeout: META_GRAPH_TIMEOUT_MS,
         });
         return getMetaDataArray(response.data)
             .filter((row) => String(row?.status || "").toLowerCase() === "granted")
@@ -637,6 +644,7 @@ const subscribeInstagramPageWebhook = async (facebookPageId, pageAccessToken) =>
                 subscribed_fields: "messages,messaging_postbacks,comments",
                 access_token: pageAccessToken,
             },
+            timeout: META_GRAPH_TIMEOUT_MS,
         });
         return true;
     }
@@ -654,6 +662,7 @@ const fetchInstagramProfileSnapshot = async (pageId, pageAccessToken) => {
                 fields: "id,username,name,profile_picture_url",
                 access_token: pageAccessToken,
             },
+            timeout: META_GRAPH_TIMEOUT_MS,
         });
         return response.data || null;
     }
@@ -671,6 +680,7 @@ const fetchWhatsAppPhoneProfile = async (phoneNumberId, accessToken) => {
                 fields: "id,display_phone_number,verified_name,quality_rating,name_status,messaging_limit_tier,status",
                 access_token: accessToken,
             },
+            timeout: META_GRAPH_TIMEOUT_MS,
         });
         return response.data || null;
     }
@@ -1022,6 +1032,8 @@ const metaOAuthConnect = async (req, res) => {
     let instagramTraceId = buildInstagramTraceId(null);
     let instagramBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
     try {
+        req.setTimeout?.(META_OAUTH_CONNECT_TIMEOUT_MS);
+        res.setTimeout(META_OAUTH_CONNECT_TIMEOUT_MS);
         const userId = req.user?.id;
         const requestBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
         const { code, state, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, phoneNumberId, facebookPageId, instagramProfessionalAccountId, } = req.body || {};
@@ -1142,6 +1154,7 @@ const metaOAuthConnect = async (req, res) => {
                     redirect_uri: redirectUri,
                     code,
                 },
+                timeout: META_GRAPH_TIMEOUT_MS,
             });
         }
         catch (error) {
@@ -1182,6 +1195,149 @@ const metaOAuthConnect = async (req, res) => {
                 status: "COMPLETED",
             });
         }
+        const selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
+            normalizeOptionalString(oauthState.preferredPhoneNumberId);
+        const requestedFacebookPageId = normalizeOptionalString(facebookPageId) ||
+            normalizeOptionalString(oauthState.preferredFacebookPageId);
+        const requestedInstagramProfessionalAccountId = normalizeOptionalString(instagramProfessionalAccountId) ||
+            normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
+        const discoveryPermissions = await fetchMetaGrantedPermissions(shortToken);
+        if (targetPlatform === "WHATSAPP" && !selectedPhoneNumberId) {
+            const requiredWhatsAppPermissions = [
+                "whatsapp_business_management",
+                "whatsapp_business_messaging",
+            ];
+            const missingWhatsAppPermissions = requiredWhatsAppPermissions.filter((scope) => !discoveryPermissions.includes(scope));
+            if (missingWhatsAppPermissions.length) {
+                const actionable = buildActionableFailurePayload({
+                    code: "WA_PERMISSION_MISSING",
+                    reason: `Missing required permissions: ${missingWhatsAppPermissions.join(", ")}`,
+                    missingPermission: missingWhatsAppPermissions[0],
+                });
+                return res.status(400).json({
+                    success: false,
+                    data: {
+                        platform: "WHATSAPP",
+                        stage: "WA_PERMISSION_AUDITED",
+                        reason: `Missing required permissions: ${missingWhatsAppPermissions.join(", ")}`,
+                        code: "WA_PERMISSION_MISSING",
+                        actionable,
+                        requiresPhoneSelection: false,
+                        availablePhoneNumbers: [],
+                    },
+                    message: "WhatsApp permissions missing",
+                    code: "WA_PERMISSION_MISSING",
+                });
+            }
+            const availablePhoneNumbers = await fetchWhatsAppPhoneCandidates(shortToken);
+            if (!availablePhoneNumbers.length) {
+                return res.status(400).json({
+                    success: false,
+                    data: {
+                        platform: "WHATSAPP",
+                        stage: "WA_PHONE_DISCOVERY",
+                        reason: "No WhatsApp phone numbers were found in linked Meta assets.",
+                        code: "WA_PHONE_NUMBER_NOT_FOUND",
+                        actionable: buildActionableFailurePayload({
+                            code: "WA_PHONE_NUMBER_NOT_FOUND",
+                            reason: "No WhatsApp phone numbers were found in linked Meta assets.",
+                        }),
+                        requiresPhoneSelection: false,
+                        availablePhoneNumbers: [],
+                    },
+                    message: "Unable to resolve WhatsApp phone number",
+                    code: "WA_PHONE_NUMBER_NOT_FOUND",
+                });
+            }
+            return res.status(409).json({
+                success: false,
+                data: {
+                    platform: "WHATSAPP",
+                    stage: "WA_PHONE_SELECTED",
+                    reason: "Select the WhatsApp mobile number you want to connect.",
+                    code: "PHONE_SELECTION_REQUIRED",
+                    actionable: buildActionableFailurePayload({
+                        code: "PHONE_SELECTION_REQUIRED",
+                        reason: "Select the WhatsApp mobile number you want to connect.",
+                    }),
+                    requiresPhoneSelection: true,
+                    availablePhoneNumbers,
+                },
+                message: "Phone number selection required",
+                code: "PHONE_SELECTION_REQUIRED",
+            });
+        }
+        if (targetPlatform === "INSTAGRAM" &&
+            !requestedFacebookPageId &&
+            !requestedInstagramProfessionalAccountId) {
+            let instagramDiscovery = null;
+            try {
+                instagramDiscovery = await fetchInstagramConnection(shortToken);
+            }
+            catch (error) {
+                failInstagramConnect({
+                    stage: "IG_PAGES_FETCHED",
+                    reason: getAxiosErrorMessage(error),
+                    code: "IG_PAGES_FETCH_FAILED",
+                    statusCode: Number(error?.response?.status || 400),
+                    metadata: {
+                        providerError: error?.response?.data || null,
+                    },
+                });
+            }
+            if (!instagramDiscovery) {
+                failInstagramConnect({
+                    stage: "IG_PAGES_FETCHED",
+                    reason: "Unable to fetch Instagram pages",
+                    code: "IG_PAGES_FETCH_FAILED",
+                    statusCode: 400,
+                });
+            }
+            const validPairs = Array.isArray(instagramDiscovery.validPairs)
+                ? instagramDiscovery.validPairs
+                : [];
+            const allPairs = Array.isArray(instagramDiscovery.allPairs)
+                ? instagramDiscovery.allPairs
+                : [];
+            const personalPairs = allPairs.filter((pair) => String(pair.instagramAccountType || "")
+                .trim()
+                .toUpperCase() === "PERSONAL");
+            if (!validPairs.length) {
+                if (personalPairs.length) {
+                    failInstagramConnect({
+                        stage: "IG_PAIR_VALIDATED",
+                        reason: "Connected Instagram account type is Personal. Professional account required.",
+                        code: "ACCOUNT_PERSONAL",
+                        statusCode: 400,
+                    });
+                }
+                if (instagramDiscovery.pagesWithoutInstagram.length > 0) {
+                    failInstagramConnect({
+                        stage: "IG_PAIR_VALIDATED",
+                        reason: "No Instagram Professional account is linked to your Facebook Page.",
+                        code: "NO_LINKED_IG_ACCOUNT",
+                        statusCode: 400,
+                    });
+                }
+                failInstagramConnect({
+                    stage: "IG_PAIR_VALIDATED",
+                    reason: "No eligible Facebook Page and Instagram Professional account pair was found.",
+                    code: instagramDiscovery.pagesFound > 0
+                        ? "NO_LINKED_PAGE"
+                        : "PAGE_ROLE_REMOVED",
+                    statusCode: 400,
+                });
+            }
+            failInstagramConnect({
+                stage: "IG_PAIR_SELECTED",
+                reason: "Select Facebook Page and Instagram account to continue.",
+                code: "PAIR_SELECTION_REQUIRED",
+                statusCode: 409,
+                metadata: {
+                    validPairs,
+                },
+            });
+        }
         let longTokenRes;
         try {
             longTokenRes = await axios_1.default.get("https://graph.facebook.com/v19.0/oauth/access_token", {
@@ -1191,6 +1347,7 @@ const metaOAuthConnect = async (req, res) => {
                     client_secret: metaRuntime.appSecret,
                     fb_exchange_token: shortToken,
                 },
+                timeout: META_GRAPH_TIMEOUT_MS,
             });
         }
         catch (error) {
@@ -1232,7 +1389,9 @@ const metaOAuthConnect = async (req, res) => {
             });
         }
         const connectedClients = [];
-        const grantedPermissions = await fetchMetaGrantedPermissions(longToken);
+        const grantedPermissions = discoveryPermissions.length
+            ? discoveryPermissions
+            : await fetchMetaGrantedPermissions(longToken);
         const connectReplayToken = `meta_oauth_${oauthState.nonce}`;
         if (targetPlatform === "INSTAGRAM") {
             let businesses = [];
@@ -1259,10 +1418,6 @@ const metaOAuthConnect = async (req, res) => {
                     businessesFound: businesses.length,
                 },
             });
-            const requestedFacebookPageId = normalizeOptionalString(facebookPageId) ||
-                normalizeOptionalString(oauthState.preferredFacebookPageId);
-            const requestedInstagramProfessionalAccountId = normalizeOptionalString(instagramProfessionalAccountId) ||
-                normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
             let instagramConnection = null;
             try {
                 instagramConnection = await fetchInstagramConnection(longToken);
@@ -1581,8 +1736,6 @@ const metaOAuthConnect = async (req, res) => {
             });
         }
         else {
-            const selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
-                normalizeOptionalString(oauthState.preferredPhoneNumberId);
             const requiredWhatsAppPermissions = [
                 "whatsapp_business_management",
                 "whatsapp_business_messaging",
@@ -1701,22 +1854,29 @@ const metaOAuthConnect = async (req, res) => {
                 },
             });
             if (connectResult.integration?.status !== "CONNECTED") {
+                const failureCode = normalizeOptionalString(connectResult.attempt?.errorCode) ||
+                    normalizeOptionalString(connectResult.health?.rootCauseCode) ||
+                    "WA_CANONICAL_SAVE_FAILED";
+                const failureReason = normalizeOptionalString(connectResult.attempt?.errorMessage) ||
+                    normalizeOptionalString(connectResult.health?.rootCauseMessage) ||
+                    "WhatsApp canonical connect did not reach CONNECTED status";
+                const actionable = buildActionableFailurePayload({
+                    code: failureCode,
+                    reason: failureReason,
+                });
                 return res.status(400).json({
                     success: false,
                     data: {
                         platform: "WHATSAPP",
                         stage: "WA_CONNECT_FAILED",
-                        reason: normalizeOptionalString(connectResult.attempt?.errorMessage) ||
-                            normalizeOptionalString(connectResult.health?.rootCauseMessage) ||
-                            "WhatsApp canonical connect did not reach CONNECTED status",
-                        code: normalizeOptionalString(connectResult.attempt?.errorCode) ||
-                            normalizeOptionalString(connectResult.health?.rootCauseCode) ||
-                            "WA_CANONICAL_SAVE_FAILED",
+                        reason: failureReason,
+                        code: failureCode,
+                        actionable,
+                        requiresPhoneSelection: availablePhoneNumbers.length > 0,
+                        availablePhoneNumbers,
                     },
                     message: "WhatsApp connect failed",
-                    code: normalizeOptionalString(connectResult.attempt?.errorCode) ||
-                        normalizeOptionalString(connectResult.health?.rootCauseCode) ||
-                        "WA_CANONICAL_SAVE_FAILED",
+                    code: failureCode,
                 });
             }
             const whatsappClient = await upsertConnectedClient({

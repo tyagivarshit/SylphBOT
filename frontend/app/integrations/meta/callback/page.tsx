@@ -245,6 +245,7 @@ function MetaCallbackContent() {
             code,
             state,
           },
+          timeout: 45000,
           validateStatus: () => true,
         });
         const payload = response?.data;

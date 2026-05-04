@@ -77,7 +77,7 @@ const requireSuccess = <T>(data: T | null, message: string) => {
 export async function fetchCurrentUser(): Promise<CurrentUser | null> {
   const response = await apiFetch<CurrentUser>("/api/user/me", {
     cache: "no-store",
-    timeoutMs: 1800,
+    timeoutMs: 4200,
   });
 
   return response.success ? response.data : null;

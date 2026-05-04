@@ -68,6 +68,7 @@ export default function DashboardPage() {
 
   const loadDashboard = useCallback(async () => {
     if (!user) {
+      setPageLoading(false);
       return;
     }
 
@@ -80,6 +81,14 @@ export default function DashboardPage() {
         getDashboardStats(),
         getActiveConversations(),
       ]);
+
+      if (
+        statsResult.status === "fulfilled" &&
+        statsResult.value.unauthorized
+      ) {
+        router.replace("/auth/login");
+        return;
+      }
 
       if (statsResult.status !== "fulfilled" || !statsResult.value.success || !statsResult.value.data) {
         throw new Error(
@@ -108,13 +117,13 @@ export default function DashboardPage() {
     } finally {
       setPageLoading(false);
     }
-  }, [user]);
+  }, [router, user]);
 
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
 
-  if (loading || pageLoading) {
+  if (loading || (pageLoading && Boolean(user))) {
     return <DashboardSkeleton />;
   }
 

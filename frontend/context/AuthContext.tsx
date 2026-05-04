@@ -80,23 +80,23 @@ export const AuthProvider = ({
           await Promise.allSettled([
             apiFetch("/api/dashboard/stats", {
               cache: "no-store",
-              timeoutMs: 1700,
+              timeoutMs: 3600,
             }),
             apiFetch("/api/billing", {
               cache: "no-store",
-              timeoutMs: 1900,
+              timeoutMs: 3800,
             }),
             apiFetch("/api/automation/flows", {
               cache: "no-store",
-              timeoutMs: 1800,
+              timeoutMs: 3200,
             }),
             apiFetch("/api/clients", {
               cache: "no-store",
-              timeoutMs: 1700,
+              timeoutMs: 3200,
             }),
             apiFetch("/api/user/profile", {
               cache: "no-store",
-              timeoutMs: 1400,
+              timeoutMs: 2800,
             }),
           ]);
 

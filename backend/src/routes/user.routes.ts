@@ -65,17 +65,58 @@ const getUserRecord = async (userId: string) =>
     select: safeUserSelect,
   });
 
-const getCurrentUser = async (
-  userId: string,
+type SafeUserRecord = NonNullable<Awaited<ReturnType<typeof getUserRecord>>>;
+
+const buildFallbackCurrentUser = (
+  user: SafeUserRecord,
   preferredBusinessId?: string | null
 ) => {
-  const user = await getUserRecord(userId);
+  const businessId =
+    String(preferredBusinessId || "").trim() ||
+    String(user.businessId || "").trim() ||
+    null;
+
+  return {
+    ...user,
+    businessId,
+    business: null,
+    workspace: businessId
+      ? {
+          id: businessId,
+          name: null,
+        }
+      : null,
+    connectedAccounts: {
+      instagram: {
+        connected: false,
+        pageId: null,
+        healthy: false,
+      },
+      whatsapp: {
+        connected: false,
+        phoneNumberId: null,
+        healthy: false,
+      },
+      totalConnected: 0,
+    },
+  };
+};
+
+const getCurrentUser = async (
+  input: {
+    userId: string;
+    preferredBusinessId?: string | null;
+    baseUser?: SafeUserRecord | null;
+  }
+) => {
+  const user = input.baseUser || (await getUserRecord(input.userId));
 
   if (!user) {
     return null;
   }
 
-  const preferredBusiness = String(preferredBusinessId || "").trim() || null;
+  const preferredBusiness =
+    String(input.preferredBusinessId || "").trim() || null;
   const linkedBusiness = String(user.businessId || "").trim() || null;
   let businessId = preferredBusiness || linkedBusiness || null;
   let workspace:
@@ -116,8 +157,8 @@ const getCurrentUser = async (
 
   if (!businessId || !workspace) {
     const identity = await resolveUserWorkspaceIdentity({
-      userId,
-      preferredBusinessId: preferredBusinessId || null,
+      userId: input.userId,
+      preferredBusinessId: input.preferredBusinessId || null,
       bootstrapWorkspaceIfMissing: false,
       persistResolvedBusinessId: false,
     });
@@ -139,7 +180,7 @@ const getCurrentUser = async (
   const clientsResult = businessId
     ? await withTimeoutFallback({
         label: "user_me_clients_projection",
-        timeoutMs: 2500,
+        timeoutMs: 900,
         task: prisma.client.findMany({
           where: {
             businessId,
@@ -211,9 +252,16 @@ router.get("/me", protect, async (req: any, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    const baseUser = await getUserRecord(userId);
+
+    if (!baseUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const preferredBusinessId = req.user?.businessId || baseUser.businessId || null;
     const cacheKey = buildCurrentUserCacheKey(
       userId,
-      req.user?.businessId || null
+      preferredBusinessId
     );
     const cached = currentUserCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
@@ -240,9 +288,13 @@ router.get("/me", protect, async (req: any, res) => {
 
     const userHydration = await withTimeoutFallback({
       label: "user_me_hydration",
-      timeoutMs: 2500,
-      task: getCurrentUser(userId, req.user?.businessId || null),
-      fallback: null,
+      timeoutMs: 2200,
+      task: getCurrentUser({
+        userId,
+        preferredBusinessId,
+        baseUser,
+      }),
+      fallback: buildFallbackCurrentUser(baseUser, preferredBusinessId),
     });
     const user = userHydration.value;
 
@@ -379,7 +431,10 @@ router.patch("/update", protect, async (req: any, res) => {
       });
     }
 
-    const updatedUser = await getCurrentUser(userId, identity.businessId);
+    const updatedUser = await getCurrentUser({
+      userId,
+      preferredBusinessId: identity.businessId,
+    });
     invalidateCurrentUserCache(userId);
     return res.json(updatedUser);
   } catch (err) {
@@ -432,7 +487,10 @@ router.post(
         },
       });
 
-      const updatedUser = await getCurrentUser(userId, req.user?.businessId || null);
+      const updatedUser = await getCurrentUser({
+        userId,
+        preferredBusinessId: req.user?.businessId || null,
+      });
       invalidateCurrentUserCache(userId);
       return res.json(updatedUser);
     } catch (err) {

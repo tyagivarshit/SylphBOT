@@ -44,7 +44,7 @@ export const getDashboardStats = async (): Promise<
   ApiResponse<DashboardStats>
 > => {
   return apiFetch<DashboardStats>("/api/dashboard/stats", {
-    timeoutMs: 1600,
+    timeoutMs: 3600,
   });
 };
 
@@ -62,7 +62,7 @@ export const getRecentLeads = async (): Promise<
   const url = `/api/dashboard/leads?${params.toString()}`;
 
   return apiFetch<LeadsResponse>(url, {
-    timeoutMs: 1800,
+    timeoutMs: 3200,
   });
 };
 
@@ -103,6 +103,6 @@ export const updateLeadStage = async (
 
 export const getActiveConversations = async () => {
   return apiFetch("/api/dashboard/active-conversations", {
-    timeoutMs: 1600,
+    timeoutMs: 3200,
   });
 };

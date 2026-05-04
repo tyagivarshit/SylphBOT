@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { env } from "../config/env";
 import prisma from "../config/prisma";
 import  redis  from "../config/redis";
+import { isRedisHealthy, isRedisWritable } from "../config/redis";
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -63,15 +64,60 @@ const verifyPassword = async (
 const isStrongPassword = (password: string) =>
   /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
 
+const withFastTimeout = async <T>(
+  task: Promise<T>,
+  timeoutMs: number
+): Promise<T> => {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error("auth_rate_limit_timeout"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
 /* ======================================
 RATE LIMIT
 ====================================== */
 
 const checkGlobalLimit = async (ip: string) => {
+  if (!isRedisHealthy() || !isRedisWritable()) {
+    return;
+  }
+
   const key = `global:${ip}`;
-  const count = await redis.incr(key);
-  if (count === 1) await redis.expire(key, 60);
-  if (count > 60) throw tooManyRequests("Too many requests");
+
+  try {
+    const count = await withFastTimeout(redis.incr(key), 350);
+
+    if (count === 1) {
+      await withFastTimeout(redis.expire(key, 60), 350);
+    }
+
+    if (count > 60) {
+      throw tooManyRequests("Too many requests");
+    }
+  } catch (error) {
+    if (
+      (error as { code?: unknown })?.code === "RATE_LIMIT" ||
+      (error as { statusCode?: unknown })?.statusCode === 429
+    ) {
+      throw error;
+    }
+
+    // Fail open when Redis is degraded so auth endpoints remain responsive.
+    return;
+  }
 };
 
 /* ======================================

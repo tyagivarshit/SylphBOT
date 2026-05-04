@@ -49,12 +49,41 @@ const getUserRecord = async (userId) => prisma_1.default.user.findUnique({
     where: { id: userId },
     select: safeUserSelect,
 });
-const getCurrentUser = async (userId, preferredBusinessId) => {
-    const user = await getUserRecord(userId);
+const buildFallbackCurrentUser = (user, preferredBusinessId) => {
+    const businessId = String(preferredBusinessId || "").trim() ||
+        String(user.businessId || "").trim() ||
+        null;
+    return {
+        ...user,
+        businessId,
+        business: null,
+        workspace: businessId
+            ? {
+                id: businessId,
+                name: null,
+            }
+            : null,
+        connectedAccounts: {
+            instagram: {
+                connected: false,
+                pageId: null,
+                healthy: false,
+            },
+            whatsapp: {
+                connected: false,
+                phoneNumberId: null,
+                healthy: false,
+            },
+            totalConnected: 0,
+        },
+    };
+};
+const getCurrentUser = async (input) => {
+    const user = input.baseUser || (await getUserRecord(input.userId));
     if (!user) {
         return null;
     }
-    const preferredBusiness = String(preferredBusinessId || "").trim() || null;
+    const preferredBusiness = String(input.preferredBusinessId || "").trim() || null;
     const linkedBusiness = String(user.businessId || "").trim() || null;
     let businessId = preferredBusiness || linkedBusiness || null;
     let workspace = null;
@@ -81,8 +110,8 @@ const getCurrentUser = async (userId, preferredBusinessId) => {
     }
     if (!businessId || !workspace) {
         const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
-            userId,
-            preferredBusinessId: preferredBusinessId || null,
+            userId: input.userId,
+            preferredBusinessId: input.preferredBusinessId || null,
             bootstrapWorkspaceIfMissing: false,
             persistResolvedBusinessId: false,
         });
@@ -103,7 +132,7 @@ const getCurrentUser = async (userId, preferredBusinessId) => {
     const clientsResult = businessId
         ? await (0, boundedTimeout_1.withTimeoutFallback)({
             label: "user_me_clients_projection",
-            timeoutMs: 2500,
+            timeoutMs: 900,
             task: prisma_1.default.client.findMany({
                 where: {
                     businessId,
@@ -170,7 +199,12 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized" });
         }
-        const cacheKey = buildCurrentUserCacheKey(userId, req.user?.businessId || null);
+        const baseUser = await getUserRecord(userId);
+        if (!baseUser) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        const preferredBusinessId = req.user?.businessId || baseUser.businessId || null;
+        const cacheKey = buildCurrentUserCacheKey(userId, preferredBusinessId);
         const cached = currentUserCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
             (0, performanceMetrics_1.emitPerformanceMetric)({
@@ -194,9 +228,13 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
         });
         const userHydration = await (0, boundedTimeout_1.withTimeoutFallback)({
             label: "user_me_hydration",
-            timeoutMs: 2500,
-            task: getCurrentUser(userId, req.user?.businessId || null),
-            fallback: null,
+            timeoutMs: 2200,
+            task: getCurrentUser({
+                userId,
+                preferredBusinessId,
+                baseUser,
+            }),
+            fallback: buildFallbackCurrentUser(baseUser, preferredBusinessId),
         });
         const user = userHydration.value;
         if (!user) {
@@ -307,7 +345,10 @@ router.patch("/update", auth_middleware_1.protect, async (req, res) => {
                 },
             });
         }
-        const updatedUser = await getCurrentUser(userId, identity.businessId);
+        const updatedUser = await getCurrentUser({
+            userId,
+            preferredBusinessId: identity.businessId,
+        });
         invalidateCurrentUserCache(userId);
         return res.json(updatedUser);
     }
@@ -348,7 +389,10 @@ router.post("/upload-avatar", auth_middleware_1.protect, upload_1.default.single
                 avatar: result.secure_url,
             },
         });
-        const updatedUser = await getCurrentUser(userId, req.user?.businessId || null);
+        const updatedUser = await getCurrentUser({
+            userId,
+            preferredBusinessId: req.user?.businessId || null,
+        });
         invalidateCurrentUserCache(userId);
         return res.json(updatedUser);
     }

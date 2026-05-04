@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import redis from "../config/redis";
+import { isRedisHealthy, isRedisWritable } from "../config/redis";
 import logger from "../utils/logger";
 
 const WINDOW = 60 * 15; // 15 min
@@ -49,6 +50,10 @@ export const loginLimiter = async (
   next: NextFunction
 ) => {
   try {
+    if (!isRedisHealthy() || !isRedisWritable()) {
+      return next();
+    }
+
     const email = getEmail(req);
     const ip = getIP(req);
 

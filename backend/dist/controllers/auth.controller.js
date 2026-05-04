@@ -9,6 +9,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const env_1 = require("../config/env");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
+const redis_2 = require("../config/redis");
 const generateToken_1 = require("../utils/generateToken");
 const authEmail_queue_1 = require("../queues/authEmail.queue");
 const AppError_1 = require("../utils/AppError");
@@ -37,16 +38,49 @@ const verifyPassword = async (plainTextPassword, storedHash) => {
     }
 };
 const isStrongPassword = (password) => /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
+const withFastTimeout = async (task, timeoutMs) => {
+    let timeoutHandle = null;
+    try {
+        return await Promise.race([
+            task,
+            new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => {
+                    reject(new Error("auth_rate_limit_timeout"));
+                }, timeoutMs);
+            }),
+        ]);
+    }
+    finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
+};
 /* ======================================
 RATE LIMIT
 ====================================== */
 const checkGlobalLimit = async (ip) => {
+    if (!(0, redis_2.isRedisHealthy)() || !(0, redis_2.isRedisWritable)()) {
+        return;
+    }
     const key = `global:${ip}`;
-    const count = await redis_1.default.incr(key);
-    if (count === 1)
-        await redis_1.default.expire(key, 60);
-    if (count > 60)
-        throw (0, AppError_1.tooManyRequests)("Too many requests");
+    try {
+        const count = await withFastTimeout(redis_1.default.incr(key), 350);
+        if (count === 1) {
+            await withFastTimeout(redis_1.default.expire(key, 60), 350);
+        }
+        if (count > 60) {
+            throw (0, AppError_1.tooManyRequests)("Too many requests");
+        }
+    }
+    catch (error) {
+        if (error?.code === "RATE_LIMIT" ||
+            error?.statusCode === 429) {
+            throw error;
+        }
+        // Fail open when Redis is degraded so auth endpoints remain responsive.
+        return;
+    }
 };
 /* ======================================
 COOKIE CONFIG (PRODUCTION GRADE)

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loginLimiter = void 0;
 const redis_1 = __importDefault(require("../config/redis"));
+const redis_2 = require("../config/redis");
 const logger_1 = __importDefault(require("../utils/logger"));
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;
@@ -36,6 +37,9 @@ LOGIN LIMITER (PRODUCTION GRADE)
 ====================================== */
 const loginLimiter = async (req, res, next) => {
     try {
+        if (!(0, redis_2.isRedisHealthy)() || !(0, redis_2.isRedisWritable)()) {
+            return next();
+        }
         const email = getEmail(req);
         const ip = getIP(req);
         const emailIPKey = `login:limit:${email}:${ip}`;

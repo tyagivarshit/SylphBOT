@@ -79,6 +79,11 @@ export default function LoginClient({
   const validateEmail = (value: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+  const wait = (ms: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (loading) return;
@@ -104,10 +109,13 @@ export default function LoginClient({
         throw new Error(res.message || "Login failed");
       }
 
-      const refreshedUser = await refreshUser();
-
-      if (!refreshedUser) {
-        throw new Error("Authentication failed. Please try again.");
+      let refreshedUser = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        refreshedUser = await refreshUser();
+        if (refreshedUser) {
+          break;
+        }
+        await wait(200 + attempt * 150);
       }
 
       toast.success("Login successful");

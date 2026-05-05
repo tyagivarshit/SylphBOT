@@ -838,20 +838,27 @@ class BillingController {
     }
     static async getPlans(req, res) {
         try {
-            const plans = await prisma_1.default.plan.findMany({
-                where: {
-                    type: {
-                        in: ["BASIC", "PRO", "ELITE"],
+            const projection = await (0, boundedTimeout_1.withTimeoutFallback)({
+                label: "billing_plans_projection",
+                timeoutMs: 2200,
+                task: prisma_1.default.plan.findMany({
+                    where: {
+                        type: {
+                            in: ["BASIC", "PRO", "ELITE"],
+                        },
                     },
-                },
-                select: {
-                    id: true,
-                    name: true,
-                    type: true,
-                    priceIdINR: true,
-                    priceIdUSD: true,
-                },
+                    select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                        priceIdINR: true,
+                        priceIdUSD: true,
+                    },
+                }),
+                fallback: [],
             });
+            const plans = Array.isArray(projection.value) ? projection.value : [];
+            const degraded = projection.timedOut || projection.failed;
             return res.json(buildPlansPayload({
                 plans: plans.map((plan) => ({
                     id: plan.id,
@@ -860,6 +867,8 @@ class BillingController {
                     priceIdINR: plan.priceIdINR,
                     priceIdUSD: plan.priceIdUSD,
                 })),
+                degraded,
+                reason: degraded ? "plans_projection_degraded" : null,
             }));
         }
         catch (error) {

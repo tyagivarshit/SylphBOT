@@ -95,6 +95,91 @@ const DEFAULT_BILLING_CONTEXT: BillingContext = {
   remainingEarly: 0,
 };
 
+const FALLBACK_PLANS_RESPONSE: PlansResponse = {
+  trialDays: 7,
+  addons: [
+    {
+      type: "ai_credits",
+      label: "Buy Extra AI Calls",
+      description: "Daily limit reached? Extra AI calls are consumed immediately.",
+    },
+    {
+      type: "contacts",
+      label: "Contacts add-on",
+      description: "Expand lead capacity without changing your core plan.",
+    },
+  ],
+  plans: [
+    {
+      id: "BASIC",
+      name: "Starter",
+      type: "BASIC",
+      description: "Daily AI coverage for new teams getting their first wins.",
+      monthlyPrice: { INR: 999, USD: 15 },
+      yearlyPrice: { INR: 9990, USD: 150 },
+      limits: {
+        contactsLimit: 1000,
+        aiDailyLimit: 150,
+        aiMonthlyLimit: 4500,
+        messageLimit: 5000,
+        automationLimit: 300,
+      },
+      features: [
+        "1,000 active contacts included",
+        "150 AI calls every day",
+        "5,000 messages each month",
+        "300 automation runs each month",
+        "Buy extra AI calls anytime",
+      ],
+    },
+    {
+      id: "PRO",
+      name: "Growth",
+      type: "PRO",
+      description: "Higher daily AI headroom for teams scaling conversations.",
+      popular: true,
+      monthlyPrice: { INR: 2999, USD: 39 },
+      yearlyPrice: { INR: 29990, USD: 390 },
+      limits: {
+        contactsLimit: 5000,
+        aiDailyLimit: 300,
+        aiMonthlyLimit: 9000,
+        messageLimit: 20000,
+        automationLimit: 3000,
+      },
+      features: [
+        "5,000 active contacts included",
+        "300 AI calls every day",
+        "20,000 messages each month",
+        "3,000 automation runs each month",
+        "Buy extra AI calls anytime",
+      ],
+    },
+    {
+      id: "ELITE",
+      name: "Elite",
+      type: "ELITE",
+      description: "Generous daily AI throughput with controlled high-volume automation.",
+      monthlyPrice: { INR: 7999, USD: 99 },
+      yearlyPrice: { INR: 79990, USD: 990 },
+      limits: {
+        contactsLimit: 20000,
+        aiDailyLimit: 800,
+        aiMonthlyLimit: 24000,
+        messageLimit: -1,
+        automationLimit: 10000,
+      },
+      features: [
+        "20,000 active contacts included",
+        "800 AI calls every day",
+        "Unlimited monthly messages",
+        "10,000 automation runs each month",
+        "Priority support",
+      ],
+    },
+  ],
+};
+
 const fetchJsonWithRetry = async <T,>(
   url: string,
   retries = 1,
@@ -175,9 +260,7 @@ function BillingPageContent() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingContext, setBillingContext] = useState<BillingContext | null>(null);
   const [plansResponse, setPlansResponse] = useState<PlansResponse>({
-    plans: [],
-    addons: [],
-    trialDays: 7,
+    ...FALLBACK_PLANS_RESPONSE,
   });
   const [pageLoading, setPageLoading] = useState(true);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
@@ -202,10 +285,23 @@ function BillingPageContent() {
   }, []);
 
   const applyPlansState = useCallback((plansData: PlansResponse) => {
+    const normalizedPlans = Array.isArray(plansData.plans)
+      ? plansData.plans
+      : [];
+    const normalizedAddons = Array.isArray(plansData.addons)
+      ? plansData.addons
+      : [];
+
+    if (!normalizedPlans.length) {
+      return;
+    }
+
     setPlansResponse({
-      plans: Array.isArray(plansData.plans) ? plansData.plans : [],
-      addons: Array.isArray(plansData.addons) ? plansData.addons : [],
-      trialDays: plansData.trialDays || 7,
+      plans: normalizedPlans,
+      addons: normalizedAddons.length
+        ? normalizedAddons
+        : FALLBACK_PLANS_RESPONSE.addons,
+      trialDays: plansData.trialDays || FALLBACK_PLANS_RESPONSE.trialDays || 7,
     });
   }, []);
 
@@ -246,7 +342,7 @@ function BillingPageContent() {
           warnings.push("Plan catalog is running in recovery mode.");
         }
       } else {
-        warnings.push("Plan catalog is temporarily unavailable.");
+        warnings.push("Plan catalog live sync is delayed. Showing standard catalog.");
       }
 
       setLoadWarning(warnings.length ? warnings.join(" ") : null);

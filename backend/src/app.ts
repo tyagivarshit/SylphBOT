@@ -197,6 +197,20 @@ const corsOptions: CorsOptions = {
   maxAge: 86400,
 };
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 9_000;
+const BILLING_CHECKOUT_TIMEOUT_MS = 35_000;
+const BILLING_LONG_TIMEOUT_PATH_PREFIXES = [
+  "/api/billing/create-checkout-session",
+  "/api/billing/checkout",
+  "/api/billing/upgrade",
+  "/api/billing/portal",
+];
+
+const resolveRequestTimeoutMs = (path: string) =>
+  BILLING_LONG_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))
+    ? BILLING_CHECKOUT_TIMEOUT_MS
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -232,10 +246,14 @@ app.use((req, res, next) => {
 app.use(monitoringMiddleware);
 
 app.use((req, res, next) => {
-  res.setTimeout(9000, () => {
+  const timeoutMs = resolveRequestTimeoutMs(req.path || req.originalUrl || "");
+
+  res.setTimeout(timeoutMs, () => {
     req.logger?.error(
       {
         statusCode: 408,
+        timeoutMs,
+        path: req.originalUrl || req.path || null,
       },
       "Request timeout"
     );

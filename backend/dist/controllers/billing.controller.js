@@ -634,13 +634,51 @@ class BillingController {
             },
         };
     }
-    static async handleCheckout(req, res) {
+    static buildCheckoutFailureRedirect(reason) {
+        const normalizedReason = String(reason || "").trim() || "checkout_failed";
+        const appBaseUrl = String(env_1.env.FRONTEND_URL || "").replace(/\/$/, "");
+        const query = new URLSearchParams({
+            checkout: "failed",
+            reason: normalizedReason,
+        });
+        return `${appBaseUrl}/billing?${query.toString()}`;
+    }
+    static async handleCheckout(req, res, options) {
+        const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
+        const requestBody = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+            ? req.body
+            : {};
+        const requestQuery = req.query && typeof req.query === "object" && !Array.isArray(req.query)
+            ? req.query
+            : {};
+        const readInput = (key) => {
+            const bodyValue = requestBody[key];
+            if (bodyValue !== undefined && bodyValue !== null && bodyValue !== "") {
+                return bodyValue;
+            }
+            const queryValue = requestQuery[key];
+            if (Array.isArray(queryValue)) {
+                return queryValue[0];
+            }
+            return queryValue;
+        };
+        const sendCheckoutError = (input) => {
+            if (redirectOnSuccess) {
+                return res.redirect(303, BillingController.buildCheckoutFailureRedirect(input.reason));
+            }
+            return res.status(input.status).json({
+                success: false,
+                ...(input.code ? { code: input.code } : {}),
+                message: input.message,
+            });
+        };
         try {
-            const { plan, coupon } = req.body;
-            const requestedQuantity = Number(req.body?.seats || req.body?.quantity || 1);
+            const plan = readInput("plan");
+            const coupon = readInput("coupon");
+            const requestedQuantity = Number(readInput("seats") || readInput("quantity") || 1);
             const quantity = Math.max(1, Math.floor(Number.isFinite(requestedQuantity) ? requestedQuantity : 1));
-            const billing = String(req.body?.billing || "monthly");
-            const checkoutTypeInput = String(req.body?.checkoutType || req.body?.action || (coupon ? "coupon" : "subscription"))
+            const billing = String(readInput("billing") || "monthly");
+            const checkoutTypeInput = String(readInput("checkoutType") || readInput("action") || (coupon ? "coupon" : "subscription"))
                 .trim()
                 .toLowerCase();
             const checkoutType = new Set([
@@ -655,18 +693,18 @@ class BillingController {
                 ? checkoutTypeInput
                 : "subscription";
             const trialDays = checkoutType === "trial"
-                ? Math.max(1, Math.min(30, Math.floor(Number(req.body?.trialDays || pricing_config_1.TRIAL_DAYS))))
+                ? Math.max(1, Math.min(30, Math.floor(Number(readInput("trialDays") || pricing_config_1.TRIAL_DAYS))))
                 : 0;
-            const addonLineItems = Array.isArray(req.body?.lineItems)
-                ? req.body.lineItems
-                : Array.isArray(req.body?.addons)
-                    ? req.body.addons.map((item, index) => ({
+            const addonLineItems = Array.isArray(requestBody.lineItems)
+                ? requestBody.lineItems
+                : Array.isArray(requestBody.addons)
+                    ? requestBody.addons.map((item, index) => ({
                         type: String(item?.type || item?.addonType || "").trim().toLowerCase(),
                         credits: Math.max(0, Math.floor(Number(item?.credits || item?.quantity || 0))),
                         label: String(item?.label || `addon_${index + 1}`).trim(),
                     }))
                     : [];
-            const couponCode = String(coupon || req.body?.couponId || "").trim() || null;
+            const couponCode = String(coupon || readInput("couponId") || "").trim() || null;
             const normalizedPlan = String(plan || "").trim().toUpperCase();
             const normalizedBilling = billing === "yearly"
                 ? "yearly"
@@ -675,28 +713,32 @@ class BillingController {
                     : null;
             const allowedPlans = new Set(["BASIC", "PRO", "ELITE"]);
             if (!normalizedPlan) {
-                return res.status(400).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 400,
                     message: "Plan is required",
+                    reason: "plan_required",
                 });
             }
             if (!allowedPlans.has(normalizedPlan)) {
-                return res.status(400).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 400,
                     message: "Invalid plan selected",
+                    reason: "invalid_plan",
                 });
             }
             if (!normalizedBilling) {
-                return res.status(400).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 400,
                     message: "Invalid billing cycle",
+                    reason: "invalid_billing",
                 });
             }
             const { businessId } = await getUserContext(req);
             if (!businessId) {
-                return res.status(403).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 403,
                     message: "Business context is required",
+                    reason: "business_context_required",
                 });
             }
             (0, stripeConfig_service_1.assertStripeConfigReady)();
@@ -706,12 +748,13 @@ class BillingController {
                 ? pricingPlan.yearlyPrice[currency]
                 : pricingPlan.monthlyPrice[currency];
             if (!Number.isFinite(Number(unitPrice)) || Number(unitPrice) <= 0) {
-                return res.status(400).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 400,
                     message: `Pricing is not configured for ${normalizedPlan} (${currency}, ${normalizedBilling})`,
+                    reason: "pricing_unavailable",
                 });
             }
-            const explicitUnitAmountMinor = Number(req.body?.unitAmountMinor || req.body?.amountMinor || 0);
+            const explicitUnitAmountMinor = Number(readInput("unitAmountMinor") || readInput("amountMinor") || 0);
             const customUnitPriceMinor = Number.isFinite(explicitUnitAmountMinor) && explicitUnitAmountMinor > 0
                 ? Math.floor(explicitUnitAmountMinor)
                 : Math.round(Number(unitPrice || 0) * 100);
@@ -740,7 +783,7 @@ class BillingController {
                 couponCode,
                 addonLineItems,
                 activeSubscriptionKey: activeSubscription?.subscriptionKey || null,
-                prorationBehavior: req.body?.prorationBehavior || null,
+                prorationBehavior: readInput("prorationBehavior") || null,
             }))
                 .digest("hex")
                 .slice(0, 24);
@@ -759,10 +802,10 @@ class BillingController {
                     checkoutType,
                     trialDays,
                     coupon: couponCode,
-                    prorationBehavior: String(req.body?.prorationBehavior || "").trim().toLowerCase() || null,
-                    providerSubscriptionId: String(req.body?.providerSubscriptionId || activeSubscription?.providerSubscriptionId || "").trim() ||
+                    prorationBehavior: String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
+                    providerSubscriptionId: String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
                         null,
-                    stripeCustomerId: String(req.body?.stripeCustomerId || subscriptionMeta.stripeCustomerId || "").trim() ||
+                    stripeCustomerId: String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
                         null,
                     seatBased: quantity > 1,
                 },
@@ -790,49 +833,88 @@ class BillingController {
                     quantity,
                     checkoutType,
                     trialDays,
-                    providerSubscriptionId: String(req.body?.providerSubscriptionId || activeSubscription?.providerSubscriptionId || "").trim() ||
+                    providerSubscriptionId: String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
                         null,
-                    stripeCustomerId: String(req.body?.stripeCustomerId || subscriptionMeta.stripeCustomerId || "").trim() ||
+                    stripeCustomerId: String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
                         null,
-                    prorationBehavior: String(req.body?.prorationBehavior || "").trim().toLowerCase() || null,
+                    prorationBehavior: String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
                     seatBased: quantity > 1,
                 },
                 idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutFingerprint}`,
             });
+            const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();
+            if (!checkoutUrl) {
+                return sendCheckoutError({
+                    status: 503,
+                    message: "Stripe checkout link is temporarily unavailable. Please retry shortly.",
+                    reason: "checkout_url_missing",
+                });
+            }
+            if (redirectOnSuccess) {
+                return res.redirect(303, checkoutUrl);
+            }
             return res.json({
                 success: true,
-                url: paymentIntent.checkoutUrl,
+                url: checkoutUrl,
                 proposalKey: readyProposal.proposalKey,
                 paymentIntentKey: paymentIntent.paymentIntentKey,
             });
         }
         catch (error) {
             if (error.message === "Unauthorized") {
-                return res.status(401).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 401,
                     message: "Unauthorized",
+                    reason: "unauthorized",
                 });
             }
             if (error.message?.includes("Currency cannot be changed") ||
                 error.message?.includes("Invalid plan") ||
                 error.message?.includes("Invalid billing") ||
                 error.message?.includes("proposal_not_checkout_ready")) {
-                return res.status(400).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 400,
                     message: error.message,
+                    reason: "checkout_invalid",
+                });
+            }
+            if (error.message?.includes("checkout_manual_review_required")) {
+                return sendCheckoutError({
+                    status: 409,
+                    code: "CHECKOUT_MANUAL_REVIEW_REQUIRED",
+                    message: "Checkout is temporarily paused for risk review. Please contact support.",
+                    reason: "manual_review_required",
+                });
+            }
+            if (error.message?.includes("provider_timeout")) {
+                return sendCheckoutError({
+                    status: 504,
+                    code: "BILLING_PROVIDER_TIMEOUT",
+                    message: "Stripe took too long to respond. Please retry in a few seconds.",
+                    reason: "provider_timeout",
+                });
+            }
+            if (error.message?.includes("provider_credential_unavailable")) {
+                return sendCheckoutError({
+                    status: 503,
+                    code: "BILLING_PROVIDER_UNAVAILABLE",
+                    message: "Billing provider is temporarily unavailable. Please retry shortly.",
+                    reason: "provider_unavailable",
                 });
             }
             if (error.message?.includes("stripe_config_invalid")) {
-                return res.status(503).json({
-                    success: false,
+                return sendCheckoutError({
+                    status: 503,
                     code: "BILLING_PROVIDER_UNAVAILABLE",
                     message: "Billing provider is temporarily unavailable. Please retry shortly.",
+                    reason: "provider_unavailable",
                 });
             }
             console.error("Billing checkout error:", error);
-            return res.status(500).json({
-                success: false,
+            return sendCheckoutError({
+                status: 500,
                 message: error.message || "Checkout failed",
+                reason: "checkout_failed",
             });
         }
     }
@@ -924,6 +1006,11 @@ class BillingController {
     }
     static async createCheckoutSession(req, res) {
         return BillingController.handleCheckout(req, res);
+    }
+    static async startCheckoutRedirect(req, res) {
+        return BillingController.handleCheckout(req, res, {
+            redirectOnSuccess: true,
+        });
     }
     static async confirmCheckout(req, res) {
         try {

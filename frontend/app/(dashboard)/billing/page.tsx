@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ShieldCheck, Sparkles } from "lucide-react";
-import { createCheckoutSession } from "@/lib/billing";
+import { redirectToCheckout } from "@/lib/billing";
 import { notify } from "@/lib/toast";
 import PaymentHistory from "@/components/billing/PaymentHistory";
 import { apiFetch } from "@/lib/apiClient";
@@ -221,6 +221,23 @@ const normalizePlanKey = (value?: string | null) =>
     .toUpperCase()
     .replace(/[\s-]+/g, "_");
 
+const getCheckoutFailureMessage = (reason: string | null) => {
+  switch (reason) {
+    case "provider_timeout":
+      return "Stripe took longer than expected. Please try again in a few seconds.";
+    case "provider_unavailable":
+      return "Billing provider is temporarily unavailable. Please retry shortly.";
+    case "manual_review_required":
+      return "Checkout is paused for risk review. Contact support if this persists.";
+    case "invalid_plan":
+    case "invalid_billing":
+    case "checkout_invalid":
+      return "Selected plan details are invalid. Please refresh and try again.";
+    default:
+      return "We couldn't start checkout right now. Please try again.";
+  }
+};
+
 const isCurrentPlan = (
   subscription: Subscription | null,
   planId: PlanId,
@@ -379,6 +396,9 @@ function BillingPageContent() {
   const remainingEarly = billingContext?.remainingEarly || 0;
   const hasUsedTrial = Boolean(subscription?.trialUsed);
   const isCancelled = searchParams.get("checkout") === "cancelled";
+  const isCheckoutFailed = searchParams.get("checkout") === "failed";
+  const checkoutFailureReason = searchParams.get("reason");
+  const checkoutFailureMessage = getCheckoutFailureMessage(checkoutFailureReason);
   const currentPeriodEnd = subscription?.currentPeriodEnd
     ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
     : null;
@@ -406,21 +426,14 @@ function BillingPageContent() {
         );
       }
 
-      const result = await createCheckoutSession(plan, billing);
-
-      if (!result?.url) {
-        throw new Error(result?.message || "No checkout URL received");
-      }
-
-      window.location.assign(result.url);
+      redirectToCheckout(plan, billing);
     } catch (checkoutError) {
+      setLoading(null);
       notify.error(
         checkoutError instanceof Error
           ? checkoutError.message
           : "We couldn't start checkout right now."
       );
-    } finally {
-      setLoading(null);
     }
   };
 
@@ -465,6 +478,12 @@ function BillingPageContent() {
       {isCancelled ? (
         <div className="rounded-[24px] border border-amber-200 bg-amber-50/90 px-5 py-4 text-sm text-amber-800 shadow-sm">
           Checkout was cancelled. Your current plan has not changed.
+        </div>
+      ) : null}
+
+      {isCheckoutFailed ? (
+        <div className="rounded-[24px] border border-rose-200 bg-rose-50/90 px-5 py-4 text-sm text-rose-700 shadow-sm">
+          {checkoutFailureMessage}
         </div>
       ) : null}
 

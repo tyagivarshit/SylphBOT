@@ -9,6 +9,7 @@ import { publishCommerceEvent } from "./commerceEvent.service";
 import { commerceAuthorityService } from "./commerceAuthority.service";
 import { commerceProviderRegistry } from "./commerce/providers/commerceProviderRegistry.service";
 import { getIntelligenceRuntimeInfluence } from "./intelligence/intelligenceRuntimeInfluence.service";
+import { withTimeoutFallback } from "../utils/boundedTimeout";
 import type { ProviderWebhookEvent } from "./commerce/providers/commerceProvider.types";
 import {
   PAYMENT_ATTEMPT_TRANSITIONS,
@@ -109,10 +110,16 @@ export const createPaymentIntentService = () => {
     if (!["APPROVED", "SENT", "ACCEPTED", "CONTRACT_GENERATED"].includes(proposal.status)) {
       throw new Error(`proposal_not_checkout_ready:${proposal.status}`);
     }
-    const runtime = await getIntelligenceRuntimeInfluence({
-      businessId,
-      leadId: proposal.leadId || null,
-    }).catch(() => null);
+    const runtimeResult = await withTimeoutFallback({
+      label: "payment_intent_checkout_runtime_influence",
+      timeoutMs: 1_800,
+      task: getIntelligenceRuntimeInfluence({
+        businessId,
+        leadId: proposal.leadId || null,
+      }),
+      fallback: null,
+    });
+    const runtime = runtimeResult.value;
     const chargebackRisk = Number(runtime?.predictions.chargeback_risk || 0);
     const fraudRisk = Number(runtime?.predictions.fraud_risk || 0);
     const riskGate = Math.max(

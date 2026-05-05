@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import { publishCommerceEvent } from "./commerceEvent.service";
 import { getIntelligenceRuntimeInfluence } from "./intelligence/intelligenceRuntimeInfluence.service";
 import { taxComplianceService } from "./taxCompliance.service";
+import { withTimeoutFallback } from "../utils/boundedTimeout";
 import {
   DISCOUNT_APPROVAL_TRANSITIONS,
   PROPOSAL_TRANSITIONS,
@@ -159,10 +160,16 @@ export const createProposalEngineService = () => {
       }),
       resolveCommercePolicy(businessId),
     ]);
-    const runtime = await getIntelligenceRuntimeInfluence({
-      businessId,
-      leadId,
-    }).catch(() => null);
+    const runtimeResult = await withTimeoutFallback({
+      label: "proposal_runtime_influence",
+      timeoutMs: 1_800,
+      task: getIntelligenceRuntimeInfluence({
+        businessId,
+        leadId,
+      }),
+      fallback: null,
+    });
+    const runtime = runtimeResult.value;
 
     const baseUnitPriceMinor =
       customUnitPriceMinor !== null && customUnitPriceMinor !== undefined

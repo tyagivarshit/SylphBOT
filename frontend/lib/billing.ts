@@ -6,10 +6,16 @@ type BillingRequestResult = {
   message?: string;
 };
 
+const CHECKOUT_REQUEST_TIMEOUT_MS = 32_000;
+const CHECKOUT_REDIRECT_PATH = "/api/billing/checkout/start";
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
+
+const isTimeoutMessage = (message: string) =>
+  message.trim().toLowerCase().includes("timeout");
 
 const requestWithTimeout = async <T>(
   path: string,
@@ -97,8 +103,8 @@ export const createCheckoutSession = async (
         method: "POST",
         body: JSON.stringify({ plan, billing }),
       },
-      15000,
-      1
+      CHECKOUT_REQUEST_TIMEOUT_MS,
+      0
     );
     const url = resolveCheckoutUrl(data);
 
@@ -112,12 +118,38 @@ export const createCheckoutSession = async (
     };
   } catch (error: unknown) {
     console.error("Checkout API error:", error);
+    const message = getErrorMessage(error, "Checkout failed");
 
     return {
       success: false,
-      message: getErrorMessage(error, "Checkout failed"),
+      message: isTimeoutMessage(message)
+        ? "Checkout is taking longer than expected. Please retry in a few seconds."
+        : message,
     };
   }
+};
+
+export const buildCheckoutRedirectUrl = (
+  plan: string,
+  billing: "monthly" | "yearly"
+) => {
+  const params = new URLSearchParams({
+    plan: String(plan || "").trim().toUpperCase(),
+    billing,
+  });
+
+  return `${CHECKOUT_REDIRECT_PATH}?${params.toString()}`;
+};
+
+export const redirectToCheckout = (
+  plan: string,
+  billing: "monthly" | "yearly"
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.location.assign(buildCheckoutRedirectUrl(plan, billing));
 };
 
 export const createCheckout = async (

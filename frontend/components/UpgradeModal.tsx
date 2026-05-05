@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { X, Check } from "lucide-react"
-import { createCheckoutSession } from "@/lib/billing"
+import { redirectToCheckout } from "@/lib/billing"
 
 type Props = {
   open: boolean
@@ -42,16 +42,10 @@ export default function UpgradeModal({ open, setOpen }: Props){
 
     try{
       setLoading(plan)
-
-      const res = await createCheckoutSession(plan, "monthly")
-
-      if(res?.url){
-        window.location.href = res.url
-      }
+      redirectToCheckout(plan, "monthly")
 
     }catch(err){
       console.error("Upgrade error:", err)
-    }finally{
       setLoading(null)
     }
 

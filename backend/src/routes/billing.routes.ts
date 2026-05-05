@@ -47,6 +47,15 @@ router.post(
   auditRequest("billing.checkout_requested"),
   BillingController.createCheckoutSession
 );
+router.get(
+  "/checkout/start",
+  protect,
+  requireBusinessContext,
+  requirePermission("billing:manage"),
+  authLimiter,
+  auditRequest("billing.checkout_requested"),
+  BillingController.startCheckoutRedirect
+);
 router.post(
   "/checkout",
   protect,

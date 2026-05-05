@@ -23,6 +23,7 @@ const requestWithTimeout = async <T>(
     const response = await apiFetch<T>(path, {
       ...options,
       signal: controller.signal,
+      timeoutMs: timeout,
     });
 
     if (!response.success || response.data == null) {

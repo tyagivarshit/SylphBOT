@@ -14,6 +14,7 @@ const paymentIntent_service_1 = require("../services/paymentIntent.service");
 const proposalEngine_service_1 = require("../services/proposalEngine.service");
 const subscriptionEngine_service_1 = require("../services/subscriptionEngine.service");
 const pricing_config_1 = require("../config/pricing.config");
+const stripe_price_map_1 = require("../config/stripe.price.map");
 const usage_service_1 = require("../services/usage.service");
 const tenant_service_1 = require("../services/tenant.service");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
@@ -111,7 +112,43 @@ const buildPlansPayload = (input) => ({
 const toRecord = (value) => value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
+const ACTIVE_STRIPE_SUBSCRIPTION_STATUSES = new Set([
+    "active",
+    "past_due",
+    "unpaid",
+    "incomplete",
+]);
+const toIsoOrNull = (value) => Number.isFinite(Number(value)) && Number(value) > 0
+    ? new Date(Number(value) * 1000).toISOString()
+    : null;
+const toDateOrNull = (value) => Number.isFinite(Number(value)) && Number(value) > 0
+    ? new Date(Number(value) * 1000)
+    : null;
+const normalizeStripeCurrency = (value) => {
+    const normalized = String(value || "").trim().toUpperCase();
+    return normalized === "USD" ? "USD" : normalized === "INR" ? "INR" : null;
+};
+const normalizeStripeBillingCycle = (value) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "year" ? "yearly" : normalized === "month" ? "monthly" : null;
+};
+const resolveStripeBillingStatus = (status) => {
+    if (status === "trialing") {
+        return "TRIAL";
+    }
+    if (ACTIVE_STRIPE_SUBSCRIPTION_STATUSES.has(status)) {
+        return "ACTIVE";
+    }
+    return "INACTIVE";
+};
 const mapInvoiceForClient = (invoice) => ({
+    ...(toRecord(invoice.metadata).providerInvoiceId
+        ? {
+            providerInvoiceId: String(toRecord(invoice.metadata).providerInvoiceId || "")
+                .trim()
+                .toLowerCase(),
+        }
+        : {}),
     id: invoice.invoiceKey,
     invoiceKey: invoice.invoiceKey,
     status: String(invoice.status || "").toLowerCase(),
@@ -126,8 +163,12 @@ const mapInvoiceForClient = (invoice) => ({
     issuedAt: invoice.issuedAt,
     paidAt: invoice.paidAt,
     externalInvoiceId: invoice.externalInvoiceId,
-    hosted_invoice_url: null,
-    invoice_pdf: null,
+    hosted_invoice_url: String(toRecord(invoice.metadata).hostedInvoiceUrl ||
+        toRecord(invoice.metadata).hosted_invoice_url ||
+        "").trim() || null,
+    invoice_pdf: String(toRecord(invoice.metadata).invoicePdf ||
+        toRecord(invoice.metadata).invoice_pdf ||
+        "").trim() || null,
 });
 async function getUserContext(req) {
     const userId = req.user?.id;
@@ -314,6 +355,125 @@ class BillingController {
         }
         return customers[0]?.id || null;
     }
+    static async buildStripeLiveSnapshot(input) {
+        const fallbackSubscription = input.fallbackSubscription || null;
+        const knownStripeSubscriptionId = String(fallbackSubscription?.stripeSubscriptionId || "").trim() || null;
+        const latestStripeSubscription = knownStripeSubscriptionId
+            ? null
+            : await prisma_1.default.subscriptionLedger.findFirst({
+                where: {
+                    businessId: input.businessId,
+                    provider: "STRIPE",
+                    providerSubscriptionId: {
+                        not: null,
+                    },
+                },
+                orderBy: {
+                    updatedAt: "desc",
+                },
+                select: {
+                    providerSubscriptionId: true,
+                },
+            });
+        const stripeSubscriptionId = knownStripeSubscriptionId ||
+            String(latestStripeSubscription?.providerSubscriptionId || "").trim() ||
+            null;
+        if (!stripeSubscriptionId) {
+            return null;
+        }
+        (0, stripeConfig_service_1.assertStripeConfigReady)();
+        const stripeSubscription = await stripe_service_1.stripe.subscriptions
+            .retrieve(stripeSubscriptionId)
+            .catch(() => null);
+        if (!stripeSubscription) {
+            return null;
+        }
+        const subscriptionRaw = toRecord(stripeSubscription);
+        const metadata = toRecord(subscriptionRaw.metadata);
+        const items = Array.isArray(toRecord(subscriptionRaw.items).data)
+            ? toRecord(subscriptionRaw.items).data
+            : [];
+        const firstItem = toRecord(items[0]);
+        const firstPrice = toRecord(firstItem.price);
+        const firstRecurring = toRecord(firstPrice.recurring);
+        const priceId = String(firstPrice.id || "").trim() || null;
+        const planFromPrice = (0, stripe_price_map_1.getPlanFromPrice)(priceId);
+        const planCode = String(metadata.planCode || fallbackSubscription?.plan?.type || planFromPrice || "")
+            .trim()
+            .toUpperCase() || null;
+        const billingCycle = normalizeStripeBillingCycle(firstRecurring.interval) ||
+            String(fallbackSubscription?.billingCycle || "").trim().toLowerCase() ||
+            null;
+        const currency = normalizeStripeCurrency(subscriptionRaw.currency) ||
+            normalizeStripeCurrency(fallbackSubscription?.currency) ||
+            null;
+        const stripeStatus = String(subscriptionRaw.status || "").trim().toLowerCase();
+        const billingStatus = resolveStripeBillingStatus(stripeStatus);
+        const customerId = typeof stripeSubscription.customer === "string"
+            ? stripeSubscription.customer
+            : null;
+        const stripeInvoices = await stripe_service_1.stripe.invoices
+            .list({
+            customer: customerId || undefined,
+            subscription: stripeSubscriptionId,
+            limit: 20,
+        })
+            .catch(() => ({ data: [] }));
+        const invoices = (Array.isArray(stripeInvoices.data) ? stripeInvoices.data : []).map((invoice) => {
+            const invoiceRaw = toRecord(invoice);
+            const totalDetails = toRecord(invoiceRaw.total_details);
+            const statusTransitions = toRecord(invoiceRaw.status_transitions);
+            const taxAmount = Math.max(0, Math.floor(Number(totalDetails.amount_tax || 0)));
+            const subtotal = Math.max(0, Math.floor(Number(invoiceRaw.subtotal || 0)));
+            const amountPaid = Math.max(0, Math.floor(Number(invoiceRaw.amount_paid || invoiceRaw.amount_due || 0)));
+            const amountTotal = Math.max(amountPaid, Math.floor(Number(invoiceRaw.total || amountPaid || 0)));
+            const created = Math.max(0, Math.floor(Number(invoiceRaw.created || Date.now() / 1000)));
+            return {
+                id: String(invoiceRaw.id || "").trim() || `stripe_invoice_${created}`,
+                invoiceKey: String(invoiceRaw.id || "").trim() || `stripe_invoice_${created}`,
+                status: String(invoiceRaw.status || "").trim().toLowerCase() || "open",
+                currency: normalizeStripeCurrency(invoiceRaw.currency) ||
+                    currency ||
+                    "INR",
+                amount: amountTotal,
+                subtotal,
+                taxAmount,
+                paidAmount: amountPaid,
+                created,
+                createdAt: new Date(created * 1000),
+                dueAt: toDateOrNull(Number(invoiceRaw.due_date || 0)),
+                issuedAt: toDateOrNull(Number(statusTransitions.finalized_at || invoiceRaw.created || 0)),
+                paidAt: toDateOrNull(Number(statusTransitions.paid_at || 0)),
+                externalInvoiceId: String(invoiceRaw.number || invoiceRaw.id || "").trim() || null,
+                hosted_invoice_url: String(invoiceRaw.hosted_invoice_url || "").trim() || null,
+                invoice_pdf: String(invoiceRaw.invoice_pdf || "").trim() || null,
+            };
+        });
+        return {
+            subscription: {
+                ...fallbackSubscription,
+                stripeSubscriptionId,
+                currency: currency || fallbackSubscription?.currency || null,
+                billingCycle: billingCycle === "yearly" || billingCycle === "monthly"
+                    ? billingCycle
+                    : fallbackSubscription?.billingCycle || null,
+                currentPeriodEnd: toIsoOrNull(Number(subscriptionRaw.current_period_end || 0)) ||
+                    fallbackSubscription?.currentPeriodEnd ||
+                    null,
+                trialUsed: billingStatus === "TRIAL"
+                    ? false
+                    : Boolean(fallbackSubscription?.trialUsed ?? true),
+                status: stripeStatus || fallbackSubscription?.status || "inactive",
+                plan: {
+                    name: planCode || fallbackSubscription?.plan?.name || null,
+                    type: planCode || fallbackSubscription?.plan?.type || null,
+                },
+            },
+            billingStatus,
+            planKey: planCode,
+            invoices,
+        };
+    }
     static async buildBillingResponse(businessId, req) {
         const startedAt = Date.now();
         if (!businessId) {
@@ -333,7 +493,7 @@ class BillingController {
         const [billingContextResult, usageResult, invoicesResult] = await Promise.all([
             (0, boundedTimeout_1.withTimeoutFallback)({
                 label: "billing_context_projection",
-                timeoutMs: 2200,
+                timeoutMs: 4500,
                 task: (0, subscription_middleware_1.loadBillingContext)(businessId),
                 fallback: {
                     subscription: null,
@@ -342,13 +502,13 @@ class BillingController {
             }),
             (0, boundedTimeout_1.withTimeoutFallback)({
                 label: "billing_usage_projection",
-                timeoutMs: 2200,
+                timeoutMs: 4200,
                 task: (0, usage_service_1.getUsageOverview)(businessId),
                 fallback: null,
             }),
             (0, boundedTimeout_1.withTimeoutFallback)({
                 label: "billing_invoice_projection",
-                timeoutMs: 1800,
+                timeoutMs: 3500,
                 task: prisma_1.default.invoiceLedger.findMany({
                     where: {
                         businessId,
@@ -370,6 +530,7 @@ class BillingController {
                         paidAt: true,
                         externalInvoiceId: true,
                         createdAt: true,
+                        metadata: true,
                     },
                 }),
                 fallback: [],
@@ -381,12 +542,41 @@ class BillingController {
             ? invoicesResult.value
             : [];
         const invoices = invoicesRaw.map(mapInvoiceForClient);
+        const stripeLiveResult = await (0, boundedTimeout_1.withTimeoutFallback)({
+            label: "billing_stripe_live_projection",
+            timeoutMs: 2400,
+            task: BillingController.buildStripeLiveSnapshot({
+                businessId,
+                fallbackSubscription: billingContext.subscription,
+            }),
+            fallback: null,
+        });
+        const stripeLive = stripeLiveResult.value;
+        const hasStripeLiveInvoices = Boolean(stripeLive?.invoices?.length);
+        const effectiveSubscription = stripeLive?.subscription || billingContext.subscription;
+        const effectiveBillingContext = {
+            ...billingContext.context,
+            ...(stripeLive?.planKey
+                ? {
+                    planKey: stripeLive.planKey,
+                    status: stripeLive.billingStatus,
+                    isLimited: stripeLive.billingStatus === "INACTIVE",
+                    upgradeRequired: stripeLive.billingStatus === "INACTIVE",
+                }
+                : {}),
+        };
+        const effectiveInvoices = hasStripeLiveInvoices ? stripeLive.invoices : invoices;
+        const effectiveCurrency = stripeLive?.subscription?.currency ||
+            billingContext.subscription?.currency ||
+            (0, billingGeo_service_1.resolveBillingCurrency)(req);
         const degraded = billingContextResult.timedOut ||
             billingContextResult.failed ||
             usageResult.timedOut ||
             usageResult.failed ||
             invoicesResult.timedOut ||
-            invoicesResult.failed;
+            invoicesResult.failed ||
+            stripeLiveResult.timedOut ||
+            stripeLiveResult.failed;
         const reasons = [
             billingContextResult.timedOut ? "context_timeout" : null,
             billingContextResult.failed ? "context_failed" : null,
@@ -394,12 +584,16 @@ class BillingController {
             usageResult.failed ? "usage_failed" : null,
             invoicesResult.timedOut ? "invoices_timeout" : null,
             invoicesResult.failed ? "invoices_failed" : null,
+            stripeLiveResult.timedOut ? "stripe_live_timeout" : null,
+            stripeLiveResult.failed ? "stripe_live_failed" : null,
         ].filter(Boolean);
         console.info("BILLING_PROJECTION_READY", {
             businessId,
             contextTimedOut: billingContextResult.timedOut,
             usageTimedOut: usageResult.timedOut,
             invoicesTimedOut: invoicesResult.timedOut,
+            stripeLiveTimedOut: stripeLiveResult.timedOut,
+            stripeLiveApplied: Boolean(stripeLive?.subscription || hasStripeLiveInvoices),
             usedFallback: degraded,
         });
         const durationMs = Date.now() - startedAt;
@@ -422,8 +616,8 @@ class BillingController {
         }
         return {
             success: true,
-            subscription: billingContext.subscription,
-            billing: billingContext.context,
+            subscription: effectiveSubscription,
+            billing: effectiveBillingContext,
             usage: usage
                 ? {
                     aiCallsUsed: usage.usage.ai.monthlyUsed,
@@ -432,8 +626,8 @@ class BillingController {
                     summary: usage,
                 }
                 : EMPTY_USAGE_SUMMARY,
-            currency: billingContext.subscription?.currency || (0, billingGeo_service_1.resolveBillingCurrency)(req),
-            invoices,
+            currency: effectiveCurrency,
+            invoices: effectiveInvoices,
             meta: {
                 degraded,
                 reason: reasons.length ? reasons.join(",") : null,
@@ -802,7 +996,8 @@ class BillingController {
                 .retrieve(sessionId)
                 .catch(() => null);
             const paymentStatus = String(session?.payment_status || "").trim().toLowerCase();
-            if (session && paymentStatus !== "paid") {
+            const paidLikeStatuses = new Set(["paid", "no_payment_required"]);
+            if (session && !paidLikeStatuses.has(paymentStatus)) {
                 return res.status(409).json({
                     success: false,
                     message: "Payment is still pending confirmation",

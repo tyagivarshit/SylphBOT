@@ -98,7 +98,7 @@ const DEFAULT_BILLING_CONTEXT: BillingContext = {
 const fetchJsonWithRetry = async <T,>(
   url: string,
   retries = 1,
-  timeoutMs = 2000
+  timeoutMs = 6000
 ) => {
   let attempt = 0;
   let lastError: Error | null = null;
@@ -151,7 +151,7 @@ const isCurrentPlan = (
   return currentType === planId || currentName === planId;
 };
 
-async function fetchJson<T>(url: string, timeoutMs = 2000) {
+async function fetchJson<T>(url: string, timeoutMs = 6000) {
   const response = await apiFetch<T>(url, {
     credentials: "include",
     cache: "no-store",
@@ -218,8 +218,8 @@ function BillingPageContent() {
       setLoadWarning(null);
 
       const [billingResult, plansResult] = await Promise.allSettled([
-        fetchJsonWithRetry<BillingApiResponse>("/api/billing", 1, 1900),
-        fetchJsonWithRetry<PlansResponse>("/api/billing/plans", 1, 1700),
+        fetchJsonWithRetry<BillingApiResponse>("/api/billing", 2, 11000),
+        fetchJsonWithRetry<PlansResponse>("/api/billing/plans", 2, 5000),
       ]);
 
       const warnings: string[] = [];
@@ -235,10 +235,6 @@ function BillingPageContent() {
         }
       } else {
         warnings.push("Billing summary is temporarily unavailable. Retry in a moment.");
-        setSubscription(null);
-        setInvoices([]);
-        setBillingContext(DEFAULT_BILLING_CONTEXT);
-        setLockedCurrency(null);
       }
 
       if (plansResult.status === "fulfilled") {
@@ -251,11 +247,6 @@ function BillingPageContent() {
         }
       } else {
         warnings.push("Plan catalog is temporarily unavailable.");
-        setPlansResponse({
-          plans: [],
-          addons: [],
-          trialDays: 7,
-        });
       }
 
       setLoadWarning(warnings.length ? warnings.join(" ") : null);
@@ -265,14 +256,6 @@ function BillingPageContent() {
           ? loadError.message
           : "Some billing data could not be loaded."
       );
-      setSubscription(null);
-      setInvoices([]);
-      setBillingContext(DEFAULT_BILLING_CONTEXT);
-      setPlansResponse({
-        plans: [],
-        addons: [],
-        trialDays: 7,
-      });
     } finally {
       if (!isBackground) {
         setPageLoading(false);

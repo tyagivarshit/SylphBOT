@@ -26,7 +26,7 @@ router.use((_req, res, next) => {
 router.post("/register", authLimiter, register);
 
 /* 🔐 LOGIN (STRICT PROTECTION) */
-router.post("/login", loginLimiter, authLimiter, login);
+router.post("/login", loginLimiter, login);
 
 /* 🔐 CURRENT USER */
 router.get("/me", protect, getMe);

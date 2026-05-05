@@ -13,7 +13,7 @@ router.use((_req, res, next) => {
 /* ================= AUTH ================= */
 router.post("/register", rateLimit_middleware_1.authLimiter, auth_controller_1.register);
 /* 🔐 LOGIN (STRICT PROTECTION) */
-router.post("/login", loginLimiter_1.loginLimiter, rateLimit_middleware_1.authLimiter, auth_controller_1.login);
+router.post("/login", loginLimiter_1.loginLimiter, auth_controller_1.login);
 /* 🔐 CURRENT USER */
 router.get("/me", auth_middleware_1.protect, auth_controller_1.getMe);
 /* ================= EMAIL ================= */

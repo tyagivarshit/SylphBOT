@@ -21,6 +21,7 @@ import {
 
 const AUTH_CONTEXT_CACHE_TTL_MS = 15_000;
 const SESSION_ANOMALY_RECHECK_MS = 10_000;
+const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 450;
 
 type CachedAuthContext = {
   userId: string;
@@ -169,6 +170,51 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
   }
 };
 
+const withFastGuardTimeout = async <T>(
+  task: Promise<T>,
+  timeoutMs: number
+) => {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error("session_anomaly_guard_timeout"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
+const runSessionAnomalyGuard = async (
+  req: Request,
+  input: {
+    userId: string;
+    businessId: string | null;
+  }
+) => {
+  try {
+    await withFastGuardTimeout(
+      enforceSessionAnomalyGuard(req, input),
+      SESSION_ANOMALY_GUARD_TIMEOUT_MS
+    );
+  } catch (error) {
+    // Fail open: auth should remain responsive even if anomaly telemetry is slow.
+    req.logger?.warn(
+      {
+        error: (error as Error)?.message || String(error || "unknown"),
+      },
+      "Session anomaly guard skipped"
+    );
+  }
+};
+
 export const protect = async (
   req: Request,
   res: Response,
@@ -265,7 +311,7 @@ export const protect = async (
             businessId: cachedContext.businessId,
           });
 
-          await enforceSessionAnomalyGuard(req, {
+          await runSessionAnomalyGuard(req, {
             userId: cachedContext.userId,
             businessId: cachedContext.businessId,
           });
@@ -320,7 +366,7 @@ export const protect = async (
             businessId,
           });
 
-          await enforceSessionAnomalyGuard(req, {
+          await runSessionAnomalyGuard(req, {
             userId: user.id,
             businessId,
           });
@@ -411,7 +457,7 @@ export const protect = async (
       businessId,
     });
 
-    await enforceSessionAnomalyGuard(req, {
+    await runSessionAnomalyGuard(req, {
       userId: user.id,
       businessId,
     });

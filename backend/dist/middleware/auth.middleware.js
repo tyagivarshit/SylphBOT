@@ -15,6 +15,7 @@ const tenant_service_1 = require("../services/tenant.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
 const AUTH_CONTEXT_CACHE_TTL_MS = 15000;
 const SESSION_ANOMALY_RECHECK_MS = 10000;
+const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 450;
 const authContextCache = new Map();
 const sessionAnomalyCheckedAt = new Map();
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
@@ -115,6 +116,35 @@ const enforceSessionAnomalyGuard = async (req, input) => {
         }
     }
 };
+const withFastGuardTimeout = async (task, timeoutMs) => {
+    let timeoutHandle = null;
+    try {
+        return await Promise.race([
+            task,
+            new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => {
+                    reject(new Error("session_anomaly_guard_timeout"));
+                }, timeoutMs);
+            }),
+        ]);
+    }
+    finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
+};
+const runSessionAnomalyGuard = async (req, input) => {
+    try {
+        await withFastGuardTimeout(enforceSessionAnomalyGuard(req, input), SESSION_ANOMALY_GUARD_TIMEOUT_MS);
+    }
+    catch (error) {
+        // Fail open: auth should remain responsive even if anomaly telemetry is slow.
+        req.logger?.warn({
+            error: error?.message || String(error || "unknown"),
+        }, "Session anomaly guard skipped");
+    }
+};
 const protect = async (req, res, next) => {
     const startedAt = Date.now();
     try {
@@ -190,7 +220,7 @@ const protect = async (req, res, next) => {
                         email: cachedContext.email,
                         businessId: cachedContext.businessId,
                     });
-                    await enforceSessionAnomalyGuard(req, {
+                    await runSessionAnomalyGuard(req, {
                         userId: cachedContext.userId,
                         businessId: cachedContext.businessId,
                     });
@@ -236,7 +266,7 @@ const protect = async (req, res, next) => {
                         email: user.email,
                         businessId,
                     });
-                    await enforceSessionAnomalyGuard(req, {
+                    await runSessionAnomalyGuard(req, {
                         userId: user.id,
                         businessId,
                     });
@@ -305,7 +335,7 @@ const protect = async (req, res, next) => {
             email: user.email,
             businessId,
         });
-        await enforceSessionAnomalyGuard(req, {
+        await runSessionAnomalyGuard(req, {
             userId: user.id,
             businessId,
         });

@@ -64,6 +64,11 @@ const verifyPassword = async (
 const isStrongPassword = (password: string) =>
   /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
 
+const LOGIN_BOOTSTRAP_TIMEOUT_MS = 2200;
+const LOGIN_SESSION_LEDGER_TIMEOUT_MS = 400;
+const AUTH_ME_BOOTSTRAP_TIMEOUT_MS = 1600;
+const AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS = 700;
+
 const withFastTimeout = async <T>(
   task: Promise<T>,
   timeoutMs: number
@@ -75,7 +80,7 @@ const withFastTimeout = async <T>(
       task,
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => {
-          reject(new Error("auth_rate_limit_timeout"));
+          reject(new Error("auth_operation_timeout"));
         }, timeoutMs);
       }),
     ]);
@@ -319,7 +324,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       throw unauthorized("Invalid credentials");
     }
 
-    const bootstrap = await ensureAuthBootstrapContext({
+    const bootstrapTask = ensureAuthBootstrapContext({
       userId: user.id,
       preferredBusinessId: user.businessId || null,
       profileSeed: {
@@ -328,53 +333,86 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         avatar: user.avatar || null,
       },
     });
-    const businessId = bootstrap.identity.businessId;
+
+    let resolvedUser = {
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+      email: user.email,
+      name: user.name,
+    };
+    let businessId = user.businessId || null;
+
+    try {
+      const bootstrap = await withFastTimeout(
+        bootstrapTask,
+        LOGIN_BOOTSTRAP_TIMEOUT_MS
+      );
+
+      resolvedUser = {
+        id: bootstrap.user.id,
+        role: bootstrap.user.role,
+        tokenVersion: bootstrap.user.tokenVersion,
+        email: bootstrap.user.email,
+        name: bootstrap.user.name,
+      };
+      businessId = bootstrap.identity.businessId;
+    } catch {
+      // Fail open for login latency: continue with existing canonical user fields
+      // and allow bootstrap recovery to finish in background.
+      void bootstrapTask.catch(() => undefined);
+    }
 
     const accessToken = generateAccessToken(
-      bootstrap.user.id,
-      bootstrap.user.role,
+      resolvedUser.id,
+      resolvedUser.role,
       businessId,
-      bootstrap.user.tokenVersion
+      resolvedUser.tokenVersion
     );
 
     const refreshRaw = generateRefreshToken(
-      bootstrap.user.id,
-      bootstrap.user.tokenVersion
+      resolvedUser.id,
+      resolvedUser.tokenVersion
     );
 
-    await pruneRefreshTokens(bootstrap.user.id, 4);
+    await pruneRefreshTokens(resolvedUser.id, 4);
 
     await prisma.refreshToken.create({
       data: {
         token: hashToken(refreshRaw),
-        userId: bootstrap.user.id,
+        userId: resolvedUser.id,
         userAgent: getUA(req),
         ip: getIP(req),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
 
-    await issueSessionLedger({
-      businessId,
-      tenantId: businessId,
-      userId: bootstrap.user.id,
-      sessionKey: hashToken(refreshRaw),
-      ip: getIP(req),
-      userAgent: String(getUA(req)),
-      deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      metadata: {
-        source: "auth.login",
-      },
-    }).catch(() => undefined);
+    const sessionLedgerTask = issueSessionLedger({
+        businessId,
+        tenantId: businessId,
+        userId: resolvedUser.id,
+        sessionKey: hashToken(refreshRaw),
+        ip: getIP(req),
+        userAgent: String(getUA(req)),
+        deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        metadata: {
+          source: "auth.login",
+        },
+      }).catch(() => undefined);
+
+    void withFastTimeout(
+      sessionLedgerTask,
+      LOGIN_SESSION_LEDGER_TIMEOUT_MS
+    ).catch(() => undefined);
 
     void writeAuthAuditLog(req, {
       action: "auth.login",
-      userId: bootstrap.user.id,
+      userId: resolvedUser.id,
       businessId,
       metadata: {
-        email: bootstrap.user.email,
-        role: bootstrap.user.role,
+        email: resolvedUser.email,
+        role: resolvedUser.role,
       },
     });
 
@@ -383,9 +421,9 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     res.json({
       success: true,
       user: {
-        id: bootstrap.user.id,
-        email: bootstrap.user.email,
-        name: bootstrap.user.name,
+        id: resolvedUser.id,
+        email: resolvedUser.email,
+        name: resolvedUser.name,
         businessId,
       },
     });
@@ -644,7 +682,7 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
   try {
     if (!req.user?.id) throw unauthorized("Not authenticated");
 
-    const bootstrap = await ensureAuthBootstrapContext({
+    const bootstrapTask = ensureAuthBootstrapContext({
       userId: req.user.id,
       preferredBusinessId: req.user?.businessId || null,
       profileSeed: {
@@ -652,23 +690,66 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
       },
     });
 
-    res.setHeader("Cache-Control", "no-store");
+    let payload = {
+      id: String(req.user.id),
+      name: "Workspace User",
+      email: String(req.user?.email || ""),
+      role: String(req.user?.role || "AGENT"),
+      businessId: String(req.user?.businessId || "").trim() || null,
+    };
 
-    res.json({
-      success: true,
-      user: {
+    try {
+      const bootstrap = await withFastTimeout(
+        bootstrapTask,
+        AUTH_ME_BOOTSTRAP_TIMEOUT_MS
+      );
+
+      payload = {
         id: bootstrap.user.id,
         name: bootstrap.user.name,
         email: bootstrap.user.email,
         role: bootstrap.user.role,
         businessId: bootstrap.identity.businessId,
-      },
+      };
+    } catch {
+      void bootstrapTask.catch(() => undefined);
+
+      const fallbackUser = await withFastTimeout(
+        prisma.user.findUnique({
+          where: { id: req.user.id },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            businessId: true,
+          },
+        }),
+        AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS
+      ).catch(() => null);
+
+      if (fallbackUser) {
+        payload = {
+          id: fallbackUser.id,
+          name: fallbackUser.name,
+          email: fallbackUser.email,
+          role: fallbackUser.role,
+          businessId: fallbackUser.businessId || null,
+        };
+      }
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+
+    res.json({
+      success: true,
+      user: payload,
     });
 
     emitPerformanceMetric({
       name: "AUTH_MS",
       value: Date.now() - startedAt,
-      businessId: bootstrap.identity.businessId,
+      businessId: payload.businessId,
       route: "auth.me",
     });
 

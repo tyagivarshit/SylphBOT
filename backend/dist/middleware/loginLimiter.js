@@ -10,6 +10,7 @@ const logger_1 = __importDefault(require("../utils/logger"));
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;
 const MAX_IP_ATTEMPTS = 20;
+const RATE_LIMIT_CHECK_TIMEOUT_MS = 400;
 /* ======================================
 UTILS
 ====================================== */
@@ -18,6 +19,24 @@ const getIP = (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
     req.ip ||
     "unknown";
 const getEmail = (req) => req.body?.email?.toLowerCase().trim() || "unknown";
+const withRateLimitTimeout = async (task) => {
+    let timeoutHandle = null;
+    try {
+        return await Promise.race([
+            task,
+            new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => {
+                    reject(new Error("login_rate_limit_timeout"));
+                }, RATE_LIMIT_CHECK_TIMEOUT_MS);
+            }),
+        ]);
+    }
+    finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
+};
 /* ======================================
 CORE LIMITER LOGIC
 ====================================== */
@@ -28,7 +47,7 @@ const checkLimit = async (key, limit) => {
     multi.zadd(key, now, `${now}-${Math.random()}`);
     multi.zcard(key);
     multi.expire(key, WINDOW);
-    const [, , count] = (await multi.exec());
+    const [, , count] = (await withRateLimitTimeout(multi.exec()));
     const attempts = count[1];
     return attempts > limit;
 };
@@ -52,7 +71,7 @@ const loginLimiter = async (req, res, next) => {
             checkLimit(ipKey, MAX_IP_ATTEMPTS),
         ]);
         if (isEmailBlocked || isIPBlocked) {
-            const ttl = await redis_1.default.ttl(emailIPKey);
+            const ttl = await withRateLimitTimeout(redis_1.default.ttl(emailIPKey));
             const retryAfter = ttl > 0 ? ttl : WINDOW;
             logger_1.default.warn({
                 email,

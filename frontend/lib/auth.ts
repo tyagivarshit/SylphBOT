@@ -1,4 +1,4 @@
-import type { ApiResponse } from "./apiClient";
+import type { ApiRequestInit, ApiResponse } from "./apiClient";
 import { apiFetch } from "./apiClient";
 import { buildAbsoluteApiUrl } from "./url";
 
@@ -29,9 +29,10 @@ const sleep = (ms: number) =>
     setTimeout(resolve, ms);
   });
 
-const authRequest = <T>(path: string, options: RequestInit = {}) =>
+const authRequest = <T>(path: string, options: ApiRequestInit = {}) =>
   apiFetch<T>(`/api/auth${path.startsWith("/") ? path : `/${path}`}`, {
     cache: "no-store",
+    timeoutMs: 9000,
     ...options,
   });
 
@@ -113,6 +114,7 @@ export async function loginUser(
 ): Promise<ApiResponse<{ user: User }>> {
   const response = await authRequest<{ user: User }>("/login", {
     method: "POST",
+    timeoutMs: 15000,
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
       password,

@@ -6,6 +6,7 @@ import logger from "../utils/logger";
 const WINDOW = 60 * 15; // 15 min
 const MAX_ATTEMPTS = 5;
 const MAX_IP_ATTEMPTS = 20;
+const RATE_LIMIT_CHECK_TIMEOUT_MS = 400;
 
 /* ======================================
 UTILS
@@ -19,6 +20,25 @@ const getIP = (req: Request) =>
 
 const getEmail = (req: Request) =>
   req.body?.email?.toLowerCase().trim() || "unknown";
+
+const withRateLimitTimeout = async <T>(task: Promise<T>) => {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error("login_rate_limit_timeout"));
+        }, RATE_LIMIT_CHECK_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
 
 /* ======================================
 CORE LIMITER LOGIC
@@ -34,7 +54,7 @@ const checkLimit = async (key: string, limit: number) => {
   multi.zcard(key);
   multi.expire(key, WINDOW);
 
-  const [, , count] = (await multi.exec()) as any;
+  const [, , count] = (await withRateLimitTimeout(multi.exec())) as any;
   const attempts = count[1];
 
   return attempts > limit;
@@ -70,7 +90,7 @@ export const loginLimiter = async (
     ]);
 
     if (isEmailBlocked || isIPBlocked) {
-      const ttl = await redis.ttl(emailIPKey);
+      const ttl = await withRateLimitTimeout(redis.ttl(emailIPKey));
       const retryAfter = ttl > 0 ? ttl : WINDOW;
 
       logger.warn(

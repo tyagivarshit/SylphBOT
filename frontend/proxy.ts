@@ -45,8 +45,10 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
+  // Do not force redirect from public auth routes when cookies exist.
+  // Stale/invalid cookies can otherwise create a dashboard<->login loop.
   if (hasSessionCookie && isPublic) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.next();
   }
 
   return NextResponse.next();

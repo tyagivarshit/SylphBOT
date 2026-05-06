@@ -8,6 +8,7 @@ import {
   getStripePriceId,
 } from "../../../config/stripe.price.map";
 import { stripe } from "../../stripe.service";
+import { getTaxConfig } from "../../tax.service";
 import { assertStripeConfigReady } from "./stripeConfig.service";
 import type {
   CommerceProviderAdapter,
@@ -356,7 +357,16 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     const customerId = String(
       metadata.customerId || metadata.stripeCustomerId || ""
     ).trim();
+    const customerEmail = String(
+      metadata.customerEmail || metadata.email || ""
+    )
+      .trim()
+      .toLowerCase();
     const discounts = getDiscountsFromMetadata(metadata);
+    const { taxRegion, taxType, ...checkoutTaxConfig } = getTaxConfig({
+      currency,
+      withCustomerUpdate: Boolean(customerId),
+    });
 
     let paymentQuantity = quantity;
     let paymentUnitAmount = Math.max(
@@ -378,13 +388,25 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       quantity: String(quantity),
       proposalKey: String(metadata.proposalKey || ""),
       providerSubscriptionId: String(metadata.providerSubscriptionId || ""),
+      taxRegion,
+      taxType,
     };
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const checkoutExpiresAtSeconds = nowSeconds + 2 * 60 * 60;
 
     const sessionPayload: Stripe.Checkout.SessionCreateParams = {
       payment_method_types: ["card"],
       metadata: sessionMetadata,
+      client_reference_id: String(input.paymentIntentKey || "").trim() || undefined,
       allow_promotion_codes: true,
-      automatic_tax: { enabled: true },
+      ...checkoutTaxConfig,
+      after_expiration: {
+        recovery: {
+          enabled: true,
+          allow_promotion_codes: true,
+        },
+      },
+      expires_at: checkoutExpiresAtSeconds,
       success_url:
         input.successUrl ||
         `${env.FRONTEND_URL}/billing/success?payment_intent_key=${input.paymentIntentKey}`,
@@ -426,10 +448,22 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       };
       if (customerId) {
         sessionPayload.customer = customerId;
+      } else if (customerEmail) {
+        sessionPayload.customer_email = customerEmail;
       }
     } else {
       sessionPayload.mode = "payment";
-      sessionPayload.customer_creation = "always";
+      sessionPayload.invoice_creation = {
+        enabled: true,
+      };
+      if (customerId) {
+        sessionPayload.customer = customerId;
+      } else {
+        sessionPayload.customer_creation = "always";
+        if (customerEmail) {
+          sessionPayload.customer_email = customerEmail;
+        }
+      }
       sessionPayload.line_items = [
         {
           quantity: paymentQuantity,
@@ -442,9 +476,6 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
           },
         },
       ];
-      if (customerId) {
-        sessionPayload.customer = customerId;
-      }
     }
 
     const checkoutIdempotencyKey = `checkout:${input.paymentIntentKey}`;
@@ -471,6 +502,8 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
           typeof session.subscription === "string" ? session.subscription : null,
         stripeCustomerId:
           typeof session.customer === "string" ? session.customer : customerId || null,
+        taxRegion,
+        taxType,
         checkoutType,
         mode: session.mode || null,
       },

@@ -853,6 +853,11 @@ export class BillingController {
     }
   ) {
     const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
+    if (redirectOnSuccess) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
     const requestBody =
       req.body && typeof req.body === "object" && !Array.isArray(req.body)
         ? (req.body as Record<string, unknown>)
@@ -902,6 +907,13 @@ export class BillingController {
       )
         .trim()
         .toLowerCase();
+      const checkoutAttemptRaw = String(
+        readInput("attempt") || readInput("checkoutAttempt") || ""
+      ).trim();
+      const checkoutAttempt =
+        checkoutAttemptRaw
+          .replace(/[^a-zA-Z0-9._-]/g, "")
+          .slice(0, 80) || crypto.randomUUID().replace(/-/g, "");
       const checkoutType = new Set([
         "subscription",
         "one_time",
@@ -960,7 +972,7 @@ export class BillingController {
         });
       }
 
-      const { businessId } = await getUserContext(req);
+      const { businessId, email } = await getUserContext(req);
 
       if (!businessId) {
         return sendCheckoutError({
@@ -1004,7 +1016,7 @@ export class BillingController {
         },
       });
       const subscriptionMeta = (activeSubscription?.metadata || {}) as Record<string, unknown>;
-      const checkoutFingerprint = crypto
+      const checkoutProposalFingerprint = crypto
         .createHash("sha256")
         .update(
           JSON.stringify({
@@ -1049,7 +1061,7 @@ export class BillingController {
             null,
           seatBased: quantity > 1,
         },
-        idempotencyKey: `checkout:proposal:${businessId}:${checkoutFingerprint}`,
+        idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
       });
 
       const readyProposal =
@@ -1082,11 +1094,13 @@ export class BillingController {
           stripeCustomerId:
             String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
             null,
+          customerEmail: email,
+          checkoutAttempt,
           prorationBehavior:
             String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
           seatBased: quantity > 1,
         },
-        idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutFingerprint}`,
+        idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
       });
 
       const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();

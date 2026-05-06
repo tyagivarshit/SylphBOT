@@ -645,6 +645,11 @@ class BillingController {
     }
     static async handleCheckout(req, res, options) {
         const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
+        if (redirectOnSuccess) {
+            res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+            res.setHeader("Pragma", "no-cache");
+            res.setHeader("Expires", "0");
+        }
         const requestBody = req.body && typeof req.body === "object" && !Array.isArray(req.body)
             ? req.body
             : {};
@@ -681,6 +686,10 @@ class BillingController {
             const checkoutTypeInput = String(readInput("checkoutType") || readInput("action") || (coupon ? "coupon" : "subscription"))
                 .trim()
                 .toLowerCase();
+            const checkoutAttemptRaw = String(readInput("attempt") || readInput("checkoutAttempt") || "").trim();
+            const checkoutAttempt = checkoutAttemptRaw
+                .replace(/[^a-zA-Z0-9._-]/g, "")
+                .slice(0, 80) || crypto_1.default.randomUUID().replace(/-/g, "");
             const checkoutType = new Set([
                 "subscription",
                 "one_time",
@@ -733,7 +742,7 @@ class BillingController {
                     reason: "invalid_billing",
                 });
             }
-            const { businessId } = await getUserContext(req);
+            const { businessId, email } = await getUserContext(req);
             if (!businessId) {
                 return sendCheckoutError({
                     status: 403,
@@ -770,7 +779,7 @@ class BillingController {
                 },
             });
             const subscriptionMeta = (activeSubscription?.metadata || {});
-            const checkoutFingerprint = crypto_1.default
+            const checkoutProposalFingerprint = crypto_1.default
                 .createHash("sha256")
                 .update(JSON.stringify({
                 businessId,
@@ -809,7 +818,7 @@ class BillingController {
                         null,
                     seatBased: quantity > 1,
                 },
-                idempotencyKey: `checkout:proposal:${businessId}:${checkoutFingerprint}`,
+                idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
             });
             const readyProposal = proposal.status === "APPROVED" || proposal.status === "SENT"
                 ? proposal
@@ -837,10 +846,12 @@ class BillingController {
                         null,
                     stripeCustomerId: String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
                         null,
+                    customerEmail: email,
+                    checkoutAttempt,
                     prorationBehavior: String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
                     seatBased: quantity > 1,
                 },
-                idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutFingerprint}`,
+                idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
             });
             const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();
             if (!checkoutUrl) {

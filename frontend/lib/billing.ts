@@ -8,6 +8,8 @@ type BillingRequestResult = {
 
 const CHECKOUT_REQUEST_TIMEOUT_MS = 32_000;
 const CHECKOUT_REDIRECT_PATH = "/api/billing/checkout/start";
+const buildCheckoutAttemptToken = () =>
+  `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -101,7 +103,11 @@ export const createCheckoutSession = async (
       "/api/billing/create-checkout-session",
       {
         method: "POST",
-        body: JSON.stringify({ plan, billing }),
+        body: JSON.stringify({
+          plan,
+          billing,
+          checkoutAttempt: buildCheckoutAttemptToken(),
+        }),
       },
       CHECKOUT_REQUEST_TIMEOUT_MS,
       0
@@ -136,6 +142,7 @@ export const buildCheckoutRedirectUrl = (
   const params = new URLSearchParams({
     plan: String(plan || "").trim().toUpperCase(),
     billing,
+    attempt: buildCheckoutAttemptToken(),
   });
 
   return `${CHECKOUT_REDIRECT_PATH}?${params.toString()}`;

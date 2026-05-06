@@ -872,6 +872,8 @@ class BillingController {
             });
         }
         catch (error) {
+            const stripeCode = String(error?.code || "").trim().toLowerCase();
+            const stripeType = String(error?.type || "").trim().toLowerCase();
             if (error.message === "Unauthorized") {
                 return sendCheckoutError({
                     status: 401,
@@ -882,10 +884,17 @@ class BillingController {
             if (error.message?.includes("Currency cannot be changed") ||
                 error.message?.includes("Invalid plan") ||
                 error.message?.includes("Invalid billing") ||
-                error.message?.includes("proposal_not_checkout_ready")) {
+                error.message?.includes("proposal_not_checkout_ready") ||
+                error.message?.includes("stripe_subscription_amount_invalid") ||
+                error.message?.includes("stripe_price_mapping_missing") ||
+                error.message?.includes("unknown parameter") ||
+                error.message?.includes("parameter_unknown") ||
+                error.message?.includes("invalid_request_error") ||
+                stripeCode === "parameter_unknown" ||
+                stripeType === "invalid_request_error") {
                 return sendCheckoutError({
                     status: 400,
-                    message: error.message,
+                    message: "Checkout configuration is invalid. Please contact support if this persists.",
                     reason: "checkout_invalid",
                 });
             }

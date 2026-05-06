@@ -232,7 +232,7 @@ const getCheckoutFailureMessage = (reason: string | null) => {
     case "invalid_plan":
     case "invalid_billing":
     case "checkout_invalid":
-      return "Selected plan details are invalid. Please refresh and try again.";
+      return "Checkout settings are temporarily misconfigured. Please try again, or contact support if this repeats.";
     default:
       return "We couldn't start checkout right now. Please try again.";
   }

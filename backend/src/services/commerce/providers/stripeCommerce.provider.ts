@@ -211,6 +211,38 @@ const isStripeTimeoutError = (error: unknown) => {
   );
 };
 
+const readStripeErrorShape = (error: unknown) => ({
+  code: String((error as { code?: unknown })?.code || "")
+    .trim()
+    .toLowerCase(),
+  type: String((error as { type?: unknown })?.type || "")
+    .trim()
+    .toLowerCase(),
+  message: String((error as { message?: unknown })?.message || error || "")
+    .trim()
+    .toLowerCase(),
+});
+
+const isStripePayloadCompatibilityError = (error: unknown) => {
+  const stripeError = readStripeErrorShape(error);
+
+  if (stripeError.code === "parameter_unknown") {
+    return true;
+  }
+
+  if (stripeError.type !== "invalid_request_error") {
+    return false;
+  }
+
+  return (
+    stripeError.message.includes("unknown parameter") ||
+    stripeError.message.includes("received unknown parameter") ||
+    stripeError.message.includes("not supported") ||
+    stripeError.message.includes("cannot provide") ||
+    stripeError.message.includes("must provide")
+  );
+};
+
 const withStripeTimeoutRetry = async <T>(operation: () => Promise<T>) => {
   try {
     return await operation();
@@ -420,6 +452,7 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     }
 
     if (subscriptionMode) {
+      const recurringInterval = billingCycle === "yearly" ? "year" : "month";
       const mappedPriceId =
         planCode &&
         getStripePriceId({
@@ -429,18 +462,32 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
           early,
         });
 
-      if (!mappedPriceId) {
-        throw new Error(
-          `stripe_price_mapping_missing:${planCode || "UNKNOWN"}:${currency}:${billingCycle}:${early ? "early" : "standard"}`
-        );
+      const canUseInlineRecurringPrice = paymentUnitAmount > 0;
+
+      if (!mappedPriceId && !canUseInlineRecurringPrice) {
+        throw new Error("stripe_subscription_amount_invalid");
       }
 
       sessionPayload.mode = "subscription";
       sessionPayload.line_items = [
-        {
-          price: mappedPriceId,
-          quantity,
-        },
+        mappedPriceId
+          ? {
+              price: mappedPriceId,
+              quantity,
+            }
+          : {
+              quantity: paymentQuantity,
+              price_data: {
+                currency: currency.toLowerCase(),
+                unit_amount: paymentUnitAmount,
+                recurring: {
+                  interval: recurringInterval,
+                },
+                product_data: {
+                  name: input.description,
+                },
+              },
+            },
       ];
       sessionPayload.subscription_data = {
         metadata: sessionMetadata,
@@ -479,11 +526,55 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     }
 
     const checkoutIdempotencyKey = `checkout:${input.paymentIntentKey}`;
-    const session = await withStripeTimeoutRetry(() =>
-      stripe.checkout.sessions.create(sessionPayload, {
-        idempotencyKey: checkoutIdempotencyKey,
-      })
-    );
+    const createStripeSession = async (
+      payload: Stripe.Checkout.SessionCreateParams,
+      idempotencyKey: string
+    ) =>
+      withStripeTimeoutRetry(() =>
+        stripe.checkout.sessions.create(payload, {
+          idempotencyKey,
+        })
+      );
+    let session: Stripe.Checkout.Session;
+
+    try {
+      session = await createStripeSession(sessionPayload, checkoutIdempotencyKey);
+    } catch (error) {
+      if (!isStripePayloadCompatibilityError(error)) {
+        throw error;
+      }
+
+      const compatibilityPayload = {
+        ...sessionPayload,
+      } as Stripe.Checkout.SessionCreateParams;
+      delete (compatibilityPayload as Record<string, unknown>).after_expiration;
+      delete (compatibilityPayload as Record<string, unknown>).expires_at;
+
+      try {
+        session = await createStripeSession(
+          compatibilityPayload,
+          `${checkoutIdempotencyKey}:compat`
+        );
+      } catch (compatibilityError) {
+        if (!isStripePayloadCompatibilityError(compatibilityError)) {
+          throw compatibilityError;
+        }
+
+        const minimalPayload = {
+          ...compatibilityPayload,
+        } as Stripe.Checkout.SessionCreateParams;
+        delete (minimalPayload as Record<string, unknown>).phone_number_collection;
+        delete (minimalPayload as Record<string, unknown>).billing_address_collection;
+        delete (minimalPayload as Record<string, unknown>).customer_update;
+        delete (minimalPayload as Record<string, unknown>).tax_id_collection;
+        delete (minimalPayload as Record<string, unknown>).automatic_tax;
+
+        session = await createStripeSession(
+          minimalPayload,
+          `${checkoutIdempotencyKey}:minimal`
+        );
+      }
+    }
 
     return {
       provider: "STRIPE",

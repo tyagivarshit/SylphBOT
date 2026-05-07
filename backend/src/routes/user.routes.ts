@@ -288,7 +288,7 @@ router.get("/me", protect, async (req: any, res) => {
 
     const userHydration = await withTimeoutFallback({
       label: "user_me_hydration",
-      timeoutMs: 2200,
+      timeoutMs: 1800,
       task: getCurrentUser({
         userId,
         preferredBusinessId,
@@ -361,7 +361,7 @@ router.get("/workspace", protect, async (req: any, res) => {
 
     const workspaceIdentity = await withTimeoutFallback({
       label: "user_workspace_hydration",
-      timeoutMs: 3000,
+      timeoutMs: 1800,
       task: resolveUserWorkspaceIdentity({
         userId,
         preferredBusinessId: req.user?.businessId || null,

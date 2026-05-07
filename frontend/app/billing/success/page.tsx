@@ -2,7 +2,10 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { confirmCheckout } from "@/lib/billing";
+import {
+  confirmCheckout,
+  type CheckoutConfirmResponse,
+} from "@/lib/billing";
 import { apiFetch } from "@/lib/apiClient";
 
 type BillingPayload = {
@@ -70,6 +73,9 @@ const getSuccessMessage = (payload: BillingPayload | null) => {
   return `${planLabel} is now active on your workspace.`;
 };
 
+const shouldStopAfterConfirmFailure = (result: CheckoutConfirmResponse | null) =>
+  Boolean(result && result.state === "FAILED" && !result.shouldPoll);
+
 const fetchBilling = async (): Promise<BillingPayload | null> => {
   try {
     const response = await apiFetch<BillingPayload>("/api/billing", {
@@ -97,6 +103,7 @@ function SuccessPageContent() {
   const [failed, setFailed] = useState(false);
   const [message, setMessage] = useState("Verifying your subscription...");
   const [resolvedPlan, setResolvedPlan] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,8 +115,21 @@ function SuccessPageContent() {
         }
       }, 250);
 
+      let confirmResult: CheckoutConfirmResponse | null = null;
       if (sessionId) {
-        const confirmed = await confirmCheckout(sessionId);
+        confirmResult = await confirmCheckout(sessionId);
+
+        if (!cancelled && confirmResult.message) {
+          setMessage(confirmResult.message);
+        }
+
+        if (!cancelled && shouldStopAfterConfirmFailure(confirmResult)) {
+          setLoading(false);
+          setFailed(true);
+          return;
+        }
+
+        const confirmed = await fetchBilling();
 
         if (!cancelled && isActivated(confirmed, expectedPlan)) {
           setResolvedPlan(getPlanLabel(confirmed));
@@ -119,7 +139,7 @@ function SuccessPageContent() {
         }
       }
 
-      for (let attempt = 0; attempt < 12; attempt += 1) {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
         const billing = await fetchBilling();
 
         if (!cancelled && isActivated(billing, expectedPlan)) {
@@ -129,14 +149,16 @@ function SuccessPageContent() {
           return;
         }
 
-        await sleep(1500);
+        await sleep(1200);
       }
 
       if (!cancelled) {
         setLoading(false);
         setFailed(true);
         setMessage(
-          "Your payment finished in Stripe, but the plan is still syncing. Please reopen billing in a moment."
+          confirmResult?.state === "FAILED"
+            ? confirmResult.message || "We could not verify payment right now. Please retry."
+            : "Your payment finished in Stripe, but the plan is still syncing. Please retry verification."
         );
       }
     };
@@ -146,7 +168,7 @@ function SuccessPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [expectedPlan, sessionId]);
+  }, [expectedPlan, retryTick, sessionId]);
 
   const statusTitle = loading
     ? "Verifying Payment"
@@ -192,6 +214,20 @@ function SuccessPageContent() {
         >
           {loading ? "Checking..." : "Open Billing"}
         </button>
+
+        {failed && sessionId ? (
+          <button
+            onClick={() => {
+              setFailed(false);
+              setLoading(true);
+              setMessage("Retrying payment verification...");
+              setRetryTick((value) => value + 1);
+            }}
+            className="mt-3 w-full rounded-xl border border-blue-200 py-2.5 text-blue-700"
+          >
+            Retry Verification
+          </button>
+        ) : null}
       </div>
     </div>
   );

@@ -219,7 +219,7 @@ export const getFlows = async (req: Request, res: Response) => {
 
     const flowsResult = await withTimeoutFallback({
       label: "automation_projection",
-      timeoutMs: 3000,
+      timeoutMs: 1800,
       task: prisma.automationFlow.findMany({
         where: {
           businessId,

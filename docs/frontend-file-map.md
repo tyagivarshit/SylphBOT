@@ -1,0 +1,179 @@
+﻿# Frontend File Map
+
+Generated: 2026-05-06 19:04:37 +05:30
+
+Scope: tracked files under `frontend/` (excluding `node_modules` and build output).
+
+- `frontend/app/(dashboard)/ai-training/page.tsx`: Dashboard route page for /ai-training feature UI.
+- `frontend/app/(dashboard)/analytics/page.tsx`: Dashboard route page for /analytics feature UI.
+- `frontend/app/(dashboard)/automation/page.tsx`: Dashboard route page for /automation feature UI.
+- `frontend/app/(dashboard)/autonomous/page.tsx`: Dashboard route page for /autonomous feature UI.
+- `frontend/app/(dashboard)/billing/page.tsx`: Dashboard route page for /billing feature UI.
+- `frontend/app/(dashboard)/booking/page.tsx`: Dashboard route page for /booking feature UI.
+- `frontend/app/(dashboard)/booking-calendar/page.tsx`: Dashboard route page for /booking-calendar feature UI.
+- `frontend/app/(dashboard)/clients/page.tsx`: Dashboard route page for /clients feature UI.
+- `frontend/app/(dashboard)/comment-automation/page.tsx`: Dashboard route page for /comment-automation feature UI.
+- `frontend/app/(dashboard)/conversations/page.tsx`: Dashboard route page for /conversations feature UI.
+- `frontend/app/(dashboard)/dashboard/page.tsx`: Dashboard route page for /dashboard feature UI.
+- `frontend/app/(dashboard)/dashboard/settings/security/page.tsx`: Dashboard route page for /dashboard/settings/security feature UI.
+- `frontend/app/(dashboard)/help/page.tsx`: Dashboard route page for /help feature UI.
+- `frontend/app/(dashboard)/knowledge-base/page.tsx`: Dashboard route page for /knowledge-base feature UI.
+- `frontend/app/(dashboard)/layout.tsx`: Layout wrapper for (dashboard) route segment.
+- `frontend/app/(dashboard)/leads/page.tsx`: Dashboard route page for /leads feature UI.
+- `frontend/app/(dashboard)/settings/page.tsx`: Dashboard route page for /settings feature UI.
+- `frontend/app/(dashboard)/settings/security/page.tsx`: Dashboard route page for /settings/security feature UI.
+- `frontend/app/(dashboard)/support/page.tsx`: Dashboard route page for /support feature UI.
+- `frontend/app/auth/forgot/page.tsx`: Auth route page for /auth/forgot.
+- `frontend/app/auth/layout.tsx`: Layout wrapper for auth route segment.
+- `frontend/app/auth/login/loginClient.tsx`: Client-side auth logic component for login/login flow.
+- `frontend/app/auth/login/page.tsx`: Auth route page for /auth/login.
+- `frontend/app/auth/register/page.tsx`: Auth route page for /auth/register.
+- `frontend/app/auth/reset-password/page.tsx`: Auth route page for /auth/reset-password.
+- `frontend/app/auth/reset-password/resetPasswordClient.tsx`: Client-side auth logic component for reset-password/resetPassword flow.
+- `frontend/app/auth/verify-email/page.tsx`: Auth route page for /auth/verify-email.
+- `frontend/app/auth/verify-email/verifyEmailClient.tsx`: Client-side auth logic component for verify-email/verifyEmail flow.
+- `frontend/app/billing/cancel/page.tsx`: Route page for /billing/cancel.
+- `frontend/app/billing/success/page.tsx`: Route page for /billing/success.
+- `frontend/app/crm/page.tsx`: Route page for /crm.
+- `frontend/app/globals.css`: Global CSS tokens/utilities and brand-level styling.
+- `frontend/app/icon.ico`: Project file in frontend workspace.
+- `frontend/app/integrations/meta/callback/page.tsx`: Route page for /integrations/meta/callback.
+- `frontend/app/layout.tsx`: Root Next.js layout: global styles, Providers, toaster, PWA prompt, SDK scripts.
+- `frontend/app/manifest.ts`: PWA manifest metadata (name, icons, theme, standalone behavior).
+- `frontend/app/page.tsx`: Home redirect entry: authenticated users -> /dashboard, others -> /auth/login.
+- `frontend/app/pricing/page.tsx`: Route page for /pricing.
+- `frontend/app/settings/profile/page.tsx`: Route page for /settings/profile.
+- `frontend/components/aiTraining/AISettingsForm.tsx`: UI component in aiTraining module: AISettingsForm.
+- `frontend/components/aiTraining/BusinessInfoForm.tsx`: UI component in aiTraining module: BusinessInfoForm.
+- `frontend/components/aiTraining/FAQForm.tsx`: UI component in aiTraining module: FAQForm.
+- `frontend/components/aiTraining/TrainingTabs.tsx`: UI component in aiTraining module: TrainingTabs.
+- `frontend/components/analytics/AnalyticsCharts.tsx`: UI component in analytics module: AnalyticsCharts.
+- `frontend/components/analytics/AnalyticsEnterprise.tsx`: UI component in analytics module: AnalyticsEnterprise.
+- `frontend/components/analytics/AnalyticsLayout.tsx`: UI component in analytics module: AnalyticsLayout.
+- `frontend/components/analytics/AnalyticsOverview.tsx`: UI component in analytics module: AnalyticsOverview.
+- `frontend/components/analytics/ConversionFunnel.tsx`: UI component in analytics module: ConversionFunnel.
+- `frontend/components/analytics/DateFilter.tsx`: UI component in analytics module: DateFilter.
+- `frontend/components/analytics/StatCard.tsx`: UI component in analytics module: StatCard.
+- `frontend/components/analytics/TopSources.tsx`: UI component in analytics module: TopSources.
+- `frontend/components/automation/AutomationBuilder.tsx`: UI component in automation module: AutomationBuilder.
+- `frontend/components/automation/AutomationCard.tsx`: UI component in automation module: AutomationCard.
+- `frontend/components/automation/AutomationFlowCard.tsx`: UI component in automation module: AutomationFlowCard.
+- `frontend/components/automation/AutomationList.tsx`: UI component in automation module: AutomationList.
+- `frontend/components/automation/AutomationStep.tsx`: UI component in automation module: AutomationStep.
+- `frontend/components/automation/ConfirmationModal.tsx`: UI component in automation module: ConfirmationModal.
+- `frontend/components/automation/CreateAutomationModal.tsx`: UI component in automation module: CreateAutomationModal.
+- `frontend/components/autonomous/AutonomousDashboard.tsx`: UI component in autonomous module: AutonomousDashboard.
+- `frontend/components/billing/PaymentHistory.tsx`: UI component in billing module: PaymentHistory.
+- `frontend/components/billing/PlanCard.tsx`: UI component in billing module: PlanCard.
+- `frontend/components/billing/UsageSummary.tsx`: UI component in billing module: UsageSummary.
+- `frontend/components/booking/BookedAppointments.tsx`: UI component in booking module: BookedAppointments.
+- `frontend/components/booking/BookingCard.tsx`: UI component in booking module: BookingCard.
+- `frontend/components/booking/BookingDrawer.tsx`: UI component in booking module: BookingDrawer.
+- `frontend/components/booking/BookingLayout.tsx`: UI component in booking module: BookingLayout.
+- `frontend/components/booking/BookingTabs.tsx`: UI component in booking module: BookingTabs.
+- `frontend/components/booking/CreateSlotModal.tsx`: UI component in booking module: CreateSlotModal.
+- `frontend/components/booking/DaySlots.tsx`: UI component in booking module: DaySlots.
+- `frontend/components/brand/AuthShell.tsx`: UI component in brand module: AuthShell.
+- `frontend/components/brand/BrandLockup.tsx`: UI component in brand module: BrandLockup.
+- `frontend/components/brand/PageHeader.tsx`: UI component in brand module: PageHeader.
+- `frontend/components/cards/StatCard.tsx`: UI component in cards module: StatCard.
+- `frontend/components/cards/UsageProgress.tsx`: UI component in cards module: UsageProgress.
+- `frontend/components/charts/LeadsCharts.tsx`: UI component in charts module: LeadsCharts.
+- `frontend/components/clients/AddClientModal.tsx`: UI component in clients module: AddClientModal.
+- `frontend/components/clients/ClientCard.tsx`: UI component in clients module: ClientCard.
+- `frontend/components/clients/ClientScopeSelector.tsx`: UI component in clients module: ClientScopeSelector.
+- `frontend/components/commentAutomation/CommentAutomationCard.tsx`: UI component in commentAutomation module: CommentAutomationCard.
+- `frontend/components/commentAutomation/CommentAutomationList.tsx`: UI component in commentAutomation module: CommentAutomationList.
+- `frontend/components/commentAutomation/CreateCommentAutomationModal.tsx`: UI component in commentAutomation module: CreateCommentAutomationModal.
+- `frontend/components/conversations/ChatSidebar.tsx`: UI component in conversations module: ChatSidebar.
+- `frontend/components/conversations/ChatWindow.tsx`: UI component in conversations module: ChatWindow.
+- `frontend/components/dashboard/QuickActions.tsx`: UI component in dashboard module: QuickActions.
+- `frontend/components/dashboard/RecentActivity.tsx`: UI component in dashboard module: RecentActivity.
+- `frontend/components/dashboard/UsageOverview.tsx`: UI component in dashboard module: UsageOverview.
+- `frontend/components/FeatureGate.tsx`: Shared dashboard UI component: FeatureGate.
+- `frontend/components/knowledgeBase/CreateKnowledgeModal.tsx`: UI component in knowledgeBase module: CreateKnowledgeModal.
+- `frontend/components/knowledgeBase/knowledgeBasePage.tsx`: UI component in knowledgeBase module: knowledgeBasePage.
+- `frontend/components/knowledgeBase/KnowledgeCard.tsx`: UI component in knowledgeBase module: KnowledgeCard.
+- `frontend/components/knowledgeBase/KnowledgeList.tsx`: UI component in knowledgeBase module: KnowledgeList.
+- `frontend/components/layout/DashboardLayout.tsx`: UI component in layout module: DashboardLayout.
+- `frontend/components/layout/Sidebar.tsx`: UI component in layout module: Sidebar.
+- `frontend/components/layout/Topbar.tsx`: UI component in layout module: Topbar.
+- `frontend/components/leads/LeadDrawer.tsx`: UI component in leads module: LeadDrawer.
+- `frontend/components/leads/LeadsTable.tsx`: UI component in leads module: LeadsTable.
+- `frontend/components/leads/StageBadge.tsx`: UI component in leads module: StageBadge.
+- `frontend/components/leads/StageSelect.tsx`: UI component in leads module: StageSelect.
+- `frontend/components/onboarding/DemoChatPreview.tsx`: UI component in onboarding module: DemoChatPreview.
+- `frontend/components/onboarding/OnboardingFlow.tsx`: UI component in onboarding module: OnboardingFlow.
+- `frontend/components/onboarding/TrialBanner.tsx`: UI component in onboarding module: TrialBanner.
+- `frontend/components/onboarding/UpgradeCtaBanner.tsx`: UI component in onboarding module: UpgradeCtaBanner.
+- `frontend/components/pwa/PWAInstallPrompt.tsx`: UI component in pwa module: PWAInstallPrompt.
+- `frontend/components/settings/BillingSettings.tsx`: UI component in settings module: BillingSettings.
+- `frontend/components/settings/BusinessSettings.tsx`: UI component in settings module: BusinessSettings.
+- `frontend/components/settings/ChangePassword.tsx`: UI component in settings module: ChangePassword.
+- `frontend/components/settings/DeleteAccount.tsx`: UI component in settings module: DeleteAccount.
+- `frontend/components/settings/IntegrationsSettings.tsx`: UI component in settings module: IntegrationsSettings.
+- `frontend/components/settings/NotificationsSettings.tsx`: UI component in settings module: NotificationsSettings.
+- `frontend/components/settings/security/ApiKeyRevealModal.tsx`: Project file in frontend workspace.
+- `frontend/components/settings/security/ApiKeysTab.tsx`: Project file in frontend workspace.
+- `frontend/components/settings/security/AuditLogsTab.tsx`: Project file in frontend workspace.
+- `frontend/components/settings/security/CreateApiKeyModal.tsx`: Project file in frontend workspace.
+- `frontend/components/settings/security/SecurityAlertsTab.tsx`: Project file in frontend workspace.
+- `frontend/components/settings/security/SecurityCenter.tsx`: Project file in frontend workspace.
+- `frontend/components/settings/security/securityUtils.ts`: Project file in frontend workspace.
+- `frontend/components/support/HelpSupportPage.tsx`: UI component in support module: HelpSupportPage.
+- `frontend/components/topbar/NotificationsDropdown.tsx`: UI component in topbar module: NotificationsDropdown.
+- `frontend/components/topbar/ProfileDropdown.tsx`: UI component in topbar module: ProfileDropdown.
+- `frontend/components/topbar/SearchDropdown.tsx`: UI component in topbar module: SearchDropdown.
+- `frontend/components/ui/feedback.tsx`: UI component in ui module: feedback.
+- `frontend/components/ui/LoadingButton.tsx`: UI component in ui module: LoadingButton.
+- `frontend/components/UpgradeModal.tsx`: Shared dashboard UI component: UpgradeModal.
+- `frontend/components/UsageMeter.tsx`: Shared dashboard UI component: UsageMeter.
+- `frontend/context/AuthContext.tsx`: Auth context: current-user fetch, auth state, sessionStorage sync, refresh events.
+- `frontend/eslint.config.mjs`: ESLint rules configuration.
+- `frontend/hooks/useAuth.ts`: Custom React hook: useAuth.
+- `frontend/hooks/useAuthGuard.ts`: Custom React hook: useAuthGuard.
+- `frontend/hooks/useDashboard.ts`: Custom React hook: useDashboard.
+- `frontend/hooks/useDebounce.ts`: Custom React hook: useDebounce.
+- `frontend/hooks/useNotifications.ts`: Custom React hook: useNotifications.
+- `frontend/hooks/usePlan.ts`: Custom React hook: usePlan.
+- `frontend/lib/analytics.ts`: Frontend service/helper module: analytics.
+- `frontend/lib/api.ts`: Frontend service/helper module: api.
+- `frontend/lib/apiClient.ts`: Shared API client: timeout, response normalization, auth/error handling, dedupe.
+- `frontend/lib/auth.ts`: Frontend service/helper module: auth.
+- `frontend/lib/automation.service.ts`: Frontend service/helper module: automation.service.
+- `frontend/lib/autonomous.ts`: Frontend service/helper module: autonomous.
+- `frontend/lib/billing.ts`: Frontend service/helper module: billing.
+- `frontend/lib/booking.api.ts`: Frontend service/helper module: booking.api.
+- `frontend/lib/clients.ts`: Frontend service/helper module: clients.
+- `frontend/lib/dashboard.api.ts`: Frontend service/helper module: dashboard.api.
+- `frontend/lib/dashboardRoutePrefetch.ts`: Frontend service/helper module: dashboardRoutePrefetch.
+- `frontend/lib/featureGuard.ts`: Frontend service/helper module: featureGuard.
+- `frontend/lib/message.service.ts`: Frontend service/helper module: message.service.
+- `frontend/lib/onboarding.ts`: Frontend service/helper module: onboarding.
+- `frontend/lib/security.ts`: Frontend service/helper module: security.
+- `frontend/lib/socket.ts`: Socket.IO client instance configuration.
+- `frontend/lib/toast.ts`: Frontend service/helper module: toast.
+- `frontend/lib/types.ts`: Frontend service/helper module: types.
+- `frontend/lib/url.ts`: URL builders for app/api absolute and relative paths.
+- `frontend/lib/usage.service.ts`: Frontend service/helper module: usage.service.
+- `frontend/lib/usagePresentation.ts`: Frontend service/helper module: usagePresentation.
+- `frontend/lib/useAnalytics.ts`: Frontend service/helper module: useAnalytics.
+- `frontend/lib/userApi.ts`: Frontend service/helper module: userApi.
+- `frontend/next.config.ts`: Next config: API rewrites and security response headers.
+- `frontend/package.json`: Frontend dependency + scripts manifest.
+- `frontend/package-lock.json`: Frontend dependency lockfile.
+- `frontend/postcss.config.mjs`: PostCSS pipeline config.
+- `frontend/providers.tsx`: App-wide provider composition (React Query + AuthProvider).
+- `frontend/providers/AppQueryProvider.tsx`: Provider composition module: AppQueryProvider.
+- `frontend/providers/index.tsx`: Provider composition module: index.
+- `frontend/providers/ReactQueryProvider.tsx`: Provider composition module: ReactQueryProvider.
+- `frontend/proxy.ts`: Edge proxy/middleware: host redirect + auth route guard using cookies.
+- `frontend/public/file.svg`: Static image asset used by the UI.
+- `frontend/public/globe.svg`: Static image asset used by the UI.
+- `frontend/public/logo.png`: Static image asset used by the UI.
+- `frontend/public/next.svg`: Static image asset used by the UI.
+- `frontend/public/sw.js`: Service worker script for PWA behavior.
+- `frontend/public/vercel.svg`: Static image asset used by the UI.
+- `frontend/public/window.svg`: Static image asset used by the UI.
+- `frontend/README.md`: Frontend scaffold/readme notes.
+- `frontend/tsconfig.json`: TypeScript config for frontend.

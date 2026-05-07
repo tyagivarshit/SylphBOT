@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { getOnboardingSnapshot } from "../services/onboarding.service";
 import { fetchInstagramUsername } from "../services/instagramProfile.service";
+import { withTimeoutFallback } from "../utils/boundedTimeout";
 import {
   applyPackagingOverride,
   assignTenantSeat,
@@ -45,6 +46,8 @@ import {
   setExtensionSecretBinding,
   subscribeExtensionEvent,
 } from "../services/developerPlatformExtensibilityOS.service";
+
+const INTEGRATION_API_TIMEOUT_MS = 1800;
 
 const normalizeOptionalString = (value?: unknown) => {
   const normalized = String(value || "").trim();
@@ -138,18 +141,23 @@ export const getIntegrations = async (req: any, res: any) => {
   try {
     const businessId = req.user.businessId;
 
-    const clients = await prisma.client.findMany({
-      where: { businessId },
-      select: {
-        id: true,
-        platform: true,
-        isActive: true,
-      },
+    const clientsResult = await withTimeoutFallback({
+      label: "integrations_projection",
+      timeoutMs: INTEGRATION_API_TIMEOUT_MS,
+      task: prisma.client.findMany({
+        where: { businessId },
+        select: {
+          id: true,
+          platform: true,
+          isActive: true,
+        },
+      }),
+      fallback: [],
     });
 
-    res.json(clients);
+    return res.json(clientsResult.value);
   } catch (err) {
-    res.status(500).json({ error: "Failed" });
+    return res.json([]);
   }
 };
 
@@ -161,16 +169,27 @@ export const getOnboarding = async (req: any, res: any) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const onboarding = await getOnboardingSnapshot(businessId);
+    const onboardingResult = await withTimeoutFallback({
+      label: "integrations_onboarding_projection",
+      timeoutMs: INTEGRATION_API_TIMEOUT_MS,
+      task: getOnboardingSnapshot(businessId),
+      fallback: null,
+    });
 
     return res.json({
       success: true,
-      data: onboarding,
+      data: onboardingResult.value,
+      meta: {
+        degraded: onboardingResult.timedOut || onboardingResult.failed,
+      },
     });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch onboarding",
+    return res.json({
+      success: true,
+      data: null,
+      meta: {
+        degraded: true,
+      },
     });
   }
 };
@@ -230,7 +249,7 @@ export const getInstagramAccounts = async (req: any, res: any) => {
               access_token: accessToken,
               fields: "id,name",
             },
-            timeout: 10000,
+            timeout: 1200,
           }
         );
 
@@ -251,7 +270,7 @@ export const getInstagramAccounts = async (req: any, res: any) => {
                   fields: "instagram_business_account,name",
                   access_token: accessToken,
                 },
-                timeout: 10000,
+                timeout: 1200,
               }
             );
 
@@ -327,20 +346,30 @@ export const getConnectHubDashboard = async (req: any, res: any) => {
       });
     }
 
-    const dashboard = await getConnectHubProjection({
-      businessId: context.businessId,
-      tenantId: context.tenantId,
+    const dashboardResult = await withTimeoutFallback({
+      label: "integrations_connect_hub_projection",
+      timeoutMs: INTEGRATION_API_TIMEOUT_MS,
+      task: getConnectHubProjection({
+        businessId: context.businessId,
+        tenantId: context.tenantId,
+      }),
+      fallback: null,
     });
 
     return res.json({
       success: true,
-      data: dashboard,
+      data: dashboardResult.value,
+      meta: {
+        degraded: dashboardResult.timedOut || dashboardResult.failed,
+      },
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to load connect hub projection",
-      error: String((error as Error)?.message || "connect_hub_error"),
+    return res.json({
+      success: true,
+      data: null,
+      meta: {
+        degraded: true,
+      },
     });
   }
 };

@@ -1,0 +1,516 @@
+﻿# Backend File Index
+
+Generated: 2026-05-06 19:05:50 +05:30
+
+Scope: tracked source/config/docs files under `backend/` (excluding `dist` and `node_modules`).
+
+- `backend/docs/ai-sales-agent-system.md`: AI sales-agent system design and flow documentation.
+- `backend/docs/backend-file-map.md`: Curated backend file-by-file architecture notes (detailed manual map).
+- `backend/docs/backup-restore.md`: Backend design/operations documentation.
+- `backend/docs/canonical-authority-backfill-plan.md`: Backend design/operations documentation.
+- `backend/docs/meta-review-pack/permission-justification-matrix.md`: Backend design/operations documentation.
+- `backend/docs/meta-review-pack/review-checklist.md`: Backend design/operations documentation.
+- `backend/docs/meta-review-pack/review-credentials-doc.md`: Backend design/operations documentation.
+- `backend/docs/meta-review-pack/review-demo-script.md`: Backend design/operations documentation.
+- `backend/docs/meta-review-pack/screencast-flow-list.md`: Backend design/operations documentation.
+- `backend/docs/phase5c-booking-self-audit.md`: Backend design/operations documentation.
+- `backend/docs/phase5e-intelligence-self-audit.md`: Backend design/operations documentation.
+- `backend/docs/prisma-mongo-phase2b-rollout.md`: Backend design/operations documentation.
+- `backend/package.json`: Backend dependency + scripts manifest.
+- `backend/package-lock.json`: Backend dependency lockfile.
+- `backend/prisma.config.ts`: Prisma CLI/runtime configuration file.
+- `backend/prisma/migrations/20260427_phase4_canonical_authority/README.md`: Project file in backend workspace.
+- `backend/prisma/migrations/20260427_phase5a_unified_inbox_foundations/README.md`: Project file in backend workspace.
+- `backend/prisma/migrations/20260428_phase5b_human_handoff_orchestration/README.md`: Project file in backend workspace.
+- `backend/prisma/migrations/20260429_phase5c_booking_meeting_os/README.md`: Project file in backend workspace.
+- `backend/prisma/migrations/20260429_phase5c1_calendar_provider_adapter_closure/README.md`: Project file in backend workspace.
+- `backend/prisma/migrations/20260429_phase5d_commerce_payments_contracts_os/README.md`: Project file in backend workspace.
+- `backend/prisma/migrations/20260429_phase5e_intelligence_forecasting_optimization_os/README.md`: Project file in backend workspace.
+- `backend/prisma/schema.prisma`: Canonical Prisma schema (MongoDB models, relations, enums).
+- `backend/src/analytics/analytics.repository.ts`: Project file in backend workspace.
+- `backend/src/analytics/analyticsDashboard.repository.ts`: Project file in backend workspace.
+- `backend/src/app.ts`: Express application setup: middleware, webhook parsing, API route mounting, error handling.
+- `backend/src/config/cloudinary.ts`: Runtime configuration module: cloudinary.
+- `backend/src/config/env.ts`: Environment variable parsing, validation, and defaults for runtime.
+- `backend/src/config/monitoring.config.ts`: Runtime configuration module: monitoring.config.
+- `backend/src/config/passport.ts`: Runtime configuration module: passport.
+- `backend/src/config/plan.config.ts`: Runtime configuration module: plan.config.
+- `backend/src/config/pricing.config.ts`: Runtime configuration module: pricing.config.
+- `backend/src/config/prisma.ts`: Shared Prisma client instance for database access.
+- `backend/src/config/redis.ts`: Shared Redis connection management for cache/queue/rate-limit.
+- `backend/src/config/stripe.price.map.ts`: Runtime configuration module: stripe.price.map.
+- `backend/src/constants/aiFunnelStages.ts`: Project file in backend workspace.
+- `backend/src/controllers/ai.controller.ts`: Controller module: request validation/handling for ai.controller.
+- `backend/src/controllers/ai-booking.controller.ts`: Controller module: request validation/handling for ai-booking.controller.
+- `backend/src/controllers/analytics.controller.ts`: Controller module: request validation/handling for analytics.controller.
+- `backend/src/controllers/auth.controller.ts`: Controller module: request validation/handling for auth.controller.
+- `backend/src/controllers/automation.controller.ts`: Controller module: request validation/handling for automation.controller.
+- `backend/src/controllers/autonomous.controller.ts`: Controller module: request validation/handling for autonomous.controller.
+- `backend/src/controllers/availabilty.controller.ts`: Controller module: request validation/handling for availabilty.controller.
+- `backend/src/controllers/billing.controller.ts`: Controller module: request validation/handling for billing.controller.
+- `backend/src/controllers/booking.controller.ts`: Controller module: request validation/handling for booking.controller.
+- `backend/src/controllers/client.controller.ts`: Controller module: request validation/handling for client.controller.
+- `backend/src/controllers/commentTrigger.controller.ts`: Controller module: request validation/handling for commentTrigger.controller.
+- `backend/src/controllers/commerce.controller.ts`: Controller module: request validation/handling for commerce.controller.
+- `backend/src/controllers/commerceWebhook.controller.ts`: Controller module: request validation/handling for commerceWebhook.controller.
+- `backend/src/controllers/conversation.controller.ts`: Controller module: request validation/handling for conversation.controller.
+- `backend/src/controllers/dashboard.controller.ts`: Controller module: request validation/handling for dashboard.controller.
+- `backend/src/controllers/googleAuth.controller.ts`: Controller module: request validation/handling for googleAuth.controller.
+- `backend/src/controllers/helpAi.controller.ts`: Controller module: request validation/handling for helpAi.controller.
+- `backend/src/controllers/instagram.controller.ts`: Controller module: request validation/handling for instagram.controller.
+- `backend/src/controllers/integration.controller.ts`: Controller module: request validation/handling for integration.controller.
+- `backend/src/controllers/knowledge.controller.ts`: Controller module: request validation/handling for knowledge.controller.
+- `backend/src/controllers/lead.controller.ts`: Controller module: request validation/handling for lead.controller.
+- `backend/src/controllers/message.controller.ts`: Controller module: request validation/handling for message.controller.
+- `backend/src/controllers/security.controller.ts`: Controller module: request validation/handling for security.controller.
+- `backend/src/controllers/training.controller.ts`: Controller module: request validation/handling for training.controller.
+- `backend/src/controllers/usage.controller.ts`: Controller module: request validation/handling for usage.controller.
+- `backend/src/cron/appointmentOps.cron.ts`: Scheduled background job (cron): appointmentOps.cron.
+- `backend/src/cron/autonomousScheduler.cron.ts`: Scheduled background job (cron): autonomousScheduler.cron.
+- `backend/src/cron/calendarSync.cron.ts`: Scheduled background job (cron): calendarSync.cron.
+- `backend/src/cron/commerceReconcile.cron.ts`: Scheduled background job (cron): commerceReconcile.cron.
+- `backend/src/cron/connectionHealth.cron.ts`: Scheduled background job (cron): connectionHealth.cron.
+- `backend/src/cron/cron.cleanup.ts`: Scheduled background job (cron): cron.cleanup.
+- `backend/src/cron/cron.runner.ts`: Scheduled background job (cron): cron.runner.
+- `backend/src/cron/humanReminder.cron.ts`: Scheduled background job (cron): humanReminder.cron.
+- `backend/src/cron/inboundSlaMonitor.cron.ts`: Scheduled background job (cron): inboundSlaMonitor.cron.
+- `backend/src/cron/intelligenceLoop.cron.ts`: Scheduled background job (cron): intelligenceLoop.cron.
+- `backend/src/cron/messageCleanup.cron.ts`: Scheduled background job (cron): messageCleanup.cron.
+- `backend/src/cron/metaTokenRefresh.cron.ts`: Scheduled background job (cron): metaTokenRefresh.cron.
+- `backend/src/cron/resetUsage.cron.ts`: Scheduled background job (cron): resetUsage.cron.
+- `backend/src/cron/trial.cron.ts`: Scheduled background job (cron): trial.cron.
+- `backend/src/handlers/booking-ai.handler.ts`: Project file in backend workspace.
+- `backend/src/middleware/apiKey.middleware.ts`: Express middleware module: apiKey.middleware.
+- `backend/src/middleware/audit.middleware.ts`: Express middleware module: audit.middleware.
+- `backend/src/middleware/auth.middleware.ts`: Express middleware module: auth.middleware.
+- `backend/src/middleware/featureGuard.middleware.ts`: Express middleware module: featureGuard.middleware.
+- `backend/src/middleware/loginLimiter.ts`: Express middleware module: loginLimiter.
+- `backend/src/middleware/monitoring.middleware.ts`: Express middleware module: monitoring.middleware.
+- `backend/src/middleware/planFeature.middleware.ts`: Express middleware module: planFeature.middleware.
+- `backend/src/middleware/rateLimit.middleware.ts`: Express middleware module: rateLimit.middleware.
+- `backend/src/middleware/rbac.middleware.ts`: Express middleware module: rbac.middleware.
+- `backend/src/middleware/requestContext.middleware.ts`: Express middleware module: requestContext.middleware.
+- `backend/src/middleware/serviceRateLimiter.ts`: Express middleware module: serviceRateLimiter.
+- `backend/src/middleware/subscription.middleware.ts`: Express middleware module: subscription.middleware.
+- `backend/src/middleware/subscriptionGuard.middleware.ts`: Express middleware module: subscriptionGuard.middleware.
+- `backend/src/middleware/tenant.middleware.ts`: Express middleware module: tenant.middleware.
+- `backend/src/middleware/upload.ts`: Express middleware module: upload.
+- `backend/src/middleware/usageGuard.middleware.ts`: Express middleware module: usageGuard.middleware.
+- `backend/src/models/availability.model.ts`: Project file in backend workspace.
+- `backend/src/monitoring/systemHealth.monitor.ts`: Project file in backend workspace.
+- `backend/src/observability/logSchema.ts`: Observability/telemetry module: logSchema.
+- `backend/src/observability/performanceMetrics.ts`: Observability/telemetry module: performanceMetrics.
+- `backend/src/observability/requestContext.ts`: Observability/telemetry module: requestContext.
+- `backend/src/observability/sentry.ts`: Observability/telemetry module: sentry.
+- `backend/src/queues/ai.queue.ts`: Queue definition/enqueue helper for ai.queue.
+- `backend/src/queues/appointmentOps.queue.ts`: Queue definition/enqueue helper for appointmentOps.queue.
+- `backend/src/queues/authEmail.queue.ts`: Queue definition/enqueue helper for authEmail.queue.
+- `backend/src/queues/bookingReminder.queue.ts`: Queue definition/enqueue helper for bookingReminder.queue.
+- `backend/src/queues/calendarSync.queue.ts`: Queue definition/enqueue helper for calendarSync.queue.
+- `backend/src/queues/followup.queue.ts`: Queue definition/enqueue helper for followup.queue.
+- `backend/src/queues/humanReminder.queue.ts`: Queue definition/enqueue helper for humanReminder.queue.
+- `backend/src/queues/queue.defaults.ts`: Queue definition/enqueue helper for queue.defaults.
+- `backend/src/queues/receptionRuntime.queue.ts`: Queue definition/enqueue helper for receptionRuntime.queue.
+- `backend/src/redis/rateLimiter.redis.ts`: Redis helper module: rateLimiter.redis.
+- `backend/src/redis/redisSafety.ts`: Redis helper module: redisSafety.
+- `backend/src/routes/ai.routes.ts`: Express route module: defines API/webhook endpoints for ai.routes.
+- `backend/src/routes/ai-booking.routes.ts`: Express route module: defines API/webhook endpoints for ai-booking.routes.
+- `backend/src/routes/analytics.routes.ts`: Express route module: defines API/webhook endpoints for analytics.routes.
+- `backend/src/routes/audit.routes.ts`: Express route module: defines API/webhook endpoints for audit.routes.
+- `backend/src/routes/auth.routes.ts`: Express route module: defines API/webhook endpoints for auth.routes.
+- `backend/src/routes/automation.routes.ts`: Express route module: defines API/webhook endpoints for automation.routes.
+- `backend/src/routes/autonomous.routes.ts`: Express route module: defines API/webhook endpoints for autonomous.routes.
+- `backend/src/routes/availability.routes.ts`: Express route module: defines API/webhook endpoints for availability.routes.
+- `backend/src/routes/billing.routes.ts`: Express route module: defines API/webhook endpoints for billing.routes.
+- `backend/src/routes/booking.routes.ts`: Express route module: defines API/webhook endpoints for booking.routes.
+- `backend/src/routes/calendar.webhook.ts`: Express route module: defines API/webhook endpoints for calendar.webhook.
+- `backend/src/routes/client.routes.ts`: Express route module: defines API/webhook endpoints for client.routes.
+- `backend/src/routes/commentTrigger.routes.ts`: Express route module: defines API/webhook endpoints for commentTrigger.routes.
+- `backend/src/routes/commerce.routes.ts`: Express route module: defines API/webhook endpoints for commerce.routes.
+- `backend/src/routes/commerceWebhook.routes.ts`: Express route module: defines API/webhook endpoints for commerceWebhook.routes.
+- `backend/src/routes/conversation.routes.ts`: Express route module: defines API/webhook endpoints for conversation.routes.
+- `backend/src/routes/dashboard.routes.ts`: Express route module: defines API/webhook endpoints for dashboard.routes.
+- `backend/src/routes/googleAuth.routes.ts`: Express route module: defines API/webhook endpoints for googleAuth.routes.
+- `backend/src/routes/health.routes.ts`: Express route module: defines API/webhook endpoints for health.routes.
+- `backend/src/routes/helpAi.routes.ts`: Express route module: defines API/webhook endpoints for helpAi.routes.
+- `backend/src/routes/instagram.routes.ts`: Express route module: defines API/webhook endpoints for instagram.routes.
+- `backend/src/routes/instagram.webhook.ts`: Express route module: defines API/webhook endpoints for instagram.webhook.
+- `backend/src/routes/integration.routes.ts`: Express route module: defines API/webhook endpoints for integration.routes.
+- `backend/src/routes/knowledge.routes.ts`: Express route module: defines API/webhook endpoints for knowledge.routes.
+- `backend/src/routes/lead.routes.ts`: Express route module: defines API/webhook endpoints for lead.routes.
+- `backend/src/routes/message.routes.ts`: Express route module: defines API/webhook endpoints for message.routes.
+- `backend/src/routes/notification.ts`: Express route module: defines API/webhook endpoints for notification.
+- `backend/src/routes/oauth.routes.ts`: Express route module: defines API/webhook endpoints for oauth.routes.
+- `backend/src/routes/receptionIntake.routes.ts`: Express route module: defines API/webhook endpoints for receptionIntake.routes.
+- `backend/src/routes/search.routes.ts`: Express route module: defines API/webhook endpoints for search.routes.
+- `backend/src/routes/security.routes.ts`: Express route module: defines API/webhook endpoints for security.routes.
+- `backend/src/routes/training.routes.ts`: Express route module: defines API/webhook endpoints for training.routes.
+- `backend/src/routes/usage.routes.ts`: Express route module: defines API/webhook endpoints for usage.routes.
+- `backend/src/routes/user.routes.ts`: Express route module: defines API/webhook endpoints for user.routes.
+- `backend/src/routes/whatsapp.webhook.ts`: Express route module: defines API/webhook endpoints for whatsapp.webhook.
+- `backend/src/runtime/lifecycle.ts`: Central queue/worker/cron initialization and shutdown orchestration.
+- `backend/src/server.ts`: Backend process entrypoint: bootstraps observability, queues/workers, HTTP + sockets, graceful shutdown.
+- `backend/src/services/actionExecutor.service.ts`: Business/domain service module: actionExecutor.service.
+- `backend/src/services/addon.service.ts`: Business/domain service module: addon.service.
+- `backend/src/services/ai.service.ts`: Business/domain service module: ai.service.
+- `backend/src/services/aiAutoLearning.service.ts`: Business/domain service module: aiAutoLearning.service.
+- `backend/src/services/aiBookingEngine.service.ts`: Business/domain service module: aiBookingEngine.service.
+- `backend/src/services/aiFollowup.service.ts`: Business/domain service module: aiFollowup.service.
+- `backend/src/services/aiIntentEngine.service.ts`: Business/domain service module: aiIntentEngine.service.
+- `backend/src/services/aiMemoryEngine.service.ts`: Business/domain service module: aiMemoryEngine.service.
+- `backend/src/services/aiPipelineState.service.ts`: Business/domain service module: aiPipelineState.service.
+- `backend/src/services/aiRateLimiter.service.ts`: Business/domain service module: aiRateLimiter.service.
+- `backend/src/services/aiReplyOrchestrator.service.ts`: Business/domain service module: aiReplyOrchestrator.service.
+- `backend/src/services/aiRouter.service.ts`: Business/domain service module: aiRouter.service.
+- `backend/src/services/aiRuntime.service.ts`: Business/domain service module: aiRuntime.service.
+- `backend/src/services/analytics.service.ts`: Business/domain service module: analytics.service.
+- `backend/src/services/analyticsDashboard.service.ts`: Business/domain service module: analyticsDashboard.service.
+- `backend/src/services/apiKey.service.ts`: Business/domain service module: apiKey.service.
+- `backend/src/services/appointment.shared.ts`: Business/domain service module: appointment.shared.
+- `backend/src/services/appointmentEngine.service.ts`: Business/domain service module: appointmentEngine.service.
+- `backend/src/services/appointmentEvent.service.ts`: Business/domain service module: appointmentEvent.service.
+- `backend/src/services/appointmentOutcome.service.ts`: Business/domain service module: appointmentOutcome.service.
+- `backend/src/services/appointmentProjection.service.ts`: Business/domain service module: appointmentProjection.service.
+- `backend/src/services/appointmentReminder.service.ts`: Business/domain service module: appointmentReminder.service.
+- `backend/src/services/assignmentEngine.service.ts`: Business/domain service module: assignmentEngine.service.
+- `backend/src/services/audit.service.ts`: Business/domain service module: audit.service.
+- `backend/src/services/authBootstrap.service.ts`: Business/domain service module: authBootstrap.service.
+- `backend/src/services/authEmail.service.ts`: Business/domain service module: authEmail.service.
+- `backend/src/services/automationEngine.service.ts`: Business/domain service module: automationEngine.service.
+- `backend/src/services/autonomous/campaign.service.ts`: Nested service module under services/: autonomous/campaign.service.ts.
+- `backend/src/services/autonomous/capReservation.service.ts`: Nested service module under services/: autonomous/capReservation.service.ts.
+- `backend/src/services/autonomous/dashboard.service.ts`: Nested service module under services/: autonomous/dashboard.service.ts.
+- `backend/src/services/autonomous/expansion.service.ts`: Nested service module under services/: autonomous/expansion.service.ts.
+- `backend/src/services/autonomous/guardrail.service.ts`: Nested service module under services/: autonomous/guardrail.service.ts.
+- `backend/src/services/autonomous/leadRevival.service.ts`: Nested service module under services/: autonomous/leadRevival.service.ts.
+- `backend/src/services/autonomous/observability.service.ts`: Nested service module under services/: autonomous/observability.service.ts.
+- `backend/src/services/autonomous/opportunity.service.ts`: Nested service module under services/: autonomous/opportunity.service.ts.
+- `backend/src/services/autonomous/referral.service.ts`: Nested service module under services/: autonomous/referral.service.ts.
+- `backend/src/services/autonomous/retention.service.ts`: Nested service module under services/: autonomous/retention.service.ts.
+- `backend/src/services/autonomous/scheduler.service.ts`: Nested service module under services/: autonomous/scheduler.service.ts.
+- `backend/src/services/autonomous/types.ts`: Nested service module under services/: autonomous/types.ts.
+- `backend/src/services/autonomous/winback.service.ts`: Nested service module under services/: autonomous/winback.service.ts.
+- `backend/src/services/availabilityEngine.service.ts`: Business/domain service module: availabilityEngine.service.
+- `backend/src/services/availabilityPlanner.service.ts`: Business/domain service module: availabilityPlanner.service.
+- `backend/src/services/backup.service.ts`: Business/domain service module: backup.service.
+- `backend/src/services/billingGeo.service.ts`: Business/domain service module: billingGeo.service.
+- `backend/src/services/billingSettlement.service.ts`: Business/domain service module: billingSettlement.service.
+- `backend/src/services/booking.service.ts`: Business/domain service module: booking.service.
+- `backend/src/services/bookingPolicy.service.ts`: Business/domain service module: bookingPolicy.service.
+- `backend/src/services/bookingPriorityRouter.service.ts`: Business/domain service module: bookingPriorityRouter.service.
+- `backend/src/services/calendarConflictArbitration.service.ts`: Business/domain service module: calendarConflictArbitration.service.
+- `backend/src/services/calendarProvider.contract.ts`: Business/domain service module: calendarProvider.contract.
+- `backend/src/services/calendarProviderEvent.service.ts`: Business/domain service module: calendarProviderEvent.service.
+- `backend/src/services/calendarProviderRouter.service.ts`: Business/domain service module: calendarProviderRouter.service.
+- `backend/src/services/calendarSync.service.ts`: Business/domain service module: calendarSync.service.
+- `backend/src/services/channelArbitration.service.ts`: Business/domain service module: channelArbitration.service.
+- `backend/src/services/chargebackEngine.service.ts`: Business/domain service module: chargebackEngine.service.
+- `backend/src/services/checkoutRecovery.service.ts`: Business/domain service module: checkoutRecovery.service.
+- `backend/src/services/client.service.ts`: Business/domain service module: client.service.
+- `backend/src/services/clientScope.service.ts`: Business/domain service module: clientScope.service.
+- `backend/src/services/clientUpsert.service.ts`: Business/domain service module: clientUpsert.service.
+- `backend/src/services/commentAutomation.service.ts`: Business/domain service module: commentAutomation.service.
+- `backend/src/services/commerce/providers/commerceProvider.types.ts`: Nested service module under services/: commerce/providers/commerceProvider.types.ts.
+- `backend/src/services/commerce/providers/commerceProviderRegistry.service.ts`: Nested service module under services/: commerce/providers/commerceProviderRegistry.service.ts.
+- `backend/src/services/commerce/providers/internalCommerce.provider.ts`: Nested service module under services/: commerce/providers/internalCommerce.provider.ts.
+- `backend/src/services/commerce/providers/paypalCommerce.provider.ts`: Nested service module under services/: commerce/providers/paypalCommerce.provider.ts.
+- `backend/src/services/commerce/providers/razorpayCommerce.provider.ts`: Nested service module under services/: commerce/providers/razorpayCommerce.provider.ts.
+- `backend/src/services/commerce/providers/stripeCommerce.provider.ts`: Nested service module under services/: commerce/providers/stripeCommerce.provider.ts.
+- `backend/src/services/commerce/providers/stripeConfig.service.ts`: Nested service module under services/: commerce/providers/stripeConfig.service.ts.
+- `backend/src/services/commerce/shared.ts`: Nested service module under services/: commerce/shared.ts.
+- `backend/src/services/commerceAuthority.service.ts`: Business/domain service module: commerceAuthority.service.
+- `backend/src/services/commerceEvent.service.ts`: Business/domain service module: commerceEvent.service.
+- `backend/src/services/commerceProjection.service.ts`: Business/domain service module: commerceProjection.service.
+- `backend/src/services/compliance.service.ts`: Business/domain service module: compliance.service.
+- `backend/src/services/connectionHealth.service.ts`: Business/domain service module: connectionHealth.service.
+- `backend/src/services/consentAuthority.service.ts`: Business/domain service module: consentAuthority.service.
+- `backend/src/services/consentAuthorityWriter.service.ts`: Business/domain service module: consentAuthorityWriter.service.
+- `backend/src/services/contractEngine.service.ts`: Business/domain service module: contractEngine.service.
+- `backend/src/services/conversationCache.service.ts`: Business/domain service module: conversationCache.service.
+- `backend/src/services/conversationLearning.service.ts`: Business/domain service module: conversationLearning.service.
+- `backend/src/services/conversationState.service.ts`: Business/domain service module: conversationState.service.
+- `backend/src/services/conversationSummary.service.ts`: Business/domain service module: conversationSummary.service.
+- `backend/src/services/conversion/close.engine.ts`: Nested service module under services/: conversion/close.engine.ts.
+- `backend/src/services/conversion/conversionScore.service.ts`: Nested service module under services/: conversion/conversionScore.service.ts.
+- `backend/src/services/conversion/cta.engine.ts`: Nested service module under services/: conversion/cta.engine.ts.
+- `backend/src/services/conversion/experiment.engine.ts`: Nested service module under services/: conversion/experiment.engine.ts.
+- `backend/src/services/conversion/negotiation.engine.ts`: Nested service module under services/: conversion/negotiation.engine.ts.
+- `backend/src/services/conversion/objection.engine.ts`: Nested service module under services/: conversion/objection.engine.ts.
+- `backend/src/services/conversion/offer.engine.ts`: Nested service module under services/: conversion/offer.engine.ts.
+- `backend/src/services/conversion/persuasion.engine.ts`: Nested service module under services/: conversion/persuasion.engine.ts.
+- `backend/src/services/conversion/trust.engine.ts`: Nested service module under services/: conversion/trust.engine.ts.
+- `backend/src/services/conversion/urgency.engine.ts`: Nested service module under services/: conversion/urgency.engine.ts.
+- `backend/src/services/coupon.service.ts`: Business/domain service module: coupon.service.
+- `backend/src/services/crm/behavior.service.ts`: Nested service module under services/: crm/behavior.service.ts.
+- `backend/src/services/crm/customerGraph.service.ts`: Nested service module under services/: crm/customerGraph.service.ts.
+- `backend/src/services/crm/leadIntelligence.service.ts`: Nested service module under services/: crm/leadIntelligence.service.ts.
+- `backend/src/services/crm/lifecycle.service.ts`: Nested service module under services/: crm/lifecycle.service.ts.
+- `backend/src/services/crm/refreshEvents.service.ts`: Nested service module under services/: crm/refreshEvents.service.ts.
+- `backend/src/services/crm/refreshQueue.service.ts`: Nested service module under services/: crm/refreshQueue.service.ts.
+- `backend/src/services/crm/relationship.service.ts`: Nested service module under services/: crm/relationship.service.ts.
+- `backend/src/services/crm/segmentation.service.ts`: Nested service module under services/: crm/segmentation.service.ts.
+- `backend/src/services/crm/stateGraph.service.ts`: Nested service module under services/: crm/stateGraph.service.ts.
+- `backend/src/services/crm/valuePrediction.service.ts`: Nested service module under services/: crm/valuePrediction.service.ts.
+- `backend/src/services/dashboard.service.ts`: Business/domain service module: dashboard.service.
+- `backend/src/services/developerPlatformExtensibilityOS.service.ts`: Business/domain service module: developerPlatformExtensibilityOS.service.
+- `backend/src/services/distributedLock.service.ts`: Business/domain service module: distributedLock.service.
+- `backend/src/services/dunningEngine.service.ts`: Business/domain service module: dunningEngine.service.
+- `backend/src/services/email.service.ts`: Business/domain service module: email.service.
+- `backend/src/services/embedding.service.ts`: Business/domain service module: embedding.service.
+- `backend/src/services/escalationLadder.service.ts`: Business/domain service module: escalationLadder.service.
+- `backend/src/services/eventBus.service.ts`: Business/domain service module: eventBus.service.
+- `backend/src/services/eventOutbox.service.ts`: Business/domain service module: eventOutbox.service.
+- `backend/src/services/executionRouter.servce.ts`: Business/domain service module: executionRouter.servce.
+- `backend/src/services/feature.service.ts`: Business/domain service module: feature.service.
+- `backend/src/services/fetchNext30DaysSlots.service.ts`: Business/domain service module: fetchNext30DaysSlots.service.
+- `backend/src/services/funnelAnalytics.service.ts`: Business/domain service module: funnelAnalytics.service.
+- `backend/src/services/googleCalendarAdapter.service.ts`: Business/domain service module: googleCalendarAdapter.service.
+- `backend/src/services/growthExpansionOS.service.ts`: Business/domain service module: growthExpansionOS.service.
+- `backend/src/services/helpAi.service.ts`: Business/domain service module: helpAi.service.
+- `backend/src/services/humanOpsEvent.service.ts`: Business/domain service module: humanOpsEvent.service.
+- `backend/src/services/humanPerformance.service.ts`: Business/domain service module: humanPerformance.service.
+- `backend/src/services/humanQueue.service.ts`: Business/domain service module: humanQueue.service.
+- `backend/src/services/humanReminder.service.ts`: Business/domain service module: humanReminder.service.
+- `backend/src/services/humanTakeoverManager.service.ts`: Business/domain service module: humanTakeoverManager.service.
+- `backend/src/services/inboundLegacyProjection.service.ts`: Business/domain service module: inboundLegacyProjection.service.
+- `backend/src/services/inboundLifecycle.service.ts`: Business/domain service module: inboundLifecycle.service.
+- `backend/src/services/inboundSlaMonitor.service.ts`: Business/domain service module: inboundSlaMonitor.service.
+- `backend/src/services/inboxDashboardProjection.service.ts`: Business/domain service module: inboxDashboardProjection.service.
+- `backend/src/services/inboxRouter.service.ts`: Business/domain service module: inboxRouter.service.
+- `backend/src/services/instagram.service.ts`: Business/domain service module: instagram.service.
+- `backend/src/services/instagramProfile.service.ts`: Business/domain service module: instagramProfile.service.
+- `backend/src/services/intelligence/intelligenceOS.service.ts`: Nested service module under services/: intelligence/intelligenceOS.service.ts.
+- `backend/src/services/intelligence/intelligenceRuntimeInfluence.service.ts`: Nested service module under services/: intelligence/intelligenceRuntimeInfluence.service.ts.
+- `backend/src/services/interactionNormalizer.service.ts`: Business/domain service module: interactionNormalizer.service.
+- `backend/src/services/interactionResolution.service.ts`: Business/domain service module: interactionResolution.service.
+- `backend/src/services/invoiceEngine.service.ts`: Business/domain service module: invoiceEngine.service.
+- `backend/src/services/knowledgeIngestion.service.ts`: Business/domain service module: knowledgeIngestion.service.
+- `backend/src/services/knowledgeReinforcement.service.ts`: Business/domain service module: knowledgeReinforcement.service.
+- `backend/src/services/knowledgeSearch.service.ts`: Business/domain service module: knowledgeSearch.service.
+- `backend/src/services/leadBehaviourEngine.service.ts`: Business/domain service module: leadBehaviourEngine.service.
+- `backend/src/services/leadControlState.service.ts`: Business/domain service module: leadControlState.service.
+- `backend/src/services/leadIntelligence.service.ts`: Business/domain service module: leadIntelligence.service.
+- `backend/src/services/learningFilter.service.ts`: Business/domain service module: learningFilter.service.
+- `backend/src/services/learningQueue.service.ts`: Business/domain service module: learningQueue.service.
+- `backend/src/services/meetingArtifact.service.ts`: Business/domain service module: meetingArtifact.service.
+- `backend/src/services/meetingState.service.ts`: Business/domain service module: meetingState.service.
+- `backend/src/services/monitoringLogger.service.ts`: Business/domain service module: monitoringLogger.service.
+- `backend/src/services/noShowRecovery.service.ts`: Business/domain service module: noShowRecovery.service.
+- `backend/src/services/notification.service.ts`: Business/domain service module: notification.service.
+- `backend/src/services/onboarding.service.ts`: Business/domain service module: onboarding.service.
+- `backend/src/services/outlookCalendarAdapter.service.ts`: Business/domain service module: outlookCalendarAdapter.service.
+- `backend/src/services/ownerNotification.service.ts`: Business/domain service module: ownerNotification.service.
+- `backend/src/services/paymentIntent.service.ts`: Business/domain service module: paymentIntent.service.
+- `backend/src/services/platformRateLimiter.service.ts`: Business/domain service module: platformRateLimiter.service.
+- `backend/src/services/priorityEngine.service.ts`: Business/domain service module: priorityEngine.service.
+- `backend/src/services/proposalEngine.service.ts`: Business/domain service module: proposalEngine.service.
+- `backend/src/services/queueDedup.service.ts`: Business/domain service module: queueDedup.service.
+- `backend/src/services/queueHealth.service.ts`: Business/domain service module: queueHealth.service.
+- `backend/src/services/rag.service.ts`: Business/domain service module: rag.service.
+- `backend/src/services/rbac.service.ts`: Business/domain service module: rbac.service.
+- `backend/src/services/reception.shared.ts`: Business/domain service module: reception.shared.
+- `backend/src/services/receptionClassifier.service.ts`: Business/domain service module: receptionClassifier.service.
+- `backend/src/services/receptionContext.service.ts`: Business/domain service module: receptionContext.service.
+- `backend/src/services/receptionEvent.service.ts`: Business/domain service module: receptionEvent.service.
+- `backend/src/services/receptionIntake.service.ts`: Business/domain service module: receptionIntake.service.
+- `backend/src/services/receptionLead.service.ts`: Business/domain service module: receptionLead.service.
+- `backend/src/services/receptionMemory.service.ts`: Business/domain service module: receptionMemory.service.
+- `backend/src/services/receptionMetrics.service.ts`: Business/domain service module: receptionMetrics.service.
+- `backend/src/services/redisHealth.service.ts`: Business/domain service module: redisHealth.service.
+- `backend/src/services/redisState.service.ts`: Business/domain service module: redisState.service.
+- `backend/src/services/refundEngine.service.ts`: Business/domain service module: refundEngine.service.
+- `backend/src/services/reliability/infrastructureResilienceOS.service.ts`: Nested service module under services/: reliability/infrastructureResilienceOS.service.ts.
+- `backend/src/services/reliability/reliabilityOS.service.ts`: Nested service module under services/: reliability/reliabilityOS.service.ts.
+- `backend/src/services/reliability/reliabilityRuntime.service.ts`: Nested service module under services/: reliability/reliabilityRuntime.service.ts.
+- `backend/src/services/replyDeliveryPipeline.service.ts`: Business/domain service module: replyDeliveryPipeline.service.
+- `backend/src/services/rescheduleEngine.service.ts`: Business/domain service module: rescheduleEngine.service.
+- `backend/src/services/revenueBrain/analytics.tracker.ts`: Nested service module under services/: revenueBrain/analytics.tracker.ts.
+- `backend/src/services/revenueBrain/context.engine.ts`: Nested service module under services/: revenueBrain/context.engine.ts.
+- `backend/src/services/revenueBrain/conversationMemory.service.ts`: Nested service module under services/: revenueBrain/conversationMemory.service.ts.
+- `backend/src/services/revenueBrain/decision.engine.ts`: Nested service module under services/: revenueBrain/decision.engine.ts.
+- `backend/src/services/revenueBrain/deliveryPolicy.service.ts`: Nested service module under services/: revenueBrain/deliveryPolicy.service.ts.
+- `backend/src/services/revenueBrain/escalation.service.ts`: Nested service module under services/: revenueBrain/escalation.service.ts.
+- `backend/src/services/revenueBrain/eventBus.service.ts`: Nested service module under services/: revenueBrain/eventBus.service.ts.
+- `backend/src/services/revenueBrain/finalDecision.service.ts`: Nested service module under services/: revenueBrain/finalDecision.service.ts.
+- `backend/src/services/revenueBrain/intent.engine.ts`: Nested service module under services/: revenueBrain/intent.engine.ts.
+- `backend/src/services/revenueBrain/leadMemory.service.ts`: Nested service module under services/: revenueBrain/leadMemory.service.ts.
+- `backend/src/services/revenueBrain/learning.tracker.ts`: Nested service module under services/: revenueBrain/learning.tracker.ts.
+- `backend/src/services/revenueBrain/memory.utils.ts`: Nested service module under services/: revenueBrain/memory.utils.ts.
+- `backend/src/services/revenueBrain/orchestrator.service.ts`: Nested service module under services/: revenueBrain/orchestrator.service.ts.
+- `backend/src/services/revenueBrain/responseComposer.service.ts`: Nested service module under services/: revenueBrain/responseComposer.service.ts.
+- `backend/src/services/revenueBrain/sales.prompt.ts`: Nested service module under services/: revenueBrain/sales.prompt.ts.
+- `backend/src/services/revenueBrain/schemaValidator.service.ts`: Nested service module under services/: revenueBrain/schemaValidator.service.ts.
+- `backend/src/services/revenueBrain/semanticMemory.service.ts`: Nested service module under services/: revenueBrain/semanticMemory.service.ts.
+- `backend/src/services/revenueBrain/stateMachine.engine.ts`: Nested service module under services/: revenueBrain/stateMachine.engine.ts.
+- `backend/src/services/revenueBrain/stateMachine.rules.ts`: Nested service module under services/: revenueBrain/stateMachine.rules.ts.
+- `backend/src/services/revenueBrain/toolPlan.service.ts`: Nested service module under services/: revenueBrain/toolPlan.service.ts.
+- `backend/src/services/revenueBrain/tools/booking.tool.ts`: Nested service module under services/: revenueBrain/tools/booking.tool.ts.
+- `backend/src/services/revenueBrain/tools/coupon.tool.ts`: Nested service module under services/: revenueBrain/tools/coupon.tool.ts.
+- `backend/src/services/revenueBrain/tools/crm.tool.ts`: Nested service module under services/: revenueBrain/tools/crm.tool.ts.
+- `backend/src/services/revenueBrain/tools/escalate.tool.ts`: Nested service module under services/: revenueBrain/tools/escalate.tool.ts.
+- `backend/src/services/revenueBrain/tools/followup.tool.ts`: Nested service module under services/: revenueBrain/tools/followup.tool.ts.
+- `backend/src/services/revenueBrain/tools/notifyOwner.tool.ts`: Nested service module under services/: revenueBrain/tools/notifyOwner.tool.ts.
+- `backend/src/services/revenueBrain/types.ts`: Nested service module under services/: revenueBrain/types.ts.
+- `backend/src/services/revenueRecognition.service.ts`: Business/domain service module: revenueRecognition.service.
+- `backend/src/services/revenueTouchLedger.service.ts`: Business/domain service module: revenueTouchLedger.service.
+- `backend/src/services/runtimePolicy.service.ts`: Business/domain service module: runtimePolicy.service.
+- `backend/src/services/saasPackagingConnectHubOS.service.ts`: Business/domain service module: saasPackagingConnectHubOS.service.
+- `backend/src/services/salesAgent/abTesting.service.ts`: Nested service module under services/: salesAgent/abTesting.service.ts.
+- `backend/src/services/salesAgent/blueprint.service.ts`: Nested service module under services/: salesAgent/blueprint.service.ts.
+- `backend/src/services/salesAgent/conversionTracker.service.ts`: Nested service module under services/: salesAgent/conversionTracker.service.ts.
+- `backend/src/services/salesAgent/decisionEngine.service.ts`: Nested service module under services/: salesAgent/decisionEngine.service.ts.
+- `backend/src/services/salesAgent/followup.service.ts`: Nested service module under services/: salesAgent/followup.service.ts.
+- `backend/src/services/salesAgent/intelligence.service.ts`: Nested service module under services/: salesAgent/intelligence.service.ts.
+- `backend/src/services/salesAgent/leadState.service.ts`: Nested service module under services/: salesAgent/leadState.service.ts.
+- `backend/src/services/salesAgent/optimizer.service.ts`: Nested service module under services/: salesAgent/optimizer.service.ts.
+- `backend/src/services/salesAgent/output.service.ts`: Nested service module under services/: salesAgent/output.service.ts.
+- `backend/src/services/salesAgent/policy.service.ts`: Nested service module under services/: salesAgent/policy.service.ts.
+- `backend/src/services/salesAgent/progression.service.ts`: Nested service module under services/: salesAgent/progression.service.ts.
+- `backend/src/services/salesAgent/prompt.service.ts`: Nested service module under services/: salesAgent/prompt.service.ts.
+- `backend/src/services/salesAgent/reply.service.ts`: Nested service module under services/: salesAgent/reply.service.ts.
+- `backend/src/services/salesAgent/replyCache.service.ts`: Nested service module under services/: salesAgent/replyCache.service.ts.
+- `backend/src/services/salesAgent/replyGuardrails.service.ts`: Nested service module under services/: salesAgent/replyGuardrails.service.ts.
+- `backend/src/services/salesAgent/types.ts`: Nested service module under services/: salesAgent/types.ts.
+- `backend/src/services/security/kmsProvider.contract.ts`: Nested service module under services/: security/kmsProvider.contract.ts.
+- `backend/src/services/security/kmsProviderRouter.service.ts`: Nested service module under services/: security/kmsProviderRouter.service.ts.
+- `backend/src/services/security/securityGovernanceOS.service.ts`: Nested service module under services/: security/securityGovernanceOS.service.ts.
+- `backend/src/services/securityAlert.service.ts`: Business/domain service module: securityAlert.service.
+- `backend/src/services/sendMessage.service.ts`: Business/domain service module: sendMessage.service.
+- `backend/src/services/signatureEngine.service.ts`: Business/domain service module: signatureEngine.service.
+- `backend/src/services/slaPolicy.service.ts`: Business/domain service module: slaPolicy.service.
+- `backend/src/services/slotLock.service.ts`: Business/domain service module: slotLock.service.
+- `backend/src/services/slotSectionHandler.service.ts`: Business/domain service module: slotSectionHandler.service.
+- `backend/src/services/smartFallback.service.ts`: Business/domain service module: smartFallback.service.
+- `backend/src/services/stripe.service.ts`: Business/domain service module: stripe.service.
+- `backend/src/services/subscriptionAuthority.service.ts`: Business/domain service module: subscriptionAuthority.service.
+- `backend/src/services/subscriptionEngine.service.ts`: Business/domain service module: subscriptionEngine.service.
+- `backend/src/services/systemHealth.service.ts`: Business/domain service module: systemHealth.service.
+- `backend/src/services/takeoverLedger.service.ts`: Business/domain service module: takeoverLedger.service.
+- `backend/src/services/tax.service.ts`: Business/domain service module: tax.service.
+- `backend/src/services/taxCompliance.service.ts`: Business/domain service module: taxCompliance.service.
+- `backend/src/services/tenant.service.ts`: Business/domain service module: tenant.service.
+- `backend/src/services/trial.service.ts`: Business/domain service module: trial.service.
+- `backend/src/services/triggerMatcher.service.ts`: Business/domain service module: triggerMatcher.service.
+- `backend/src/services/usage.service.ts`: Business/domain service module: usage.service.
+- `backend/src/services/waitlistEngine.service.ts`: Business/domain service module: waitlistEngine.service.
+- `backend/src/services/webhookDedup.service.ts`: Business/domain service module: webhookDedup.service.
+- `backend/src/services/webhookHealth.service.ts`: Business/domain service module: webhookHealth.service.
+- `backend/src/services/webhookSecurity.service.ts`: Business/domain service module: webhookSecurity.service.
+- `backend/src/services/whatsapp.service.ts`: Business/domain service module: whatsapp.service.
+- `backend/src/sockets/socket.server.ts`: Socket server module: socket.server.
+- `backend/src/tests/appointment.phase5c.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/assignmentEngine.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/authHydrationBootstrap.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/autonomous.phase4.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/availabilityEngine.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/calendar.provider.phase5c1.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/cancelToken.invalidates.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/classification.replay.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/commerce.phase5d.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/consent.revoke.midflight.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/controlAuthority.forceHuman.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/conversion.phase3.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/crm.behavior-value.service.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/crm.leadIntelligence.service.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/crm.lifecycle.service.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/crm.refreshQueue.service.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/crm.relationship.service.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/crm.stateGraph.service.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/crm.test.helpers.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/dashboardProjection.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/delivery.replay.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/developerPlatform.phase6e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/escalationLadder.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/growth.phase6f.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/human.assignment.idempotent.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/humanPerformance.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/humanQueue.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/humanReminder.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/inbound.idempotency.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/inboxRouter.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/infrastructure.phase6c.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/harness/bootstrap.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/harness/env.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/harness/helpers.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/harness/transaction.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/harness/types.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/README.md`: Project file in backend workspace.
+- `backend/src/tests/integration/run-integration-tests.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/concurrency.duplicate.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/consent.block.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/dashboard.projection.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/failure.injection.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/human.takeover.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/inbound.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/inbound.replay.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/malformed.failclosed.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/outbox.flow.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/resolution.reopen.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/revenue.bridge.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/sla.leader.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/integration/suites/worker.retry.replay.e2e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/intelligence.phase5e.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/interactionNormalizer.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/lead.lock.expiry.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/metaEnterpriseConnectClosure.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/metaOAuthState.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/normalize.replay.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/priorityEngine.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/queue.failclosed.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/reception.test.helpers.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/receptionClassifier.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/receptionMemory.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/reliability.phase6a.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/resolution.reopen.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/revenue.bridge.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/revenueBrain.memory.utils.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/revenueBrain.phase3b.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/revenueBrain.phase3c.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/revenueBrain.stateMachine.rules.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/revenueBrain.toolPlan.service.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/routing.authority.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/run-tests.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/saasPackaging.phase6d.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/scheduler.leader.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/security.phase6b.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/sla.breach.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/sla.warning.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/slaPolicy.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/spam.failclosed.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/takeover.atomicity.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/tenantWorkspaceIdentity.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/tests/webhook.reconciliation.test.ts`: Automated test file for backend behavior and regressions.
+- `backend/src/types/billing.types.ts`: Type definition/augmentation module.
+- `backend/src/types/dashboard.types.ts`: Type definition/augmentation module.
+- `backend/src/types/express/index.d.ts`: Type definition/augmentation module.
+- `backend/src/types/request.ts`: Type definition/augmentation module.
+- `backend/src/utils/analytics.utils.ts`: Utility helper module: analytics.utils.
+- `backend/src/utils/AppError.ts`: Utility helper module: AppError.
+- `backend/src/utils/asyncHandler.ts`: Utility helper module: asyncHandler.
+- `backend/src/utils/authCookies.ts`: Utility helper module: authCookies.
+- `backend/src/utils/booking-ai.utils.ts`: Utility helper module: booking-ai.utils.
+- `backend/src/utils/bookingErrorHandler.utils.ts`: Utility helper module: bookingErrorHandler.utils.
+- `backend/src/utils/boundedTimeout.ts`: Utility helper module: boundedTimeout.
+- `backend/src/utils/encrypt.ts`: Utility helper module: encrypt.
+- `backend/src/utils/generateToken.ts`: Utility helper module: generateToken.
+- `backend/src/utils/geo.ts`: Utility helper module: geo.
+- `backend/src/utils/googleOAuthState.ts`: Utility helper module: googleOAuthState.
+- `backend/src/utils/logger.ts`: Utility helper module: logger.
+- `backend/src/utils/metaOAuthState.ts`: Utility helper module: metaOAuthState.
+- `backend/src/utils/monthlyUsage.helper.ts`: Utility helper module: monthlyUsage.helper.
+- `backend/src/utils/retry.utils.ts`: Utility helper module: retry.utils.
+- `backend/src/utils/timezoneHandler.utils.ts`: Utility helper module: timezoneHandler.utils.
+- `backend/src/workers/ai.partition.worker.ts`: Queue worker module: async job consumer for ai.partition.worker.
+- `backend/src/workers/ai.worker.ts`: Queue worker module: async job consumer for ai.worker.
+- `backend/src/workers/appointmentOps.worker.ts`: Queue worker module: async job consumer for appointmentOps.worker.
+- `backend/src/workers/authEmail.worker.ts`: Queue worker module: async job consumer for authEmail.worker.
+- `backend/src/workers/bookingReminder.worker.ts`: Queue worker module: async job consumer for bookingReminder.worker.
+- `backend/src/workers/calendarSync.worker.ts`: Queue worker module: async job consumer for calendarSync.worker.
+- `backend/src/workers/cluster.worker.ts`: Queue worker module: async job consumer for cluster.worker.
+- `backend/src/workers/crmRefresh.worker.ts`: Queue worker module: async job consumer for crmRefresh.worker.
+- `backend/src/workers/followup.worker.ts`: Queue worker module: async job consumer for followup.worker.
+- `backend/src/workers/humanReminder.worker.ts`: Queue worker module: async job consumer for humanReminder.worker.
+- `backend/src/workers/receptionRuntime.worker.ts`: Queue worker module: async job consumer for receptionRuntime.worker.
+- `backend/src/workers/revenueBrainEvents.worker.ts`: Queue worker module: async job consumer for revenueBrainEvents.worker.
+- `backend/src/workers/workerManager.ts`: Queue worker module: async job consumer for workerManager.
+- `backend/tsconfig.json`: TypeScript compiler settings for backend.

@@ -162,16 +162,17 @@ const corsOptions = {
     exposedHeaders: ["X-Request-Id"],
     maxAge: 86400,
 };
-const DEFAULT_REQUEST_TIMEOUT_MS = 9000;
-const BILLING_CHECKOUT_TIMEOUT_MS = 35000;
-const BILLING_LONG_TIMEOUT_PATH_PREFIXES = [
-    "/api/billing/create-checkout-session",
-    "/api/billing/checkout",
-    "/api/billing/upgrade",
-    "/api/billing/portal",
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+const WEBHOOK_REQUEST_TIMEOUT_MS = 8000;
+const WEBHOOK_TIMEOUT_PATH_PREFIXES = [
+    "/api/webhooks/commerce",
+    "/api/webhook/whatsapp",
+    "/api/webhook/instagram",
+    "/webhook/instagram",
+    "/api/webhook/calendar",
 ];
-const resolveRequestTimeoutMs = (path) => BILLING_LONG_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))
-    ? BILLING_CHECKOUT_TIMEOUT_MS
+const resolveRequestTimeoutMs = (path) => WEBHOOK_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))
+    ? WEBHOOK_REQUEST_TIMEOUT_MS
     : DEFAULT_REQUEST_TIMEOUT_MS;
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -200,12 +201,17 @@ app.use((req, res, next) => {
 });
 app.use(monitoring_middleware_1.monitoringMiddleware);
 app.use((req, res, next) => {
+    const startedAt = Date.now();
+    const route = req.originalUrl || req.path || null;
     const timeoutMs = resolveRequestTimeoutMs(req.path || req.originalUrl || "");
     res.setTimeout(timeoutMs, () => {
+        const durationMs = Date.now() - startedAt;
         req.logger?.error({
             statusCode: 408,
             timeoutMs,
-            path: req.originalUrl || req.path || null,
+            durationMs,
+            route,
+            requestId: req.requestId || null,
         }, "Request timeout");
         if (!res.headersSent) {
             res.status(408).json({
@@ -277,7 +283,6 @@ app.get("/", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     });
 }));
 app.post("/v1/messages", apiKey_middleware_1.optionalApiKeyAuth, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    let timeoutHandle;
     try {
         if (!(0, runtimePolicy_service_1.isPhase5APreviewBypassEnabled)()) {
             return res.status(410).json({
@@ -305,18 +310,12 @@ app.post("/v1/messages", apiKey_middleware_1.optionalApiKeyAuth, (0, asyncHandle
                 });
             }
         }
-        const enqueue = (0, ai_queue_1.enqueueAIBatch)(messages, {
+        const jobs = await (0, ai_queue_1.enqueueAIBatch)(messages, {
             source: "api",
             idempotencyKey: typeof body.idempotencyKey === "string"
                 ? body.idempotencyKey.trim()
                 : undefined,
         });
-        const timeout = new Promise((_resolve, reject) => {
-            timeoutHandle = setTimeout(() => {
-                reject(new Error("Queue enqueue timeout"));
-            }, env_1.env.API_REQUEST_TIMEOUT_MS);
-        });
-        const jobs = await Promise.race([enqueue, timeout]);
         res.status(202).json({
             success: true,
             requestId: req.requestId,
@@ -333,11 +332,6 @@ app.post("/v1/messages", apiKey_middleware_1.optionalApiKeyAuth, (0, asyncHandle
             requestId: req.requestId,
             message,
         });
-    }
-    finally {
-        if (timeoutHandle) {
-            clearTimeout(timeoutHandle);
-        }
     }
 }));
 app.use("/api/auth", auth_routes_1.default);

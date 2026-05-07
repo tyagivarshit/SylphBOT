@@ -87,6 +87,14 @@ const EMPTY_BILLING_CONTEXT: BillingContext = {
   remainingEarly: 0,
 };
 
+type BillingConfirmApiState = "SUCCESS" | "ALREADY_PROCESSED" | "PENDING" | "FAILED";
+
+const BILLING_CONFIRM_REQUEST_TIMEOUT_MS = 1_800;
+const BILLING_CONFIRM_LOOKUP_TIMEOUT_MS = 700;
+const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60_000;
+const BILLING_CONFIRM_STRIPE_TIMEOUT_MS = 1_100;
+const BILLING_CONFIRM_RECONCILE_TIMEOUT_MS = 1_300;
+
 type PlanRow = {
   id: string;
   name: string;
@@ -269,6 +277,48 @@ const mapInvoiceForClient = (invoice: {
     ).trim() || null,
 });
 
+type CheckoutConfirmIntentRow = {
+  id: string;
+  businessId: string;
+  paymentIntentKey: string;
+  providerPaymentIntentId: string | null;
+  status: string;
+  metadata: unknown;
+  proposal: {
+    proposalKey: string;
+  } | null;
+};
+
+const TERMINAL_PAYMENT_INTENT_STATUSES = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "EXPIRED",
+]);
+
+const getCheckoutConfirmMetadata = (value: unknown) =>
+  toRecord(toRecord(value).checkoutConfirm);
+
+const getCheckoutConfirmState = (value: unknown) =>
+  String(getCheckoutConfirmMetadata(value).state || "")
+    .trim()
+    .toUpperCase();
+
+const isCheckoutConfirmStillProcessing = (value: unknown) => {
+  const checkoutConfirm = getCheckoutConfirmMetadata(value);
+  const state = String(checkoutConfirm.state || "")
+    .trim()
+    .toUpperCase();
+  const startedAt = new Date(String(checkoutConfirm.startedAt || ""));
+  const startedAtMs = startedAt.getTime();
+
+  if (state !== "PROCESSING" || Number.isNaN(startedAtMs)) {
+    return false;
+  }
+
+  return Date.now() - startedAtMs <= BILLING_CONFIRM_DUPLICATE_WINDOW_MS;
+};
+
 async function getUserContext(req: Request): Promise<UserContext> {
   const userId = req.user?.id;
 
@@ -307,6 +357,284 @@ async function getUserContext(req: Request): Promise<UserContext> {
 }
 
 export class BillingController {
+  private static getBusinessIdFromRequest(req: Request) {
+    const tenantBusinessId = String((req as any)?.tenant?.businessId || "").trim();
+    const userBusinessId = String(req.user?.businessId || "").trim();
+    return tenantBusinessId || userBusinessId || null;
+  }
+
+  private static async findCheckoutIntentForSession(input: {
+    businessId: string;
+    sessionId: string;
+  }): Promise<CheckoutConfirmIntentRow | null> {
+    const directMatch = await prisma.paymentIntentLedger.findFirst({
+      where: {
+        businessId: input.businessId,
+        provider: "STRIPE",
+        providerPaymentIntentId: input.sessionId,
+      },
+      select: {
+        id: true,
+        businessId: true,
+        paymentIntentKey: true,
+        providerPaymentIntentId: true,
+        status: true,
+        metadata: true,
+        proposal: {
+          select: {
+            proposalKey: true,
+          },
+        },
+      },
+    });
+
+    if (directMatch) {
+      return directMatch as CheckoutConfirmIntentRow;
+    }
+
+    const recentRows = await prisma.paymentIntentLedger.findMany({
+      where: {
+        businessId: input.businessId,
+        provider: "STRIPE",
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+      take: 40,
+      select: {
+        id: true,
+        businessId: true,
+        paymentIntentKey: true,
+        providerPaymentIntentId: true,
+        status: true,
+        metadata: true,
+        proposal: {
+          select: {
+            proposalKey: true,
+          },
+        },
+      },
+    });
+
+    const resolved = recentRows.find((row) => {
+      const metadata = toRecord(row.metadata);
+      const providerMetadata = toRecord(metadata.providerMetadata);
+      return (
+        String(metadata.stripeSessionId || "").trim() === input.sessionId ||
+        String(providerMetadata.stripeSessionId || "").trim() === input.sessionId
+      );
+    });
+
+    return resolved ? (resolved as CheckoutConfirmIntentRow) : null;
+  }
+
+  private static async updateCheckoutConfirmMetadata(input: {
+    paymentIntent: CheckoutConfirmIntentRow;
+    sessionId: string;
+    state: "PROCESSING" | "SUCCESS" | "PENDING" | "FAILED";
+    reason?: string | null;
+  }) {
+    const metadata = toRecord(input.paymentIntent.metadata);
+    const previous = getCheckoutConfirmMetadata(metadata);
+    const nowIso = new Date().toISOString();
+
+    const nextCheckoutConfirm = {
+      ...previous,
+      state: input.state,
+      sessionId: input.sessionId,
+      reason: String(input.reason || "").trim() || null,
+      updatedAt: nowIso,
+      ...(input.state === "PROCESSING"
+        ? {
+            startedAt: nowIso,
+          }
+        : {}),
+      ...(input.state === "SUCCESS" || input.state === "FAILED"
+        ? {
+            completedAt: nowIso,
+          }
+        : {}),
+    };
+
+    await prisma.paymentIntentLedger
+      .update({
+        where: {
+          id: input.paymentIntent.id,
+        },
+        data: {
+          metadata: {
+            ...metadata,
+            checkoutConfirm: nextCheckoutConfirm,
+          } as any,
+        },
+      })
+      .catch(() => undefined);
+  }
+
+  private static async finalizeCheckoutConfirmationAsync(input: {
+    businessId: string;
+    sessionId: string;
+    paymentIntent: CheckoutConfirmIntentRow;
+  }) {
+    const paidLikeStatuses = new Set(["paid", "no_payment_required"]);
+
+    try {
+      assertStripeConfigReady();
+    } catch (error) {
+      await BillingController.updateCheckoutConfirmMetadata({
+        paymentIntent: input.paymentIntent,
+        sessionId: input.sessionId,
+        state: "FAILED",
+        reason: "stripe_config_invalid",
+      });
+
+      console.error("BILLING_CONFIRM_FAILED", {
+        businessId: input.businessId,
+        sessionId: input.sessionId,
+        paymentIntentKey: input.paymentIntent.paymentIntentKey,
+        reason: String((error as Error)?.message || "stripe_config_invalid"),
+      });
+      return;
+    }
+
+    const stripeSessionResult = await withTimeoutFallback({
+      label: "billing_confirm_stripe_session",
+      timeoutMs: BILLING_CONFIRM_STRIPE_TIMEOUT_MS,
+      task: stripe.checkout.sessions.retrieve(input.sessionId),
+      fallback: null as Awaited<ReturnType<typeof stripe.checkout.sessions.retrieve>> | null,
+    });
+    const session = stripeSessionResult.value;
+    const paymentStatus = String(session?.payment_status || "")
+      .trim()
+      .toLowerCase();
+
+    if (stripeSessionResult.timedOut || !session) {
+      await BillingController.updateCheckoutConfirmMetadata({
+        paymentIntent: input.paymentIntent,
+        sessionId: input.sessionId,
+        state: "PENDING",
+        reason: "stripe_session_pending",
+      });
+
+      console.info("BILLING_CONFIRM_PENDING", {
+        businessId: input.businessId,
+        sessionId: input.sessionId,
+        paymentIntentKey: input.paymentIntent.paymentIntentKey,
+        timedOut: stripeSessionResult.timedOut,
+        reason: "stripe_session_pending",
+      });
+      return;
+    }
+
+    if (!paidLikeStatuses.has(paymentStatus)) {
+      await BillingController.updateCheckoutConfirmMetadata({
+        paymentIntent: input.paymentIntent,
+        sessionId: input.sessionId,
+        state: "PENDING",
+        reason: `payment_status_${paymentStatus || "unknown"}`,
+      });
+
+      console.info("BILLING_CONFIRM_PENDING", {
+        businessId: input.businessId,
+        sessionId: input.sessionId,
+        paymentIntentKey: input.paymentIntent.paymentIntentKey,
+        reason: `payment_status_${paymentStatus || "unknown"}`,
+      });
+      return;
+    }
+
+    const reconcileResult = await withTimeoutFallback({
+      label: "billing_confirm_reconcile",
+      timeoutMs: BILLING_CONFIRM_RECONCILE_TIMEOUT_MS,
+      task: commerceProjectionService.reconcileProviderWebhook({
+        provider: "STRIPE",
+        strictBusinessId: input.businessId,
+        body: {
+          id: `manual_confirm_${input.paymentIntent.providerPaymentIntentId || input.sessionId}`,
+          type: "checkout.session.completed",
+          created: Math.floor(Date.now() / 1000),
+          data: {
+            object: {
+              id: input.paymentIntent.providerPaymentIntentId || input.sessionId,
+              payment_status: session.payment_status || "paid",
+              amount_total: session.amount_total || null,
+              currency: session.currency || null,
+              subscription:
+                typeof session.subscription === "string"
+                  ? session.subscription
+                  : session.subscription?.id || null,
+              metadata: {
+                businessId: input.businessId,
+                paymentIntentKey: input.paymentIntent.paymentIntentKey,
+                proposalKey: input.paymentIntent.proposal?.proposalKey || null,
+              },
+            },
+          },
+        },
+      }),
+      fallback: null,
+    });
+
+    if (reconcileResult.timedOut || reconcileResult.failed) {
+      await BillingController.updateCheckoutConfirmMetadata({
+        paymentIntent: input.paymentIntent,
+        sessionId: input.sessionId,
+        state: "PENDING",
+        reason: reconcileResult.timedOut
+          ? "reconcile_timeout"
+          : "reconcile_retry_required",
+      });
+
+      console.info("BILLING_CONFIRM_PENDING", {
+        businessId: input.businessId,
+        sessionId: input.sessionId,
+        paymentIntentKey: input.paymentIntent.paymentIntentKey,
+        timedOut: reconcileResult.timedOut,
+        failed: reconcileResult.failed,
+        reason: reconcileResult.timedOut
+          ? "reconcile_timeout"
+          : "reconcile_retry_required",
+      });
+      return;
+    }
+
+    await BillingController.updateCheckoutConfirmMetadata({
+      paymentIntent: input.paymentIntent,
+      sessionId: input.sessionId,
+      state: "SUCCESS",
+      reason: "projection_reconciled",
+    });
+
+    console.info("BILLING_CONFIRM_SUCCESS", {
+      businessId: input.businessId,
+      sessionId: input.sessionId,
+      paymentIntentKey: input.paymentIntent.paymentIntentKey,
+    });
+  }
+
+  private static buildConfirmPayload(input: {
+    state: BillingConfirmApiState;
+    sessionId: string;
+    message: string;
+    shouldPoll: boolean;
+    retryAfterMs?: number;
+    reason?: string | null;
+    code?: string | null;
+  }) {
+    return {
+      state: input.state,
+      sessionId: input.sessionId,
+      message: input.message,
+      shouldPoll: input.shouldPoll,
+      retryAfterMs:
+        input.shouldPoll && Number.isFinite(Number(input.retryAfterMs))
+          ? Math.max(500, Math.floor(Number(input.retryAfterMs)))
+          : null,
+      reason: String(input.reason || "").trim() || null,
+      code: String(input.code || "").trim() || null,
+    };
+  }
+
   private static async reconcileRecentPortalState(businessId: string) {
     const latestSubscription = await prisma.subscriptionLedger.findFirst({
       where: {
@@ -685,7 +1013,7 @@ export class BillingController {
     const [billingContextResult, usageResult, invoicesResult] = await Promise.all([
       withTimeoutFallback({
         label: "billing_context_projection",
-        timeoutMs: 4500,
+        timeoutMs: 1_350,
         task: loadBillingContext(businessId),
         fallback: {
           subscription: null,
@@ -694,13 +1022,13 @@ export class BillingController {
       }),
       withTimeoutFallback({
         label: "billing_usage_projection",
-        timeoutMs: 4200,
+        timeoutMs: 1_350,
         task: getUsageOverview(businessId),
         fallback: null,
       }),
       withTimeoutFallback({
         label: "billing_invoice_projection",
-        timeoutMs: 3500,
+        timeoutMs: 1_350,
         task: prisma.invoiceLedger.findMany({
           where: {
             businessId,
@@ -737,7 +1065,7 @@ export class BillingController {
     const invoices = invoicesRaw.map(mapInvoiceForClient);
     const stripeLiveResult = await withTimeoutFallback({
       label: "billing_stripe_live_projection",
-      timeoutMs: 2400,
+      timeoutMs: 900,
       task: BillingController.buildStripeLiveSnapshot({
         businessId,
         fallbackSubscription: billingContext.subscription,
@@ -1205,7 +1533,7 @@ export class BillingController {
     try {
       const projection = await withTimeoutFallback({
         label: "billing_plans_projection",
-        timeoutMs: 2200,
+        timeoutMs: 1800,
         task: prisma.plan.findMany({
           where: {
             type: {
@@ -1270,8 +1598,25 @@ export class BillingController {
         }).catch(() => undefined);
       }
       res.setHeader("Cache-Control", "no-store");
+      const projection = await withTimeoutFallback({
+        label: "billing_projection_api_guard",
+        timeoutMs: BILLING_CONFIRM_REQUEST_TIMEOUT_MS,
+        task: BillingController.buildBillingResponse(businessId, req),
+        fallback: {
+          success: true,
+          subscription: null,
+          billing: EMPTY_BILLING_CONTEXT,
+          usage: EMPTY_USAGE_SUMMARY,
+          currency: resolveBillingCurrency(req),
+          invoices: [],
+          meta: {
+            degraded: true,
+            reason: "billing_projection_timeout_guard",
+          },
+        },
+      });
 
-      return res.json(await BillingController.buildBillingResponse(businessId, req));
+      return res.json(projection.value);
     } catch (error: any) {
       if (error?.message === "Unauthorized") {
         return res.status(401).json({
@@ -1312,152 +1657,252 @@ export class BillingController {
   }
 
   static async confirmCheckout(req: Request, res: Response) {
-    try {
-      const sessionId = String(req.query.session_id || req.body?.session_id || "");
-
-      if (!sessionId) {
-        return res.status(400).json({
-          success: false,
-          message: "session_id is required",
-        });
-      }
-
-      const { businessId } = await getUserContext(req);
-
-      if (!businessId) {
-        return res.status(403).json({
-          success: false,
-          message: "Business context is required",
-        });
-      }
-
-      const directMatch = await prisma.paymentIntentLedger.findFirst({
-        where: {
-          businessId,
-          provider: "STRIPE",
-          providerPaymentIntentId: sessionId,
-        },
-        select: {
-          id: true,
-          paymentIntentKey: true,
-          providerPaymentIntentId: true,
-          metadata: true,
-          proposal: {
-            select: {
-              proposalKey: true,
-            },
-          },
-        },
+    const sessionId = String(req.query.session_id || req.body?.session_id || "").trim();
+    const businessId = BillingController.getBusinessIdFromRequest(req);
+    const respond = (payload: ReturnType<typeof BillingController.buildConfirmPayload>) => {
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json({
+        success: true,
+        data: payload,
       });
-      const paymentIntent =
-        directMatch ||
-        (await prisma.paymentIntentLedger
-          .findMany({
-            where: {
-              businessId,
-              provider: "STRIPE",
-            },
-            orderBy: {
-              updatedAt: "desc",
-            },
-            take: 50,
-            select: {
-              id: true,
-              paymentIntentKey: true,
-              providerPaymentIntentId: true,
-              metadata: true,
-              proposal: {
-                select: {
-                  proposalKey: true,
-                },
-              },
+    };
+
+    console.info("BILLING_CONFIRM_START", {
+      businessId,
+      sessionId: sessionId || null,
+    });
+
+    if (!sessionId) {
+      console.error("BILLING_CONFIRM_FAILED", {
+        businessId,
+        sessionId: null,
+        reason: "session_id_missing",
+      });
+
+      return respond(
+        BillingController.buildConfirmPayload({
+          state: "FAILED",
+          sessionId: "",
+          message: "session_id is required",
+          shouldPoll: false,
+          reason: "session_id_missing",
+          code: "SESSION_ID_MISSING",
+        })
+      );
+    }
+
+    if (!businessId) {
+      console.error("BILLING_CONFIRM_FAILED", {
+        businessId: null,
+        sessionId,
+        reason: "business_context_missing",
+      });
+
+      return respond(
+        BillingController.buildConfirmPayload({
+          state: "FAILED",
+          sessionId,
+          message: "Business context is required",
+          shouldPoll: false,
+          reason: "business_context_missing",
+          code: "BUSINESS_CONTEXT_MISSING",
+        })
+      );
+    }
+
+    try {
+      const lookup = await withTimeoutFallback({
+        label: "billing_confirm_intent_lookup",
+        timeoutMs: BILLING_CONFIRM_LOOKUP_TIMEOUT_MS,
+        task: BillingController.findCheckoutIntentForSession({
+          businessId,
+          sessionId,
+        }),
+        fallback: null as CheckoutConfirmIntentRow | null,
+      });
+      const paymentIntent = lookup.value;
+
+      if (!paymentIntent) {
+        if (lookup.timedOut) {
+          console.info("BILLING_CONFIRM_PENDING", {
+            businessId,
+            sessionId,
+            reason: "intent_lookup_timeout",
+          });
+
+          return respond(
+            BillingController.buildConfirmPayload({
+              state: "PENDING",
+              sessionId,
+              message: "Payment is being verified. Please wait a moment.",
+              shouldPoll: true,
+              retryAfterMs: 1_000,
+              reason: "intent_lookup_timeout",
+              code: "INTENT_LOOKUP_TIMEOUT",
+            })
+          );
+        }
+
+        console.error("BILLING_CONFIRM_FAILED", {
+          businessId,
+          sessionId,
+          reason: "checkout_session_not_found",
+        });
+
+        return respond(
+          BillingController.buildConfirmPayload({
+            state: "FAILED",
+            sessionId,
+            message: "Checkout session could not be matched with your workspace.",
+            shouldPoll: false,
+            reason: "checkout_session_not_found",
+            code: "CHECKOUT_SESSION_NOT_FOUND",
+          })
+        );
+      }
+
+      const status = String(paymentIntent.status || "")
+        .trim()
+        .toUpperCase();
+      const confirmState = getCheckoutConfirmState(paymentIntent.metadata);
+      const alreadyProcessed =
+        status === "SUCCEEDED" ||
+        confirmState === "SUCCESS" ||
+        confirmState === "ALREADY_PROCESSED";
+
+      if (alreadyProcessed) {
+        console.info("BILLING_CONFIRM_ALREADY_PROCESSED", {
+          businessId,
+          sessionId,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          status,
+          confirmState,
+        });
+
+        return respond(
+          BillingController.buildConfirmPayload({
+            state: "ALREADY_PROCESSED",
+            sessionId,
+            message: "Payment confirmation is already complete.",
+            shouldPoll: true,
+            retryAfterMs: 900,
+            reason: "already_processed",
+            code: "ALREADY_PROCESSED",
+          })
+        );
+      }
+
+      if (TERMINAL_PAYMENT_INTENT_STATUSES.has(status)) {
+        console.error("BILLING_CONFIRM_FAILED", {
+          businessId,
+          sessionId,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          status,
+          reason: "payment_intent_terminal_non_success",
+        });
+
+        return respond(
+          BillingController.buildConfirmPayload({
+            state: "FAILED",
+            sessionId,
+            message: "Checkout confirmation cannot continue for this session.",
+            shouldPoll: false,
+            reason: "payment_intent_terminal_non_success",
+            code: "PAYMENT_INTENT_TERMINAL",
+          })
+        );
+      }
+
+      if (isCheckoutConfirmStillProcessing(paymentIntent.metadata)) {
+        console.info("BILLING_CONFIRM_PENDING", {
+          businessId,
+          sessionId,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          reason: "duplicate_confirm",
+        });
+
+        return respond(
+          BillingController.buildConfirmPayload({
+            state: "PENDING",
+            sessionId,
+            message: "Payment is already being verified.",
+            shouldPoll: true,
+            retryAfterMs: 1_000,
+            reason: "duplicate_confirm",
+            code: "DUPLICATE_CONFIRM",
+          })
+        );
+      }
+
+      await BillingController.updateCheckoutConfirmMetadata({
+        paymentIntent,
+        sessionId,
+        state: "PROCESSING",
+        reason: "queued_for_async_confirmation",
+      });
+
+      if (status === "CREATED" || status === "REQUIRES_ACTION") {
+        await paymentIntentService
+          .transitionPaymentIntentStatus({
+            paymentIntentId: paymentIntent.id,
+            nextStatus: "PROCESSING",
+            metadata: {
+              manualConfirmSessionId: sessionId,
+              manualConfirmQueuedAt: new Date().toISOString(),
             },
           })
-          .then((rows) =>
-            rows.find((row) => {
-              const metadata =
-                row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
-                  ? (row.metadata as Record<string, unknown>)
-                  : {};
-              const providerMetadata =
-                metadata.providerMetadata &&
-                typeof metadata.providerMetadata === "object" &&
-                !Array.isArray(metadata.providerMetadata)
-                  ? (metadata.providerMetadata as Record<string, unknown>)
-                  : {};
-              return (
-                String(metadata.stripeSessionId || "").trim() === sessionId ||
-                String(providerMetadata.stripeSessionId || "").trim() === sessionId
-              );
-            })
-          ));
-
-      if (!paymentIntent?.providerPaymentIntentId) {
-        return res.status(403).json({
-          success: false,
-          message: "Checkout session does not belong to this user",
-        });
+          .catch(() => undefined);
       }
 
-      assertStripeConfigReady();
-
-      const session = await stripe.checkout.sessions
-        .retrieve(sessionId)
-        .catch(() => null);
-      const paymentStatus = String(session?.payment_status || "").trim().toLowerCase();
-      const paidLikeStatuses = new Set(["paid", "no_payment_required"]);
-
-      if (session && !paidLikeStatuses.has(paymentStatus)) {
-        return res.status(409).json({
-          success: false,
-          message: "Payment is still pending confirmation",
+      void BillingController.finalizeCheckoutConfirmationAsync({
+        businessId,
+        sessionId,
+        paymentIntent,
+      }).catch((error) => {
+        console.error("BILLING_CONFIRM_FAILED", {
+          businessId,
+          sessionId,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          reason: String((error as Error)?.message || "confirm_async_failed"),
         });
-      }
-
-      await commerceProjectionService.reconcileProviderWebhook({
-        provider: "STRIPE",
-        strictBusinessId: businessId,
-        body: {
-          id: `manual_confirm_${paymentIntent.providerPaymentIntentId}`,
-          type: session ? "checkout.session.completed" : "payment_intent.succeeded",
-          created: Math.floor(Date.now() / 1000),
-          data: {
-            object: {
-              id: paymentIntent.providerPaymentIntentId,
-              payment_status: session?.payment_status || "paid",
-              amount_total: session?.amount_total || null,
-              currency: session?.currency || null,
-              subscription:
-                typeof session?.subscription === "string"
-                  ? session.subscription
-                  : session?.subscription?.id || null,
-              metadata: {
-                businessId,
-                paymentIntentKey: paymentIntent.paymentIntentKey,
-                proposalKey: paymentIntent.proposal?.proposalKey || null,
-              },
-            },
-          },
-        },
       });
 
-      res.setHeader("Cache-Control", "no-store");
-      return res.json(await BillingController.buildBillingResponse(businessId, req));
+      console.info("BILLING_CONFIRM_PENDING", {
+        businessId,
+        sessionId,
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        reason: "queued_for_async_confirmation",
+      });
+
+      return respond(
+        BillingController.buildConfirmPayload({
+          state: "PENDING",
+          sessionId,
+          message: "Payment is being verified. We will activate your plan shortly.",
+          shouldPoll: true,
+          retryAfterMs: 1_200,
+          reason: "queued_for_async_confirmation",
+          code: "CONFIRM_QUEUED",
+        })
+      );
     } catch (error: any) {
-      console.error("Confirm checkout error:", error);
-
-      if (error?.message?.includes("stripe_config_invalid")) {
-        return res.status(503).json({
-          success: false,
-          code: "BILLING_PROVIDER_UNAVAILABLE",
-          message: "Billing confirmation is temporarily unavailable. Please retry shortly.",
-        });
-      }
-
-      return res.status(500).json({
-        success: false,
-        message: error.message || "Checkout confirmation failed",
+      console.error("BILLING_CONFIRM_FAILED", {
+        businessId,
+        sessionId,
+        reason: String(error?.message || "confirm_failed"),
       });
+
+      return respond(
+        BillingController.buildConfirmPayload({
+          state: "FAILED",
+          sessionId,
+          message: "Checkout confirmation is temporarily unavailable. Please retry.",
+          shouldPoll: true,
+          retryAfterMs: 1_200,
+          reason: String(error?.message || "confirm_failed"),
+          code: "CONFIRM_FAILED",
+        })
+      );
     }
   }
 

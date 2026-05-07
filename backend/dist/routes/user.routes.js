@@ -228,7 +228,7 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
         });
         const userHydration = await (0, boundedTimeout_1.withTimeoutFallback)({
             label: "user_me_hydration",
-            timeoutMs: 2200,
+            timeoutMs: 1800,
             task: getCurrentUser({
                 userId,
                 preferredBusinessId,
@@ -291,7 +291,7 @@ router.get("/workspace", auth_middleware_1.protect, async (req, res) => {
         }
         const workspaceIdentity = await (0, boundedTimeout_1.withTimeoutFallback)({
             label: "user_workspace_hydration",
-            timeoutMs: 3000,
+            timeoutMs: 1800,
             task: (0, tenant_service_1.resolveUserWorkspaceIdentity)({
                 userId,
                 preferredBusinessId: req.user?.businessId || null,

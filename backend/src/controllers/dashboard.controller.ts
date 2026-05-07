@@ -78,7 +78,7 @@ async function baseHandler(
 
     const projection = await withTimeoutFallback({
       label: options.timeoutLabel,
-      timeoutMs: options.timeoutMs || 4000,
+      timeoutMs: options.timeoutMs || 1800,
       task: handler(businessId),
       fallback: options.fallback,
     });

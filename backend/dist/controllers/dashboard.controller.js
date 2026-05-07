@@ -43,7 +43,7 @@ async function baseHandler(req, res, handler, options) {
         }
         const projection = await (0, boundedTimeout_1.withTimeoutFallback)({
             label: options.timeoutLabel,
-            timeoutMs: options.timeoutMs || 4000,
+            timeoutMs: options.timeoutMs || 1800,
             task: handler(businessId),
             fallback: options.fallback,
         });

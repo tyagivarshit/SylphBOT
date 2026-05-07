@@ -1,6 +1,8 @@
 import { apiClient } from "@/lib/apiClient";
 import { apiFetch } from "@/lib/apiClient";
 
+const API_TIMEOUT_MS = 7_000;
+
 export type AutomationStepConfig = {
   message?: string | null;
   condition?: string | null;
@@ -63,7 +65,7 @@ export type CreateCommentTriggerInput = {
 export async function getAutomationFlows(): Promise<AutomationFlow[]> {
   const response = await apiFetch<AutomationFlow[]>("/api/automation/flows", {
     cache: "no-store",
-    timeoutMs: 1800,
+    timeoutMs: API_TIMEOUT_MS,
   });
 
   if (response.limited || response.upgradeRequired) {

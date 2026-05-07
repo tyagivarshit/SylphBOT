@@ -72,6 +72,12 @@ const monitoringMiddleware = (req, res, next) => {
             },
         });
         if (durationMs >= monitoring_config_1.monitoringConfig.slowRequestMs) {
+            req.logger?.warn({
+                route: req.originalUrl,
+                durationMs,
+                requestId: req.requestId || null,
+                thresholdMs: monitoring_config_1.monitoringConfig.slowRequestMs,
+            }, "Slow API request");
             (0, performanceMetrics_1.emitPerformanceMetric)({
                 name: "DB_SLOW",
                 value: durationMs,

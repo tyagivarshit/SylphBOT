@@ -290,12 +290,29 @@ router.get("/", (req: Request, res: Response) => {
 router.post("/", async (req: any, res: Response) => {
   let body: any;
   const webhookTraceId = `ig_webhook_${req.requestId || crypto.randomUUID()}`;
+  let checkpointReached = "[STEP 1] entered route";
+  let diagnosticSenderId: string | null = null;
+  let diagnosticRecipientId: string | null = null;
+  let diagnosticMessageMid: string | null = null;
 
   console.log("🔥 WEBHOOK HIT", JSON.stringify(req.body));
+
+  log("[STEP 1] entered route");
 
   try {
     body = parseWebhookBody(req);
   } catch (error) {
+    const rawMessaging =
+      !Buffer.isBuffer(req.body) && req.body && typeof req.body === "object"
+        ? req.body?.entry?.[0]?.messaging?.[0]
+        : undefined;
+    diagnosticSenderId =
+      diagnosticSenderId || normalizeIdentifier(rawMessaging?.sender?.id);
+    diagnosticRecipientId =
+      diagnosticRecipientId || normalizeIdentifier(rawMessaging?.recipient?.id);
+    diagnosticMessageMid =
+      diagnosticMessageMid || normalizeIdentifier(rawMessaging?.message?.mid);
+
     req.logger?.error({ error }, "Instagram webhook body parse failed");
     captureExceptionWithContext(error, {
       tags: {
@@ -320,6 +337,14 @@ router.post("/", async (req: any, res: Response) => {
     }).catch(() => undefined);
     log("Body parse failed", {
       message: (error as { message?: string })?.message || "Unknown error",
+    });
+    log("Webhook error diagnostics", {
+      "error.message": (error as { message?: string })?.message || "Unknown error",
+      "error.stack": (error as { stack?: string })?.stack || null,
+      "checkpoint reached": checkpointReached,
+      "sender.id": diagnosticSenderId,
+      "recipient.id": diagnosticRecipientId,
+      "message.mid": diagnosticMessageMid,
     });
     return res.sendStatus(400);
   }
@@ -347,6 +372,10 @@ router.post("/", async (req: any, res: Response) => {
       }).catch(() => undefined);
       return res.sendStatus(403);
     }
+    checkpointReached = "[STEP 2] signature validated";
+    log("[STEP 2] signature validated");
+    checkpointReached = "[STEP 3] replay guard passed";
+    log("[STEP 3] replay guard passed");
 
     const entry = body.entry?.[0];
 
@@ -560,12 +589,22 @@ router.post("/", async (req: any, res: Response) => {
     let pageIds: string[] = [];
 
     const messaging = entry?.messaging?.[0];
+    diagnosticSenderId =
+      diagnosticSenderId || normalizeIdentifier(messaging?.sender?.id);
+    diagnosticRecipientId =
+      diagnosticRecipientId || normalizeIdentifier(messaging?.recipient?.id);
+    diagnosticMessageMid =
+      diagnosticMessageMid || normalizeIdentifier(messaging?.message?.mid);
 
     if (messaging?.message?.text && !messaging?.message?.is_echo) {
       senderId = messaging.sender?.id;
       text = messaging.message.text;
       pageIds = getUniqueIdentifiers([messaging.recipient?.id, entry.id]);
       eventId = messaging.message.mid;
+      diagnosticSenderId = normalizeIdentifier(senderId);
+      diagnosticRecipientId =
+        normalizeIdentifier(messaging.recipient?.id) || diagnosticRecipientId;
+      diagnosticMessageMid = normalizeIdentifier(eventId) || diagnosticMessageMid;
     }
 
     const changeMessage = entry?.changes?.[0]?.value?.messages?.[0];
@@ -575,6 +614,9 @@ router.post("/", async (req: any, res: Response) => {
       text = changeMessage.text.body;
       pageIds = getUniqueIdentifiers([entry.id]);
       eventId = changeMessage.id;
+      diagnosticSenderId = normalizeIdentifier(senderId) || diagnosticSenderId;
+      diagnosticRecipientId = normalizeIdentifier(entry.id) || diagnosticRecipientId;
+      diagnosticMessageMid = normalizeIdentifier(eventId) || diagnosticMessageMid;
     }
 
     if (!senderId || !text || !pageIds.length) {
@@ -606,6 +648,8 @@ router.post("/", async (req: any, res: Response) => {
     if (!shouldProcess) {
       return res.sendStatus(200);
     }
+    checkpointReached = "[STEP 4] dedupe passed";
+    log("[STEP 4] dedupe passed");
 
     log("message identifiers", {
       pageIds,
@@ -619,6 +663,8 @@ router.post("/", async (req: any, res: Response) => {
     if (!client) {
       return res.sendStatus(200);
     }
+    checkpointReached = "[STEP 5] client mapping resolved";
+    log("[STEP 5] client mapping resolved");
 
     attachResolvedBusinessContext(req, client);
     await recordInboundProviderWebhook({
@@ -665,6 +711,8 @@ router.post("/", async (req: any, res: Response) => {
         receivedAt: new Date().toISOString(),
       },
     });
+    checkpointReached = "[STEP 6] lead resolved";
+    log("[STEP 6] lead resolved");
 
     const instagramUsername = await fetchInstagramUsername(
       senderId,
@@ -681,6 +729,11 @@ router.post("/", async (req: any, res: Response) => {
         },
       });
     }
+    checkpointReached = "[STEP 7] username enrichment complete";
+    log("[STEP 7] username enrichment complete");
+    checkpointReached = "[STEP 8] before receiveInboundInteraction";
+    log("[STEP 8] before receiveInboundInteraction");
+
     const intake = await receiveInboundInteraction({
       businessId: client.businessId,
       leadId: lead.id,
@@ -706,6 +759,8 @@ router.post("/", async (req: any, res: Response) => {
         pageId: pageIds[0],
       },
     });
+    checkpointReached = "[STEP 9] intake complete";
+    log("[STEP 9] intake complete");
 
     if (WEBHOOK_DEBUG) {
       log("Canonical interaction accepted", {
@@ -731,6 +786,8 @@ router.post("/", async (req: any, res: Response) => {
       },
     }).catch(() => undefined);
 
+    checkpointReached = "[STEP 10] returning 200";
+    log("[STEP 10] returning 200");
     return res.sendStatus(200);
   } catch (error) {
     req.logger?.error({ error }, "Instagram webhook error");
@@ -764,6 +821,14 @@ router.post("/", async (req: any, res: Response) => {
         error: String((error as { message?: unknown })?.message || error || "webhook_failed"),
       },
     }).catch(() => undefined);
+    log("Webhook error diagnostics", {
+      "error.message": (error as { message?: string })?.message || "Unknown error",
+      "error.stack": (error as { stack?: string })?.stack || null,
+      "checkpoint reached": checkpointReached,
+      "sender.id": diagnosticSenderId,
+      "recipient.id": diagnosticRecipientId,
+      "message.mid": diagnosticMessageMid,
+    });
     log("Webhook error:", error);
     return res.sendStatus(500);
   }

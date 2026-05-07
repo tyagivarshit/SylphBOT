@@ -95,6 +95,8 @@ const DEFAULT_BILLING_CONTEXT: BillingContext = {
   remainingEarly: 0,
 };
 
+const BILLING_API_TIMEOUT_MS = 7_000;
+
 const FALLBACK_PLANS_RESPONSE: PlansResponse = {
   trialDays: 7,
   addons: [
@@ -183,7 +185,7 @@ const FALLBACK_PLANS_RESPONSE: PlansResponse = {
 const fetchJsonWithRetry = async <T,>(
   url: string,
   retries = 1,
-  timeoutMs = 6000
+  timeoutMs = BILLING_API_TIMEOUT_MS
 ) => {
   let attempt = 0;
   let lastError: Error | null = null;
@@ -253,7 +255,7 @@ const isCurrentPlan = (
   return currentType === planId || currentName === planId;
 };
 
-async function fetchJson<T>(url: string, timeoutMs = 6000) {
+async function fetchJson<T>(url: string, timeoutMs = BILLING_API_TIMEOUT_MS) {
   const response = await apiFetch<T>(url, {
     credentials: "include",
     cache: "no-store",
@@ -331,8 +333,8 @@ function BillingPageContent() {
       setLoadWarning(null);
 
       const [billingResult, plansResult] = await Promise.allSettled([
-        fetchJsonWithRetry<BillingApiResponse>("/api/billing", 2, 11000),
-        fetchJsonWithRetry<PlansResponse>("/api/billing/plans", 2, 5000),
+        fetchJsonWithRetry<BillingApiResponse>("/api/billing", 0, BILLING_API_TIMEOUT_MS),
+        fetchJsonWithRetry<PlansResponse>("/api/billing/plans", 0, BILLING_API_TIMEOUT_MS),
       ]);
 
       const warnings: string[] = [];

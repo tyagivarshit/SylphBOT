@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/apiClient"
 import { normalizePlan } from "@/lib/featureGuard"
 
+const BILLING_FETCH_TIMEOUT_MS = 7_000;
+
 /* ================= FETCH ================= */
 
 const fetchBilling = async () => {
@@ -22,7 +24,7 @@ const fetchBilling = async () => {
   }>("/api/billing", {
     credentials: "include",
     cache: "no-store",
-    timeoutMs: 1800,
+    timeoutMs: BILLING_FETCH_TIMEOUT_MS,
   });
 
   if (!response.success || !response.data) {

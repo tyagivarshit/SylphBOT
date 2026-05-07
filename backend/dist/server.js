@@ -81,7 +81,9 @@ const startServer = async () => {
     (0, socket_server_1.initSocket)(server);
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
-    server.requestTimeout = 9000;
+    // Keep server-level request timeout slightly above route-level timeouts
+    // so app middleware remains the primary response timeout authority.
+    server.requestTimeout = 11000;
     const shutdownServer = async (signal, exitCode = 0) => {
         if (isShuttingDown) {
             return;

@@ -276,12 +276,14 @@ async function coreRequest<T>(
   options: ApiRequestInit,
   retry = false
 ): Promise<ApiResponse<T>> {
+  const method = String(options.method || "GET").trim().toUpperCase() || "GET";
+
   try {
     const response = await apiClient.request(buildAxiosConfig(path, options));
     const payload = response.data;
 
     if (response.status === 401) {
-      if (!retry) {
+      if (!retry && method === "GET") {
         return coreRequest<T>(path, options, true);
       }
 

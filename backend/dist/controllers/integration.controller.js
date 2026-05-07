@@ -9,8 +9,10 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
 const onboarding_service_1 = require("../services/onboarding.service");
 const instagramProfile_service_1 = require("../services/instagramProfile.service");
+const boundedTimeout_1 = require("../utils/boundedTimeout");
 const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
 const developerPlatformExtensibilityOS_service_1 = require("../services/developerPlatformExtensibilityOS.service");
+const INTEGRATION_API_TIMEOUT_MS = 1800;
 const normalizeOptionalString = (value) => {
     const normalized = String(value || "").trim();
     return normalized || null;
@@ -70,18 +72,23 @@ const buildFallbackInstagramAccount = async (client) => {
 const getIntegrations = async (req, res) => {
     try {
         const businessId = req.user.businessId;
-        const clients = await prisma_1.default.client.findMany({
-            where: { businessId },
-            select: {
-                id: true,
-                platform: true,
-                isActive: true,
-            },
+        const clientsResult = await (0, boundedTimeout_1.withTimeoutFallback)({
+            label: "integrations_projection",
+            timeoutMs: INTEGRATION_API_TIMEOUT_MS,
+            task: prisma_1.default.client.findMany({
+                where: { businessId },
+                select: {
+                    id: true,
+                    platform: true,
+                    isActive: true,
+                },
+            }),
+            fallback: [],
         });
-        res.json(clients);
+        return res.json(clientsResult.value);
     }
     catch (err) {
-        res.status(500).json({ error: "Failed" });
+        return res.json([]);
     }
 };
 exports.getIntegrations = getIntegrations;
@@ -91,16 +98,27 @@ const getOnboarding = async (req, res) => {
         if (!businessId) {
             return res.status(401).json({ error: "Unauthorized" });
         }
-        const onboarding = await (0, onboarding_service_1.getOnboardingSnapshot)(businessId);
+        const onboardingResult = await (0, boundedTimeout_1.withTimeoutFallback)({
+            label: "integrations_onboarding_projection",
+            timeoutMs: INTEGRATION_API_TIMEOUT_MS,
+            task: (0, onboarding_service_1.getOnboardingSnapshot)(businessId),
+            fallback: null,
+        });
         return res.json({
             success: true,
-            data: onboarding,
+            data: onboardingResult.value,
+            meta: {
+                degraded: onboardingResult.timedOut || onboardingResult.failed,
+            },
         });
     }
     catch (err) {
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch onboarding",
+        return res.json({
+            success: true,
+            data: null,
+            meta: {
+                degraded: true,
+            },
         });
     }
 };
@@ -149,7 +167,7 @@ const getInstagramAccounts = async (req, res) => {
                         access_token: accessToken,
                         fields: "id,name",
                     },
-                    timeout: 10000,
+                    timeout: 1200,
                 });
                 const pages = getMetaDataArray(pagesRes.data);
                 for (const page of pages) {
@@ -163,7 +181,7 @@ const getInstagramAccounts = async (req, res) => {
                                 fields: "instagram_business_account,name",
                                 access_token: accessToken,
                             },
-                            timeout: 10000,
+                            timeout: 1200,
                         });
                         const igUserId = normalizeOptionalString(pageRes.data?.instagram_business_account?.id);
                         if (!igUserId) {
@@ -226,20 +244,30 @@ const getConnectHubDashboard = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const dashboard = await (0, saasPackagingConnectHubOS_service_1.getConnectHubProjection)({
-            businessId: context.businessId,
-            tenantId: context.tenantId,
+        const dashboardResult = await (0, boundedTimeout_1.withTimeoutFallback)({
+            label: "integrations_connect_hub_projection",
+            timeoutMs: INTEGRATION_API_TIMEOUT_MS,
+            task: (0, saasPackagingConnectHubOS_service_1.getConnectHubProjection)({
+                businessId: context.businessId,
+                tenantId: context.tenantId,
+            }),
+            fallback: null,
         });
         return res.json({
             success: true,
-            data: dashboard,
+            data: dashboardResult.value,
+            meta: {
+                degraded: dashboardResult.timedOut || dashboardResult.failed,
+            },
         });
     }
     catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Failed to load connect hub projection",
-            error: String(error?.message || "connect_hub_error"),
+        return res.json({
+            success: true,
+            data: null,
+            meta: {
+                degraded: true,
+            },
         });
     }
 };

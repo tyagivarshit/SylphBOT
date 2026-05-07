@@ -548,6 +548,9 @@ export class BillingController {
       timeoutMs: BILLING_CONFIRM_RECONCILE_TIMEOUT_MS,
       task: commerceProjectionService.reconcileProviderWebhook({
         provider: "STRIPE",
+        headers: {
+          "x-commerce-manual-reconcile": "true",
+        },
         strictBusinessId: input.businessId,
         body: {
           id: `manual_confirm_${input.paymentIntent.providerPaymentIntentId || input.sessionId}`,

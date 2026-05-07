@@ -1,7 +1,7 @@
 import type Stripe from "stripe";
 
-type TaxRegion = "IN" | "GLOBAL";
-type TaxType = "GST" | "VAT";
+type TaxRegion = "AUTO" | "IN" | "GLOBAL";
+type TaxType = "AUTO" | "GST" | "VAT" | "SALES_TAX";
 
 type CheckoutTaxConfigInput = {
   currency: string;
@@ -17,24 +17,45 @@ type CheckoutTaxConfig = Pick<
   taxType: TaxType;
 };
 
-const resolveTaxProfile = (currency: string): { taxRegion: TaxRegion; taxType: TaxType } => {
-  const normalizedCurrency = String(currency || "").trim().toUpperCase();
+const resolveTaxProfile = (): { taxRegion: TaxRegion; taxType: TaxType } => ({
+  taxRegion: "AUTO",
+  taxType: "AUTO",
+});
 
-  if (normalizedCurrency === "INR") {
-    return {
-      taxRegion: "IN",
-      taxType: "GST",
-    };
+const resolveInvoiceTaxType = (invoice: any): TaxType => {
+  const totalTaxAmounts = Array.isArray(invoice?.total_tax_amounts)
+    ? invoice.total_tax_amounts
+    : [];
+  const taxTypes = totalTaxAmounts
+    .map((row: any) =>
+      String(
+        row?.tax_rate_details?.tax_type ||
+          row?.tax_rate?.tax_type ||
+          row?.tax_type ||
+          ""
+      )
+        .trim()
+        .toLowerCase()
+    )
+    .filter(Boolean);
+
+  if (taxTypes.some((taxType: string) => taxType.includes("sales_tax"))) {
+    return "SALES_TAX";
   }
 
-  return {
-    taxRegion: "GLOBAL",
-    taxType: "VAT",
-  };
+  if (taxTypes.some((taxType: string) => taxType.includes("gst"))) {
+    return "GST";
+  }
+
+  if (taxTypes.some((taxType: string) => taxType.includes("vat"))) {
+    return "VAT";
+  }
+
+  return "AUTO";
 };
 
 export const getTaxConfig = (input: CheckoutTaxConfigInput): CheckoutTaxConfig => {
-  const taxProfile = resolveTaxProfile(input.currency);
+  const taxProfile = resolveTaxProfile();
 
   return {
     automatic_tax: {
@@ -69,7 +90,7 @@ export const getStripeTaxDetails = (invoice: any) => {
       0
     ) || 0;
   const currency = String(invoice?.currency || "INR").toUpperCase();
-  const { taxType } = resolveTaxProfile(currency);
+  const taxType = resolveInvoiceTaxType(invoice);
 
   return {
     subtotal,

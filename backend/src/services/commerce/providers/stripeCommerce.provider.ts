@@ -329,6 +329,72 @@ const getKnownPlanCode = (value: unknown): PlanType | null => {
 const getBillingInterval = (value: unknown): BillingInterval =>
   String(value || "").trim().toLowerCase() === "yearly" ? "yearly" : "monthly";
 
+type StripeInlineTaxBehavior = "inclusive" | "exclusive" | "unspecified";
+
+const toMinorInteger = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor(parsed));
+};
+
+const parseStripeTaxBehavior = (value: unknown): StripeInlineTaxBehavior | null => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "inclusive" || normalized === "exclusive" || normalized === "unspecified") {
+    return normalized;
+  }
+  return null;
+};
+
+const resolveInlineTaxBehavior = ({
+  metadata,
+  amountMinor,
+}: {
+  metadata: Record<string, unknown>;
+  amountMinor: number;
+}): StripeInlineTaxBehavior | null => {
+  const taxRules = toRecord(metadata.taxRules);
+  const explicitBehavior = parseStripeTaxBehavior(
+    metadata.taxBehavior ||
+      metadata.tax_behavior ||
+      metadata.pricingTaxBehavior ||
+      metadata.stripeTaxBehavior ||
+      taxRules.taxBehavior ||
+      taxRules.tax_behavior
+  );
+
+  if (explicitBehavior) {
+    return explicitBehavior;
+  }
+
+  const proposalTaxMinor = toMinorInteger(
+    metadata.proposalTaxMinor ?? metadata.taxMinor ?? taxRules.taxMinor
+  );
+  if (proposalTaxMinor > 0) {
+    return "inclusive";
+  }
+
+  const proposalSubtotalMinor = toMinorInteger(
+    metadata.proposalSubtotalMinor ?? metadata.subtotalMinor
+  );
+  const proposalTotalMinor = toMinorInteger(metadata.proposalTotalMinor ?? amountMinor);
+  if (proposalSubtotalMinor > 0 && proposalTotalMinor > proposalSubtotalMinor) {
+    return "inclusive";
+  }
+
+  const configuredQuantity = Math.max(1, Math.floor(Number(metadata.quantity || 1)));
+  const configuredUnitAmountMinor = toMinorInteger(
+    metadata.unitPriceMinor ?? metadata.unit_amount_minor
+  );
+  const configuredSubtotalMinor = configuredQuantity * configuredUnitAmountMinor;
+  if (configuredSubtotalMinor > 0 && toMinorInteger(amountMinor) > configuredSubtotalMinor) {
+    return "inclusive";
+  }
+
+  return null;
+};
+
 const getDiscountsFromMetadata = (
   metadata: Record<string, unknown>
 ): Stripe.Checkout.SessionCreateParams.Discount[] | undefined => {
@@ -410,6 +476,10 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       paymentQuantity = 1;
       paymentUnitAmount = Math.max(0, Math.floor(input.amountMinor));
     }
+    const inlineTaxBehavior = resolveInlineTaxBehavior({
+      metadata,
+      amountMinor: input.amountMinor,
+    });
 
     const sessionMetadata: Record<string, string> = {
       businessId: String(input.businessId || "").trim(),
@@ -422,6 +492,7 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       providerSubscriptionId: String(metadata.providerSubscriptionId || ""),
       taxRegion,
       taxType,
+      inlineTaxBehavior: inlineTaxBehavior || "",
     };
     const nowSeconds = Math.floor(Date.now() / 1000);
     const checkoutExpiresAtSeconds = nowSeconds + 2 * 60 * 60;
@@ -480,6 +551,7 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
               price_data: {
                 currency: currency.toLowerCase(),
                 unit_amount: paymentUnitAmount,
+                ...(inlineTaxBehavior ? { tax_behavior: inlineTaxBehavior } : {}),
                 recurring: {
                   interval: recurringInterval,
                 },
@@ -517,6 +589,7 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
           price_data: {
             currency: currency.toLowerCase(),
             unit_amount: paymentUnitAmount,
+            ...(inlineTaxBehavior ? { tax_behavior: inlineTaxBehavior } : {}),
             product_data: {
               name: input.description,
             },
@@ -560,19 +633,32 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
           throw compatibilityError;
         }
 
-        const minimalPayload = {
+        const reducedPayload = {
           ...compatibilityPayload,
         } as Stripe.Checkout.SessionCreateParams;
-        delete (minimalPayload as Record<string, unknown>).phone_number_collection;
-        delete (minimalPayload as Record<string, unknown>).billing_address_collection;
-        delete (minimalPayload as Record<string, unknown>).customer_update;
-        delete (minimalPayload as Record<string, unknown>).tax_id_collection;
-        delete (minimalPayload as Record<string, unknown>).automatic_tax;
+        delete (reducedPayload as Record<string, unknown>).phone_number_collection;
+        delete (reducedPayload as Record<string, unknown>).customer_update;
 
-        session = await createStripeSession(
-          minimalPayload,
-          `${checkoutIdempotencyKey}:minimal`
-        );
+        try {
+          session = await createStripeSession(
+            reducedPayload,
+            `${checkoutIdempotencyKey}:reduced`
+          );
+        } catch (reducedError) {
+          if (!isStripePayloadCompatibilityError(reducedError)) {
+            throw reducedError;
+          }
+
+          const minimalPayload = {
+            ...reducedPayload,
+          } as Stripe.Checkout.SessionCreateParams;
+          delete (minimalPayload as Record<string, unknown>).tax_id_collection;
+
+          session = await createStripeSession(
+            minimalPayload,
+            `${checkoutIdempotencyKey}:minimal`
+          );
+        }
       }
     }
 

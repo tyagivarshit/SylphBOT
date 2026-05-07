@@ -238,6 +238,9 @@ export const createPaymentIntentService = () => {
                   )
                 )
               ),
+              proposalSubtotalMinor: Math.max(0, Number(proposal.subtotalMinor || 0)),
+              proposalTaxMinor: Math.max(0, Number(proposal.taxMinor || 0)),
+              proposalTotalMinor: Math.max(0, Number(proposal.totalMinor || 0)),
             },
             metadata || undefined
           ) as Prisma.InputJsonValue,
@@ -306,6 +309,9 @@ export const createPaymentIntentService = () => {
               .trim()
               .toLowerCase() || "subscription",
           trialDays: Math.max(0, Number(toRecord(paymentIntent.metadata).trialDays || 0)),
+          proposalSubtotalMinor: Math.max(0, Number(proposal.subtotalMinor || 0)),
+          proposalTaxMinor: Math.max(0, Number(proposal.taxMinor || 0)),
+          proposalTotalMinor: Math.max(0, Number(proposal.totalMinor || 0)),
           coupon:
             String(toRecord(paymentIntent.metadata).coupon || "").trim() || null,
           ...(metadata || {}),

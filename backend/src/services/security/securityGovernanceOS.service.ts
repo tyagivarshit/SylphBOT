@@ -1278,8 +1278,14 @@ export const appendAuthEvent = async (input: {
   bumpAuthority("AuthEventLedger");
 
   await withDbMirror(() =>
-    db.authEventLedger.create({
-      data: row,
+    db.authEventLedger.upsert({
+      where: {
+        eventKey,
+      },
+      update: {
+        eventKey,
+      },
+      create: row,
     })
   );
 
@@ -2534,7 +2540,17 @@ export const issueSessionLedger = async (input: {
 
   getStore().sessionLedger.set(sessionKey, row);
   bumpAuthority("SessionLedger");
-  await withDbMirror(() => db.sessionLedger.create({ data: row }));
+  await withDbMirror(() =>
+    db.sessionLedger.upsert({
+      where: {
+        sessionKey,
+      },
+      update: {
+        sessionKey,
+      },
+      create: row,
+    })
+  );
 
   await appendAuthEvent({
     businessId: row.businessId,
@@ -2950,7 +2966,19 @@ export const attestInfraIsolation = async (input: {
   getStore().isolationAttestationLedger.set(attestationKey, row);
   bumpAuthority("IsolationAttestationLedger");
   const ledger = getDbLedger("isolationAttestationLedger");
-  await withDbMirror(() => ledger?.create?.({ data: row }));
+  await withDbMirror(() =>
+    ledger?.upsert
+      ? ledger.upsert({
+          where: {
+            attestationKey,
+          },
+          update: {
+            attestationKey,
+          },
+          create: row,
+        })
+      : ledger?.create?.({ data: row })
+  );
 
   if (breachedDomains.length) {
     if (tenantId) {

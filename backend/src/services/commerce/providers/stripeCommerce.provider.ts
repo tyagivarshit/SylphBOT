@@ -437,6 +437,38 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
   provider: "STRIPE",
 
   createCheckout: async (input: ProviderCheckoutRequest) => {
+    const providerStartedAt = Date.now();
+    let previousCheckpointAt = providerStartedAt;
+    let firstStallCheckpoint: string | null = null;
+    const logStripeCheckpoint = (
+      label: string,
+      details?: Record<string, unknown>
+    ) => {
+      const now = Date.now();
+      const segmentMs = now - previousCheckpointAt;
+      const elapsedMs = now - providerStartedAt;
+      previousCheckpointAt = now;
+
+      const payload = {
+        businessId: input.businessId,
+        paymentIntentKey: input.paymentIntentKey,
+        label,
+        segmentMs,
+        elapsedMs,
+        ...(details || {}),
+      };
+
+      console.info("[STRIPE_PROVIDER_CHECKPOINT]", payload);
+
+      if (segmentMs > 500 && !firstStallCheckpoint) {
+        firstStallCheckpoint = label;
+        console.warn("[STRIPE_PROVIDER_STALL_DETECTED]", {
+          ...payload,
+          thresholdMs: 500,
+        });
+      }
+    };
+
     assertStripeConfigReady({
       requireWebhookSecret: true,
     });
@@ -496,6 +528,15 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     };
     const nowSeconds = Math.floor(Date.now() / 1000);
     const checkoutExpiresAtSeconds = nowSeconds + 2 * 60 * 60;
+    logStripeCheckpoint("START 1 checkout metadata normalized", {
+      checkoutType,
+      subscriptionMode,
+      currency,
+      quantity,
+      amountMinor: input.amountMinor,
+      hasCustomerId: Boolean(customerId),
+      hasCustomerEmail: Boolean(customerEmail),
+    });
 
     const sessionPayload: Stripe.Checkout.SessionCreateParams = {
       payment_method_types: ["card"],
@@ -517,6 +558,11 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
         input.cancelUrl ||
         `${env.FRONTEND_URL}/billing/cancel?payment_intent_key=${input.paymentIntentKey}`,
     };
+    logStripeCheckpoint("START 2 session payload prepared", {
+      mode: sessionPayload.mode || (subscriptionMode ? "subscription" : "payment"),
+      hasDiscounts: Boolean(discounts?.length),
+      inlineTaxBehavior: inlineTaxBehavior || null,
+    });
 
     if (discounts?.length) {
       sessionPayload.discounts = discounts;
@@ -609,8 +655,13 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
         })
       );
     let session: Stripe.Checkout.Session;
+    let sessionAttemptMode: "primary" | "compat" | "reduced" | "minimal" = "primary";
 
     try {
+      logStripeCheckpoint("START 3 stripe session create requested", {
+        idempotencyKey: checkoutIdempotencyKey,
+        mode: sessionAttemptMode,
+      });
       session = await createStripeSession(sessionPayload, checkoutIdempotencyKey);
     } catch (error) {
       if (!isStripePayloadCompatibilityError(error)) {
@@ -622,8 +673,13 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       } as Stripe.Checkout.SessionCreateParams;
       delete (compatibilityPayload as Record<string, unknown>).after_expiration;
       delete (compatibilityPayload as Record<string, unknown>).expires_at;
+      sessionAttemptMode = "compat";
 
       try {
+        logStripeCheckpoint("START 3A stripe compatibility retry", {
+          idempotencyKey: `${checkoutIdempotencyKey}:compat`,
+          mode: sessionAttemptMode,
+        });
         session = await createStripeSession(
           compatibilityPayload,
           `${checkoutIdempotencyKey}:compat`
@@ -638,8 +694,13 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
         } as Stripe.Checkout.SessionCreateParams;
         delete (reducedPayload as Record<string, unknown>).phone_number_collection;
         delete (reducedPayload as Record<string, unknown>).customer_update;
+        sessionAttemptMode = "reduced";
 
         try {
+          logStripeCheckpoint("START 3B stripe reduced retry", {
+            idempotencyKey: `${checkoutIdempotencyKey}:reduced`,
+            mode: sessionAttemptMode,
+          });
           session = await createStripeSession(
             reducedPayload,
             `${checkoutIdempotencyKey}:reduced`
@@ -653,6 +714,12 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
             ...reducedPayload,
           } as Stripe.Checkout.SessionCreateParams;
           delete (minimalPayload as Record<string, unknown>).tax_id_collection;
+          sessionAttemptMode = "minimal";
+
+          logStripeCheckpoint("START 3C stripe minimal retry", {
+            idempotencyKey: `${checkoutIdempotencyKey}:minimal`,
+            mode: sessionAttemptMode,
+          });
 
           session = await createStripeSession(
             minimalPayload,
@@ -661,6 +728,14 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
         }
       }
     }
+    logStripeCheckpoint("START 4 stripe session created", {
+      sessionId: session.id,
+      providerPaymentIntentId:
+        typeof session.payment_intent === "string" ? session.payment_intent : null,
+      mode: session.mode || null,
+      sessionAttemptMode,
+      firstStallCheckpoint,
+    });
 
     return {
       provider: "STRIPE",

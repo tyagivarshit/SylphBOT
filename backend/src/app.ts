@@ -72,6 +72,9 @@ const isPlainRecord = (
 ): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+const isResponseCommitted = (res: express.Response) =>
+  res.headersSent || res.writableEnded || res.writableFinished;
+
 const normalizeJsonResponseBody = (body: unknown, statusCode: number) => {
   const success = statusCode < 400;
 
@@ -236,10 +239,39 @@ app.use(globalLimiter);
 app.use(cookieParser());
 app.use(passport.initialize());
 app.use((req, res, next) => {
+  const originalSetHeader = res.setHeader.bind(res);
   const originalJson = res.json.bind(res);
+  const originalSend = res.send.bind(res);
+  const originalRedirect = res.redirect.bind(res);
 
-  res.json = ((body: unknown) =>
-    originalJson(normalizeJsonResponseBody(body, res.statusCode))) as typeof res.json;
+  res.setHeader = ((name: string, value: string | number | readonly string[]) => {
+    if (isResponseCommitted(res)) {
+      return res;
+    }
+
+    return originalSetHeader(name, value);
+  }) as typeof res.setHeader;
+  res.json = ((body: unknown) => {
+    if (isResponseCommitted(res)) {
+      return res;
+    }
+
+    return originalJson(normalizeJsonResponseBody(body, res.statusCode));
+  }) as typeof res.json;
+  res.send = ((body?: unknown) => {
+    if (isResponseCommitted(res)) {
+      return res;
+    }
+
+    return originalSend(body as any);
+  }) as typeof res.send;
+  res.redirect = ((...args: unknown[]) => {
+    if (isResponseCommitted(res)) {
+      return res;
+    }
+
+    return (originalRedirect as (...redirectArgs: unknown[]) => typeof res)(...args);
+  }) as typeof res.redirect;
 
   next();
 });
@@ -263,13 +295,16 @@ app.use((req, res, next) => {
       },
       "Request timeout"
     );
-    if (!res.headersSent) {
-      res.status(408).json({
-        success: false,
-        message: "Request Timeout",
-        requestId: (req as any).requestId,
-      });
+    res.locals.requestTimedOut = true;
+    if (isResponseCommitted(res)) {
+      return;
     }
+
+    res.status(408).json({
+      success: false,
+      message: "Request Timeout",
+      requestId: (req as any).requestId,
+    });
   });
   next();
 });
@@ -514,6 +549,10 @@ app.use((req: any, res) => {
 });
 
 app.use((err: any, req: any, res: any, _next: any) => {
+  if (res.headersSent || res.writableEnded || res.writableFinished) {
+    return;
+  }
+
   req.logger?.error(
     {
       error: err,

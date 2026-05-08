@@ -121,6 +121,45 @@ export const createProposalEngineService = () => {
     requestedBy?: string;
     idempotencyKey?: string | null;
   }) => {
+    const proposalStartedAt = Date.now();
+    let previousCheckpointAt = proposalStartedAt;
+    let firstStallCheckpoint: string | null = null;
+    const logProposalCheckpoint = (
+      label: string,
+      details?: Record<string, unknown>
+    ) => {
+      const now = Date.now();
+      const segmentMs = now - previousCheckpointAt;
+      const elapsedMs = now - proposalStartedAt;
+      previousCheckpointAt = now;
+
+      const payload = {
+        businessId,
+        label,
+        segmentMs,
+        elapsedMs,
+        ...(details || {}),
+      };
+
+      console.info("[PROPOSAL_CHECKPOINT]", payload);
+
+      if (segmentMs > 500 && !firstStallCheckpoint) {
+        firstStallCheckpoint = label;
+        console.warn("[PROPOSAL_STALL_DETECTED]", {
+          ...payload,
+          thresholdMs: 500,
+        });
+      }
+    };
+
+    logProposalCheckpoint("START 1 proposal request parsed", {
+      planCode,
+      billingCycle,
+      currency,
+      quantity,
+      hasIdempotencyKey: Boolean(idempotencyKey),
+    });
+
     const normalizedIdempotency = String(idempotencyKey || "").trim() || null;
     const scopedIdempotency = scopeIdempotencyKey({
       businessId,
@@ -141,6 +180,10 @@ export const createProposalEngineService = () => {
       });
 
       if (existing) {
+        logProposalCheckpoint("START 1A idempotency hit", {
+          proposalKey: existing.proposalKey,
+          proposalStatus: existing.status,
+        });
         return existing;
       }
     }
@@ -160,6 +203,13 @@ export const createProposalEngineService = () => {
       }),
       resolveCommercePolicy(businessId),
     ]);
+    logProposalCheckpoint("START 2 pricing and policy resolved", {
+      planCode: normalizedPlanCode,
+      billingCycle: normalizedBillingCycle,
+      currency: normalizedCurrency,
+      pricingCatalogKey: pricing?.catalogKey || null,
+      policyKey: policy?.policyKey || null,
+    });
     const runtimeResult = await withTimeoutFallback({
       label: "proposal_runtime_influence",
       timeoutMs: 1_800,
@@ -170,6 +220,11 @@ export const createProposalEngineService = () => {
       fallback: null,
     });
     const runtime = runtimeResult.value;
+    logProposalCheckpoint("START 3 runtime influence resolved", {
+      runtimeTimedOut: runtimeResult.timedOut,
+      runtimeFailed: runtimeResult.failed,
+      runtimePolicyVersion: runtime?.policyVersion || null,
+    });
 
     const baseUnitPriceMinor =
       customUnitPriceMinor !== null && customUnitPriceMinor !== undefined
@@ -198,7 +253,7 @@ export const createProposalEngineService = () => {
     const requiresApproval = normalizedDiscount > autoApproveThreshold;
     const status: ProposalStatus = requiresApproval ? "PENDING_APPROVAL" : "APPROVED";
 
-    return prisma.$transaction(async (tx) => {
+    const createdProposal = await prisma.$transaction(async (tx) => {
       const proposal = await tx.proposalLedger.create({
         data: {
           businessId,
@@ -350,6 +405,13 @@ export const createProposalEngineService = () => {
 
       return proposal;
     });
+    logProposalCheckpoint("START 4 proposal persisted", {
+      proposalKey: createdProposal.proposalKey,
+      proposalStatus: createdProposal.status,
+      firstStallCheckpoint,
+    });
+
+    return createdProposal;
   };
 
   const transitionProposalStatus = async ({

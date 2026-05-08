@@ -390,6 +390,9 @@ class BillingController {
             timeoutMs: BILLING_CONFIRM_RECONCILE_TIMEOUT_MS,
             task: commerceProjection_service_1.commerceProjectionService.reconcileProviderWebhook({
                 provider: "STRIPE",
+                headers: {
+                    "x-commerce-manual-reconcile": "true",
+                },
                 strictBusinessId: input.businessId,
                 body: {
                     id: `manual_confirm_${input.paymentIntent.providerPaymentIntentId || input.sessionId}`,
@@ -904,6 +907,21 @@ class BillingController {
     }
     static async handleCheckout(req, res, options) {
         const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
+        const checkoutStartedAt = Date.now();
+        const checkoutRequestId = String(req?.requestId || "").trim() || null;
+        const isResponseCommitted = () => res.headersSent || res.writableEnded || res.writableFinished;
+        const logCheckoutStart = (label, details) => {
+            console.info(label, {
+                requestId: checkoutRequestId,
+                route: req.originalUrl,
+                method: req.method,
+                elapsedMs: Date.now() - checkoutStartedAt,
+                ...(details || {}),
+            });
+        };
+        logCheckoutStart("[START 1] checkout request received", {
+            redirectOnSuccess,
+        });
         if (redirectOnSuccess) {
             res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
             res.setHeader("Pragma", "no-cache");
@@ -927,6 +945,24 @@ class BillingController {
             return queryValue;
         };
         const sendCheckoutError = (input) => {
+            logCheckoutStart("[START 8] response return", {
+                success: false,
+                status: input.status,
+                reason: input.reason,
+                code: input.code || null,
+                redirectOnSuccess,
+            });
+            if (isResponseCommitted()) {
+                logCheckoutStart("[START 8] response skipped", {
+                    success: false,
+                    status: input.status,
+                    reason: input.reason,
+                    code: input.code || null,
+                    skipped: "response_already_committed",
+                    redirectOnSuccess,
+                });
+                return res;
+            }
             if (redirectOnSuccess) {
                 return res.redirect(303, BillingController.buildCheckoutFailureRedirect(input.reason));
             }
@@ -1002,6 +1038,10 @@ class BillingController {
                 });
             }
             const { businessId, email } = await getUserContext(req);
+            logCheckoutStart("[START 2] auth resolved", {
+                userId: String(req.user?.id || "").trim() || null,
+                businessId: businessId || null,
+            });
             if (!businessId) {
                 return sendCheckoutError({
                     status: 403,
@@ -1009,6 +1049,13 @@ class BillingController {
                     reason: "business_context_required",
                 });
             }
+            logCheckoutStart("[START 3] checkout context validated", {
+                businessId,
+                plan: normalizedPlan,
+                billingCycle: normalizedBilling,
+                checkoutType,
+                quantity,
+            });
             (0, stripeConfig_service_1.assertStripeConfigReady)();
             const currency = (0, billingGeo_service_1.resolveBillingCurrency)(req);
             const pricingPlan = (0, pricing_config_1.getPricingPlanConfig)(normalizedPlan);
@@ -1026,6 +1073,15 @@ class BillingController {
             const customUnitPriceMinor = Number.isFinite(explicitUnitAmountMinor) && explicitUnitAmountMinor > 0
                 ? Math.floor(explicitUnitAmountMinor)
                 : Math.round(Number(unitPrice || 0) * 100);
+            logCheckoutStart("[START 4] pricing resolved", {
+                businessId,
+                plan: normalizedPlan,
+                billingCycle: normalizedBilling,
+                currency,
+                quantity,
+                unitPrice,
+                customUnitPriceMinor,
+            });
             const activeSubscription = await prisma_1.default.subscriptionLedger.findFirst({
                 where: {
                     businessId,
@@ -1085,6 +1141,11 @@ class BillingController {
                     businessId,
                     proposalKey: proposal.proposalKey,
                 });
+            logCheckoutStart("[START 5] proposal created", {
+                businessId,
+                proposalKey: readyProposal.proposalKey,
+                proposalStatus: readyProposal.status,
+            });
             const paymentIntent = await paymentIntent_service_1.paymentIntentService.createCheckout({
                 businessId,
                 proposalKey: readyProposal.proposalKey,
@@ -1107,12 +1168,27 @@ class BillingController {
                         null,
                     customerEmail: email,
                     checkoutAttempt,
+                    checkoutStartRequestId: checkoutRequestId,
+                    checkoutStartPath: req.originalUrl,
                     prorationBehavior: String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
                     seatBased: quantity > 1,
                 },
                 idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
             });
+            logCheckoutStart("[START 6] payment intent created", {
+                businessId,
+                proposalKey: readyProposal.proposalKey,
+                paymentIntentKey: paymentIntent.paymentIntentKey,
+                provider: paymentIntent.provider,
+                paymentIntentStatus: paymentIntent.status,
+            });
             const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();
+            logCheckoutStart("[START 7] checkout url evaluated", {
+                businessId,
+                proposalKey: readyProposal.proposalKey,
+                paymentIntentKey: paymentIntent.paymentIntentKey,
+                hasCheckoutUrl: Boolean(checkoutUrl),
+            });
             if (!checkoutUrl) {
                 return sendCheckoutError({
                     status: 503,
@@ -1120,9 +1196,36 @@ class BillingController {
                     reason: "checkout_url_missing",
                 });
             }
+            if (isResponseCommitted()) {
+                logCheckoutStart("[START 8] response skipped", {
+                    success: true,
+                    businessId,
+                    proposalKey: readyProposal.proposalKey,
+                    paymentIntentKey: paymentIntent.paymentIntentKey,
+                    skipped: "response_already_committed",
+                    redirectOnSuccess,
+                });
+                return;
+            }
             if (redirectOnSuccess) {
+                logCheckoutStart("[START 8] response return", {
+                    success: true,
+                    status: 303,
+                    businessId,
+                    proposalKey: readyProposal.proposalKey,
+                    paymentIntentKey: paymentIntent.paymentIntentKey,
+                    redirectOnSuccess,
+                });
                 return res.redirect(303, checkoutUrl);
             }
+            logCheckoutStart("[START 8] response return", {
+                success: true,
+                status: 200,
+                businessId,
+                proposalKey: readyProposal.proposalKey,
+                paymentIntentKey: paymentIntent.paymentIntentKey,
+                redirectOnSuccess,
+            });
             return res.json({
                 success: true,
                 url: checkoutUrl,

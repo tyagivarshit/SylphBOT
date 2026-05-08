@@ -96,6 +96,44 @@ export const createPaymentIntentService = () => {
     metadata?: Record<string, unknown> | null;
     idempotencyKey?: string | null;
   }) => {
+    const checkoutStartedAt = Date.now();
+    let previousCheckpointAt = checkoutStartedAt;
+    let firstStallCheckpoint: string | null = null;
+    const logPaymentIntentCheckpoint = (
+      label: string,
+      details?: Record<string, unknown>
+    ) => {
+      const now = Date.now();
+      const segmentMs = now - previousCheckpointAt;
+      const elapsedMs = now - checkoutStartedAt;
+      previousCheckpointAt = now;
+
+      const payload = {
+        businessId,
+        proposalKey,
+        provider,
+        label,
+        segmentMs,
+        elapsedMs,
+        ...(details || {}),
+      };
+
+      console.info("[PAYMENT_INTENT_CHECKPOINT]", payload);
+
+      if (segmentMs > 500 && !firstStallCheckpoint) {
+        firstStallCheckpoint = label;
+        console.warn("[PAYMENT_INTENT_STALL_DETECTED]", {
+          ...payload,
+          thresholdMs: 500,
+        });
+      }
+    };
+
+    logPaymentIntentCheckpoint("START 1 checkout request parsed", {
+      hasIdempotencyKey: Boolean(idempotencyKey),
+      source,
+    });
+
     const inputMetadata = toRecord(metadata);
     const checkoutStartRequestId =
       String(inputMetadata.checkoutStartRequestId || "").trim() || null;
@@ -115,6 +153,12 @@ export const createPaymentIntentService = () => {
     if (!["APPROVED", "SENT", "ACCEPTED", "CONTRACT_GENERATED"].includes(proposal.status)) {
       throw new Error(`proposal_not_checkout_ready:${proposal.status}`);
     }
+    logPaymentIntentCheckpoint("START 2 proposal resolved", {
+      proposalStatus: proposal.status,
+      proposalId: proposal.id,
+      amountMinor: proposal.totalMinor,
+      currency: proposal.currency,
+    });
     const runtimeResult = await withTimeoutFallback({
       label: "payment_intent_checkout_runtime_influence",
       timeoutMs: 1_800,
@@ -125,6 +169,11 @@ export const createPaymentIntentService = () => {
       fallback: null,
     });
     const runtime = runtimeResult.value;
+    logPaymentIntentCheckpoint("START 3 runtime influence resolved", {
+      runtimeTimedOut: runtimeResult.timedOut,
+      runtimeFailed: runtimeResult.failed,
+      runtimePolicyVersion: runtime?.policyVersion || null,
+    });
     const chargebackRisk = Number(runtime?.predictions.chargeback_risk || 0);
     const fraudRisk = Number(runtime?.predictions.fraud_risk || 0);
     const riskGate = Math.max(
@@ -156,6 +205,9 @@ export const createPaymentIntentService = () => {
       }
 
       throw new Error(`provider_credential_unavailable:${normalizedProvider}`);
+    });
+    logPaymentIntentCheckpoint("START 4 provider authority resolved", {
+      normalizedProvider,
     });
     const adapter = commerceProviderRegistry.resolve(normalizedProvider);
     const rawIdempotency = String(idempotencyKey || "").trim() || null;
@@ -190,6 +242,10 @@ export const createPaymentIntentService = () => {
         });
 
     if (existing) {
+      logPaymentIntentCheckpoint("START 4A idempotency hit", {
+        paymentIntentKey: existing.paymentIntentKey,
+        paymentIntentStatus: existing.status,
+      });
       return existing;
     }
 
@@ -274,9 +330,18 @@ export const createPaymentIntentService = () => {
 
       return row;
     });
+    logPaymentIntentCheckpoint("START 5 payment intent persisted", {
+      paymentIntentKey: paymentIntent.paymentIntentKey,
+      paymentIntentStatus: paymentIntent.status,
+      firstStallCheckpoint,
+    });
 
     try {
       const stripeSessionStartedAt = Date.now();
+      logPaymentIntentCheckpoint("START 6 provider checkout started", {
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        normalizedProvider,
+      });
       if (normalizedProvider === "STRIPE") {
         console.info("[START 6] Stripe session start", {
           requestId: checkoutStartRequestId,
@@ -346,6 +411,10 @@ export const createPaymentIntentService = () => {
           elapsedMs: Date.now() - stripeSessionStartedAt,
         });
       }
+      logPaymentIntentCheckpoint("START 7 provider checkout completed", {
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        providerPaymentIntentId: checkout.providerPaymentIntentId,
+      });
 
       const updated = await prisma.paymentIntentLedger.update({
         where: {
@@ -402,8 +471,18 @@ export const createPaymentIntentService = () => {
         });
       }
 
+      logPaymentIntentCheckpoint("START 8 payment intent updated", {
+        paymentIntentKey: updated.paymentIntentKey,
+        paymentIntentStatus: updated.status,
+        providerPaymentIntentId: updated.providerPaymentIntentId,
+      });
+
       return updated;
     } catch (error) {
+      logPaymentIntentCheckpoint("START 8A provider checkout failed", {
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        reason: String((error as any)?.message || "provider_checkout_failed"),
+      });
       const failed = await prisma.paymentIntentLedger.update({
         where: {
           id: paymentIntent.id,

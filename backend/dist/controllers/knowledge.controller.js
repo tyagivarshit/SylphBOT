@@ -9,6 +9,7 @@ const embedding_service_1 = require("../services/embedding.service");
 const clientScope_service_1 = require("../services/clientScope.service");
 const getRequestedClientId = (req) => (0, clientScope_service_1.normalizeClientId)(req.body?.clientId || req.query?.clientId);
 const getScopedKnowledgeClientId = (client) => client.platform === "SYSTEM" ? null : client.id;
+const hasResponseCommitted = (res) => res.headersSent || res.writableEnded || res.writableFinished;
 /* =====================================================
 CREATE KNOWLEDGE
 ===================================================== */
@@ -55,6 +56,9 @@ const createKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Create knowledge error:", error);
+        if (hasResponseCommitted(res)) {
+            return;
+        }
         return res.status(error?.message === "Client not found" ? 404 : 500).json({
             success: false,
             message: error?.message === "Client not found"
@@ -97,6 +101,9 @@ const getKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Fetch knowledge error:", error);
+        if (hasResponseCommitted(res)) {
+            return;
+        }
         return res.status(error?.message === "Client not found" ? 404 : 500).json({
             success: false,
             message: error?.message === "Client not found"
@@ -140,6 +147,9 @@ const getSingleKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Fetch knowledge error:", error);
+        if (hasResponseCommitted(res)) {
+            return;
+        }
         return res.status(500).json({
             success: false,
             message: "Fetch knowledge failed",
@@ -205,6 +215,9 @@ const updateKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Update knowledge error:", error);
+        if (hasResponseCommitted(res)) {
+            return;
+        }
         return res.status(error?.message === "Client not found" ? 404 : 500).json({
             success: false,
             message: error?.message === "Client not found"
@@ -255,6 +268,9 @@ const deleteKnowledge = async (req, res) => {
     }
     catch (error) {
         console.error("Delete knowledge error:", error);
+        if (hasResponseCommitted(res)) {
+            return;
+        }
         return res.status(500).json({
             success: false,
             message: "Knowledge delete failed",

@@ -26,6 +26,9 @@ const getRequestedClientId = (
 const getScopedKnowledgeClientId = (client: { platform?: string; id: string }) =>
   client.platform === "SYSTEM" ? null : client.id;
 
+const hasResponseCommitted = (res: Response) =>
+  res.headersSent || res.writableEnded || res.writableFinished;
+
 /* =====================================================
 CREATE KNOWLEDGE
 ===================================================== */
@@ -81,6 +84,9 @@ export const createKnowledge = async (
     });
   } catch (error: any) {
     console.error("Create knowledge error:", error);
+    if (hasResponseCommitted(res)) {
+      return;
+    }
 
     return res.status(error?.message === "Client not found" ? 404 : 500).json({
       success: false,
@@ -132,6 +138,9 @@ export const getKnowledge = async (
     });
   } catch (error: any) {
     console.error("Fetch knowledge error:", error);
+    if (hasResponseCommitted(res)) {
+      return;
+    }
 
     return res.status(error?.message === "Client not found" ? 404 : 500).json({
       success: false,
@@ -184,6 +193,9 @@ export const getSingleKnowledge = async (
     });
   } catch (error) {
     console.error("Fetch knowledge error:", error);
+    if (hasResponseCommitted(res)) {
+      return;
+    }
 
     return res.status(500).json({
       success: false,
@@ -264,6 +276,9 @@ export const updateKnowledge = async (
     });
   } catch (error: any) {
     console.error("Update knowledge error:", error);
+    if (hasResponseCommitted(res)) {
+      return;
+    }
 
     return res.status(error?.message === "Client not found" ? 404 : 500).json({
       success: false,
@@ -324,6 +339,9 @@ export const deleteKnowledge = async (
     });
   } catch (error) {
     console.error("Delete knowledge error:", error);
+    if (hasResponseCommitted(res)) {
+      return;
+    }
 
     return res.status(500).json({
       success: false,

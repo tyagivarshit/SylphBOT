@@ -1031,6 +1031,25 @@ META OAUTH CONNECT (INSTAGRAM)
 const metaOAuthConnect = async (req, res) => {
     let instagramTraceId = buildInstagramTraceId(null);
     let instagramBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
+    const waDiagStartedAt = Date.now();
+    let waDiagLastCheckpointAt = waDiagStartedAt;
+    let waCheckpointReached = "[WA STEP 0] initialized";
+    let waDiagEnabled = false;
+    const logWaCheckpoint = (checkpoint, metadata = {}) => {
+        waCheckpointReached = checkpoint;
+        if (!waDiagEnabled) {
+            return;
+        }
+        const now = Date.now();
+        const durationMs = now - waDiagLastCheckpointAt;
+        waDiagLastCheckpointAt = now;
+        console.info("WA_META_FINALIZE_DIAG", {
+            checkpoint,
+            durationMs,
+            totalDurationMs: now - waDiagStartedAt,
+            ...metadata,
+        });
+    };
     try {
         req.setTimeout?.(META_OAUTH_CONNECT_TIMEOUT_MS);
         res.setTimeout(META_OAUTH_CONNECT_TIMEOUT_MS);
@@ -1038,6 +1057,15 @@ const metaOAuthConnect = async (req, res) => {
         const requestBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
         const { code, state, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, phoneNumberId, facebookPageId, instagramProfessionalAccountId, } = req.body || {};
         const oauthState = (0, metaOAuthState_1.verifyMetaOAuthState)(state);
+        waDiagEnabled = oauthState?.platform === "WHATSAPP";
+        if (waDiagEnabled) {
+            logWaCheckpoint("[WA STEP 1] request entered", {
+                hasCode: Boolean(code),
+                hasState: Boolean(state),
+                hasUserId: Boolean(userId),
+                requestBusinessId: requestBusinessId || null,
+            });
+        }
         instagramTraceId = buildInstagramTraceId(oauthState?.nonce || null);
         instagramBusinessId = oauthState?.businessId || requestBusinessId || null;
         const failInstagramConnect = (options) => {
@@ -1078,6 +1106,12 @@ const metaOAuthConnect = async (req, res) => {
         const businessId = oauthState.businessId;
         const targetPlatform = oauthState.platform;
         instagramBusinessId = businessId;
+        if (targetPlatform === "WHATSAPP") {
+            logWaCheckpoint("[WA STEP 2] state verified", {
+                businessId,
+                mode: oauthState.mode,
+            });
+        }
         if (targetPlatform === "INSTAGRAM") {
             await recordInstagramConnectStage({
                 traceId: instagramTraceId,
@@ -1187,6 +1221,9 @@ const metaOAuthConnect = async (req, res) => {
                 message: "Meta token exchange failed",
             });
         }
+        if (targetPlatform === "WHATSAPP") {
+            logWaCheckpoint("[WA STEP 3] short token exchanged");
+        }
         if (targetPlatform === "INSTAGRAM") {
             await recordInstagramConnectStage({
                 traceId: instagramTraceId,
@@ -1230,6 +1267,18 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
             const availablePhoneNumbers = await fetchWhatsAppPhoneCandidates(shortToken);
+            const discoveredWabaCandidate = availablePhoneNumbers.find((candidate) => Boolean(candidate.wabaId)) || null;
+            logWaCheckpoint("[WA STEP 5] accounts/pages discovered", {
+                candidateCount: availablePhoneNumbers.length,
+            });
+            logWaCheckpoint("[WA STEP 6] whatsapp business account discovered", {
+                wabaDiscovered: Boolean(discoveredWabaCandidate?.wabaId),
+                wabaId: discoveredWabaCandidate?.wabaId || null,
+                businessManagerId: discoveredWabaCandidate?.businessManagerId || null,
+            });
+            logWaCheckpoint("[WA STEP 7] phone numbers fetched", {
+                phoneNumberCount: availablePhoneNumbers.length,
+            });
             if (!availablePhoneNumbers.length) {
                 return res.status(400).json({
                     success: false,
@@ -1249,6 +1298,10 @@ const metaOAuthConnect = async (req, res) => {
                     code: "WA_PHONE_NUMBER_NOT_FOUND",
                 });
             }
+            logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
+                selectionRequired: true,
+                selectedPhoneNumberId: null,
+            });
             return res.status(409).json({
                 success: false,
                 data: {
@@ -1379,6 +1432,9 @@ const metaOAuthConnect = async (req, res) => {
                 data: null,
                 message: "Unable to resolve long lived token",
             });
+        }
+        if (targetPlatform === "WHATSAPP") {
+            logWaCheckpoint("[WA STEP 4] long token exchanged");
         }
         if (targetPlatform === "INSTAGRAM") {
             await recordInstagramConnectStage({
@@ -1763,6 +1819,18 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
             const availablePhoneNumbers = await fetchWhatsAppPhoneCandidates(longToken);
+            const discoveredWabaCandidate = availablePhoneNumbers.find((candidate) => Boolean(candidate.wabaId)) || null;
+            logWaCheckpoint("[WA STEP 5] accounts/pages discovered", {
+                candidateCount: availablePhoneNumbers.length,
+            });
+            logWaCheckpoint("[WA STEP 6] whatsapp business account discovered", {
+                wabaDiscovered: Boolean(discoveredWabaCandidate?.wabaId),
+                wabaId: discoveredWabaCandidate?.wabaId || null,
+                businessManagerId: discoveredWabaCandidate?.businessManagerId || null,
+            });
+            logWaCheckpoint("[WA STEP 7] phone numbers fetched", {
+                phoneNumberCount: availablePhoneNumbers.length,
+            });
             if (!availablePhoneNumbers.length) {
                 return res.status(400).json({
                     success: false,
@@ -1783,6 +1851,10 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
             if (!selectedPhoneNumberId) {
+                logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
+                    selectionRequired: true,
+                    selectedPhoneNumberId: null,
+                });
                 return res.status(409).json({
                     success: false,
                     data: {
@@ -1803,6 +1875,10 @@ const metaOAuthConnect = async (req, res) => {
             }
             const selectedPhone = availablePhoneNumbers.find((candidate) => candidate.phoneNumberId === selectedPhoneNumberId);
             if (!selectedPhone) {
+                logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
+                    selectionRequired: true,
+                    selectedPhoneNumberId: selectedPhoneNumberId || null,
+                });
                 return res.status(400).json({
                     success: false,
                     data: {
@@ -1822,7 +1898,16 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
             const resolvedPhoneNumberId = selectedPhone.phoneNumberId;
+            logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
+                selectionRequired: false,
+                selectedPhoneNumberId: resolvedPhoneNumberId,
+            });
             const phoneProfile = await fetchWhatsAppPhoneProfile(resolvedPhoneNumberId, longToken);
+            logWaCheckpoint("[WA STEP 9] webhook/provider registration started", {
+                phoneNumberId: resolvedPhoneNumberId,
+                businessManagerId: selectedPhone.businessManagerId || null,
+                wabaId: selectedPhone.wabaId || null,
+            });
             const connectResult = await (0, saasPackagingConnectHubOS_service_1.connectWhatsAppGuidedWizard)({
                 businessId,
                 tenantId: businessId,
@@ -1853,6 +1938,10 @@ const metaOAuthConnect = async (req, res) => {
                         "DISCONNECTED",
                 },
             });
+            logWaCheckpoint("[WA STEP 10] webhook/provider registration complete", {
+                integrationStatus: connectResult.integration?.status || null,
+                attemptStatus: connectResult.attempt?.status || null,
+            });
             if (connectResult.integration?.status !== "CONNECTED") {
                 const failureCode = normalizeOptionalString(connectResult.attempt?.errorCode) ||
                     normalizeOptionalString(connectResult.health?.rootCauseCode) ||
@@ -1879,11 +1968,16 @@ const metaOAuthConnect = async (req, res) => {
                     code: failureCode,
                 });
             }
+            logWaCheckpoint("[WA STEP 11] DB persist started");
             const whatsappClient = await upsertConnectedClient({
                 businessId,
                 platform: "WHATSAPP",
                 phoneNumberId: resolvedPhoneNumberId,
                 accessToken: (0, encrypt_1.encrypt)(longToken),
+            });
+            logWaCheckpoint("[WA STEP 12] DB persist complete", {
+                clientId: whatsappClient.id,
+                phoneNumberId: whatsappClient.phoneNumberId || null,
             });
             connectedClients.push(whatsappClient);
             await queueOnboardingDemoForClient(businessId, whatsappClient);
@@ -1899,6 +1993,12 @@ const metaOAuthConnect = async (req, res) => {
                 phoneNumberId: client.phoneNumberId || null,
             };
         }));
+        if (targetPlatform === "WHATSAPP") {
+            logWaCheckpoint("[WA STEP 13] response return", {
+                mode: oauthState.mode,
+                connectedClients: healthRows.length,
+            });
+        }
         return res.json({
             success: true,
             data: {
@@ -1911,6 +2011,15 @@ const metaOAuthConnect = async (req, res) => {
         });
     }
     catch (error) {
+        if (waDiagEnabled) {
+            const errorMessage = error instanceof Error ? error.message : String(error || "Unknown error");
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            console.error("WA_META_FINALIZE_DIAG_ERROR", {
+                "error.message": errorMessage,
+                "error.stack": errorStack,
+                checkpointReached: waCheckpointReached,
+            });
+        }
         if (error instanceof MetaOAuthFlowError) {
             const doctorReport = instagramBusinessId
                 ? await (0, saasPackagingConnectHubOS_service_1.runMetaConnectDoctor)({

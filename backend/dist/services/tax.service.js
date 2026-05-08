@@ -1,21 +1,35 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getStripeTaxDetails = exports.getTaxConfig = void 0;
-const resolveTaxProfile = (currency) => {
-    const normalizedCurrency = String(currency || "").trim().toUpperCase();
-    if (normalizedCurrency === "INR") {
-        return {
-            taxRegion: "IN",
-            taxType: "GST",
-        };
+const resolveTaxProfile = () => ({
+    taxRegion: "AUTO",
+    taxType: "AUTO",
+});
+const resolveInvoiceTaxType = (invoice) => {
+    const totalTaxAmounts = Array.isArray(invoice?.total_tax_amounts)
+        ? invoice.total_tax_amounts
+        : [];
+    const taxTypes = totalTaxAmounts
+        .map((row) => String(row?.tax_rate_details?.tax_type ||
+        row?.tax_rate?.tax_type ||
+        row?.tax_type ||
+        "")
+        .trim()
+        .toLowerCase())
+        .filter(Boolean);
+    if (taxTypes.some((taxType) => taxType.includes("sales_tax"))) {
+        return "SALES_TAX";
     }
-    return {
-        taxRegion: "GLOBAL",
-        taxType: "VAT",
-    };
+    if (taxTypes.some((taxType) => taxType.includes("gst"))) {
+        return "GST";
+    }
+    if (taxTypes.some((taxType) => taxType.includes("vat"))) {
+        return "VAT";
+    }
+    return "AUTO";
 };
 const getTaxConfig = (input) => {
-    const taxProfile = resolveTaxProfile(input.currency);
+    const taxProfile = resolveTaxProfile();
     return {
         automatic_tax: {
             enabled: true,
@@ -45,7 +59,7 @@ const getStripeTaxDetails = (invoice) => {
     const total = invoice?.amount_paid || 0;
     const taxAmount = invoice?.total_tax_amounts?.reduce((sum, taxRow) => sum + (taxRow?.amount || 0), 0) || 0;
     const currency = String(invoice?.currency || "INR").toUpperCase();
-    const { taxType } = resolveTaxProfile(currency);
+    const taxType = resolveInvoiceTaxType(invoice);
     return {
         subtotal,
         total,

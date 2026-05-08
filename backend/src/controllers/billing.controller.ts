@@ -1186,6 +1186,8 @@ export class BillingController {
     const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
     const checkoutStartedAt = Date.now();
     const checkoutRequestId = String((req as any)?.requestId || "").trim() || null;
+    const isResponseCommitted = () =>
+      res.headersSent || res.writableEnded || res.writableFinished;
     const logCheckoutStart = (
       label: string,
       details?: Record<string, unknown>
@@ -1198,6 +1200,9 @@ export class BillingController {
         ...(details || {}),
       });
     };
+    logCheckoutStart("[START 1] checkout request received", {
+      redirectOnSuccess,
+    });
     if (redirectOnSuccess) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
       res.setHeader("Pragma", "no-cache");
@@ -1237,6 +1242,18 @@ export class BillingController {
         code: input.code || null,
         redirectOnSuccess,
       });
+
+      if (isResponseCommitted()) {
+        logCheckoutStart("[START 8] response skipped", {
+          success: false,
+          status: input.status,
+          reason: input.reason,
+          code: input.code || null,
+          skipped: "response_already_committed",
+          redirectOnSuccess,
+        });
+        return res;
+      }
 
       if (redirectOnSuccess) {
         return res.redirect(303, BillingController.buildCheckoutFailureRedirect(input.reason));
@@ -1339,6 +1356,13 @@ export class BillingController {
         });
       }
 
+      logCheckoutStart("[START 3] checkout context validated", {
+        businessId,
+        plan: normalizedPlan,
+        billingCycle: normalizedBilling,
+        checkoutType,
+        quantity,
+      });
       assertStripeConfigReady();
 
       const currency = resolveBillingCurrency(req);
@@ -1475,8 +1499,21 @@ export class BillingController {
         },
         idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
       });
+      logCheckoutStart("[START 6] payment intent created", {
+        businessId,
+        proposalKey: readyProposal.proposalKey,
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        provider: paymentIntent.provider,
+        paymentIntentStatus: paymentIntent.status,
+      });
 
       const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();
+      logCheckoutStart("[START 7] checkout url evaluated", {
+        businessId,
+        proposalKey: readyProposal.proposalKey,
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        hasCheckoutUrl: Boolean(checkoutUrl),
+      });
 
       if (!checkoutUrl) {
         return sendCheckoutError({
@@ -1484,6 +1521,18 @@ export class BillingController {
           message: "Stripe checkout link is temporarily unavailable. Please retry shortly.",
           reason: "checkout_url_missing",
         });
+      }
+
+      if (isResponseCommitted()) {
+        logCheckoutStart("[START 8] response skipped", {
+          success: true,
+          businessId,
+          proposalKey: readyProposal.proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          skipped: "response_already_committed",
+          redirectOnSuccess,
+        });
+        return;
       }
 
       if (redirectOnSuccess) {

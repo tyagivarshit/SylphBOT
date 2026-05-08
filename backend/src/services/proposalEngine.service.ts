@@ -22,6 +22,11 @@ import {
 } from "./commerce/shared";
 import { toRecord } from "./reception.shared";
 
+const PROPOSAL_RUNTIME_INFLUENCE_TIMEOUT_MS = 900;
+const PROPOSAL_RUNTIME_INFLUENCE_FAST_LANE_TIMEOUT_MS = 320;
+const PROPOSAL_POLICY_TIMEOUT_MS = 900;
+const PROPOSAL_POLICY_FAST_LANE_TIMEOUT_MS = 320;
+
 const pickPricingCatalog = (rows: any[], businessId: string) => {
   const businessSpecific = rows.find((row) => row.businessId === businessId);
   if (businessSpecific) {
@@ -193,26 +198,44 @@ export const createProposalEngineService = () => {
     const normalizedPlanCode = String(planCode || "").trim().toUpperCase() || "CUSTOM";
     const normalizedCurrency = normalizeCurrency(currency);
     const normalizedBillingCycle = normalizeBillingCycle(billingCycle);
+    const requestMetadata = toRecord(metadata);
+    const isCheckoutFastLane =
+      String(requestMetadata.checkoutSource || requestMetadata.origin || "")
+        .trim()
+        .toLowerCase() === "billing_controller";
 
-    const [pricing, policy] = await Promise.all([
+    const [pricing, policyResult] = await Promise.all([
       resolvePricingCatalog({
         businessId,
         planCode: normalizedPlanCode,
         currency: normalizedCurrency,
         billingCycle: normalizedBillingCycle,
       }),
-      resolveCommercePolicy(businessId),
+      withTimeoutFallback({
+        label: "proposal_policy_lookup",
+        timeoutMs: isCheckoutFastLane
+          ? PROPOSAL_POLICY_FAST_LANE_TIMEOUT_MS
+          : PROPOSAL_POLICY_TIMEOUT_MS,
+        task: resolveCommercePolicy(businessId),
+        fallback: null,
+      }),
     ]);
+    const policy = policyResult.value;
     logProposalCheckpoint("START 2 pricing and policy resolved", {
       planCode: normalizedPlanCode,
       billingCycle: normalizedBillingCycle,
       currency: normalizedCurrency,
       pricingCatalogKey: pricing?.catalogKey || null,
       policyKey: policy?.policyKey || null,
+      policyTimedOut: policyResult.timedOut,
+      policyFailed: policyResult.failed,
+      isCheckoutFastLane,
     });
     const runtimeResult = await withTimeoutFallback({
       label: "proposal_runtime_influence",
-      timeoutMs: 1_800,
+      timeoutMs: isCheckoutFastLane
+        ? PROPOSAL_RUNTIME_INFLUENCE_FAST_LANE_TIMEOUT_MS
+        : PROPOSAL_RUNTIME_INFLUENCE_TIMEOUT_MS,
       task: getIntelligenceRuntimeInfluence({
         businessId,
         leadId,
@@ -225,6 +248,12 @@ export const createProposalEngineService = () => {
       runtimeFailed: runtimeResult.failed,
       runtimePolicyVersion: runtime?.policyVersion || null,
     });
+    if (isCheckoutFastLane && (runtimeResult.timedOut || runtimeResult.failed)) {
+      void getIntelligenceRuntimeInfluence({
+        businessId,
+        leadId,
+      }).catch(() => undefined);
+    }
 
     const baseUnitPriceMinor =
       customUnitPriceMinor !== null && customUnitPriceMinor !== undefined
@@ -253,6 +282,7 @@ export const createProposalEngineService = () => {
     const requiresApproval = normalizedDiscount > autoApproveThreshold;
     const status: ProposalStatus = requiresApproval ? "PENDING_APPROVAL" : "APPROVED";
 
+    const shouldDeferTaxCompliance = isCheckoutFastLane;
     const createdProposal = await prisma.$transaction(async (tx) => {
       const proposal = await tx.proposalLedger.create({
         data: {
@@ -378,33 +408,72 @@ export const createProposalEngineService = () => {
         });
       }
 
-      await taxComplianceService.recordTaxEvent({
-        tx,
-        businessId,
-        eventType: "PROPOSAL",
-        jurisdiction: String(toRecord(policy?.taxRules).jurisdiction || "GLOBAL"),
-        taxType: String(toRecord(policy?.taxRules).taxType || (normalizedCurrency === "INR" ? "GST" : "VAT")),
-        reverseCharge: Boolean(toRecord(policy?.taxRules).reverseCharge),
-        exemptionCode:
-          String(toRecord(policy?.taxRules).exemptionCode || "").trim() || null,
-        withholdingMinor: Number(toRecord(policy?.taxRules).withholdingMinor || 0),
-        taxableMinor: subtotalAfterDiscount,
-        taxMinor,
-        totalMinor,
-        currency: normalizedCurrency,
-        proposalKey: proposal.proposalKey,
-        mappingRef: `proposal:${proposal.proposalKey}`,
-        metadata: {
-          policyKey: policy?.policyKey || null,
-          policyVersion: policy?.version || null,
-          planCode: normalizedPlanCode,
-          billingCycle: normalizedBillingCycle,
-        },
-        idempotencyKey: `tax:proposal:${proposal.id}`,
-      });
+      if (!shouldDeferTaxCompliance) {
+        await taxComplianceService.recordTaxEvent({
+          tx,
+          businessId,
+          eventType: "PROPOSAL",
+          jurisdiction: String(toRecord(policy?.taxRules).jurisdiction || "GLOBAL"),
+          taxType: String(toRecord(policy?.taxRules).taxType || (normalizedCurrency === "INR" ? "GST" : "VAT")),
+          reverseCharge: Boolean(toRecord(policy?.taxRules).reverseCharge),
+          exemptionCode:
+            String(toRecord(policy?.taxRules).exemptionCode || "").trim() || null,
+          withholdingMinor: Number(toRecord(policy?.taxRules).withholdingMinor || 0),
+          taxableMinor: subtotalAfterDiscount,
+          taxMinor,
+          totalMinor,
+          currency: normalizedCurrency,
+          proposalKey: proposal.proposalKey,
+          mappingRef: `proposal:${proposal.proposalKey}`,
+          metadata: {
+            policyKey: policy?.policyKey || null,
+            policyVersion: policy?.version || null,
+            planCode: normalizedPlanCode,
+            billingCycle: normalizedBillingCycle,
+          },
+          idempotencyKey: `tax:proposal:${proposal.id}`,
+        });
+      }
 
       return proposal;
     });
+    if (shouldDeferTaxCompliance) {
+      void prisma
+        .$transaction(async (tx) => {
+          await taxComplianceService.recordTaxEvent({
+            tx,
+            businessId,
+            eventType: "PROPOSAL",
+            jurisdiction: String(toRecord(policy?.taxRules).jurisdiction || "GLOBAL"),
+            taxType: String(
+              toRecord(policy?.taxRules).taxType ||
+                (normalizedCurrency === "INR" ? "GST" : "VAT")
+            ),
+            reverseCharge: Boolean(toRecord(policy?.taxRules).reverseCharge),
+            exemptionCode:
+              String(toRecord(policy?.taxRules).exemptionCode || "").trim() ||
+              null,
+            withholdingMinor: Number(
+              toRecord(policy?.taxRules).withholdingMinor || 0
+            ),
+            taxableMinor: subtotalAfterDiscount,
+            taxMinor,
+            totalMinor,
+            currency: normalizedCurrency,
+            proposalKey: createdProposal.proposalKey,
+            mappingRef: `proposal:${createdProposal.proposalKey}`,
+            metadata: {
+              policyKey: policy?.policyKey || null,
+              policyVersion: policy?.version || null,
+              planCode: normalizedPlanCode,
+              billingCycle: normalizedBillingCycle,
+              deferredFromFastLane: true,
+            },
+            idempotencyKey: `tax:proposal:${createdProposal.id}`,
+          });
+        })
+        .catch(() => undefined);
+    }
     logProposalCheckpoint("START 4 proposal persisted", {
       proposalKey: createdProposal.proposalKey,
       proposalStatus: createdProposal.status,

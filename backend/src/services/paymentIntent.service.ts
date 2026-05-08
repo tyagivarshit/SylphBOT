@@ -27,6 +27,9 @@ import {
   toMinor,
 } from "./commerce/shared";
 
+const PAYMENT_INTENT_RUNTIME_INFLUENCE_TIMEOUT_MS = 900;
+const PAYMENT_INTENT_RUNTIME_INFLUENCE_FAST_LANE_TIMEOUT_MS = 320;
+
 const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -135,6 +138,10 @@ export const createPaymentIntentService = () => {
     });
 
     const inputMetadata = toRecord(metadata);
+    const isCheckoutFastLane =
+      String(inputMetadata.checkoutSource || inputMetadata.origin || "")
+        .trim()
+        .toLowerCase() === "billing_controller";
     const checkoutStartRequestId =
       String(inputMetadata.checkoutStartRequestId || "").trim() || null;
     const checkoutStartPath =
@@ -161,7 +168,9 @@ export const createPaymentIntentService = () => {
     });
     const runtimeResult = await withTimeoutFallback({
       label: "payment_intent_checkout_runtime_influence",
-      timeoutMs: 1_800,
+      timeoutMs: isCheckoutFastLane
+        ? PAYMENT_INTENT_RUNTIME_INFLUENCE_FAST_LANE_TIMEOUT_MS
+        : PAYMENT_INTENT_RUNTIME_INFLUENCE_TIMEOUT_MS,
       task: getIntelligenceRuntimeInfluence({
         businessId,
         leadId: proposal.leadId || null,
@@ -173,7 +182,14 @@ export const createPaymentIntentService = () => {
       runtimeTimedOut: runtimeResult.timedOut,
       runtimeFailed: runtimeResult.failed,
       runtimePolicyVersion: runtime?.policyVersion || null,
+      isCheckoutFastLane,
     });
+    if (isCheckoutFastLane && (runtimeResult.timedOut || runtimeResult.failed)) {
+      void getIntelligenceRuntimeInfluence({
+        businessId,
+        leadId: proposal.leadId || null,
+      }).catch(() => undefined);
+    }
     const chargebackRisk = Number(runtime?.predictions.chargeback_risk || 0);
     const fraudRisk = Number(runtime?.predictions.fraud_risk || 0);
     const riskGate = Math.max(

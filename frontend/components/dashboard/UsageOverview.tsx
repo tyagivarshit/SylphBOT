@@ -58,7 +58,9 @@ export default function UsageOverview() {
         setLoading(true);
         setError("");
 
-        const payload = await getUsageOverview();
+        const payload = await getUsageOverview({
+          forceRefresh: reloadKey > 0,
+        });
 
         if (!mounted) {
           return;

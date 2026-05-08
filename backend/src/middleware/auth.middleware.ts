@@ -21,7 +21,14 @@ import {
 
 const AUTH_CONTEXT_CACHE_TTL_MS = 15_000;
 const SESSION_ANOMALY_RECHECK_MS = 10_000;
-const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 450;
+const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 180;
+const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
+  "/api/billing/checkout",
+  "/api/security",
+  "/api/auth",
+  "/api/oauth",
+  "/api/commerce",
+];
 
 type CachedAuthContext = {
   userId: string;
@@ -199,20 +206,31 @@ const runSessionAnomalyGuard = async (
     businessId: string | null;
   }
 ) => {
-  try {
-    await withFastGuardTimeout(
-      enforceSessionAnomalyGuard(req, input),
-      SESSION_ANOMALY_GUARD_TIMEOUT_MS
-    );
-  } catch (error) {
+  const route = String(req.originalUrl || req.url || "").trim();
+  const shouldEnforceSynchronously =
+    req.method !== "GET" ||
+    SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => route.startsWith(prefix));
+  const task = withFastGuardTimeout(
+    enforceSessionAnomalyGuard(req, input),
+    SESSION_ANOMALY_GUARD_TIMEOUT_MS
+  ).catch((error) => {
     // Fail open: auth should remain responsive even if anomaly telemetry is slow.
     req.logger?.warn(
       {
         error: (error as Error)?.message || String(error || "unknown"),
+        route,
+        method: req.method,
       },
       "Session anomaly guard skipped"
     );
+  });
+
+  if (shouldEnforceSynchronously) {
+    await task;
+    return;
   }
+
+  void task;
 };
 
 export const protect = async (

@@ -94,7 +94,23 @@ const BILLING_CONFIRM_LOOKUP_TIMEOUT_MS = 700;
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60_000;
 const BILLING_CONFIRM_STRIPE_TIMEOUT_MS = 1_100;
 const BILLING_CONFIRM_RECONCILE_TIMEOUT_MS = 1_300;
+const BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS = 650;
+const BILLING_PROJECTION_CACHE_TTL_MS = 4_000;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
+
+const billingProjectionCache = new Map<
+  string,
+  {
+    value?: Record<string, unknown>;
+    expiresAt: number;
+    promise?: Promise<Record<string, unknown>>;
+  }
+>();
+
+const getBillingProjectionCacheKey = (
+  businessId: string,
+  currencyHint: string
+) => `${businessId}:${currencyHint}`;
 
 type PlanRow = {
   id: string;
@@ -327,33 +343,71 @@ async function getUserContext(req: Request): Promise<UserContext> {
     throw new Error("Unauthorized");
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      email: true,
-      businessId: true,
-    },
+  const businessIdFromRequest =
+    String((req as any)?.tenant?.businessId || req.user?.businessId || "").trim() ||
+    null;
+  const emailFromRequest = String(req.user?.email || "").trim().toLowerCase() || null;
+
+  if (businessIdFromRequest && emailFromRequest) {
+    return {
+      userId,
+      businessId: businessIdFromRequest,
+      email: emailFromRequest,
+    };
+  }
+
+  const userLookup = await withTimeoutFallback({
+    label: "billing_user_context_lookup",
+    timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
+    task: prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        businessId: true,
+      },
+    }),
+    fallback: null as { id: string; email: string; businessId: string | null } | null,
   });
+  const user = userLookup.value;
 
   if (!user) {
+    if (emailFromRequest) {
+      return {
+        userId,
+        businessId: businessIdFromRequest,
+        email: emailFromRequest,
+      };
+    }
+
     throw new Error("Unauthorized");
   }
 
-  const businessIdHint = String(req.user?.businessId || user.businessId || "").trim() || null;
-  const identity = businessIdHint
+  const businessIdHint =
+    String(businessIdFromRequest || user.businessId || "").trim() || null;
+  const identityResult = businessIdHint
     ? {
         businessId: businessIdHint,
       }
-    : await resolveUserWorkspaceIdentity({
-        userId,
-        preferredBusinessId: req.user?.businessId || user.businessId || null,
+    : await withTimeoutFallback({
+        label: "billing_workspace_identity_lookup",
+        timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
+        task: resolveUserWorkspaceIdentity({
+          userId,
+          preferredBusinessId:
+            req.user?.businessId || user.businessId || businessIdFromRequest || null,
+        }),
+        fallback: {
+          businessId: user.businessId || null,
+        },
       });
+  const identity = "value" in identityResult ? identityResult.value : identityResult;
+  const resolvedEmail = emailFromRequest || String(user.email || "").trim().toLowerCase();
 
   return {
     userId,
     businessId: identity.businessId,
-    email: user.email,
+    email: resolvedEmail,
   };
 }
 
@@ -1067,15 +1121,24 @@ export class BillingController {
       ? invoicesResult.value
       : [];
     const invoices = invoicesRaw.map(mapInvoiceForClient);
-    const stripeLiveResult = await withTimeoutFallback({
-      label: "billing_stripe_live_projection",
-      timeoutMs: 900,
-      task: BillingController.buildStripeLiveSnapshot({
-        businessId,
-        fallbackSubscription: billingContext.subscription,
-      }),
-      fallback: null as StripeLiveSnapshot | null,
-    });
+    const shouldAttemptStripeLive = Boolean(
+      String((billingContext.subscription as any)?.stripeSubscriptionId || "").trim()
+    );
+    const stripeLiveResult = shouldAttemptStripeLive
+      ? await withTimeoutFallback({
+          label: "billing_stripe_live_projection",
+          timeoutMs: 450,
+          task: BillingController.buildStripeLiveSnapshot({
+            businessId,
+            fallbackSubscription: billingContext.subscription,
+          }),
+          fallback: null as StripeLiveSnapshot | null,
+        })
+      : {
+          value: null as StripeLiveSnapshot | null,
+          timedOut: false,
+          failed: false,
+        };
     const stripeLive = stripeLiveResult.value;
     const hasStripeLiveInvoices = Boolean(stripeLive?.invoices?.length);
     const effectiveSubscription =
@@ -1715,25 +1778,83 @@ export class BillingController {
         }).catch(() => undefined);
       }
       res.setHeader("Cache-Control", "no-store");
-      const projection = await withTimeoutFallback({
-        label: "billing_projection_api_guard",
-        timeoutMs: BILLING_CONFIRM_REQUEST_TIMEOUT_MS,
-        task: BillingController.buildBillingResponse(businessId, req),
-        fallback: {
-          success: true,
-          subscription: null,
-          billing: EMPTY_BILLING_CONTEXT,
-          usage: EMPTY_USAGE_SUMMARY,
-          currency: resolveBillingCurrency(req),
-          invoices: [],
-          meta: {
-            degraded: true,
-            reason: "billing_projection_timeout_guard",
+      const currencyHint = resolveBillingCurrency(req);
+      const cacheKey = businessId
+        ? getBillingProjectionCacheKey(businessId, currencyHint)
+        : null;
+
+      if (cacheKey) {
+        const cached = billingProjectionCache.get(cacheKey);
+        if (cached?.value && cached.expiresAt > Date.now()) {
+          emitPerformanceMetric({
+            name: "CACHE_HIT",
+            businessId,
+            route: "billing_projection",
+            metadata: {
+              cache: "memory_billing_projection",
+            },
+          });
+          return res.json(cached.value);
+        }
+
+        if (cached?.promise) {
+          return res.json(await cached.promise);
+        }
+
+        emitPerformanceMetric({
+          name: "CACHE_MISS",
+          businessId,
+          route: "billing_projection",
+          metadata: {
+            cache: "memory_billing_projection",
           },
-        },
+        });
+      }
+
+      const computeProjection = (async () => {
+        const projection = await withTimeoutFallback({
+          label: "billing_projection_api_guard",
+          timeoutMs: BILLING_CONFIRM_REQUEST_TIMEOUT_MS,
+          task: BillingController.buildBillingResponse(businessId, req),
+          fallback: {
+            success: true,
+            subscription: null,
+            billing: EMPTY_BILLING_CONTEXT,
+            usage: EMPTY_USAGE_SUMMARY,
+            currency: currencyHint,
+            invoices: [],
+            meta: {
+              degraded: true,
+              reason: "billing_projection_timeout_guard",
+            },
+          },
+        });
+
+        return projection.value as Record<string, unknown>;
+      })();
+
+      if (cacheKey) {
+        billingProjectionCache.set(cacheKey, {
+          expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+          promise: computeProjection,
+        });
+      }
+
+      const value = await computeProjection.catch((error) => {
+        if (cacheKey) {
+          billingProjectionCache.delete(cacheKey);
+        }
+        throw error;
       });
 
-      return res.json(projection.value);
+      if (cacheKey) {
+        billingProjectionCache.set(cacheKey, {
+          value,
+          expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+        });
+      }
+
+      return res.json(value);
     } catch (error: any) {
       if (error?.message === "Unauthorized") {
         return res.status(401).json({

@@ -6,8 +6,10 @@ import { env } from "../config/env";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 const CACHE_TTL = 60 * 3;
+const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15_000;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
 const EARLY_ACCESS_CACHE_TTL_MS = 30_000;
+const EARLY_ACCESS_CACHE_KEY = "__global__";
 
 const earlyAccessCache = new Map<
   string,
@@ -20,6 +22,15 @@ const earlyAccessCache = new Map<
   }
 >();
 
+const subscriptionMemoryCache = new Map<
+  string,
+  {
+    value: any | null;
+    expiresAt: number;
+    promise?: Promise<any | null>;
+  }
+>();
+
 export const getBillingCacheKey = (businessId: string) => `sub:${businessId}`;
 
 export const invalidateBillingContextCache = async (businessId: string) => {
@@ -29,6 +40,7 @@ export const invalidateBillingContextCache = async (businessId: string) => {
     return false;
   }
 
+  subscriptionMemoryCache.delete(normalizedBusinessId);
   await redis.del(getBillingCacheKey(normalizedBusinessId)).catch(() => undefined);
   return true;
 };
@@ -95,6 +107,24 @@ const mapCanonicalSubscription = (row: any) => ({
 });
 
 const getCachedSubscription = async (businessId: string) => {
+  const inMemory = subscriptionMemoryCache.get(businessId);
+  if (inMemory && !inMemory.promise && inMemory.expiresAt > Date.now()) {
+    emitPerformanceMetric({
+      name: "CACHE_HIT",
+      businessId,
+      route: "subscription_context",
+      metadata: {
+        cache: "memory_subscription",
+      },
+    });
+    return inMemory.value;
+  }
+
+  if (inMemory?.promise) {
+    return inMemory.promise;
+  }
+
+  const loadPromise = (async () => {
   const cacheKey = getBillingCacheKey(businessId);
   const cached = await redis.get(cacheKey).catch(() => null);
 
@@ -108,7 +138,12 @@ const getCachedSubscription = async (businessId: string) => {
       },
     });
     try {
-      return JSON.parse(cached);
+      const parsed = JSON.parse(cached);
+      subscriptionMemoryCache.set(businessId, {
+        value: parsed,
+        expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
+      });
+      return parsed;
     } catch {
       await redis.del(cacheKey).catch(() => undefined);
     }
@@ -146,15 +181,39 @@ const getCachedSubscription = async (businessId: string) => {
         CACHE_TTL
       )
       .catch(() => undefined);
+    subscriptionMemoryCache.set(businessId, {
+      value: subscription,
+      expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
+    });
+  } else {
+    subscriptionMemoryCache.set(businessId, {
+      value: null,
+      expiresAt: Date.now() + 5_000,
+    });
   }
 
   return subscription;
+  })().finally(() => {
+    const latest = subscriptionMemoryCache.get(businessId);
+    if (latest?.promise) {
+      subscriptionMemoryCache.set(businessId, {
+        value: latest.value ?? null,
+        expiresAt: latest.expiresAt || 0,
+      });
+    }
+  });
+
+  subscriptionMemoryCache.set(businessId, {
+    value: inMemory?.value ?? null,
+    expiresAt: inMemory?.expiresAt || 0,
+    promise: loadPromise,
+  });
+
+  return loadPromise;
 };
 
 const getEarlyAccessSnapshot = async (subscription: any | null) => {
-  const cacheKey = subscription?.businessId
-    ? String(subscription.businessId)
-    : "__global__";
+  const cacheKey = EARLY_ACCESS_CACHE_KEY;
   const cached = earlyAccessCache.get(cacheKey);
 
   if (cached && cached.expiresAt > Date.now()) {

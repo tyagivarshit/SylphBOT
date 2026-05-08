@@ -215,6 +215,8 @@ const corsOptions: CorsOptions = {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const WEBHOOK_REQUEST_TIMEOUT_MS = 8_000;
+const BILLING_REQUEST_TIMEOUT_MS = 12_000;
+const CHECKOUT_REQUEST_TIMEOUT_MS = 14_000;
 const WEBHOOK_TIMEOUT_PATH_PREFIXES = [
   "/api/webhooks/commerce",
   "/api/webhook/whatsapp",
@@ -222,11 +224,29 @@ const WEBHOOK_TIMEOUT_PATH_PREFIXES = [
   "/webhook/instagram",
   "/api/webhook/calendar",
 ];
+const CHECKOUT_TIMEOUT_PATH_PREFIXES = [
+  "/api/billing/checkout/start",
+  "/api/billing/checkout",
+  "/api/billing/create-checkout-session",
+  "/api/billing/upgrade",
+];
+const BILLING_TIMEOUT_PATH_PREFIXES = ["/api/billing"];
 
-const resolveRequestTimeoutMs = (path: string) =>
-  WEBHOOK_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))
-    ? WEBHOOK_REQUEST_TIMEOUT_MS
-    : DEFAULT_REQUEST_TIMEOUT_MS;
+const resolveRequestTimeoutMs = (path: string) => {
+  if (WEBHOOK_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    return WEBHOOK_REQUEST_TIMEOUT_MS;
+  }
+
+  if (CHECKOUT_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    return CHECKOUT_REQUEST_TIMEOUT_MS;
+  }
+
+  if (BILLING_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    return BILLING_REQUEST_TIMEOUT_MS;
+  }
+
+  return DEFAULT_REQUEST_TIMEOUT_MS;
+};
 
 app.use(
   helmet({
@@ -546,7 +566,6 @@ app.use("/api/booking", protect, attachBillingContext, bookingRoutes);
 app.use(
   "/api/availability",
   protect,
-  attachBillingContext,
   availabilityRoutes
 );
 app.use("/api/inbox/intake", protect, receptionIntakeRoutes);

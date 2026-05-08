@@ -42,15 +42,41 @@ export type UsageOverviewData = {
   };
 };
 
-export async function getUsageOverview(): Promise<UsageOverviewData | null> {
-  try {
-    const response = await apiClient.get<UsageOverviewData>("/usage", {
-      headers: {
-        "Cache-Control": "no-store",
-      },
-    });
+const USAGE_OVERVIEW_CACHE_TTL_MS = 8_000;
 
-    return response.data;
+let usageOverviewCache:
+  | {
+      value: UsageOverviewData | null;
+      expiresAt: number;
+      promise?: Promise<UsageOverviewData | null>;
+    }
+  | null = null;
+
+export async function getUsageOverview(options?: {
+  forceRefresh?: boolean;
+}): Promise<UsageOverviewData | null> {
+  const forceRefresh = Boolean(options?.forceRefresh);
+  if (
+    !forceRefresh &&
+    usageOverviewCache?.value &&
+    usageOverviewCache.expiresAt > Date.now()
+  ) {
+    return usageOverviewCache.value;
+  }
+
+  if (!forceRefresh && usageOverviewCache?.promise) {
+    return usageOverviewCache.promise;
+  }
+
+  const requestPromise = (async () => {
+  try {
+      const response = await apiClient.get<UsageOverviewData>("/usage");
+      const payload = response.data;
+      usageOverviewCache = {
+        value: payload,
+        expiresAt: Date.now() + USAGE_OVERVIEW_CACHE_TTL_MS,
+      };
+      return payload;
   } catch (error: unknown) {
     console.error("Failed to load usage overview:", {
       status: getApiErrorStatus(error),
@@ -59,4 +85,17 @@ export async function getUsageOverview(): Promise<UsageOverviewData | null> {
 
     return null;
   }
+  })();
+
+  usageOverviewCache = {
+    value: usageOverviewCache?.value || null,
+    expiresAt: usageOverviewCache?.expiresAt || 0,
+    promise: requestPromise,
+  };
+
+  const response = await requestPromise;
+  if (!response) {
+    usageOverviewCache = null;
+  }
+  return response;
 }

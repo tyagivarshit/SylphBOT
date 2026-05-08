@@ -126,8 +126,15 @@ export default function OnboardingFlow() {
   const onboardingQuery = useQuery({
     queryKey: ["integrations-onboarding"],
     queryFn: getOnboardingSnapshot,
-    staleTime: 4000,
-    refetchInterval: 8000,
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) => {
+      const payload = query.state.data;
+      if (!payload?.success || !payload.data) {
+        return 15_000;
+      }
+      return payload.data.onboardingCompleted ? 60_000 : 12_000;
+    },
   });
 
   const onboarding = onboardingQuery.data?.success

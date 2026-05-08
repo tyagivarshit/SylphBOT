@@ -76,41 +76,35 @@ export default function DashboardPage() {
       setPageLoading(true);
       setError("");
       setConversationUnavailable(false);
+      setConvo(EMPTY_CONVERSATION_STATS);
 
-      const [statsResult, convoResult] = await Promise.allSettled([
-        getDashboardStats(),
-        getActiveConversations(),
-      ]);
+      const statsResult = await getDashboardStats();
 
-      if (
-        statsResult.status === "fulfilled" &&
-        statsResult.value.unauthorized
-      ) {
+      if (statsResult.unauthorized) {
         router.replace("/auth/login");
         return;
       }
 
-      if (statsResult.status !== "fulfilled" || !statsResult.value.success || !statsResult.value.data) {
+      if (!statsResult.success || !statsResult.data) {
         throw new Error(
-          statsResult.status === "fulfilled"
-            ? statsResult.value.message || "We couldn't load your dashboard right now."
-            : "We couldn't load your dashboard right now."
+          statsResult.message || "We couldn't load your dashboard right now."
         );
       }
 
-      setStats(statsResult.value.data as DashboardStats);
-      setLimited(Boolean(statsResult.value.limited));
+      setStats(statsResult.data as DashboardStats);
+      setLimited(Boolean(statsResult.limited));
 
-      if (
-        convoResult.status === "fulfilled" &&
-        convoResult.value.success &&
-        convoResult.value.data
-      ) {
-        setConvo(convoResult.value.data as ConversationStats);
-      } else {
-        setConversationUnavailable(true);
-        setConvo(EMPTY_CONVERSATION_STATS);
-      }
+      // Stagger non-critical panel hydration to avoid request spikes on initial load.
+      setTimeout(() => {
+        void (async () => {
+          const convoResult = await getActiveConversations().catch(() => null);
+          if (convoResult?.success && convoResult.data) {
+            setConvo(convoResult.data as ConversationStats);
+            return;
+          }
+          setConversationUnavailable(true);
+        })();
+      }, 120);
     } catch (dashboardError) {
       console.error("Dashboard error", dashboardError);
       setError("We couldn't load your dashboard right now.");

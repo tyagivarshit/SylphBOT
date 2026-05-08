@@ -8,6 +8,14 @@ import {
 import { getRequestBusinessId } from "../services/tenant.service";
 import { monitoringConfig } from "../config/monitoring.config";
 
+const HIGH_VALUE_OBSERVABILITY_PATH_PREFIXES = [
+  "/api/billing",
+  "/api/webhook",
+  "/api/webhooks",
+  "/api/inbox/intake",
+  "/api/commerce",
+];
+
 export const monitoringMiddleware = (
   req: Request,
   res: Response,
@@ -20,6 +28,12 @@ export const monitoringMiddleware = (
     const traceId = req.requestId || null;
     const statusCode = res.statusCode;
     const durationMs = Date.now() - startedAt;
+    const shouldPersistDetailedObservability =
+      statusCode >= 400 ||
+      durationMs >= monitoringConfig.slowRequestMs ||
+      HIGH_VALUE_OBSERVABILITY_PATH_PREFIXES.some((prefix) =>
+        String(req.originalUrl || "").startsWith(prefix)
+      );
 
     req.logger?.info(
       {
@@ -33,49 +47,51 @@ export const monitoringMiddleware = (
       "Request completed"
     );
 
-    void recordTraceLedger({
-      traceId,
-      correlationId: traceId,
-      businessId,
-      tenantId: businessId,
-      leadId:
-        typeof req.query?.leadId === "string"
-          ? req.query.leadId
-          : null,
-      stage: `http:${req.method}:${req.originalUrl}`,
-      status: statusCode >= 500 ? "FAILED" : "COMPLETED",
-      endedAt: new Date(),
-      metadata: {
-        statusCode,
-        durationMs,
-      },
-    }).catch(() => undefined);
-
-    void recordObservabilityEvent({
-      businessId,
-      tenantId: businessId,
-      eventType: "http.request.completed",
-      message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
-      severity:
-        statusCode >= 500
-          ? "error"
-          : statusCode >= 400
-          ? "warn"
-          : "info",
-      context: {
+    if (shouldPersistDetailedObservability) {
+      void recordTraceLedger({
         traceId,
         correlationId: traceId,
+        businessId,
         tenantId: businessId,
-        component: "http",
-        phase: "reception",
-      },
-      metadata: {
-        statusCode,
-        durationMs,
-        method: req.method,
-        route: req.originalUrl,
-      },
-    }).catch(() => undefined);
+        leadId:
+          typeof req.query?.leadId === "string"
+            ? req.query.leadId
+            : null,
+        stage: `http:${req.method}:${req.originalUrl}`,
+        status: statusCode >= 500 ? "FAILED" : "COMPLETED",
+        endedAt: new Date(),
+        metadata: {
+          statusCode,
+          durationMs,
+        },
+      }).catch(() => undefined);
+
+      void recordObservabilityEvent({
+        businessId,
+        tenantId: businessId,
+        eventType: "http.request.completed",
+        message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
+        severity:
+          statusCode >= 500
+            ? "error"
+            : statusCode >= 400
+            ? "warn"
+            : "info",
+        context: {
+          traceId,
+          correlationId: traceId,
+          tenantId: businessId,
+          component: "http",
+          phase: "reception",
+        },
+        metadata: {
+          statusCode,
+          durationMs,
+          method: req.method,
+          route: req.originalUrl,
+        },
+      }).catch(() => undefined);
+    }
 
     emitPerformanceMetric({
       name: "API_MS",

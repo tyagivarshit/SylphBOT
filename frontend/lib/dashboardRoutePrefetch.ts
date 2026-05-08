@@ -6,6 +6,10 @@ import { api } from "@/lib/api";
 import { apiClient } from "@/lib/apiClient";
 import * as analyticsApi from "@/lib/analytics";
 
+const PREFETCH_COOLDOWN_MS = 8_000;
+const prefetchInFlight = new Map<string, Promise<void>>();
+const prefetchLastRunAt = new Map<string, number>();
+
 export const dashboardStatsQueryKey = ["dashboard-stats"] as const;
 export const dashboardConversationsQueryKey = [
   "dashboard-active-conversations",
@@ -98,107 +102,123 @@ export async function prefetchDashboardRoute(
   href: string,
   businessId?: string | null
 ) {
-  if (href === "/dashboard") {
-    await Promise.allSettled([
-      queryClient.prefetchQuery({
+  const prefetchKey = `${href}:${businessId || "none"}`;
+  const previousRunAt = prefetchLastRunAt.get(prefetchKey) || 0;
+  if (Date.now() - previousRunAt < PREFETCH_COOLDOWN_MS) {
+    return;
+  }
+
+  const existing = prefetchInFlight.get(prefetchKey);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const run = (async () => {
+    if (href === "/dashboard") {
+      await queryClient.prefetchQuery({
         queryKey: dashboardStatsQueryKey,
         queryFn: fetchDashboardStats,
-      }),
-      queryClient.prefetchQuery({
-        queryKey: dashboardConversationsQueryKey,
-        queryFn: fetchDashboardActiveConversations,
-      }),
-    ]);
-    return;
-  }
-
-  if (href === "/leads") {
-    await queryClient.prefetchQuery({
-      queryKey: dashboardLeadsQueryKey(1, ""),
-      queryFn: () => fetchDashboardLeadsPage(1, ""),
-    });
-    return;
-  }
-
-  if (href === "/conversations") {
-    await queryClient.prefetchQuery({
-      queryKey: conversationsQueryKey,
-      queryFn: fetchConversationLeads,
-    });
-    return;
-  }
-
-  if (href === "/automation") {
-    await queryClient.prefetchQuery({
-      queryKey: automationFlowsQueryKey,
-      queryFn: fetchAutomationFlows,
-    });
-    return;
-  }
-
-  if (href === "/comment-automation") {
-    await queryClient.prefetchQuery({
-      queryKey: commentTriggersQueryKey,
-      queryFn: fetchCommentTriggers,
-    });
-    return;
-  }
-
-  if (href === "/knowledge-base") {
-    await queryClient.prefetchQuery({
-      queryKey: knowledgeEntriesQueryKey,
-      queryFn: fetchKnowledgeEntries,
-    });
-    return;
-  }
-
-  if (href === "/booking") {
-    const requests = [
-      queryClient.prefetchQuery({
-        queryKey: bookingListQueryKey,
-        queryFn: fetchBookingList,
-      }),
-    ];
-
-    if (businessId) {
-      requests.push(
-        queryClient.prefetchQuery({
-          queryKey: availabilityQueryKey(businessId),
-          queryFn: () => fetchAvailability(businessId),
-        })
-      );
+      });
+      return;
     }
 
-    await Promise.allSettled(requests);
-    return;
-  }
+    if (href === "/leads") {
+      await queryClient.prefetchQuery({
+        queryKey: dashboardLeadsQueryKey(1, ""),
+        queryFn: () => fetchDashboardLeadsPage(1, ""),
+      });
+      return;
+    }
 
-  if (href === "/analytics") {
-    await Promise.allSettled([
-      queryClient.prefetchQuery({
-        queryKey: analyticsOverviewQueryKey("7d"),
-        queryFn: () => analyticsApi.getOverview("7d"),
-      }),
-      queryClient.prefetchQuery({
-        queryKey: analyticsChartsQueryKey("7d"),
-        queryFn: () => analyticsApi.getCharts("7d"),
-      }),
-      queryClient.prefetchQuery({
-        queryKey: analyticsFunnelQueryKey("30d"),
-        queryFn: () => analyticsApi.getFunnel("30d"),
-      }),
-      queryClient.prefetchQuery({
-        queryKey: analyticsSourcesQueryKey("30d"),
-        queryFn: () => analyticsApi.getSources("30d"),
-      }),
-    ]);
-    return;
-  }
+    if (href === "/conversations") {
+      await queryClient.prefetchQuery({
+        queryKey: conversationsQueryKey,
+        queryFn: fetchConversationLeads,
+      });
+      return;
+    }
 
-  if (href === "/clients") {
-    await queryClient.prefetchQuery({
-      queryKey: clientsQueryKey,
-      queryFn: getClients,
+    if (href === "/automation") {
+      await queryClient.prefetchQuery({
+        queryKey: automationFlowsQueryKey,
+        queryFn: fetchAutomationFlows,
+      });
+      return;
+    }
+
+    if (href === "/comment-automation") {
+      await queryClient.prefetchQuery({
+        queryKey: commentTriggersQueryKey,
+        queryFn: fetchCommentTriggers,
+      });
+      return;
+    }
+
+    if (href === "/knowledge-base") {
+      await queryClient.prefetchQuery({
+        queryKey: knowledgeEntriesQueryKey,
+        queryFn: fetchKnowledgeEntries,
+      });
+      return;
+    }
+
+    if (href === "/booking") {
+      const requests = [
+        queryClient.prefetchQuery({
+          queryKey: bookingListQueryKey,
+          queryFn: fetchBookingList,
+        }),
+      ];
+
+      if (businessId) {
+        requests.push(
+          queryClient.prefetchQuery({
+            queryKey: availabilityQueryKey(businessId),
+            queryFn: () => fetchAvailability(businessId),
+          })
+        );
+      }
+
+      await Promise.allSettled(requests);
+      return;
+    }
+
+    if (href === "/analytics") {
+      await Promise.allSettled([
+        queryClient.prefetchQuery({
+          queryKey: analyticsOverviewQueryKey("7d"),
+          queryFn: () => analyticsApi.getOverview("7d"),
+        }),
+        queryClient.prefetchQuery({
+          queryKey: analyticsChartsQueryKey("7d"),
+          queryFn: () => analyticsApi.getCharts("7d"),
+        }),
+        queryClient.prefetchQuery({
+          queryKey: analyticsFunnelQueryKey("30d"),
+          queryFn: () => analyticsApi.getFunnel("30d"),
+        }),
+        queryClient.prefetchQuery({
+          queryKey: analyticsSourcesQueryKey("30d"),
+          queryFn: () => analyticsApi.getSources("30d"),
+        }),
+      ]);
+      return;
+    }
+
+    if (href === "/clients") {
+      await queryClient.prefetchQuery({
+        queryKey: clientsQueryKey,
+        queryFn: getClients,
+      });
+    }
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      prefetchInFlight.delete(prefetchKey);
+      prefetchLastRunAt.set(prefetchKey, Date.now());
     });
-  }
+
+  prefetchInFlight.set(prefetchKey, run);
+  await run;
 }

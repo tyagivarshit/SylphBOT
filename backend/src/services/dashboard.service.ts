@@ -322,23 +322,29 @@ export class DashboardService {
         };
       });
 
-      const counts = await Promise.all(
-        days.map((day) =>
-          prisma.lead.count({
-            where: {
-              businessId,
-              createdAt: {
-                gte: day.dayStart,
-                lt: day.dayEnd,
-              },
-            },
-          })
-        )
-      );
+      const oldestDayStart = days[0]?.dayStart || today;
+      const newestDayEnd = days[days.length - 1]?.dayEnd || addDays(today, 1);
+      const rows = await prisma.lead.findMany({
+        where: {
+          businessId,
+          createdAt: {
+            gte: oldestDayStart,
+            lt: newestDayEnd,
+          },
+        },
+        select: {
+          createdAt: true,
+        },
+      });
+      const dailyCounts = rows.reduce<Record<string, number>>((acc, row) => {
+        const key = startOfDay(row.createdAt).toISOString();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
 
-      return days.map((day, index) => ({
+      return days.map((day) => ({
         date: day.label,
-        leads: counts[index] || 0,
+        leads: dailyCounts[day.dayStart.toISOString()] || 0,
       }));
     } catch (error) {
       console.error("Dashboard getLeadsGrowth error", error);
@@ -360,23 +366,29 @@ export class DashboardService {
         };
       });
 
-      const counts = await Promise.all(
-        days.map((day) =>
-          prisma.message.count({
-            where: {
-              lead: { businessId },
-              createdAt: {
-                gte: day.dayStart,
-                lt: day.dayEnd,
-              },
-            },
-          })
-        )
-      );
+      const oldestDayStart = days[0]?.dayStart || today;
+      const newestDayEnd = days[days.length - 1]?.dayEnd || addDays(today, 1);
+      const rows = await prisma.message.findMany({
+        where: {
+          lead: { businessId },
+          createdAt: {
+            gte: oldestDayStart,
+            lt: newestDayEnd,
+          },
+        },
+        select: {
+          createdAt: true,
+        },
+      });
+      const dailyCounts = rows.reduce<Record<string, number>>((acc, row) => {
+        const key = startOfDay(row.createdAt).toISOString();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
 
-      return days.map((day, index) => ({
+      return days.map((day) => ({
         date: day.label,
-        messages: counts[index] || 0,
+        messages: dailyCounts[day.dayStart.toISOString()] || 0,
       }));
     } catch (error) {
       console.error("Dashboard getMessagesGrowth error", error);

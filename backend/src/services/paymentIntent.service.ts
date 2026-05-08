@@ -96,6 +96,11 @@ export const createPaymentIntentService = () => {
     metadata?: Record<string, unknown> | null;
     idempotencyKey?: string | null;
   }) => {
+    const inputMetadata = toRecord(metadata);
+    const checkoutStartRequestId =
+      String(inputMetadata.checkoutStartRequestId || "").trim() || null;
+    const checkoutStartPath =
+      String(inputMetadata.checkoutStartPath || "").trim() || null;
     const proposal = await prisma.proposalLedger.findFirst({
       where: {
         businessId,
@@ -271,6 +276,18 @@ export const createPaymentIntentService = () => {
     });
 
     try {
+      const stripeSessionStartedAt = Date.now();
+      if (normalizedProvider === "STRIPE") {
+        console.info("[START 6] Stripe session start", {
+          requestId: checkoutStartRequestId,
+          businessId,
+          proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          provider: normalizedProvider,
+          path: checkoutStartPath,
+        });
+      }
+
       const checkout = await adapter.createCheckout({
         businessId,
         paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -317,6 +334,18 @@ export const createPaymentIntentService = () => {
           ...(metadata || {}),
         },
       });
+
+      if (normalizedProvider === "STRIPE") {
+        console.info("[START 7] Stripe session complete", {
+          requestId: checkoutStartRequestId,
+          businessId,
+          proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          provider: normalizedProvider,
+          providerPaymentIntentId: checkout.providerPaymentIntentId,
+          elapsedMs: Date.now() - stripeSessionStartedAt,
+        });
+      }
 
       const updated = await prisma.paymentIntentLedger.update({
         where: {

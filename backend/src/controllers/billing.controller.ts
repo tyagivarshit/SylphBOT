@@ -1184,6 +1184,20 @@ export class BillingController {
     }
   ) {
     const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
+    const checkoutStartedAt = Date.now();
+    const checkoutRequestId = String((req as any)?.requestId || "").trim() || null;
+    const logCheckoutStart = (
+      label: string,
+      details?: Record<string, unknown>
+    ) => {
+      console.info(label, {
+        requestId: checkoutRequestId,
+        route: req.originalUrl,
+        method: req.method,
+        elapsedMs: Date.now() - checkoutStartedAt,
+        ...(details || {}),
+      });
+    };
     if (redirectOnSuccess) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
       res.setHeader("Pragma", "no-cache");
@@ -1216,6 +1230,14 @@ export class BillingController {
       reason: string;
       code?: string;
     }) => {
+      logCheckoutStart("[START 8] response return", {
+        success: false,
+        status: input.status,
+        reason: input.reason,
+        code: input.code || null,
+        redirectOnSuccess,
+      });
+
       if (redirectOnSuccess) {
         return res.redirect(303, BillingController.buildCheckoutFailureRedirect(input.reason));
       }
@@ -1304,6 +1326,10 @@ export class BillingController {
       }
 
       const { businessId, email } = await getUserContext(req);
+      logCheckoutStart("[START 2] auth resolved", {
+        userId: String(req.user?.id || "").trim() || null,
+        businessId: businessId || null,
+      });
 
       if (!businessId) {
         return sendCheckoutError({
@@ -1335,6 +1361,15 @@ export class BillingController {
         Number.isFinite(explicitUnitAmountMinor) && explicitUnitAmountMinor > 0
           ? Math.floor(explicitUnitAmountMinor)
           : Math.round(Number(unitPrice || 0) * 100);
+      logCheckoutStart("[START 4] pricing resolved", {
+        businessId,
+        plan: normalizedPlan,
+        billingCycle: normalizedBilling,
+        currency,
+        quantity,
+        unitPrice,
+        customUnitPriceMinor,
+      });
       const activeSubscription = await prisma.subscriptionLedger.findFirst({
         where: {
           businessId,
@@ -1402,6 +1437,11 @@ export class BillingController {
               businessId,
               proposalKey: proposal.proposalKey,
             });
+      logCheckoutStart("[START 5] proposal created", {
+        businessId,
+        proposalKey: readyProposal.proposalKey,
+        proposalStatus: readyProposal.status,
+      });
 
       const paymentIntent = await paymentIntentService.createCheckout({
         businessId,
@@ -1427,6 +1467,8 @@ export class BillingController {
             null,
           customerEmail: email,
           checkoutAttempt,
+          checkoutStartRequestId: checkoutRequestId,
+          checkoutStartPath: req.originalUrl,
           prorationBehavior:
             String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
           seatBased: quantity > 1,
@@ -1445,9 +1487,25 @@ export class BillingController {
       }
 
       if (redirectOnSuccess) {
+        logCheckoutStart("[START 8] response return", {
+          success: true,
+          status: 303,
+          businessId,
+          proposalKey: readyProposal.proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          redirectOnSuccess,
+        });
         return res.redirect(303, checkoutUrl);
       }
 
+      logCheckoutStart("[START 8] response return", {
+        success: true,
+        status: 200,
+        businessId,
+        proposalKey: readyProposal.proposalKey,
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        redirectOnSuccess,
+      });
       return res.json({
         success: true,
         url: checkoutUrl,

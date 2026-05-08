@@ -72,8 +72,21 @@ const isPlainRecord = (
 ): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
+
+const hasExplicitFinalResponseWrite = (res: express.Response) =>
+  Boolean(
+    (res.locals as Record<string, unknown> | undefined)?.[
+      RESPONSE_FINAL_WRITE_LOCAL_KEY
+    ]
+  );
+
+const markExplicitFinalResponseWrite = (res: express.Response) => {
+  (res.locals as Record<string, unknown>)[RESPONSE_FINAL_WRITE_LOCAL_KEY] = true;
+};
+
 const isResponseCommitted = (res: express.Response) =>
-  res.headersSent || res.writableEnded || res.writableFinished;
+  res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite(res);
 
 const normalizeJsonResponseBody = (body: unknown, statusCode: number) => {
   const success = statusCode < 400;
@@ -256,21 +269,29 @@ app.use((req, res, next) => {
       return res;
     }
 
-    return originalJson(normalizeJsonResponseBody(body, res.statusCode));
+    const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
+    markExplicitFinalResponseWrite(res);
+    return response;
   }) as typeof res.json;
   res.send = ((body?: unknown) => {
     if (isResponseCommitted(res)) {
       return res;
     }
 
-    return originalSend(body as any);
+    const response = originalSend(body as any);
+    markExplicitFinalResponseWrite(res);
+    return response;
   }) as typeof res.send;
   res.redirect = ((...args: unknown[]) => {
     if (isResponseCommitted(res)) {
       return res;
     }
 
-    return (originalRedirect as (...redirectArgs: unknown[]) => typeof res)(...args);
+    const response = (
+      originalRedirect as (...redirectArgs: unknown[]) => typeof res
+    )(...args);
+    markExplicitFinalResponseWrite(res);
+    return response;
   }) as typeof res.redirect;
 
   next();
@@ -549,7 +570,7 @@ app.use((req: any, res) => {
 });
 
 app.use((err: any, req: any, res: any, _next: any) => {
-  if (res.headersSent || res.writableEnded || res.writableFinished) {
+  if (isResponseCommitted(res)) {
     return;
   }
 

@@ -94,6 +94,7 @@ const BILLING_CONFIRM_LOOKUP_TIMEOUT_MS = 700;
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60_000;
 const BILLING_CONFIRM_STRIPE_TIMEOUT_MS = 1_100;
 const BILLING_CONFIRM_RECONCILE_TIMEOUT_MS = 1_300;
+const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 
 type PlanRow = {
   id: string;
@@ -1186,8 +1187,14 @@ export class BillingController {
     const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
     const checkoutStartedAt = Date.now();
     const checkoutRequestId = String((req as any)?.requestId || "").trim() || null;
+    const hasExplicitFinalResponseWrite = () =>
+      Boolean(
+        (res.locals as Record<string, unknown> | undefined)?.[
+          RESPONSE_FINAL_WRITE_LOCAL_KEY
+        ]
+      );
     const isResponseCommitted = () =>
-      res.headersSent || res.writableEnded || res.writableFinished;
+      res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite();
     const logCheckoutStart = (
       label: string,
       details?: Record<string, unknown>

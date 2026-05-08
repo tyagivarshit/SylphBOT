@@ -85,6 +85,7 @@ const BILLING_CONFIRM_LOOKUP_TIMEOUT_MS = 700;
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60000;
 const BILLING_CONFIRM_STRIPE_TIMEOUT_MS = 1100;
 const BILLING_CONFIRM_RECONCILE_TIMEOUT_MS = 1300;
+const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 const mapPublicPlans = (plans = []) => {
     const planMap = new Map(plans.map((plan) => [String(plan.type || plan.name).toUpperCase(), plan]));
     return (0, pricing_config_1.getPublicPricingPlans)().map((plan) => {
@@ -909,7 +910,8 @@ class BillingController {
         const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
         const checkoutStartedAt = Date.now();
         const checkoutRequestId = String(req?.requestId || "").trim() || null;
-        const isResponseCommitted = () => res.headersSent || res.writableEnded || res.writableFinished;
+        const hasExplicitFinalResponseWrite = () => Boolean(res.locals?.[RESPONSE_FINAL_WRITE_LOCAL_KEY]);
+        const isResponseCommitted = () => res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite();
         const logCheckoutStart = (label, details) => {
             console.info(label, {
                 requestId: checkoutRequestId,

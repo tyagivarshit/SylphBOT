@@ -59,7 +59,12 @@ const asyncHandler_1 = require("./utils/asyncHandler");
 const sentry_1 = require("./observability/sentry");
 const app = (0, express_1.default)();
 const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
-const isResponseCommitted = (res) => res.headersSent || res.writableEnded || res.writableFinished;
+const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
+const hasExplicitFinalResponseWrite = (res) => Boolean(res.locals?.[RESPONSE_FINAL_WRITE_LOCAL_KEY]);
+const markExplicitFinalResponseWrite = (res) => {
+    res.locals[RESPONSE_FINAL_WRITE_LOCAL_KEY] = true;
+};
+const isResponseCommitted = (res) => res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite(res);
 const normalizeJsonResponseBody = (body, statusCode) => {
     const success = statusCode < 400;
     if (body === undefined) {
@@ -210,19 +215,25 @@ app.use((req, res, next) => {
         if (isResponseCommitted(res)) {
             return res;
         }
-        return originalJson(normalizeJsonResponseBody(body, res.statusCode));
+        const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
+        markExplicitFinalResponseWrite(res);
+        return response;
     });
     res.send = ((body) => {
         if (isResponseCommitted(res)) {
             return res;
         }
-        return originalSend(body);
+        const response = originalSend(body);
+        markExplicitFinalResponseWrite(res);
+        return response;
     });
     res.redirect = ((...args) => {
         if (isResponseCommitted(res)) {
             return res;
         }
-        return originalRedirect(...args);
+        const response = originalRedirect(...args);
+        markExplicitFinalResponseWrite(res);
+        return response;
     });
     next();
 });
@@ -412,7 +423,7 @@ app.use((req, res) => {
     });
 });
 app.use((err, req, res, _next) => {
-    if (res.headersSent || res.writableEnded || res.writableFinished) {
+    if (isResponseCommitted(res)) {
         return;
     }
     req.logger?.error({

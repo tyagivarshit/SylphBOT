@@ -29,8 +29,6 @@ import {
 
 const PAYMENT_INTENT_RUNTIME_INFLUENCE_TIMEOUT_MS = 900;
 const PAYMENT_INTENT_RUNTIME_INFLUENCE_FAST_LANE_TIMEOUT_MS = 320;
-const PAYMENT_INTENT_PROVIDER_CREDENTIAL_TIMEOUT_MS = 900;
-const PAYMENT_INTENT_PROVIDER_CREDENTIAL_FAST_LANE_TIMEOUT_MS = 450;
 const PAYMENT_INTENT_PROVIDER_CHECKOUT_TIMEOUT_MS = 9_000;
 const PAYMENT_INTENT_PROVIDER_CHECKOUT_FAST_LANE_TIMEOUT_MS = 4_500;
 
@@ -228,9 +226,6 @@ export const createPaymentIntentService = () => {
     await commerceAuthorityService.resolveProviderCredential({
       businessId,
       provider: normalizedProvider,
-      timeoutMs: isCheckoutFastLane
-        ? PAYMENT_INTENT_PROVIDER_CREDENTIAL_FAST_LANE_TIMEOUT_MS
-        : PAYMENT_INTENT_PROVIDER_CREDENTIAL_TIMEOUT_MS,
     }).catch(() => {
       if (normalizedProvider === "INTERNAL") {
         return null;

@@ -198,6 +198,7 @@ const resolveRequestTimeoutMs = (path) => {
     }
     return DEFAULT_REQUEST_TIMEOUT_MS;
 };
+const isCheckoutTimeoutRoute = (path) => CHECKOUT_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     referrerPolicy: {
@@ -272,6 +273,17 @@ app.use((req, res, next) => {
         res.locals.requestTimedOut = true;
         if (isResponseCommitted(res)) {
             return;
+        }
+        const routePath = String(req.path || req.originalUrl || "").trim();
+        if (req.method === "GET" && isCheckoutTimeoutRoute(routePath)) {
+            const appBaseUrl = String(env_1.env.FRONTEND_URL || "").replace(/\/$/, "");
+            if (appBaseUrl) {
+                const query = new URLSearchParams({
+                    checkout: "failed",
+                    reason: "request_timeout",
+                });
+                return res.redirect(303, `${appBaseUrl}/billing?${query.toString()}`);
+            }
         }
         res.status(408).json({
             success: false,

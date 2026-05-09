@@ -21,7 +21,11 @@ import {
 import { getPlanFromPrice } from "../config/stripe.price.map";
 import { getUsageOverview } from "../services/usage.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
-import { withTimeoutFallback } from "../utils/boundedTimeout";
+import {
+  TimeoutExceededError,
+  withTimeout,
+  withTimeoutFallback,
+} from "../utils/boundedTimeout";
 import { stripe } from "../services/stripe.service";
 import { assertStripeConfigReady } from "../services/commerce/providers/stripeConfig.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
@@ -95,6 +99,8 @@ const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60_000;
 const BILLING_CONFIRM_STRIPE_TIMEOUT_MS = 1_100;
 const BILLING_CONFIRM_RECONCILE_TIMEOUT_MS = 1_300;
 const BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS = 650;
+const BILLING_CHECKOUT_PROPOSAL_TIMEOUT_MS = 2_200;
+const BILLING_CHECKOUT_PAYMENT_INTENT_TIMEOUT_MS = 5_500;
 const BILLING_PROJECTION_CACHE_TTL_MS = 4_000;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 
@@ -1500,33 +1506,50 @@ export class BillingController {
         .digest("hex")
         .slice(0, 24);
 
-      const proposal = await proposalEngineService.createProposal({
-        businessId,
-        planCode: normalizedPlan,
-        billingCycle: normalizedBilling,
-        currency,
-        quantity,
-        customUnitPriceMinor,
-        lineItems: addonLineItems,
-        source: "SELF",
-        requestedBy: "SELF",
-        metadata: {
-          checkoutSource: "billing_controller",
-          checkoutType,
-          trialDays,
-          coupon: couponCode,
-          prorationBehavior:
-            String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
-          providerSubscriptionId:
-            String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
-            null,
-          stripeCustomerId:
-            String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
-            null,
-          seatBased: quantity > 1,
-        },
-        idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
-      });
+      let proposal: Awaited<ReturnType<typeof proposalEngineService.createProposal>>;
+      try {
+        proposal = await withTimeout({
+          label: "billing_checkout_proposal",
+          timeoutMs: BILLING_CHECKOUT_PROPOSAL_TIMEOUT_MS,
+          task: proposalEngineService.createProposal({
+            businessId,
+            planCode: normalizedPlan,
+            billingCycle: normalizedBilling,
+            currency,
+            quantity,
+            customUnitPriceMinor,
+            lineItems: addonLineItems,
+            source: "SELF",
+            requestedBy: "SELF",
+            metadata: {
+              checkoutSource: "billing_controller",
+              checkoutType,
+              trialDays,
+              coupon: couponCode,
+              prorationBehavior:
+                String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
+              providerSubscriptionId:
+                String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
+                null,
+              stripeCustomerId:
+                String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
+                null,
+              seatBased: quantity > 1,
+            },
+            idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
+          }),
+        });
+      } catch (error) {
+        if (error instanceof TimeoutExceededError) {
+          return sendCheckoutError({
+            status: 504,
+            code: "BILLING_PROPOSAL_TIMEOUT",
+            message: "Checkout is taking longer than expected. Please retry.",
+            reason: "proposal_timeout",
+          });
+        }
+        throw error;
+      }
 
       const readyProposal =
         proposal.status === "APPROVED" || proposal.status === "SENT"
@@ -1541,38 +1564,55 @@ export class BillingController {
         proposalStatus: readyProposal.status,
       });
 
-      const paymentIntent = await paymentIntentService.createCheckout({
-        businessId,
-        proposalKey: readyProposal.proposalKey,
-        provider: "STRIPE",
-        source: "SELF",
-        description: `${normalizedPlan} ${normalizedBilling} plan checkout`,
-        successUrl: `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
-        cancelUrl: `${env.FRONTEND_URL}/billing/cancel?plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
-        metadata: {
-          coupon: couponCode,
-          origin: "billing_controller",
-          planCode: normalizedPlan,
-          billingCycle: normalizedBilling,
-          quantity,
-          checkoutType,
-          trialDays,
-          providerSubscriptionId:
-            String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
-            null,
-          stripeCustomerId:
-            String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
-            null,
-          customerEmail: email,
-          checkoutAttempt,
-          checkoutStartRequestId: checkoutRequestId,
-          checkoutStartPath: req.originalUrl,
-          prorationBehavior:
-            String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
-          seatBased: quantity > 1,
-        },
-        idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
-      });
+      let paymentIntent: Awaited<ReturnType<typeof paymentIntentService.createCheckout>>;
+      try {
+        paymentIntent = await withTimeout({
+          label: "billing_checkout_payment_intent",
+          timeoutMs: BILLING_CHECKOUT_PAYMENT_INTENT_TIMEOUT_MS,
+          task: paymentIntentService.createCheckout({
+            businessId,
+            proposalKey: readyProposal.proposalKey,
+            provider: "STRIPE",
+            source: "SELF",
+            description: `${normalizedPlan} ${normalizedBilling} plan checkout`,
+            successUrl: `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
+            cancelUrl: `${env.FRONTEND_URL}/billing/cancel?plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
+            metadata: {
+              coupon: couponCode,
+              origin: "billing_controller",
+              planCode: normalizedPlan,
+              billingCycle: normalizedBilling,
+              quantity,
+              checkoutType,
+              trialDays,
+              providerSubscriptionId:
+                String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
+                null,
+              stripeCustomerId:
+                String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
+                null,
+              customerEmail: email,
+              checkoutAttempt,
+              checkoutStartRequestId: checkoutRequestId,
+              checkoutStartPath: req.originalUrl,
+              prorationBehavior:
+                String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
+              seatBased: quantity > 1,
+            },
+            idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
+          }),
+        });
+      } catch (error) {
+        if (error instanceof TimeoutExceededError) {
+          return sendCheckoutError({
+            status: 504,
+            code: "BILLING_PROVIDER_TIMEOUT",
+            message: "Stripe took too long to respond. Please retry in a few seconds.",
+            reason: "provider_timeout",
+          });
+        }
+        throw error;
+      }
       logCheckoutStart("[START 6] payment intent created", {
         businessId,
         proposalKey: readyProposal.proposalKey,

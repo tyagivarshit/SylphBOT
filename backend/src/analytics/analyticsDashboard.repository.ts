@@ -1,6 +1,15 @@
 import prisma from "../config/prisma";
 import { listRevenueTouchTrackingRows } from "../services/revenueTouchLedger.service";
 
+const ANALYTICS_MAX_LEADS_RANGE_ROWS = 3000;
+const ANALYTICS_MAX_LEADS_ALL_ROWS = 5000;
+const ANALYTICS_MAX_MESSAGES_RANGE_ROWS = 12000;
+const ANALYTICS_MAX_CONVERSION_EVENT_ROWS = 6000;
+const ANALYTICS_MAX_REVENUE_EVENT_ROWS = 6000;
+const ANALYTICS_MAX_APPOINTMENT_RANGE_ROWS = 6000;
+const ANALYTICS_MAX_APPOINTMENT_BY_LEAD_ROWS = 8000;
+const ANALYTICS_MAX_APPOINTMENT_ALL_ROWS = 8000;
+
 export type AnalyticsLeadRecord = {
   id: string;
   createdAt: Date;
@@ -143,7 +152,11 @@ export async function getLeadsInRange(
         lte: end,
       },
     },
+    orderBy: {
+      createdAt: "desc",
+    },
     select: leadSelect,
+    take: ANALYTICS_MAX_LEADS_RANGE_ROWS,
   });
 }
 
@@ -152,7 +165,11 @@ export async function getAllLeads(
 ): Promise<AnalyticsLeadRecord[]> {
   return prisma.lead.findMany({
     where: { businessId },
+    orderBy: {
+      createdAt: "desc",
+    },
     select: leadSelect,
+    take: ANALYTICS_MAX_LEADS_ALL_ROWS,
   });
 }
 
@@ -175,6 +192,7 @@ export async function getMessagesInRange(
       createdAt: "asc",
     },
     select: messageSelect,
+    take: ANALYTICS_MAX_MESSAGES_RANGE_ROWS,
   });
 }
 
@@ -191,7 +209,11 @@ export async function getConversionEventsInRange(
         lte: end,
       },
     },
+    orderBy: {
+      occurredAt: "desc",
+    },
     select: conversionEventSelect,
+    take: ANALYTICS_MAX_CONVERSION_EVENT_ROWS,
   });
 }
 
@@ -232,6 +254,10 @@ export async function getRevenueBrainAnalyticsInRange(
       meta: true,
       createdAt: true,
     },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: ANALYTICS_MAX_REVENUE_EVENT_ROWS,
   }) as Promise<AnalyticsRevenueBrainEventRecord[]>;
 }
 
@@ -248,7 +274,11 @@ export async function getAppointmentsInRange(
         lte: end,
       },
     },
+    orderBy: {
+      createdAt: "desc",
+    },
     select: appointmentSelect,
+    take: ANALYTICS_MAX_APPOINTMENT_RANGE_ROWS,
   });
 }
 
@@ -265,7 +295,11 @@ export async function getAppointmentsForLeadIds(
         in: leadIds,
       },
     },
+    orderBy: {
+      createdAt: "desc",
+    },
     select: appointmentSelect,
+    take: ANALYTICS_MAX_APPOINTMENT_BY_LEAD_ROWS,
   });
 }
 
@@ -279,6 +313,10 @@ export async function getAllLeadAppointments(
         not: null,
       },
     },
+    orderBy: {
+      createdAt: "desc",
+    },
     select: appointmentSelect,
+    take: ANALYTICS_MAX_APPOINTMENT_ALL_ROWS,
   });
 }

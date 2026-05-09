@@ -29,6 +29,10 @@ import {
 
 const PAYMENT_INTENT_RUNTIME_INFLUENCE_TIMEOUT_MS = 900;
 const PAYMENT_INTENT_RUNTIME_INFLUENCE_FAST_LANE_TIMEOUT_MS = 320;
+const PAYMENT_INTENT_PROVIDER_CREDENTIAL_TIMEOUT_MS = 900;
+const PAYMENT_INTENT_PROVIDER_CREDENTIAL_FAST_LANE_TIMEOUT_MS = 450;
+const PAYMENT_INTENT_PROVIDER_CHECKOUT_TIMEOUT_MS = 9_000;
+const PAYMENT_INTENT_PROVIDER_CHECKOUT_FAST_LANE_TIMEOUT_MS = 4_500;
 
 const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -146,14 +150,13 @@ export const createPaymentIntentService = () => {
       String(inputMetadata.checkoutStartRequestId || "").trim() || null;
     const checkoutStartPath =
       String(inputMetadata.checkoutStartPath || "").trim() || null;
-    const proposal = await prisma.proposalLedger.findFirst({
+    const proposal = await prisma.proposalLedger.findUnique({
       where: {
-        businessId,
         proposalKey,
       },
     });
 
-    if (!proposal) {
+    if (!proposal || proposal.businessId !== businessId) {
       throw new Error("proposal_not_found");
     }
 
@@ -225,6 +228,9 @@ export const createPaymentIntentService = () => {
     await commerceAuthorityService.resolveProviderCredential({
       businessId,
       provider: normalizedProvider,
+      timeoutMs: isCheckoutFastLane
+        ? PAYMENT_INTENT_PROVIDER_CREDENTIAL_FAST_LANE_TIMEOUT_MS
+        : PAYMENT_INTENT_PROVIDER_CREDENTIAL_TIMEOUT_MS,
     }).catch(() => {
       if (normalizedProvider === "INTERNAL") {
         return null;
@@ -386,52 +392,71 @@ export const createPaymentIntentService = () => {
         paymentIntentKey: paymentIntent.paymentIntentKey,
         normalizedProvider,
       });
-      const checkout = await adapter.createCheckout({
-        businessId,
-        paymentIntentKey: paymentIntent.paymentIntentKey,
-        amountMinor: paymentIntent.amountMinor,
-        currency: paymentIntent.currency,
-        description,
-        successUrl,
-        cancelUrl,
-        metadata: {
-          proposalKey,
-          paymentIntentId: paymentIntent.id,
+      const checkoutResult = await withTimeoutFallback({
+        label: "payment_intent_provider_checkout",
+        timeoutMs: isCheckoutFastLane
+          ? PAYMENT_INTENT_PROVIDER_CHECKOUT_FAST_LANE_TIMEOUT_MS
+          : PAYMENT_INTENT_PROVIDER_CHECKOUT_TIMEOUT_MS,
+        task: adapter.createCheckout({
+          businessId,
           paymentIntentKey: paymentIntent.paymentIntentKey,
-          planCode:
-            String(toRecord(paymentIntent.metadata).planCode || toRecord(proposal.pricingSnapshot).planCode || "")
-              .trim()
-              .toUpperCase() || null,
-          billingCycle:
-            String(
-              toRecord(paymentIntent.metadata).billingCycle ||
-                toRecord(proposal.pricingSnapshot).billingCycle ||
-                "monthly"
-            )
-              .trim()
-              .toLowerCase() || "monthly",
-          quantity: Math.max(1, Number(toRecord(paymentIntent.metadata).quantity || proposal.quantity || 1)),
-          unitPriceMinor: Math.max(
-            0,
-            Number(
-              toRecord(paymentIntent.metadata).unitPriceMinor ||
-                proposal.unitPriceMinor ||
-                paymentIntent.amountMinor
-            )
-          ),
-          checkoutType:
-            String(toRecord(paymentIntent.metadata).checkoutType || "subscription")
-              .trim()
-              .toLowerCase() || "subscription",
-          trialDays: Math.max(0, Number(toRecord(paymentIntent.metadata).trialDays || 0)),
-          proposalSubtotalMinor: Math.max(0, Number(proposal.subtotalMinor || 0)),
-          proposalTaxMinor: Math.max(0, Number(proposal.taxMinor || 0)),
-          proposalTotalMinor: Math.max(0, Number(proposal.totalMinor || 0)),
-          coupon:
-            String(toRecord(paymentIntent.metadata).coupon || "").trim() || null,
-          ...(metadata || {}),
-        },
+          amountMinor: paymentIntent.amountMinor,
+          currency: paymentIntent.currency,
+          description,
+          successUrl,
+          cancelUrl,
+          metadata: {
+            proposalKey,
+            paymentIntentId: paymentIntent.id,
+            paymentIntentKey: paymentIntent.paymentIntentKey,
+            planCode:
+              String(
+                toRecord(paymentIntent.metadata).planCode ||
+                  toRecord(proposal.pricingSnapshot).planCode ||
+                  ""
+              )
+                .trim()
+                .toUpperCase() || null,
+            billingCycle:
+              String(
+                toRecord(paymentIntent.metadata).billingCycle ||
+                  toRecord(proposal.pricingSnapshot).billingCycle ||
+                  "monthly"
+              )
+                .trim()
+                .toLowerCase() || "monthly",
+            quantity: Math.max(
+              1,
+              Number(toRecord(paymentIntent.metadata).quantity || proposal.quantity || 1)
+            ),
+            unitPriceMinor: Math.max(
+              0,
+              Number(
+                toRecord(paymentIntent.metadata).unitPriceMinor ||
+                  proposal.unitPriceMinor ||
+                  paymentIntent.amountMinor
+              )
+            ),
+            checkoutType:
+              String(toRecord(paymentIntent.metadata).checkoutType || "subscription")
+                .trim()
+                .toLowerCase() || "subscription",
+            trialDays: Math.max(0, Number(toRecord(paymentIntent.metadata).trialDays || 0)),
+            proposalSubtotalMinor: Math.max(0, Number(proposal.subtotalMinor || 0)),
+            proposalTaxMinor: Math.max(0, Number(proposal.taxMinor || 0)),
+            proposalTotalMinor: Math.max(0, Number(proposal.totalMinor || 0)),
+            coupon: String(toRecord(paymentIntent.metadata).coupon || "").trim() || null,
+            ...(metadata || {}),
+          },
+        }),
+        fallback: null as Awaited<ReturnType<typeof adapter.createCheckout>> | null,
       });
+
+      if (checkoutResult.timedOut || checkoutResult.failed || !checkoutResult.value) {
+        throw new Error("provider_timeout");
+      }
+
+      const checkout = checkoutResult.value;
       logPaymentIntentCheckpoint("START 3F after Stripe adapter", {
         paymentIntentKey: paymentIntent.paymentIntentKey,
         providerPaymentIntentId: checkout.providerPaymentIntentId,

@@ -15,6 +15,7 @@ import {
 
 const IDEMPOTENCY_INFLIGHT_TIMEOUT_MS = 5 * 60 * 1000;
 const MANUAL_OVERRIDE_LOOKUP_TIMEOUT_MS = 250;
+const PROVIDER_CREDENTIAL_RESOLVE_TIMEOUT_MS = 2_500;
 
 const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -44,6 +45,18 @@ class ManualOverrideLookupTimeoutError extends Error {
     super(`manual_override_lookup_timeout:${timeoutMs}`);
     this.name = "ManualOverrideLookupTimeoutError";
     this.timeoutMs = timeoutMs;
+  }
+}
+
+class ProviderCredentialResolveTimeoutError extends Error {
+  readonly timeoutMs: number;
+  readonly provider: string;
+
+  constructor(provider: string, timeoutMs: number) {
+    super(`provider_credential_resolve_timeout:${provider}:${timeoutMs}`);
+    this.name = "ProviderCredentialResolveTimeoutError";
+    this.timeoutMs = timeoutMs;
+    this.provider = provider;
   }
 }
 
@@ -137,6 +150,31 @@ export const createCommerceAuthorityService = () => {
         new Promise<T>((_, reject) => {
           timeoutHandle = setTimeout(() => {
             reject(new ManualOverrideLookupTimeoutError(timeoutMs));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  };
+
+  const withProviderCredentialResolveTimeout = async <T>(
+    provider: string,
+    task: Promise<T>,
+    timeoutMs: number
+  ) => {
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
+    try {
+      return await Promise.race([
+        task,
+        new Promise<T>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(
+              new ProviderCredentialResolveTimeoutError(provider, timeoutMs)
+            );
           }, timeoutMs);
         }),
       ]);
@@ -300,9 +338,11 @@ export const createCommerceAuthorityService = () => {
   const resolveProviderCredential = async ({
     businessId,
     provider,
+    timeoutMs = PROVIDER_CREDENTIAL_RESOLVE_TIMEOUT_MS,
   }: {
     businessId: string;
     provider: string;
+    timeoutMs?: number;
   }) => {
     const resolveStartedAt = Date.now();
     const normalizedProvider = normalizeProvider(provider);
@@ -313,49 +353,12 @@ export const createCommerceAuthorityService = () => {
     let slowPath = false;
     let credentialFound = false;
     let outcome = "unknown";
+    let timedOut = false;
 
     try {
-      const initialLookupStartedAt = Date.now();
-      let credential = await prisma.commerceProviderCredential.findUnique({
-        where: {
-          businessId_provider: {
-            businessId,
-            provider: normalizedProvider,
-          },
-        },
-      });
-      credentialLookupMs += Date.now() - initialLookupStartedAt;
-
-      if (!credential) {
-        slowPath = true;
-
-        const governanceStartedAt = Date.now();
-        await enforceSecurityGovernanceInfluence({
-          domain: "COMMERCE",
-          action: "billing:view",
-          businessId,
-          tenantId: businessId,
-          actorId: "commerce_authority",
-          actorType: "SERVICE",
-          role: "SERVICE",
-          permissions: ["billing:view"],
-          scopes: ["READ_ONLY"],
-          resourceType: "COMMERCE_CREDENTIAL",
-          resourceId: normalizedProvider,
-          resourceTenantId: businessId,
-          purpose: "CREDENTIAL_RESOLVE",
-        });
-        governanceMs = Date.now() - governanceStartedAt;
-
-        const seedStartedAt = Date.now();
-        await seedProviderCredentialIfMissing({
-          businessId,
-          provider: normalizedProvider,
-        }).catch(() => undefined);
-        seedMs = Date.now() - seedStartedAt;
-
-        const refetchStartedAt = Date.now();
-        credential = await prisma.commerceProviderCredential.findUnique({
+      const resolveTask = (async () => {
+        const initialLookupStartedAt = Date.now();
+        let credential = await prisma.commerceProviderCredential.findUnique({
           where: {
             businessId_provider: {
               businessId,
@@ -363,54 +366,108 @@ export const createCommerceAuthorityService = () => {
             },
           },
         });
-        credentialLookupMs += Date.now() - refetchStartedAt;
+        credentialLookupMs += Date.now() - initialLookupStartedAt;
+
+        if (!credential) {
+          slowPath = true;
+
+          const governanceStartedAt = Date.now();
+          await enforceSecurityGovernanceInfluence({
+            domain: "COMMERCE",
+            action: "billing:view",
+            businessId,
+            tenantId: businessId,
+            actorId: "commerce_authority",
+            actorType: "SERVICE",
+            role: "SERVICE",
+            permissions: ["billing:view"],
+            scopes: ["READ_ONLY"],
+            resourceType: "COMMERCE_CREDENTIAL",
+            resourceId: normalizedProvider,
+            resourceTenantId: businessId,
+            purpose: "CREDENTIAL_RESOLVE",
+          });
+          governanceMs = Date.now() - governanceStartedAt;
+
+          const seedStartedAt = Date.now();
+          await seedProviderCredentialIfMissing({
+            businessId,
+            provider: normalizedProvider,
+          }).catch(() => undefined);
+          seedMs = Date.now() - seedStartedAt;
+
+          const refetchStartedAt = Date.now();
+          credential = await prisma.commerceProviderCredential.findUnique({
+            where: {
+              businessId_provider: {
+                businessId,
+                provider: normalizedProvider,
+              },
+            },
+          });
+          credentialLookupMs += Date.now() - refetchStartedAt;
+        }
+
+        if (!credential) {
+          outcome = "missing";
+          return null;
+        }
+        credentialFound = true;
+
+        const validationStartedAt = Date.now();
+        try {
+          const now = Date.now();
+
+          const expired =
+            credential.expiresAt instanceof Date &&
+            credential.expiresAt.getTime() <= now;
+
+          const revoked =
+            credential.status === "REVOKED" ||
+            credential.revokedAt instanceof Date ||
+            toRecord(credential.providerMetadata).revoked === true;
+
+          if (revoked) {
+            outcome = "revoked";
+            throw new Error(`provider_credential_revoked:${normalizedProvider}`);
+          }
+
+          if (expired || credential.status === "EXPIRED") {
+            outcome = "expired";
+            throw new Error(`provider_credential_expired:${normalizedProvider}`);
+          }
+
+          if (credential.status === "AUTH_FAILED") {
+            outcome = "auth_failed";
+            throw new Error(`provider_credential_auth_failed:${normalizedProvider}`);
+          }
+
+          if (credential.status === "DISCONNECTED") {
+            outcome = "disconnected";
+            throw new Error(`provider_credential_disconnected:${normalizedProvider}`);
+          }
+        } finally {
+          validationMs = Date.now() - validationStartedAt;
+        }
+
+        outcome = "active";
+        return credential;
+      })();
+
+      if (timeoutMs > 0) {
+        return await withProviderCredentialResolveTimeout(
+          normalizedProvider,
+          resolveTask,
+          timeoutMs
+        );
       }
 
-      if (!credential) {
-        outcome = "missing";
-        return null;
-      }
-      credentialFound = true;
-
-      const validationStartedAt = Date.now();
-      try {
-        const now = Date.now();
-
-        const expired =
-          credential.expiresAt instanceof Date &&
-          credential.expiresAt.getTime() <= now;
-
-        const revoked =
-          credential.status === "REVOKED" ||
-          credential.revokedAt instanceof Date ||
-          toRecord(credential.providerMetadata).revoked === true;
-
-        if (revoked) {
-          outcome = "revoked";
-          throw new Error(`provider_credential_revoked:${normalizedProvider}`);
-        }
-
-        if (expired || credential.status === "EXPIRED") {
-          outcome = "expired";
-          throw new Error(`provider_credential_expired:${normalizedProvider}`);
-        }
-
-        if (credential.status === "AUTH_FAILED") {
-          outcome = "auth_failed";
-          throw new Error(`provider_credential_auth_failed:${normalizedProvider}`);
-        }
-
-        if (credential.status === "DISCONNECTED") {
-          outcome = "disconnected";
-          throw new Error(`provider_credential_disconnected:${normalizedProvider}`);
-        }
-      } finally {
-        validationMs = Date.now() - validationStartedAt;
-      }
-
-      outcome = "active";
-      return credential;
+      return await resolveTask;
     } catch (error) {
+      timedOut = error instanceof ProviderCredentialResolveTimeoutError;
+      if (timedOut) {
+        outcome = "timeout";
+      }
       if (outcome === "unknown") {
         outcome = "error";
       }
@@ -426,6 +483,8 @@ export const createCommerceAuthorityService = () => {
         governanceMs,
         seedMs,
         validationMs,
+        timeoutMs,
+        timedOut,
         totalMs: Date.now() - resolveStartedAt,
       });
     }

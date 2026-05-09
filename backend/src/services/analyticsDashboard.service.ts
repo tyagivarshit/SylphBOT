@@ -93,6 +93,7 @@ const STAGE_LABELS: Record<string, string> = {
 const ANALYTICS_DASHBOARD_CACHE_TTL_MS = 15_000;
 const ANALYTICS_DASHBOARD_STALE_TTL_MS = 60_000;
 const ANALYTICS_DASHBOARD_REFRESH_WAIT_MS = 900;
+const ANALYTICS_DASHBOARD_NON_ELITE_TTL_MS = 30_000;
 
 const analyticsDashboardCache = new Map<
   string,
@@ -1077,7 +1078,7 @@ function buildInsights(params: {
   ];
 }
 
-function buildAnalyticsDashboardFallback(range: string, planKey: PlanKey) {
+export function buildAnalyticsDashboardFallback(range: string, planKey: PlanKey) {
   const window = getDateWindow(range);
   const emptyLeads: AnalyticsLeadRecord[] = [];
   const emptyMessages: AnalyticsMessageRecord[] = [];
@@ -1492,6 +1493,22 @@ export async function getAnalyticsDashboard(
       planKey,
     });
     return cached.value;
+  }
+
+  if (planKey !== "ELITE") {
+    const fallback = buildAnalyticsDashboardFallback(range, planKey);
+    analyticsDashboardCache.set(cacheKey, {
+      value: fallback,
+      expiresAt: nowMs + ANALYTICS_DASHBOARD_NON_ELITE_TTL_MS,
+      staleUntil: nowMs + ANALYTICS_DASHBOARD_NON_ELITE_TTL_MS,
+    });
+    console.info("[ANALYTICS_DASHBOARD_CACHE]", {
+      mode: "NON_ELITE_FAST_FALLBACK",
+      businessId,
+      range,
+      planKey,
+    });
+    return fallback;
   }
 
   const projectionPromise = primeAnalyticsDashboardProjection(

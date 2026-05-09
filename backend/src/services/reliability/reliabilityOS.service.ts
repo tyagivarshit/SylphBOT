@@ -720,8 +720,12 @@ export const recordObservabilityEvent = async ({
     return existing;
   }
 
-  const created = await db.observabilityEventLedger.create({
-    data,
+  const created = await db.observabilityEventLedger.upsert({
+    where: {
+      eventKey: key,
+    },
+    update: {},
+    create: data,
   });
 
   await recordTraceLedger({

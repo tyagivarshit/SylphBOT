@@ -14,6 +14,7 @@ import {
 } from "./security/securityGovernanceOS.service";
 
 const IDEMPOTENCY_INFLIGHT_TIMEOUT_MS = 5 * 60 * 1000;
+const MANUAL_OVERRIDE_LOOKUP_TIMEOUT_MS = 250;
 
 const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -35,6 +36,16 @@ const toEncryptedRef = (value?: string | null) => {
 };
 
 const nowIso = () => new Date().toISOString();
+
+class ManualOverrideLookupTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`manual_override_lookup_timeout:${timeoutMs}`);
+    this.name = "ManualOverrideLookupTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
 
 const buildProviderEventKey = (provider: CommerceProvider, providerEventId: string) =>
   `${provider}:${String(providerEventId || "").trim() || "unknown_event"}`;
@@ -102,6 +113,40 @@ export type ExternalCommerceClaimResult = {
 };
 
 export const createCommerceAuthorityService = () => {
+  const normalizeOverrideScope = (scope: string) =>
+    String(scope || "").trim().toUpperCase() || "ALL";
+
+  const normalizeOverrideProvider = (provider?: string | null) =>
+    String(provider || "").trim().toUpperCase() || "ALL";
+
+  const isScopeMatch = (candidateScope: string, expectedScope: string) =>
+    candidateScope === "ALL" || candidateScope === expectedScope;
+
+  const isProviderMatch = (candidateProvider: string, expectedProvider: string) =>
+    candidateProvider === "ALL" || candidateProvider === expectedProvider;
+
+  const withManualOverrideLookupTimeout = async <T>(
+    task: Promise<T>,
+    timeoutMs: number
+  ) => {
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
+    try {
+      return await Promise.race([
+        task,
+        new Promise<T>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(new ManualOverrideLookupTimeoutError(timeoutMs));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  };
+
   const seedProviderCredentialIfMissing = async ({
     businessId,
     provider,
@@ -438,27 +483,34 @@ export const createCommerceAuthorityService = () => {
     scope: string;
     provider?: string | null;
     now?: Date;
-  }) =>
-    prisma.manualCommerceOverride.findFirst({
+  }) => {
+    const normalizedScope = normalizeOverrideScope(scope);
+    const normalizedProvider = normalizeOverrideProvider(provider);
+    const providerCandidates = Array.from(
+      new Set(["ALL", normalizedProvider])
+    );
+
+    const fastCandidate = await prisma.manualCommerceOverride.findFirst({
       where: {
         businessId,
+        provider: {
+          in: providerCandidates,
+        },
         isActive: true,
         manualLock: true,
         expiresAt: {
           gt: now,
         },
-        scope: {
-          in: [
-            "ALL",
-            String(scope || "").trim().toUpperCase() || "ALL",
-          ],
-        },
-        provider: {
-          in: [
-            "ALL",
-            String(provider || "").trim().toUpperCase() || "ALL",
-          ],
-        },
+      },
+      select: {
+        id: true,
+        scope: true,
+        provider: true,
+        reason: true,
+        expiresAt: true,
+        priority: true,
+        isActive: true,
+        manualLock: true,
       },
       orderBy: [
         {
@@ -470,26 +522,204 @@ export const createCommerceAuthorityService = () => {
       ],
     });
 
+    if (!fastCandidate) {
+      return null;
+    }
+
+    const fastPathScopeMatch = isScopeMatch(
+      normalizeOverrideScope(fastCandidate.scope),
+      normalizedScope
+    );
+    const fastPathProviderMatch = isProviderMatch(
+      normalizeOverrideProvider(fastCandidate.provider),
+      normalizedProvider
+    );
+
+    if (fastPathScopeMatch && fastPathProviderMatch) {
+      return fastCandidate;
+    }
+
+    await enforceSecurityGovernanceInfluence({
+      domain: "COMMERCE",
+      action: "billing:view",
+      businessId,
+      tenantId: businessId,
+      actorId: "commerce_authority",
+      actorType: "SERVICE",
+      role: "SERVICE",
+      permissions: ["billing:view"],
+      scopes: ["READ_ONLY"],
+      resourceType: "MANUAL_COMMERCE_OVERRIDE",
+      resourceId: fastCandidate.id,
+      resourceTenantId: businessId,
+      purpose: "MANUAL_OVERRIDE_SLOW_PATH_CHECK",
+      metadata: {
+        requestedScope: normalizedScope,
+        requestedProvider: normalizedProvider,
+        fastCandidateScope: fastCandidate.scope,
+        fastCandidateProvider: fastCandidate.provider,
+      },
+    }).catch(() => undefined);
+
+    return prisma.manualCommerceOverride.findFirst({
+      where: {
+        businessId,
+        isActive: true,
+        manualLock: true,
+        expiresAt: {
+          gt: now,
+        },
+        scope: {
+          in: ["ALL", normalizedScope],
+        },
+        provider: {
+          in: providerCandidates,
+        },
+      },
+      select: {
+        id: true,
+        scope: true,
+        provider: true,
+        reason: true,
+        expiresAt: true,
+        priority: true,
+        isActive: true,
+        manualLock: true,
+      },
+      orderBy: [
+        {
+          priority: "desc",
+        },
+        {
+          updatedAt: "desc",
+        },
+      ],
+    });
+  };
+
   const assertNoActiveManualOverride = async ({
     businessId,
     scope,
     provider = null,
+    advisoryLookup = false,
+    timeoutMs = MANUAL_OVERRIDE_LOOKUP_TIMEOUT_MS,
   }: {
     businessId: string;
     scope: string;
     provider?: string | null;
+    advisoryLookup?: boolean;
+    timeoutMs?: number;
   }) => {
-    const active = await getActiveManualOverride({
+    const startedAt = Date.now();
+    const normalizedScope = normalizeOverrideScope(scope);
+    const normalizedProvider = normalizeOverrideProvider(provider);
+    const providerCandidates = Array.from(
+      new Set(["ALL", normalizedProvider])
+    );
+    let lookupMs = 0;
+    let timedOut = false;
+
+    console.info("[MANUAL_OVERRIDE_GATE]", {
+      checkpoint: "OVERRIDE 1 before lookup",
       businessId,
-      scope,
-      provider,
+      scope: normalizedScope,
+      provider: normalizedProvider,
+      advisoryLookup,
+      timeoutMs,
+      providerCandidates,
     });
 
-    if (!active) {
-      return null;
-    }
+    try {
+      const lookupStartedAt = Date.now();
+      const lookupTask = getActiveManualOverride({
+        businessId,
+        scope: normalizedScope,
+        provider: normalizedProvider,
+      });
+      const active =
+        timeoutMs > 0
+          ? await withManualOverrideLookupTimeout(lookupTask, timeoutMs)
+          : await lookupTask;
+      lookupMs = Date.now() - lookupStartedAt;
 
-    throw new Error(`manual_commerce_override_active:${active.scope}:${active.reason}`);
+      console.info("[MANUAL_OVERRIDE_GATE]", {
+        checkpoint: "OVERRIDE 2 after lookup",
+        businessId,
+        scope: normalizedScope,
+        provider: normalizedProvider,
+        lookupMs,
+        overrideId: active?.id || null,
+        overrideScope: active?.scope || null,
+        overrideProvider: active?.provider || null,
+      });
+
+      console.info("[MANUAL_OVERRIDE_GATE]", {
+        checkpoint: "OVERRIDE 3 before validation",
+        businessId,
+        scope: normalizedScope,
+        provider: normalizedProvider,
+        overrideId: active?.id || null,
+      });
+
+      const hasActiveOverride =
+        Boolean(active) &&
+        Boolean(active?.isActive) &&
+        Boolean(active?.manualLock) &&
+        active?.expiresAt instanceof Date &&
+        active.expiresAt.getTime() > Date.now() &&
+        isScopeMatch(normalizeOverrideScope(active.scope), normalizedScope) &&
+        isProviderMatch(
+          normalizeOverrideProvider(active.provider),
+          normalizedProvider
+        );
+
+      console.info("[MANUAL_OVERRIDE_GATE]", {
+        checkpoint: "OVERRIDE 4 after validation",
+        businessId,
+        scope: normalizedScope,
+        provider: normalizedProvider,
+        overrideId: active?.id || null,
+        hasActiveOverride,
+      });
+
+      if (!hasActiveOverride) {
+        return null;
+      }
+
+      throw new Error(
+        `manual_commerce_override_active:${active.scope}:${active.reason}`
+      );
+    } catch (error) {
+      timedOut = error instanceof ManualOverrideLookupTimeoutError;
+
+      if (timedOut) {
+        console.warn("[MANUAL_OVERRIDE_GATE]", {
+          checkpoint: "OVERRIDE_TIMEOUT",
+          businessId,
+          scope: normalizedScope,
+          provider: normalizedProvider,
+          advisoryLookup,
+          timeoutMs,
+        });
+
+        if (advisoryLookup) {
+          return null;
+        }
+      }
+
+      throw error;
+    } finally {
+      console.info("[MANUAL_OVERRIDE_GATE]", {
+        checkpoint: "OVERRIDE_TOTAL",
+        businessId,
+        scope: normalizedScope,
+        provider: normalizedProvider,
+        advisoryLookup,
+        timedOut,
+        lookupMs,
+        totalMs: Date.now() - startedAt,
+      });
+    }
   };
 
   const readExternalIdempotency = async ({

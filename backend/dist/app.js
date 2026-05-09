@@ -170,6 +170,8 @@ const corsOptions = {
 };
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const WEBHOOK_REQUEST_TIMEOUT_MS = 8000;
+const BILLING_REQUEST_TIMEOUT_MS = 12000;
+const CHECKOUT_REQUEST_TIMEOUT_MS = 14000;
 const WEBHOOK_TIMEOUT_PATH_PREFIXES = [
     "/api/webhooks/commerce",
     "/api/webhook/whatsapp",
@@ -177,9 +179,25 @@ const WEBHOOK_TIMEOUT_PATH_PREFIXES = [
     "/webhook/instagram",
     "/api/webhook/calendar",
 ];
-const resolveRequestTimeoutMs = (path) => WEBHOOK_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))
-    ? WEBHOOK_REQUEST_TIMEOUT_MS
-    : DEFAULT_REQUEST_TIMEOUT_MS;
+const CHECKOUT_TIMEOUT_PATH_PREFIXES = [
+    "/api/billing/checkout/start",
+    "/api/billing/checkout",
+    "/api/billing/create-checkout-session",
+    "/api/billing/upgrade",
+];
+const BILLING_TIMEOUT_PATH_PREFIXES = ["/api/billing"];
+const resolveRequestTimeoutMs = (path) => {
+    if (WEBHOOK_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+        return WEBHOOK_REQUEST_TIMEOUT_MS;
+    }
+    if (CHECKOUT_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+        return CHECKOUT_REQUEST_TIMEOUT_MS;
+    }
+    if (BILLING_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+        return BILLING_REQUEST_TIMEOUT_MS;
+    }
+    return DEFAULT_REQUEST_TIMEOUT_MS;
+};
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     referrerPolicy: {
@@ -404,7 +422,7 @@ app.use("/api/security", auth_middleware_1.protect, security_routes_1.default);
 app.use("/api/integrations", auth_middleware_1.protect, integration_routes_1.default);
 app.use("/api/oauth", oauth_routes_1.default);
 app.use("/api/booking", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, booking_routes_1.default);
-app.use("/api/availability", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, availability_routes_1.default);
+app.use("/api/availability", auth_middleware_1.protect, availability_routes_1.default);
 app.use("/api/inbox/intake", auth_middleware_1.protect, receptionIntake_routes_1.default);
 app.use("/api/health", health_routes_1.default);
 app.get("/health", (req, res) => {

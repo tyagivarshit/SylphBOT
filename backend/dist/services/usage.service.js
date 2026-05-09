@@ -42,6 +42,8 @@ const AI_HOURLY_FEATURE_KEY = "ai_messages_hourly";
 const AI_WARNING_MARKER_FEATURE_KEY = "ai_usage_warning_notice";
 const CONTACTS_LIMIT_LOCK_FEATURE_KEY = "contacts_limit_lock";
 const AI_WARNING_MESSAGE = "You have used 80% of your daily AI limit.";
+const USAGE_OVERVIEW_CACHE_TTL_MS = 6000;
+const usageOverviewCache = new Map();
 const AI_HOURLY_LIMITS = {
     LOCKED: 0,
     FREE_LOCKED: 0,
@@ -68,6 +70,13 @@ const getCurrentPeriodKey = (businessId) => {
 const getCurrentDateKey = () => new Date().toISOString().slice(0, 10);
 const getCurrentHourKey = () => new Date().toISOString().slice(0, 13);
 const normalizeBusinessId = (businessId) => String(businessId || "").trim();
+const invalidateUsageOverviewCache = (businessId) => {
+    const normalizedBusinessId = normalizeBusinessId(businessId);
+    if (!normalizedBusinessId) {
+        return;
+    }
+    usageOverviewCache.delete(normalizedBusinessId);
+};
 const normalizeCount = (count) => {
     if (count === undefined) {
         return DEFAULT_INCREMENT_COUNT;
@@ -510,6 +519,7 @@ const finalizeAIUsageExecution = async (reservation) => {
     if (reservation.snapshot.warning) {
         await maybeSendAiWarningNotification(reservation.snapshot).catch(() => undefined);
     }
+    invalidateUsageOverviewCache(reservation.businessId);
     return reservation.snapshot;
 };
 exports.finalizeAIUsageExecution = finalizeAIUsageExecution;
@@ -619,6 +629,7 @@ const releaseAIUsageExecution = async (reservation) => {
             });
         }
     });
+    invalidateUsageOverviewCache(reservation.businessId);
 };
 exports.releaseAIUsageExecution = releaseAIUsageExecution;
 const getUsage = async ({ businessId, feature, count, }) => {
@@ -632,7 +643,7 @@ const getUsage = async ({ businessId, feature, count, }) => {
     const { month, year } = (0, monthlyUsage_helper_1.getCurrentMonthYear)();
     if (feature === "contacts") {
         const contactsUsed = await getContactsCount(normalizedBusinessId);
-        return buildUsageSnapshot(normalizedBusinessId, buildComputation({
+        const snapshot = buildUsageSnapshot(normalizedBusinessId, buildComputation({
             feature,
             count: normalizedCount,
             planKey,
@@ -797,6 +808,7 @@ const incrementUsage = async ({ businessId, feature, count, }) => {
         month: updated.key.month,
         year: updated.key.year,
     }));
+    invalidateUsageOverviewCache(normalizedBusinessId);
     return snapshot;
 };
 exports.incrementUsage = incrementUsage;
@@ -862,10 +874,12 @@ const runWithContactUsageLimit = async (businessId, operation, count = DEFAULT_I
             month: (0, monthlyUsage_helper_1.getCurrentMonthYear)().month,
             year: (0, monthlyUsage_helper_1.getCurrentMonthYear)().year,
         }));
-        return {
+        const payload = {
             result,
             usage,
         };
+        invalidateUsageOverviewCache(normalizedBusinessId);
+        return payload;
     });
 };
 exports.runWithContactUsageLimit = runWithContactUsageLimit;
@@ -874,71 +888,122 @@ const getUsageOverview = async (businessId) => {
     if (!normalizedBusinessId) {
         throw new UsageError("INVALID_BUSINESS_ID", "Invalid business id");
     }
-    const [{ planKey }, trial, addons, aiUsage, contactsUsage, messageUsage, automationUsage] = await Promise.all([
-        resolveUsagePlan(normalizedBusinessId),
-        (0, trial_service_1.getTrialStatus)(normalizedBusinessId),
-        (0, addon_service_1.getAddonBalance)(normalizedBusinessId),
-        (0, exports.getUsage)({
-            businessId: normalizedBusinessId,
-            feature: "ai_messages",
-        }),
-        (0, exports.getUsage)({
-            businessId: normalizedBusinessId,
-            feature: "contacts",
-        }),
-        (0, exports.getUsage)({
-            businessId: normalizedBusinessId,
-            feature: "messages_sent",
-        }),
-        (0, exports.getUsage)({
-            businessId: normalizedBusinessId,
-            feature: "automation_runs",
-        }),
-    ]);
-    return {
-        plan: planKey,
-        planLabel: (0, pricing_config_1.getPricingPlanLabel)(planKey),
-        trialActive: trial.trialActive,
-        daysLeft: trial.daysLeft,
-        warning: aiUsage.warning,
-        warningMessage: aiUsage.warningMessage,
-        addonCredits: addons.aiCredits,
-        ai: {
-            usedToday: aiUsage.dailyUsed || 0,
-            limit: aiUsage.dailyLimit || 0,
-            remaining: aiUsage.dailyRemaining ?? null,
-        },
-        usage: {
+    const cached = usageOverviewCache.get(normalizedBusinessId);
+    if (cached?.value && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+    if (cached?.promise) {
+        return cached.promise;
+    }
+    const computePromise = (async () => {
+        const periodKey = getCurrentPeriodKey(normalizedBusinessId);
+        const dailyDateKey = getCurrentDateKey();
+        const [{ planKey, limits }, trial, addons, usageRow, aiDailyRow, contactsUsed] = await Promise.all([
+            resolveUsagePlan(normalizedBusinessId),
+            (0, trial_service_1.getTrialStatus)(normalizedBusinessId),
+            (0, addon_service_1.getAddonBalance)(normalizedBusinessId),
+            prisma_1.default.usage.findUnique({
+                where: {
+                    businessId_month_year: periodKey,
+                },
+                select: {
+                    aiCallsUsed: true,
+                    messagesUsed: true,
+                    followupsUsed: true,
+                },
+            }),
+            prisma_1.default.usageDaily.findUnique({
+                where: {
+                    businessId_feature_dateKey: {
+                        businessId: normalizedBusinessId,
+                        feature: AI_DAILY_FEATURE_KEY,
+                        dateKey: dailyDateKey,
+                    },
+                },
+                select: {
+                    count: true,
+                },
+            }),
+            getContactsCount(normalizedBusinessId),
+        ]);
+        const aiDailyUsed = Number(aiDailyRow?.count || 0);
+        const aiDailyLimit = Number(limits.aiDailyLimit || 0);
+        const aiMonthlyUsed = Number(usageRow?.aiCallsUsed || 0);
+        const aiMonthlyLimit = Number(limits.aiMonthlyLimit || 0);
+        const messageUsed = Number(usageRow?.messagesUsed || 0);
+        const messageLimit = Number(limits.messageLimit || 0);
+        const automationUsed = Number(usageRow?.followupsUsed || 0);
+        const automationLimit = Number(limits.automationLimit || 0);
+        const contactsLimit = Number(limits.contactsLimit || 0);
+        const aiDailyRemaining = toRemaining(aiDailyLimit, aiDailyUsed);
+        const aiMonthlyRemaining = toRemaining(aiMonthlyLimit, aiMonthlyUsed);
+        const warning = aiDailyLimit > 0 &&
+            aiDailyLimit !== -1 &&
+            aiDailyUsed / aiDailyLimit >= pricing_config_1.AI_USAGE_WARNING_THRESHOLD;
+        const overview = {
+            plan: planKey,
+            planLabel: (0, pricing_config_1.getPricingPlanLabel)(planKey),
+            trialActive: trial.trialActive,
+            daysLeft: trial.daysLeft,
+            warning,
+            warningMessage: warning ? AI_WARNING_MESSAGE : null,
+            addonCredits: addons.aiCredits,
             ai: {
-                used: aiUsage.dailyUsed || 0,
-                dailyLimit: aiUsage.dailyLimit || 0,
-                monthlyUsed: aiUsage.monthlyUsed,
-                monthlyLimit: aiUsage.monthlyLimit,
-                dailyRemaining: aiUsage.dailyRemaining ?? null,
-                monthlyRemaining: aiUsage.monthlyRemaining,
-                warning: aiUsage.warning,
+                usedToday: aiDailyUsed,
+                limit: aiDailyLimit,
+                remaining: aiDailyRemaining,
             },
-            contacts: {
-                used: contactsUsage.monthlyUsed,
-                limit: contactsUsage.monthlyLimit,
-                remaining: contactsUsage.monthlyRemaining,
+            usage: {
+                ai: {
+                    used: aiDailyUsed,
+                    dailyLimit: aiDailyLimit,
+                    monthlyUsed: aiMonthlyUsed,
+                    monthlyLimit: aiMonthlyLimit,
+                    dailyRemaining: aiDailyRemaining,
+                    monthlyRemaining: aiMonthlyRemaining,
+                    warning,
+                },
+                contacts: {
+                    used: contactsUsed,
+                    limit: contactsLimit,
+                    remaining: toRemaining(contactsLimit, contactsUsed),
+                },
+                messages: {
+                    used: messageUsed,
+                    limit: messageLimit,
+                    remaining: toRemaining(messageLimit, messageUsed),
+                },
+                automation: {
+                    used: automationUsed,
+                    limit: automationLimit,
+                    remaining: toRemaining(automationLimit, automationUsed),
+                },
             },
-            messages: {
-                used: messageUsage.monthlyUsed,
-                limit: messageUsage.monthlyLimit,
-                remaining: messageUsage.monthlyRemaining,
+            addons: {
+                aiCredits: addons.aiCredits,
+                contacts: addons.contacts,
             },
-            automation: {
-                used: automationUsage.monthlyUsed,
-                limit: automationUsage.monthlyLimit,
-                remaining: automationUsage.monthlyRemaining,
-            },
-        },
-        addons: {
-            aiCredits: addons.aiCredits,
-            contacts: addons.contacts,
-        },
-    };
+        };
+        usageOverviewCache.set(normalizedBusinessId, {
+            value: overview,
+            expiresAt: Date.now() + USAGE_OVERVIEW_CACHE_TTL_MS,
+        });
+        return overview;
+    })().finally(() => {
+        const latest = usageOverviewCache.get(normalizedBusinessId);
+        if (latest?.promise) {
+            usageOverviewCache.set(normalizedBusinessId, {
+                value: latest.value,
+                expiresAt: latest.expiresAt,
+            });
+        }
+    });
+    usageOverviewCache.set(normalizedBusinessId, {
+        value: cached?.value,
+        expiresAt: cached?.expiresAt || 0,
+        promise: computePromise,
+    });
+    return computePromise;
 };
 exports.getUsageOverview = getUsageOverview;
 const trackUsage = async (businessId, field) => {

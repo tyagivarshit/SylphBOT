@@ -15,7 +15,14 @@ const tenant_service_1 = require("../services/tenant.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
 const AUTH_CONTEXT_CACHE_TTL_MS = 15000;
 const SESSION_ANOMALY_RECHECK_MS = 10000;
-const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 450;
+const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 180;
+const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
+    "/api/billing/checkout",
+    "/api/security",
+    "/api/auth",
+    "/api/oauth",
+    "/api/commerce",
+];
 const authContextCache = new Map();
 const sessionAnomalyCheckedAt = new Map();
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
@@ -135,15 +142,22 @@ const withFastGuardTimeout = async (task, timeoutMs) => {
     }
 };
 const runSessionAnomalyGuard = async (req, input) => {
-    try {
-        await withFastGuardTimeout(enforceSessionAnomalyGuard(req, input), SESSION_ANOMALY_GUARD_TIMEOUT_MS);
-    }
-    catch (error) {
+    const route = String(req.originalUrl || req.url || "").trim();
+    const shouldEnforceSynchronously = req.method !== "GET" ||
+        SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => route.startsWith(prefix));
+    const task = withFastGuardTimeout(enforceSessionAnomalyGuard(req, input), SESSION_ANOMALY_GUARD_TIMEOUT_MS).catch((error) => {
         // Fail open: auth should remain responsive even if anomaly telemetry is slow.
         req.logger?.warn({
             error: error?.message || String(error || "unknown"),
+            route,
+            method: req.method,
         }, "Session anomaly guard skipped");
+    });
+    if (shouldEnforceSynchronously) {
+        await task;
+        return;
     }
+    void task;
 };
 const protect = async (req, res, next) => {
     const startedAt = Date.now();

@@ -2481,6 +2481,7 @@ model ManualCommerceOverride {
 
   @@index([businessId, scope, isActive, expiresAt, priority])
   @@index([businessId, provider, isActive, expiresAt])
+  @@index([businessId, provider, isActive, manualLock, expiresAt, priority])
 }
 
 model TaxComplianceLedger {

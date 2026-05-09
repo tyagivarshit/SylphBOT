@@ -262,18 +262,28 @@ class DashboardService {
                     dayEnd,
                 };
             });
-            const counts = await Promise.all(days.map((day) => prisma_1.default.lead.count({
+            const oldestDayStart = days[0]?.dayStart || today;
+            const newestDayEnd = days[days.length - 1]?.dayEnd || (0, date_fns_1.addDays)(today, 1);
+            const rows = await prisma_1.default.lead.findMany({
                 where: {
                     businessId,
                     createdAt: {
-                        gte: day.dayStart,
-                        lt: day.dayEnd,
+                        gte: oldestDayStart,
+                        lt: newestDayEnd,
                     },
                 },
-            })));
-            return days.map((day, index) => ({
+                select: {
+                    createdAt: true,
+                },
+            });
+            const dailyCounts = rows.reduce((acc, row) => {
+                const key = (0, date_fns_1.startOfDay)(row.createdAt).toISOString();
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+            }, {});
+            return days.map((day) => ({
                 date: day.label,
-                leads: counts[index] || 0,
+                leads: dailyCounts[day.dayStart.toISOString()] || 0,
             }));
         }
         catch (error) {
@@ -293,18 +303,28 @@ class DashboardService {
                     dayEnd,
                 };
             });
-            const counts = await Promise.all(days.map((day) => prisma_1.default.message.count({
+            const oldestDayStart = days[0]?.dayStart || today;
+            const newestDayEnd = days[days.length - 1]?.dayEnd || (0, date_fns_1.addDays)(today, 1);
+            const rows = await prisma_1.default.message.findMany({
                 where: {
                     lead: { businessId },
                     createdAt: {
-                        gte: day.dayStart,
-                        lt: day.dayEnd,
+                        gte: oldestDayStart,
+                        lt: newestDayEnd,
                     },
                 },
-            })));
-            return days.map((day, index) => ({
+                select: {
+                    createdAt: true,
+                },
+            });
+            const dailyCounts = rows.reduce((acc, row) => {
+                const key = (0, date_fns_1.startOfDay)(row.createdAt).toISOString();
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+            }, {});
+            return days.map((day) => ({
                 date: day.label,
-                messages: counts[index] || 0,
+                messages: dailyCounts[day.dayStart.toISOString()] || 0,
             }));
         }
         catch (error) {

@@ -6,6 +6,13 @@ const performanceMetrics_1 = require("../observability/performanceMetrics");
 const reliabilityOS_service_1 = require("../services/reliability/reliabilityOS.service");
 const tenant_service_1 = require("../services/tenant.service");
 const monitoring_config_1 = require("../config/monitoring.config");
+const HIGH_VALUE_OBSERVABILITY_PATH_PREFIXES = [
+    "/api/billing",
+    "/api/webhook",
+    "/api/webhooks",
+    "/api/inbox/intake",
+    "/api/commerce",
+];
 const monitoringMiddleware = (req, res, next) => {
     const startedAt = Date.now();
     res.on("finish", () => {
@@ -13,6 +20,9 @@ const monitoringMiddleware = (req, res, next) => {
         const traceId = req.requestId || null;
         const statusCode = res.statusCode;
         const durationMs = Date.now() - startedAt;
+        const shouldPersistDetailedObservability = statusCode >= 400 ||
+            durationMs >= monitoring_config_1.monitoringConfig.slowRequestMs ||
+            HIGH_VALUE_OBSERVABILITY_PATH_PREFIXES.some((prefix) => String(req.originalUrl || "").startsWith(prefix));
         req.logger?.info({
             statusCode,
             durationMs,
@@ -21,46 +31,48 @@ const monitoringMiddleware = (req, res, next) => {
             userId: req.user?.id || null,
             businessId,
         }, "Request completed");
-        void (0, reliabilityOS_service_1.recordTraceLedger)({
-            traceId,
-            correlationId: traceId,
-            businessId,
-            tenantId: businessId,
-            leadId: typeof req.query?.leadId === "string"
-                ? req.query.leadId
-                : null,
-            stage: `http:${req.method}:${req.originalUrl}`,
-            status: statusCode >= 500 ? "FAILED" : "COMPLETED",
-            endedAt: new Date(),
-            metadata: {
-                statusCode,
-                durationMs,
-            },
-        }).catch(() => undefined);
-        void (0, reliabilityOS_service_1.recordObservabilityEvent)({
-            businessId,
-            tenantId: businessId,
-            eventType: "http.request.completed",
-            message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
-            severity: statusCode >= 500
-                ? "error"
-                : statusCode >= 400
-                    ? "warn"
-                    : "info",
-            context: {
+        if (shouldPersistDetailedObservability) {
+            void (0, reliabilityOS_service_1.recordTraceLedger)({
                 traceId,
                 correlationId: traceId,
+                businessId,
                 tenantId: businessId,
-                component: "http",
-                phase: "reception",
-            },
-            metadata: {
-                statusCode,
-                durationMs,
-                method: req.method,
-                route: req.originalUrl,
-            },
-        }).catch(() => undefined);
+                leadId: typeof req.query?.leadId === "string"
+                    ? req.query.leadId
+                    : null,
+                stage: `http:${req.method}:${req.originalUrl}`,
+                status: statusCode >= 500 ? "FAILED" : "COMPLETED",
+                endedAt: new Date(),
+                metadata: {
+                    statusCode,
+                    durationMs,
+                },
+            }).catch(() => undefined);
+            void (0, reliabilityOS_service_1.recordObservabilityEvent)({
+                businessId,
+                tenantId: businessId,
+                eventType: "http.request.completed",
+                message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
+                severity: statusCode >= 500
+                    ? "error"
+                    : statusCode >= 400
+                        ? "warn"
+                        : "info",
+                context: {
+                    traceId,
+                    correlationId: traceId,
+                    tenantId: businessId,
+                    component: "http",
+                    phase: "reception",
+                },
+                metadata: {
+                    statusCode,
+                    durationMs,
+                    method: req.method,
+                    route: req.originalUrl,
+                },
+            }).catch(() => undefined);
+        }
         (0, performanceMetrics_1.emitPerformanceMetric)({
             name: "API_MS",
             value: durationMs,

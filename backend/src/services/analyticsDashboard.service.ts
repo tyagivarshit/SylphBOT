@@ -90,6 +90,49 @@ const STAGE_LABELS: Record<string, string> = {
   LOST: "Lost",
 };
 
+const ANALYTICS_DASHBOARD_CACHE_TTL_MS = 15_000;
+const ANALYTICS_DASHBOARD_STALE_TTL_MS = 60_000;
+const ANALYTICS_DASHBOARD_REFRESH_WAIT_MS = 900;
+
+const analyticsDashboardCache = new Map<
+  string,
+  {
+    value?: Awaited<ReturnType<typeof computeAnalyticsDashboardProjection>>;
+    expiresAt: number;
+    staleUntil: number;
+    promise?: Promise<Awaited<ReturnType<typeof computeAnalyticsDashboardProjection>>>;
+  }
+>();
+
+const buildAnalyticsDashboardCacheKey = (
+  businessId: string,
+  range: string,
+  planKey: PlanKey
+) => `${businessId}:${range}:${planKey}`;
+
+const waitWithTimeoutFallback = async <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T
+) => {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timeoutHandle = setTimeout(() => {
+          resolve(fallback);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
 function getDateWindow(inputRange: string): DateWindow {
   const config = RANGE_CONFIG[inputRange] || RANGE_CONFIG["30d"];
   const end = endOfDay(new Date());
@@ -1034,7 +1077,87 @@ function buildInsights(params: {
   ];
 }
 
-export async function getAnalyticsDashboard(
+function buildAnalyticsDashboardFallback(range: string, planKey: PlanKey) {
+  const window = getDateWindow(range);
+  const emptyLeads: AnalyticsLeadRecord[] = [];
+  const emptyMessages: AnalyticsMessageRecord[] = [];
+  const emptyAppointments: AnalyticsAppointmentRecord[] = [];
+  const emptyTrackedMessages: AnalyticsTrackedMessageRecord[] = [];
+  const emptyConversions: AnalyticsConversionEventRecord[] = [];
+  const emptyRevenueEvents: AnalyticsRevenueBrainEventRecord[] = [];
+  const emptyBookedLeadIds = new Set<string>();
+  const emptyFunnel = buildFunnel(emptyLeads, emptyBookedLeadIds);
+
+  return {
+    meta: {
+      range: window.range,
+      label: window.label,
+      start: window.current.start.toISOString(),
+      end: window.current.end.toISOString(),
+      generatedAt: new Date().toISOString(),
+      planKey,
+      isElite: planKey === "ELITE",
+      upgradeRequired: planKey !== "ELITE",
+    },
+    business: {
+      name: "Workspace",
+      industry: null,
+      website: null,
+      teamSize: null,
+      timezone: null,
+    },
+    summary: {
+      healthScore: buildMetric(0, 0, "number"),
+      leadsCaptured: buildMetric(0, 0, "number"),
+      qualifiedLeads: buildMetric(0, 0, "number"),
+      bookedMeetings: buildMetric(0, 0, "number"),
+      leadToBookingRate: buildMetric(0, 0, "percent"),
+      avgFirstResponseMinutes: buildMetric(0, 0, "minutes", "lower"),
+      avgLeadScore: buildMetric(0, 0, "number"),
+      aiReplyShare: buildMetric(0, 0, "percent"),
+      unreadBacklog: 0,
+      hotLeadCount: 0,
+      activeConversations: 0,
+      humanTakeoverCount: 0,
+    },
+    trends: {
+      series: buildDailySeries(
+        window.current.start,
+        window.current.end,
+        emptyLeads,
+        emptyMessages,
+        emptyAppointments
+      ),
+      totals: {
+        inboundMessages: 0,
+        aiReplies: 0,
+        agentReplies: 0,
+        totalReplies: 0,
+        avgMessagesPerLead: 0,
+      },
+    },
+    funnel: emptyFunnel,
+    revenueEngine: {
+      ...buildRevenueEngineMetrics(
+        emptyTrackedMessages,
+        emptyConversions,
+        emptyLeads,
+        emptyBookedLeadIds
+      ),
+      variantPerformance: [],
+      funnelBreakdown: emptyFunnel,
+    },
+    revenueBrain: buildRevenueBrainMetrics(
+      emptyRevenueEvents,
+      emptyTrackedMessages,
+      emptyConversions
+    ),
+    sourcePerformance: [],
+    deepDive: null,
+  };
+}
+
+async function computeAnalyticsDashboardProjection(
   businessId: string,
   range: string,
   planKey: PlanKey
@@ -1291,4 +1414,141 @@ export async function getAnalyticsDashboard(
     sourcePerformance,
     deepDive,
   };
+}
+
+const primeAnalyticsDashboardProjection = (
+  cacheKey: string,
+  businessId: string,
+  range: string,
+  planKey: PlanKey
+) => {
+  const current = analyticsDashboardCache.get(cacheKey);
+
+  if (current?.promise) {
+    return current.promise;
+  }
+
+  const previousValue = current?.value;
+  const projectionPromise = computeAnalyticsDashboardProjection(
+    businessId,
+    range,
+    planKey
+  )
+    .then((value) => {
+      analyticsDashboardCache.set(cacheKey, {
+        value,
+        expiresAt: Date.now() + ANALYTICS_DASHBOARD_CACHE_TTL_MS,
+        staleUntil: Date.now() + ANALYTICS_DASHBOARD_STALE_TTL_MS,
+      });
+      return value;
+    })
+    .catch((error) => {
+      if (previousValue) {
+        analyticsDashboardCache.set(cacheKey, {
+          value: previousValue,
+          expiresAt: Date.now() + Math.floor(ANALYTICS_DASHBOARD_CACHE_TTL_MS / 3),
+          staleUntil: Date.now() + ANALYTICS_DASHBOARD_STALE_TTL_MS,
+        });
+        return previousValue;
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      const latest = analyticsDashboardCache.get(cacheKey);
+      if (latest?.promise === projectionPromise) {
+        analyticsDashboardCache.set(cacheKey, {
+          value: latest.value,
+          expiresAt: latest.expiresAt,
+          staleUntil: latest.staleUntil,
+        });
+      }
+    });
+
+  analyticsDashboardCache.set(cacheKey, {
+    value: current?.value,
+    expiresAt: current?.expiresAt || 0,
+    staleUntil: current?.staleUntil || 0,
+    promise: projectionPromise,
+  });
+
+  return projectionPromise;
+};
+
+export async function getAnalyticsDashboard(
+  businessId: string,
+  range: string,
+  planKey: PlanKey
+) {
+  const cacheKey = buildAnalyticsDashboardCacheKey(businessId, range, planKey);
+  const nowMs = Date.now();
+  const cached = analyticsDashboardCache.get(cacheKey);
+
+  if (cached?.value && cached.expiresAt > nowMs) {
+    console.info("[ANALYTICS_DASHBOARD_CACHE]", {
+      mode: "HIT",
+      businessId,
+      range,
+      planKey,
+    });
+    return cached.value;
+  }
+
+  const projectionPromise = primeAnalyticsDashboardProjection(
+    cacheKey,
+    businessId,
+    range,
+    planKey
+  );
+
+  if (cached?.value && cached.staleUntil > nowMs) {
+    console.info("[ANALYTICS_DASHBOARD_CACHE]", {
+      mode: "STALE_RETURN_REFRESH",
+      businessId,
+      range,
+      planKey,
+      waitMs: ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
+    });
+
+    const refreshed = await waitWithTimeoutFallback(
+      projectionPromise,
+      ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
+      cached.value
+    );
+
+    if (refreshed === cached.value) {
+      console.info("[ANALYTICS_DASHBOARD_CACHE]", {
+        mode: "STALE_TIMEOUT_FALLBACK",
+        businessId,
+        range,
+        planKey,
+      });
+    }
+
+    return refreshed;
+  }
+
+  const fallback = buildAnalyticsDashboardFallback(range, planKey);
+  const projection = await waitWithTimeoutFallback(
+    projectionPromise,
+    ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
+    fallback
+  );
+
+  if (projection === fallback) {
+    console.info("[ANALYTICS_DASHBOARD_CACHE]", {
+      mode: "MISS_TIMEOUT_FALLBACK",
+      businessId,
+      range,
+      planKey,
+    });
+  }
+
+  console.info("[ANALYTICS_DASHBOARD_CACHE]", {
+    mode: projection === fallback ? "MISS_FALLBACK" : "MISS_WAIT",
+    businessId,
+    range,
+    planKey,
+  });
+  return projection;
 }

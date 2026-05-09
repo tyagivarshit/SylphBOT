@@ -85,7 +85,11 @@ const BILLING_CONFIRM_LOOKUP_TIMEOUT_MS = 700;
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60000;
 const BILLING_CONFIRM_STRIPE_TIMEOUT_MS = 1100;
 const BILLING_CONFIRM_RECONCILE_TIMEOUT_MS = 1300;
+const BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS = 650;
+const BILLING_PROJECTION_CACHE_TTL_MS = 4000;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
+const billingProjectionCache = new Map();
+const getBillingProjectionCacheKey = (businessId, currencyHint) => `${businessId}:${currencyHint}`;
 const mapPublicPlans = (plans = []) => {
     const planMap = new Map(plans.map((plan) => [String(plan.type || plan.name).toUpperCase(), plan]));
     return (0, pricing_config_1.getPublicPricingPlans)().map((plan) => {
@@ -203,30 +207,66 @@ async function getUserContext(req) {
     if (!userId) {
         throw new Error("Unauthorized");
     }
-    const user = await prisma_1.default.user.findUnique({
-        where: { id: userId },
-        select: {
-            id: true,
-            email: true,
-            businessId: true,
-        },
+    const businessIdFromRequest = String(req?.tenant?.businessId || req.user?.businessId || "").trim() ||
+        null;
+    const emailFromRequest = String(req.user?.email || "").trim().toLowerCase() || null;
+    if (businessIdFromRequest && emailFromRequest) {
+        return {
+            userId,
+            businessId: businessIdFromRequest,
+            email: emailFromRequest,
+        };
+    }
+    const userLookup = await (0, boundedTimeout_1.withTimeoutFallback)({
+        label: "billing_user_context_lookup",
+        timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
+        task: prisma_1.default.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                businessId: true,
+            },
+        }),
+        fallback: null,
     });
+    const user = userLookup.value;
     if (!user) {
+        if (emailFromRequest) {
+            return {
+                userId,
+                businessId: businessIdFromRequest,
+                email: emailFromRequest,
+            };
+        }
         throw new Error("Unauthorized");
     }
-    const businessIdHint = String(req.user?.businessId || user.businessId || "").trim() || null;
-    const identity = businessIdHint
+    const businessIdHint = String(businessIdFromRequest || user.businessId || "").trim() || null;
+    const identityResult = businessIdHint
         ? {
             businessId: businessIdHint,
+            workspace: null,
+            source: "request_fallback",
         }
-        : await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
-            userId,
-            preferredBusinessId: req.user?.businessId || user.businessId || null,
+        : await (0, boundedTimeout_1.withTimeoutFallback)({
+            label: "billing_workspace_identity_lookup",
+            timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
+            task: (0, tenant_service_1.resolveUserWorkspaceIdentity)({
+                userId,
+                preferredBusinessId: req.user?.businessId || user.businessId || businessIdFromRequest || null,
+            }),
+            fallback: {
+                businessId: user.businessId || null,
+                workspace: null,
+                source: "none",
+            },
         });
+    const identity = "value" in identityResult ? identityResult.value : identityResult;
+    const resolvedEmail = emailFromRequest || String(user.email || "").trim().toLowerCase();
     return {
         userId,
         businessId: identity.businessId,
-        email: user.email,
+        email: resolvedEmail,
     };
 }
 class BillingController {
@@ -805,15 +845,22 @@ class BillingController {
             ? invoicesResult.value
             : [];
         const invoices = invoicesRaw.map(mapInvoiceForClient);
-        const stripeLiveResult = await (0, boundedTimeout_1.withTimeoutFallback)({
-            label: "billing_stripe_live_projection",
-            timeoutMs: 900,
-            task: BillingController.buildStripeLiveSnapshot({
-                businessId,
-                fallbackSubscription: billingContext.subscription,
-            }),
-            fallback: null,
-        });
+        const shouldAttemptStripeLive = Boolean(String(billingContext.subscription?.stripeSubscriptionId || "").trim());
+        const stripeLiveResult = shouldAttemptStripeLive
+            ? await (0, boundedTimeout_1.withTimeoutFallback)({
+                label: "billing_stripe_live_projection",
+                timeoutMs: 450,
+                task: BillingController.buildStripeLiveSnapshot({
+                    businessId,
+                    fallbackSubscription: billingContext.subscription,
+                }),
+                fallback: null,
+            })
+            : {
+                value: null,
+                timedOut: false,
+                failed: false,
+            };
         const stripeLive = stripeLiveResult.value;
         const hasStripeLiveInvoices = Boolean(stripeLive?.invoices?.length);
         const effectiveSubscription = stripeLive?.subscription || billingContext.subscription;
@@ -1360,24 +1407,74 @@ class BillingController {
                 }).catch(() => undefined);
             }
             res.setHeader("Cache-Control", "no-store");
-            const projection = await (0, boundedTimeout_1.withTimeoutFallback)({
-                label: "billing_projection_api_guard",
-                timeoutMs: BILLING_CONFIRM_REQUEST_TIMEOUT_MS,
-                task: BillingController.buildBillingResponse(businessId, req),
-                fallback: {
-                    success: true,
-                    subscription: null,
-                    billing: EMPTY_BILLING_CONTEXT,
-                    usage: EMPTY_USAGE_SUMMARY,
-                    currency: (0, billingGeo_service_1.resolveBillingCurrency)(req),
-                    invoices: [],
-                    meta: {
-                        degraded: true,
-                        reason: "billing_projection_timeout_guard",
+            const currencyHint = (0, billingGeo_service_1.resolveBillingCurrency)(req);
+            const cacheKey = businessId
+                ? getBillingProjectionCacheKey(businessId, currencyHint)
+                : null;
+            if (cacheKey) {
+                const cached = billingProjectionCache.get(cacheKey);
+                if (cached?.value && cached.expiresAt > Date.now()) {
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "CACHE_HIT",
+                        businessId,
+                        route: "billing_projection",
+                        metadata: {
+                            cache: "memory_billing_projection",
+                        },
+                    });
+                    return res.json(cached.value);
+                }
+                if (cached?.promise) {
+                    return res.json(await cached.promise);
+                }
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "CACHE_MISS",
+                    businessId,
+                    route: "billing_projection",
+                    metadata: {
+                        cache: "memory_billing_projection",
                     },
-                },
+                });
+            }
+            const computeProjection = (async () => {
+                const projection = await (0, boundedTimeout_1.withTimeoutFallback)({
+                    label: "billing_projection_api_guard",
+                    timeoutMs: BILLING_CONFIRM_REQUEST_TIMEOUT_MS,
+                    task: BillingController.buildBillingResponse(businessId, req),
+                    fallback: {
+                        success: true,
+                        subscription: null,
+                        billing: EMPTY_BILLING_CONTEXT,
+                        usage: EMPTY_USAGE_SUMMARY,
+                        currency: currencyHint,
+                        invoices: [],
+                        meta: {
+                            degraded: true,
+                            reason: "billing_projection_timeout_guard",
+                        },
+                    },
+                });
+                return projection.value;
+            })();
+            if (cacheKey) {
+                billingProjectionCache.set(cacheKey, {
+                    expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                    promise: computeProjection,
+                });
+            }
+            const value = await computeProjection.catch((error) => {
+                if (cacheKey) {
+                    billingProjectionCache.delete(cacheKey);
+                }
+                throw error;
             });
-            return res.json(projection.value);
+            if (cacheKey) {
+                billingProjectionCache.set(cacheKey, {
+                    value,
+                    expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                });
+            }
+            return res.json(value);
         }
         catch (error) {
             if (error?.message === "Unauthorized") {

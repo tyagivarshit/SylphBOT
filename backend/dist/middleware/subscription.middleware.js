@@ -10,9 +10,12 @@ const plan_config_1 = require("../config/plan.config");
 const env_1 = require("../config/env");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
 const CACHE_TTL = 60 * 3;
+const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15000;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
 const EARLY_ACCESS_CACHE_TTL_MS = 30000;
+const EARLY_ACCESS_CACHE_KEY = "__global__";
 const earlyAccessCache = new Map();
+const subscriptionMemoryCache = new Map();
 const getBillingCacheKey = (businessId) => `sub:${businessId}`;
 exports.getBillingCacheKey = getBillingCacheKey;
 const invalidateBillingContextCache = async (businessId) => {
@@ -20,6 +23,7 @@ const invalidateBillingContextCache = async (businessId) => {
     if (!normalizedBusinessId) {
         return false;
     }
+    subscriptionMemoryCache.delete(normalizedBusinessId);
     await redis_1.default.del((0, exports.getBillingCacheKey)(normalizedBusinessId)).catch(() => undefined);
     return true;
 };
@@ -67,56 +71,100 @@ const mapCanonicalSubscription = (row) => ({
     },
 });
 const getCachedSubscription = async (businessId) => {
-    const cacheKey = (0, exports.getBillingCacheKey)(businessId);
-    const cached = await redis_1.default.get(cacheKey).catch(() => null);
-    if (cached) {
+    const inMemory = subscriptionMemoryCache.get(businessId);
+    if (inMemory && !inMemory.promise && inMemory.expiresAt > Date.now()) {
         (0, performanceMetrics_1.emitPerformanceMetric)({
             name: "CACHE_HIT",
+            businessId,
+            route: "subscription_context",
+            metadata: {
+                cache: "memory_subscription",
+            },
+        });
+        return inMemory.value;
+    }
+    if (inMemory?.promise) {
+        return inMemory.promise;
+    }
+    const loadPromise = (async () => {
+        const cacheKey = (0, exports.getBillingCacheKey)(businessId);
+        const cached = await redis_1.default.get(cacheKey).catch(() => null);
+        if (cached) {
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "CACHE_HIT",
+                businessId,
+                route: "subscription_context",
+                metadata: {
+                    cache: "redis_subscription",
+                },
+            });
+            try {
+                const parsed = JSON.parse(cached);
+                subscriptionMemoryCache.set(businessId, {
+                    value: parsed,
+                    expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
+                });
+                return parsed;
+            }
+            catch {
+                await redis_1.default.del(cacheKey).catch(() => undefined);
+            }
+        }
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "CACHE_MISS",
             businessId,
             route: "subscription_context",
             metadata: {
                 cache: "redis_subscription",
             },
         });
-        try {
-            return JSON.parse(cached);
+        const canonical = await prisma_1.default.subscriptionLedger
+            .findFirst({
+            where: {
+                businessId,
+            },
+            orderBy: {
+                updatedAt: "desc",
+            },
+        })
+            .catch(() => null);
+        const subscription = canonical
+            ? mapCanonicalSubscription(canonical)
+            : null;
+        if (subscription) {
+            await redis_1.default
+                .set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL)
+                .catch(() => undefined);
+            subscriptionMemoryCache.set(businessId, {
+                value: subscription,
+                expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
+            });
         }
-        catch {
-            await redis_1.default.del(cacheKey).catch(() => undefined);
+        else {
+            subscriptionMemoryCache.set(businessId, {
+                value: null,
+                expiresAt: Date.now() + 5000,
+            });
         }
-    }
-    (0, performanceMetrics_1.emitPerformanceMetric)({
-        name: "CACHE_MISS",
-        businessId,
-        route: "subscription_context",
-        metadata: {
-            cache: "redis_subscription",
-        },
+        return subscription;
+    })().finally(() => {
+        const latest = subscriptionMemoryCache.get(businessId);
+        if (latest?.promise) {
+            subscriptionMemoryCache.set(businessId, {
+                value: latest.value ?? null,
+                expiresAt: latest.expiresAt || 0,
+            });
+        }
     });
-    const canonical = await prisma_1.default.subscriptionLedger
-        .findFirst({
-        where: {
-            businessId,
-        },
-        orderBy: {
-            updatedAt: "desc",
-        },
-    })
-        .catch(() => null);
-    const subscription = canonical
-        ? mapCanonicalSubscription(canonical)
-        : null;
-    if (subscription) {
-        await redis_1.default
-            .set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL)
-            .catch(() => undefined);
-    }
-    return subscription;
+    subscriptionMemoryCache.set(businessId, {
+        value: inMemory?.value ?? null,
+        expiresAt: inMemory?.expiresAt || 0,
+        promise: loadPromise,
+    });
+    return loadPromise;
 };
 const getEarlyAccessSnapshot = async (subscription) => {
-    const cacheKey = subscription?.businessId
-        ? String(subscription.businessId)
-        : "__global__";
+    const cacheKey = EARLY_ACCESS_CACHE_KEY;
     const cached = earlyAccessCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
         (0, performanceMetrics_1.emitPerformanceMetric)({

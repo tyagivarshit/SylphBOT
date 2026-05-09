@@ -214,6 +214,7 @@ export const createPaymentIntentService = () => {
       businessId,
       scope: "CHECKOUT",
       provider: normalizedProvider,
+      advisoryLookup: true,
     });
     logPaymentIntentCheckpoint("START 3B after manual override gate", {
       normalizedProvider,

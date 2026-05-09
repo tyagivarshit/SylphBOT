@@ -253,12 +253,26 @@ export const createCommerceAuthorityService = () => {
   };
 
   const resolveProviderCredential = async ({
-    businessId,
-    provider,
-  }: {
-    businessId: string;
-    provider: string;
-  }) => {
+  businessId,
+  provider,
+}: {
+  businessId: string;
+  provider: string;
+}) => {
+  const normalizedProvider = normalizeProvider(provider);
+
+  // FAST PATH: direct credential lookup
+  let credential = await prisma.commerceProviderCredential.findUnique({
+    where: {
+      businessId_provider: {
+        businessId,
+        provider: normalizedProvider,
+      },
+    },
+  });
+
+  // SLOW PATH: only if missing
+  if (!credential) {
     await enforceSecurityGovernanceInfluence({
       domain: "COMMERCE",
       action: "billing:view",
@@ -275,13 +289,12 @@ export const createCommerceAuthorityService = () => {
       purpose: "CREDENTIAL_RESOLVE",
     });
 
-    const normalizedProvider = normalizeProvider(provider);
     await seedProviderCredentialIfMissing({
       businessId,
       provider: normalizedProvider,
     }).catch(() => undefined);
 
-    const credential = await prisma.commerceProviderCredential.findUnique({
+    credential = await prisma.commerceProviderCredential.findUnique({
       where: {
         businessId_provider: {
           businessId,
@@ -289,37 +302,41 @@ export const createCommerceAuthorityService = () => {
         },
       },
     });
+  }
 
-    if (!credential) {
-      return null;
-    }
+  if (!credential) {
+    return null;
+  }
 
-    const now = Date.now();
-    const expired =
-      credential.expiresAt instanceof Date && credential.expiresAt.getTime() <= now;
-    const revoked =
-      credential.status === "REVOKED" ||
-      credential.revokedAt instanceof Date ||
-      toRecord(credential.providerMetadata).revoked === true;
+  const now = Date.now();
 
-    if (revoked) {
-      throw new Error(`provider_credential_revoked:${normalizedProvider}`);
-    }
+  const expired =
+    credential.expiresAt instanceof Date &&
+    credential.expiresAt.getTime() <= now;
 
-    if (expired || credential.status === "EXPIRED") {
-      throw new Error(`provider_credential_expired:${normalizedProvider}`);
-    }
+  const revoked =
+    credential.status === "REVOKED" ||
+    credential.revokedAt instanceof Date ||
+    toRecord(credential.providerMetadata).revoked === true;
 
-    if (credential.status === "AUTH_FAILED") {
-      throw new Error(`provider_credential_auth_failed:${normalizedProvider}`);
-    }
+  if (revoked) {
+    throw new Error(`provider_credential_revoked:${normalizedProvider}`);
+  }
 
-    if (credential.status === "DISCONNECTED") {
-      throw new Error(`provider_credential_disconnected:${normalizedProvider}`);
-    }
+  if (expired || credential.status === "EXPIRED") {
+    throw new Error(`provider_credential_expired:${normalizedProvider}`);
+  }
 
-    return credential;
-  };
+  if (credential.status === "AUTH_FAILED") {
+    throw new Error(`provider_credential_auth_failed:${normalizedProvider}`);
+  }
+
+  if (credential.status === "DISCONNECTED") {
+    throw new Error(`provider_credential_disconnected:${normalizedProvider}`);
+  }
+
+  return credential;
+};
 
   const createManualOverride = async ({
     businessId,

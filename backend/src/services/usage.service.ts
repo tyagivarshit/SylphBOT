@@ -1119,8 +1119,6 @@ export const incrementUsage = async ({
         year: getCurrentMonthYear().year,
       })
     );
-    invalidateUsageOverviewCache(normalizedBusinessId);
-    return snapshot;
   }
 
   const featureConfig = getFeatureConfig(feature);

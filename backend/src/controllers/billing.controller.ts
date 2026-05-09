@@ -386,21 +386,25 @@ async function getUserContext(req: Request): Promise<UserContext> {
   const businessIdHint =
     String(businessIdFromRequest || user.businessId || "").trim() || null;
   const identityResult = businessIdHint
-    ? {
-        businessId: businessIdHint,
-      }
-    : await withTimeoutFallback({
-        label: "billing_workspace_identity_lookup",
-        timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
-        task: resolveUserWorkspaceIdentity({
-          userId,
-          preferredBusinessId:
-            req.user?.businessId || user.businessId || businessIdFromRequest || null,
-        }),
-        fallback: {
-          businessId: user.businessId || null,
-        },
-      });
+  ? {
+      businessId: businessIdHint,
+      workspace: null,
+      source: "request_fallback",
+    }
+  : await withTimeoutFallback({
+      label: "billing_workspace_identity_lookup",
+      timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
+      task: resolveUserWorkspaceIdentity({
+        userId,
+        preferredBusinessId:
+          req.user?.businessId || user.businessId || businessIdFromRequest || null,
+      }),
+      fallback: {
+        businessId: user.businessId || null,
+        workspace: null,
+        source: "none",
+      },
+    });
   const identity = "value" in identityResult ? identityResult.value : identityResult;
   const resolvedEmail = emailFromRequest || String(user.email || "").trim().toLowerCase();
 

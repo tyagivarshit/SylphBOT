@@ -253,90 +253,138 @@ export const createCommerceAuthorityService = () => {
   };
 
   const resolveProviderCredential = async ({
-  businessId,
-  provider,
-}: {
-  businessId: string;
-  provider: string;
-}) => {
-  const normalizedProvider = normalizeProvider(provider);
+    businessId,
+    provider,
+  }: {
+    businessId: string;
+    provider: string;
+  }) => {
+    const resolveStartedAt = Date.now();
+    const normalizedProvider = normalizeProvider(provider);
+    let credentialLookupMs = 0;
+    let governanceMs = 0;
+    let seedMs = 0;
+    let validationMs = 0;
+    let slowPath = false;
+    let credentialFound = false;
+    let outcome = "unknown";
 
-  // FAST PATH: direct credential lookup
-  let credential = await prisma.commerceProviderCredential.findUnique({
-    where: {
-      businessId_provider: {
-        businessId,
-        provider: normalizedProvider,
-      },
-    },
-  });
+    try {
+      const initialLookupStartedAt = Date.now();
+      let credential = await prisma.commerceProviderCredential.findUnique({
+        where: {
+          businessId_provider: {
+            businessId,
+            provider: normalizedProvider,
+          },
+        },
+      });
+      credentialLookupMs += Date.now() - initialLookupStartedAt;
 
-  // SLOW PATH: only if missing
-  if (!credential) {
-    await enforceSecurityGovernanceInfluence({
-      domain: "COMMERCE",
-      action: "billing:view",
-      businessId,
-      tenantId: businessId,
-      actorId: "commerce_authority",
-      actorType: "SERVICE",
-      role: "SERVICE",
-      permissions: ["billing:view"],
-      scopes: ["READ_ONLY"],
-      resourceType: "COMMERCE_CREDENTIAL",
-      resourceId: provider,
-      resourceTenantId: businessId,
-      purpose: "CREDENTIAL_RESOLVE",
-    });
+      if (!credential) {
+        slowPath = true;
 
-    await seedProviderCredentialIfMissing({
-      businessId,
-      provider: normalizedProvider,
-    }).catch(() => undefined);
+        const governanceStartedAt = Date.now();
+        await enforceSecurityGovernanceInfluence({
+          domain: "COMMERCE",
+          action: "billing:view",
+          businessId,
+          tenantId: businessId,
+          actorId: "commerce_authority",
+          actorType: "SERVICE",
+          role: "SERVICE",
+          permissions: ["billing:view"],
+          scopes: ["READ_ONLY"],
+          resourceType: "COMMERCE_CREDENTIAL",
+          resourceId: normalizedProvider,
+          resourceTenantId: businessId,
+          purpose: "CREDENTIAL_RESOLVE",
+        });
+        governanceMs = Date.now() - governanceStartedAt;
 
-    credential = await prisma.commerceProviderCredential.findUnique({
-      where: {
-        businessId_provider: {
+        const seedStartedAt = Date.now();
+        await seedProviderCredentialIfMissing({
           businessId,
           provider: normalizedProvider,
-        },
-      },
-    });
-  }
+        }).catch(() => undefined);
+        seedMs = Date.now() - seedStartedAt;
 
-  if (!credential) {
-    return null;
-  }
+        const refetchStartedAt = Date.now();
+        credential = await prisma.commerceProviderCredential.findUnique({
+          where: {
+            businessId_provider: {
+              businessId,
+              provider: normalizedProvider,
+            },
+          },
+        });
+        credentialLookupMs += Date.now() - refetchStartedAt;
+      }
 
-  const now = Date.now();
+      if (!credential) {
+        outcome = "missing";
+        return null;
+      }
+      credentialFound = true;
 
-  const expired =
-    credential.expiresAt instanceof Date &&
-    credential.expiresAt.getTime() <= now;
+      const validationStartedAt = Date.now();
+      try {
+        const now = Date.now();
 
-  const revoked =
-    credential.status === "REVOKED" ||
-    credential.revokedAt instanceof Date ||
-    toRecord(credential.providerMetadata).revoked === true;
+        const expired =
+          credential.expiresAt instanceof Date &&
+          credential.expiresAt.getTime() <= now;
 
-  if (revoked) {
-    throw new Error(`provider_credential_revoked:${normalizedProvider}`);
-  }
+        const revoked =
+          credential.status === "REVOKED" ||
+          credential.revokedAt instanceof Date ||
+          toRecord(credential.providerMetadata).revoked === true;
 
-  if (expired || credential.status === "EXPIRED") {
-    throw new Error(`provider_credential_expired:${normalizedProvider}`);
-  }
+        if (revoked) {
+          outcome = "revoked";
+          throw new Error(`provider_credential_revoked:${normalizedProvider}`);
+        }
 
-  if (credential.status === "AUTH_FAILED") {
-    throw new Error(`provider_credential_auth_failed:${normalizedProvider}`);
-  }
+        if (expired || credential.status === "EXPIRED") {
+          outcome = "expired";
+          throw new Error(`provider_credential_expired:${normalizedProvider}`);
+        }
 
-  if (credential.status === "DISCONNECTED") {
-    throw new Error(`provider_credential_disconnected:${normalizedProvider}`);
-  }
+        if (credential.status === "AUTH_FAILED") {
+          outcome = "auth_failed";
+          throw new Error(`provider_credential_auth_failed:${normalizedProvider}`);
+        }
 
-  return credential;
-};
+        if (credential.status === "DISCONNECTED") {
+          outcome = "disconnected";
+          throw new Error(`provider_credential_disconnected:${normalizedProvider}`);
+        }
+      } finally {
+        validationMs = Date.now() - validationStartedAt;
+      }
+
+      outcome = "active";
+      return credential;
+    } catch (error) {
+      if (outcome === "unknown") {
+        outcome = "error";
+      }
+      throw error;
+    } finally {
+      console.info("[COMMERCE_CREDENTIAL_RESOLVE_TIMING]", {
+        businessId,
+        provider: normalizedProvider,
+        slowPath,
+        credentialFound,
+        outcome,
+        credentialLookupMs,
+        governanceMs,
+        seedMs,
+        validationMs,
+        totalMs: Date.now() - resolveStartedAt,
+      });
+    }
+  };
 
   const createManualOverride = async ({
     businessId,

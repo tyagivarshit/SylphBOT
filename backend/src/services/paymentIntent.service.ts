@@ -207,10 +207,19 @@ export const createPaymentIntentService = () => {
     }
 
     const normalizedProvider = normalizeProvider(provider);
+    logPaymentIntentCheckpoint("START 3A before manual override gate", {
+      normalizedProvider,
+    });
     await commerceAuthorityService.assertNoActiveManualOverride({
       businessId,
       scope: "CHECKOUT",
       provider: normalizedProvider,
+    });
+    logPaymentIntentCheckpoint("START 3B after manual override gate", {
+      normalizedProvider,
+    });
+    logPaymentIntentCheckpoint("START 3C before provider credential resolve", {
+      normalizedProvider,
     });
     await commerceAuthorityService.resolveProviderCredential({
       businessId,
@@ -221,6 +230,9 @@ export const createPaymentIntentService = () => {
       }
 
       throw new Error(`provider_credential_unavailable:${normalizedProvider}`);
+    });
+    logPaymentIntentCheckpoint("START 3D after provider credential resolve", {
+      normalizedProvider,
     });
     logPaymentIntentCheckpoint("START 4 provider authority resolved", {
       normalizedProvider,
@@ -369,6 +381,10 @@ export const createPaymentIntentService = () => {
         });
       }
 
+      logPaymentIntentCheckpoint("START 3E before Stripe adapter", {
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        normalizedProvider,
+      });
       const checkout = await adapter.createCheckout({
         businessId,
         paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -414,6 +430,11 @@ export const createPaymentIntentService = () => {
             String(toRecord(paymentIntent.metadata).coupon || "").trim() || null,
           ...(metadata || {}),
         },
+      });
+      logPaymentIntentCheckpoint("START 3F after Stripe adapter", {
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        providerPaymentIntentId: checkout.providerPaymentIntentId,
+        normalizedProvider,
       });
 
       if (normalizedProvider === "STRIPE") {

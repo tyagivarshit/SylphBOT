@@ -131,7 +131,7 @@ export const createCommerceAuthorityService = () => {
       where: {
         businessId,
         provider: normalizedProvider,
-        revokedAt: null,
+        OR: [{ revokedAt: null }, { revokedAt: { isSet: false } }],
       },
       orderBy: {
         createdAt: "desc",
@@ -290,7 +290,7 @@ export const createCommerceAuthorityService = () => {
           where: {
             businessId,
             provider: normalizedProvider,
-            revokedAt: null,
+            OR: [{ revokedAt: null }, { revokedAt: { isSet: false } }],
           },
           orderBy: {
             createdAt: "desc",
@@ -298,6 +298,18 @@ export const createCommerceAuthorityService = () => {
         });
         const ms = Date.now() - queryStartedAt;
         credentialLookupMs += ms;
+        const revoked =
+          credential?.status === "REVOKED" ||
+          credential?.revokedAt instanceof Date ||
+          toRecord(credential?.providerMetadata).revoked === true;
+        console.info("CREDENTIAL_LOOKUP_RESULT", {
+          found: Boolean(credential),
+          status: credential?.status ?? null,
+          revokedAtPresent: credential
+            ? Object.prototype.hasOwnProperty.call(credential, "revokedAt")
+            : false,
+          revoked,
+        });
         console.info("CREDENTIAL_QUERY_MS", {
           ms,
           found: Boolean(credential),

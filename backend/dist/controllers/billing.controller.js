@@ -80,9 +80,59 @@ const EMPTY_BILLING_CONTEXT = {
 };
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60000;
 const BILLING_PROJECTION_CACHE_TTL_MS = 4000;
+const BILLING_PROJECTION_MAX_WAIT_MS = 10500;
+const BILLING_PROJECTION_TIMEOUT_BUFFER_MS = 350;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 const billingProjectionCache = new Map();
 const getBillingProjectionCacheKey = (businessId, currencyHint) => `${businessId}:${currencyHint}`;
+const hasExplicitFinalResponseWrite = (res) => Boolean(res.locals?.[RESPONSE_FINAL_WRITE_LOCAL_KEY]);
+const isResponseCommitted = (res) => res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite(res);
+const isRequestLifecycleClosed = (req, res) => Boolean(res.locals?.requestTimedOut) ||
+    req.aborted ||
+    isResponseCommitted(res);
+const resolveBillingProjectionWaitBudgetMs = (res) => {
+    const locals = (res.locals || {});
+    const deadlineAt = Number(locals.requestDeadlineAt || 0);
+    if (!Number.isFinite(deadlineAt) || deadlineAt <= 0) {
+        return BILLING_PROJECTION_MAX_WAIT_MS;
+    }
+    const remainingBudgetMs = Math.floor(deadlineAt - Date.now() - BILLING_PROJECTION_TIMEOUT_BUFFER_MS);
+    return Math.max(1, Math.min(BILLING_PROJECTION_MAX_WAIT_MS, remainingBudgetMs));
+};
+const waitForBillingProjection = async (promise, timeoutMs) => new Promise((resolve, reject) => {
+    let settled = false;
+    const boundedTimeoutMs = Math.max(1, Math.floor(timeoutMs));
+    const timeoutHandle = setTimeout(() => {
+        if (settled) {
+            return;
+        }
+        settled = true;
+        resolve({
+            timedOut: true,
+        });
+    }, boundedTimeoutMs);
+    promise
+        .then((value) => {
+        if (settled) {
+            return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        resolve({
+            timedOut: false,
+            value,
+        });
+    })
+        .catch((error) => {
+        if (settled) {
+            return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        reject(error);
+    });
+});
+const hasProjectionValue = (result) => !result.timedOut;
 const mapPublicPlans = (plans = []) => {
     const planMap = new Map(plans.map((plan) => [String(plan.type || plan.name).toUpperCase(), plan]));
     return (0, pricing_config_1.getPublicPricingPlans)().map((plan) => {
@@ -633,12 +683,6 @@ class BillingController {
         ]);
         const invoices = invoicesRaw.map(mapInvoiceForClient);
         const effectiveCurrency = billingContext.subscription?.currency || (0, billingGeo_service_1.resolveBillingCurrency)(req);
-        console.info("BILLING_STAGE_OK", {
-            stage: "billing_projection.ready",
-            businessId,
-            invoiceCount: invoices.length,
-            hasSubscription: Boolean(billingContext.subscription),
-        });
         const durationMs = Date.now() - startedAt;
         (0, performanceMetrics_1.emitPerformanceMetric)({
             name: "PROJECTION_MS",
@@ -672,6 +716,38 @@ class BillingController {
             meta: {
                 degraded: false,
                 reason: null,
+            },
+        };
+    }
+    static buildDegradedBillingResponse(input) {
+        const normalizedReason = String(input.reason || "").trim() || "projection_timeout";
+        const fallbackRecord = input.fallbackValue &&
+            typeof input.fallbackValue === "object" &&
+            !Array.isArray(input.fallbackValue)
+            ? input.fallbackValue
+            : null;
+        if (fallbackRecord) {
+            const fallbackMeta = toRecord(fallbackRecord.meta);
+            return {
+                ...fallbackRecord,
+                success: true,
+                meta: {
+                    ...fallbackMeta,
+                    degraded: true,
+                    reason: normalizedReason,
+                },
+            };
+        }
+        return {
+            success: true,
+            subscription: null,
+            billing: EMPTY_BILLING_CONTEXT,
+            usage: EMPTY_USAGE_SUMMARY,
+            currency: (0, billingGeo_service_1.resolveBillingCurrency)(input.req),
+            invoices: [],
+            meta: {
+                degraded: true,
+                reason: normalizedReason,
             },
         };
     }
@@ -1133,16 +1209,17 @@ class BillingController {
     static async getBilling(req, res) {
         try {
             const { businessId } = await getUserContext(req);
-            if (businessId) {
-                void BillingController.reconcileRecentPortalState(businessId).catch(() => undefined);
-            }
             res.setHeader("Cache-Control", "no-store");
             const currencyHint = (0, billingGeo_service_1.resolveBillingCurrency)(req);
             const cacheKey = businessId
                 ? getBillingProjectionCacheKey(businessId, currencyHint)
                 : null;
+            const waitBudgetMs = resolveBillingProjectionWaitBudgetMs(res);
+            let staleCacheValue;
+            let projectionPromise = null;
             if (cacheKey) {
                 const cached = billingProjectionCache.get(cacheKey);
+                staleCacheValue = cached?.value;
                 if (cached?.value && cached.expiresAt > Date.now()) {
                     (0, performanceMetrics_1.emitPerformanceMetric)({
                         name: "CACHE_HIT",
@@ -1152,42 +1229,95 @@ class BillingController {
                             cache: "memory_billing_projection",
                         },
                     });
+                    console.info("BILLING_STAGE_OK", {
+                        stage: "billing_projection.ready",
+                        businessId,
+                        invoiceCount: Array.isArray(cached.value.invoices)
+                            ? cached.value.invoices.length
+                            : 0,
+                        hasSubscription: Boolean(cached.value.subscription),
+                        source: "cache_hit",
+                    });
                     return res.json(cached.value);
                 }
                 if (cached?.promise) {
-                    return res.json(await cached.promise);
+                    projectionPromise = cached.promise;
                 }
+                else {
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "CACHE_MISS",
+                        businessId,
+                        route: "billing_projection",
+                        metadata: {
+                            cache: "memory_billing_projection",
+                        },
+                    });
+                    const computeProjection = BillingController.buildBillingResponse(businessId, req);
+                    const sharedProjectionPromise = computeProjection
+                        .then((value) => {
+                        billingProjectionCache.set(cacheKey, {
+                            value,
+                            expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                        });
+                        return value;
+                    })
+                        .catch((error) => {
+                        billingProjectionCache.delete(cacheKey);
+                        throw error;
+                    });
+                    billingProjectionCache.set(cacheKey, {
+                        expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                        promise: sharedProjectionPromise,
+                    });
+                    projectionPromise = sharedProjectionPromise;
+                }
+            }
+            if (!projectionPromise) {
+                projectionPromise = BillingController.buildBillingResponse(businessId, req);
+            }
+            const projection = await waitForBillingProjection(projectionPromise, waitBudgetMs);
+            if (!hasProjectionValue(projection)) {
                 (0, performanceMetrics_1.emitPerformanceMetric)({
-                    name: "CACHE_MISS",
+                    name: "TIMEOUT_PREVENTED",
+                    value: waitBudgetMs,
                     businessId,
                     route: "billing_projection",
                     metadata: {
-                        cache: "memory_billing_projection",
+                        timeoutMs: waitBudgetMs,
+                        reason: "projection_wait_budget_exceeded",
                     },
                 });
-            }
-            const computeProjection = BillingController.buildBillingResponse(businessId, req);
-            if (cacheKey) {
-                billingProjectionCache.set(cacheKey, {
-                    expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
-                    promise: computeProjection,
-                });
-            }
-            const value = await computeProjection.catch((error) => {
-                if (cacheKey) {
-                    billingProjectionCache.delete(cacheKey);
+                if (isResponseCommitted(res)) {
+                    return;
                 }
-                throw error;
+                return res.status(200).json(BillingController.buildDegradedBillingResponse({
+                    req,
+                    fallbackValue: staleCacheValue,
+                    reason: "projection_timeout",
+                }));
+            }
+            if (isRequestLifecycleClosed(req, res)) {
+                return;
+            }
+            const value = projection.value;
+            console.info("BILLING_STAGE_OK", {
+                stage: "billing_projection.ready",
+                businessId,
+                invoiceCount: Array.isArray(value.invoices)
+                    ? value.invoices.length
+                    : 0,
+                hasSubscription: Boolean(value.subscription),
+                source: "projection",
             });
-            if (cacheKey) {
-                billingProjectionCache.set(cacheKey, {
-                    value,
-                    expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
-                });
+            if (isResponseCommitted(res)) {
+                return;
             }
             return res.json(value);
         }
         catch (error) {
+            if (isRequestLifecycleClosed(req, res) || isResponseCommitted(res)) {
+                return;
+            }
             if (error?.message === "Unauthorized") {
                 return res.status(401).json({
                     success: false,

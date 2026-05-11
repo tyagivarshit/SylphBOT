@@ -261,6 +261,9 @@ app.use((req, res, next) => {
     const startedAt = Date.now();
     const route = req.originalUrl || req.path || null;
     const timeoutMs = resolveRequestTimeoutMs(req.path || req.originalUrl || "");
+    res.locals.requestTimeoutMs = timeoutMs;
+    res.locals.requestTimeoutStartedAt = startedAt;
+    res.locals.requestDeadlineAt = startedAt + timeoutMs;
     res.setTimeout(timeoutMs, () => {
         const durationMs = Date.now() - startedAt;
         req.logger?.error({

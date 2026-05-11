@@ -326,6 +326,9 @@ app.use((req, res, next) => {
   const startedAt = Date.now();
   const route = req.originalUrl || req.path || null;
   const timeoutMs = resolveRequestTimeoutMs(req.path || req.originalUrl || "");
+  (res.locals as Record<string, unknown>).requestTimeoutMs = timeoutMs;
+  (res.locals as Record<string, unknown>).requestTimeoutStartedAt = startedAt;
+  (res.locals as Record<string, unknown>).requestDeadlineAt = startedAt + timeoutMs;
 
   res.setTimeout(timeoutMs, () => {
     const durationMs = Date.now() - startedAt;

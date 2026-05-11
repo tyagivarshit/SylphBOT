@@ -23,6 +23,11 @@ import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import { stripe } from "../services/stripe.service";
 import { assertStripeConfigReady } from "../services/commerce/providers/stripeConfig.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import {
+  getRequestRemainingMs,
+  isRequestLifecycleAborted,
+  throwIfRequestLifecycleAborted,
+} from "../utils/requestLifecycle";
 
 const EMPTY_USAGE_SUMMARY = {
   aiCallsUsed: 0,
@@ -92,6 +97,7 @@ const BILLING_PROJECTION_CACHE_TTL_MS = 4_000;
 const BILLING_PROJECTION_MAX_WAIT_MS = 10_500;
 const BILLING_PROJECTION_TIMEOUT_BUFFER_MS = 350;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
+const CHECKOUT_IN_FLIGHT_WINDOW_MS = 20_000;
 
 const billingProjectionCache = new Map<
   string,
@@ -99,6 +105,13 @@ const billingProjectionCache = new Map<
     value?: Record<string, unknown>;
     expiresAt: number;
     promise?: Promise<Record<string, unknown>>;
+  }
+>();
+const checkoutInFlight = new Map<
+  string,
+  {
+    startedAt: number;
+    requestId: string | null;
   }
 >();
 
@@ -1017,12 +1030,40 @@ export class BillingController {
         elapsedMs: Date.now() - checkoutStartedAt,
         ...(details || {}),
       });
+      console.info("CHECKOUT_STAGE_OK", {
+        stage,
+        requestId: checkoutRequestId,
+        elapsedMs: Date.now() - checkoutStartedAt,
+        ...(details || {}),
+      });
+    };
+    const logStageFail = (
+      stage: string,
+      reason: string,
+      details?: Record<string, unknown>
+    ) => {
+      console.error("CHECKOUT_STAGE_FAIL", {
+        stage,
+        reason,
+        requestId: checkoutRequestId,
+        route: req.originalUrl,
+        method: req.method,
+        elapsedMs: Date.now() - checkoutStartedAt,
+        ...(details || {}),
+      });
     };
     console.info("BILLING_START", {
       requestId: checkoutRequestId,
       route: req.originalUrl,
       method: req.method,
       redirectOnSuccess,
+    });
+    console.info("CHECKOUT_START", {
+      requestId: checkoutRequestId,
+      route: req.originalUrl,
+      method: req.method,
+      redirectOnSuccess,
+      remainingMs: getRequestRemainingMs({ req, res }, 0),
     });
     if (redirectOnSuccess) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
@@ -1056,6 +1097,11 @@ export class BillingController {
       reason: string;
       code?: string;
     }) => {
+      logStageFail("checkout.response", input.reason, {
+        status: input.status,
+        code: input.code || null,
+        redirectOnSuccess,
+      });
       console.error("BILLING_STAGE_FAIL", {
         stage: "checkout.response",
         reason: input.reason,
@@ -1092,6 +1138,11 @@ export class BillingController {
     };
 
     try {
+      throwIfRequestLifecycleAborted({
+        req,
+        res,
+        stage: "checkout.entry",
+      });
       const plan = readInput("plan");
       const coupon = readInput("coupon");
       const requestedQuantity = Number(readInput("seats") || readInput("quantity") || 1);
@@ -1168,6 +1219,11 @@ export class BillingController {
       }
 
       const { businessId, email } = await getUserContext(req);
+      throwIfRequestLifecycleAborted({
+        req,
+        res,
+        stage: "checkout.auth_resolved",
+      });
       logStageOk("auth.resolved", {
         userId: String(req.user?.id || "").trim() || null,
         businessId: businessId || null,
@@ -1189,6 +1245,11 @@ export class BillingController {
         quantity,
       });
       assertStripeConfigReady();
+      throwIfRequestLifecycleAborted({
+        req,
+        res,
+        stage: "checkout.stripe_config",
+      });
 
       const currency = resolveBillingCurrency(req);
       const pricingPlan = getPricingPlanConfig(normalizedPlan);
@@ -1230,6 +1291,11 @@ export class BillingController {
           updatedAt: "desc",
         },
       });
+      throwIfRequestLifecycleAborted({
+        req,
+        res,
+        stage: "checkout.subscription_lookup",
+      });
       const subscriptionMeta = (activeSubscription?.metadata || {}) as Record<string, unknown>;
       const checkoutProposalFingerprint = crypto
         .createHash("sha256")
@@ -1251,7 +1317,26 @@ export class BillingController {
         .digest("hex")
         .slice(0, 24);
 
-      const proposal = await proposalEngineService.createProposal({
+      const inFlightKey = `${businessId}:${normalizedPlan}:${normalizedBilling}:${checkoutType}`;
+      const currentInFlight = checkoutInFlight.get(inFlightKey);
+      if (
+        currentInFlight &&
+        Date.now() - currentInFlight.startedAt <= CHECKOUT_IN_FLIGHT_WINDOW_MS
+      ) {
+        return sendCheckoutError({
+          status: 409,
+          message: "Another checkout is already in progress. Please wait a moment and retry.",
+          reason: "checkout_in_progress",
+          code: "CHECKOUT_IN_PROGRESS",
+        });
+      }
+      checkoutInFlight.set(inFlightKey, {
+        startedAt: Date.now(),
+        requestId: checkoutRequestId,
+      });
+
+      try {
+        const proposal = await proposalEngineService.createProposal({
             businessId,
             planCode: normalizedPlan,
             billingCycle: normalizedBilling,
@@ -1278,21 +1363,31 @@ export class BillingController {
             },
             idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
           });
+        throwIfRequestLifecycleAborted({
+          req,
+          res,
+          stage: "checkout.proposal_created",
+        });
 
-      const readyProposal =
-        proposal.status === "APPROVED" || proposal.status === "SENT"
-          ? proposal
-          : await proposalEngineService.sendProposal({
-              businessId,
-              proposalKey: proposal.proposalKey,
-            });
-      logStageOk("proposal.created", {
-        businessId,
-        proposalKey: readyProposal.proposalKey,
-        proposalStatus: readyProposal.status,
-      });
+        const readyProposal =
+          proposal.status === "APPROVED" || proposal.status === "SENT"
+            ? proposal
+            : await proposalEngineService.sendProposal({
+                businessId,
+                proposalKey: proposal.proposalKey,
+              });
+        throwIfRequestLifecycleAborted({
+          req,
+          res,
+          stage: "checkout.proposal_ready",
+        });
+        logStageOk("proposal.created", {
+          businessId,
+          proposalKey: readyProposal.proposalKey,
+          proposalStatus: readyProposal.status,
+        });
 
-      const paymentIntent = await paymentIntentService.createCheckout({
+        const paymentIntent = await paymentIntentService.createCheckout({
             businessId,
             proposalKey: readyProposal.proposalKey,
             provider: "STRIPE",
@@ -1324,69 +1419,102 @@ export class BillingController {
             },
             idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
           });
-      logStageOk("payment_intent.created", {
-        businessId,
-        proposalKey: readyProposal.proposalKey,
-        paymentIntentKey: paymentIntent.paymentIntentKey,
-        provider: paymentIntent.provider,
-        paymentIntentStatus: paymentIntent.status,
-      });
-
-      const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();
-      logStageOk("checkout_url.evaluated", {
-        businessId,
-        proposalKey: readyProposal.proposalKey,
-        paymentIntentKey: paymentIntent.paymentIntentKey,
-        hasCheckoutUrl: Boolean(checkoutUrl),
-      });
-
-      if (!checkoutUrl) {
-        return sendCheckoutError({
-          status: 503,
-          message: "Stripe checkout link is temporarily unavailable. Please retry shortly.",
-          reason: "checkout_url_missing",
+        throwIfRequestLifecycleAborted({
+          req,
+          res,
+          stage: "checkout.payment_intent_created",
         });
-      }
-
-      if (isResponseCommitted()) {
-        logStageOk("checkout.response.skipped", {
-          success: true,
+        logStageOk("payment_intent.created", {
           businessId,
           proposalKey: readyProposal.proposalKey,
           paymentIntentKey: paymentIntent.paymentIntentKey,
-          skipped: "response_already_committed",
+          provider: paymentIntent.provider,
+          paymentIntentStatus: paymentIntent.status,
+        });
+
+        const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();
+        logStageOk("checkout_url.evaluated", {
+          businessId,
+          proposalKey: readyProposal.proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          hasCheckoutUrl: Boolean(checkoutUrl),
+        });
+
+        if (!checkoutUrl) {
+          return sendCheckoutError({
+            status: 503,
+            message: "Stripe checkout link is temporarily unavailable. Please retry shortly.",
+            reason: "checkout_url_missing",
+          });
+        }
+
+        if (isResponseCommitted()) {
+          logStageOk("checkout.response.skipped", {
+            success: true,
+            businessId,
+            proposalKey: readyProposal.proposalKey,
+            paymentIntentKey: paymentIntent.paymentIntentKey,
+            skipped: "response_already_committed",
+            redirectOnSuccess,
+          });
+          return;
+        }
+
+        if (redirectOnSuccess) {
+          console.info("CHECKOUT_SUCCESS", {
+            requestId: checkoutRequestId,
+            businessId,
+            proposalKey: readyProposal.proposalKey,
+            paymentIntentKey: paymentIntent.paymentIntentKey,
+            elapsedMs: Date.now() - checkoutStartedAt,
+            action: "redirect",
+          });
+          logStageOk("checkout.response.redirect", {
+            success: true,
+            status: 303,
+            businessId,
+            proposalKey: readyProposal.proposalKey,
+            paymentIntentKey: paymentIntent.paymentIntentKey,
+            redirectOnSuccess,
+          });
+          console.info("CHECKOUT_REDIRECT_SENT", {
+            requestId: checkoutRequestId,
+            status: 303,
+            checkoutUrl,
+            elapsedMs: Date.now() - checkoutStartedAt,
+          });
+          return res.redirect(303, checkoutUrl);
+        }
+
+        console.info("CHECKOUT_SUCCESS", {
+          requestId: checkoutRequestId,
+          businessId,
+          proposalKey: readyProposal.proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          elapsedMs: Date.now() - checkoutStartedAt,
+          action: "json",
+        });
+        logStageOk("checkout.response.json", {
+          success: true,
+          status: 200,
+          businessId,
+          proposalKey: readyProposal.proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
           redirectOnSuccess,
         });
+        return res.json({
+          success: true,
+          url: checkoutUrl,
+          proposalKey: readyProposal.proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+        });
+      } finally {
+        checkoutInFlight.delete(inFlightKey);
+      }
+    } catch (error: any) {
+      if (isRequestLifecycleAborted({ req, res }) || isResponseCommitted()) {
         return;
       }
-
-      if (redirectOnSuccess) {
-        logStageOk("checkout.response.redirect", {
-          success: true,
-          status: 303,
-          businessId,
-          proposalKey: readyProposal.proposalKey,
-          paymentIntentKey: paymentIntent.paymentIntentKey,
-          redirectOnSuccess,
-        });
-        return res.redirect(303, checkoutUrl);
-      }
-
-      logStageOk("checkout.response.json", {
-        success: true,
-        status: 200,
-        businessId,
-        proposalKey: readyProposal.proposalKey,
-        paymentIntentKey: paymentIntent.paymentIntentKey,
-        redirectOnSuccess,
-      });
-      return res.json({
-        success: true,
-        url: checkoutUrl,
-        proposalKey: readyProposal.proposalKey,
-        paymentIntentKey: paymentIntent.paymentIntentKey,
-      });
-    } catch (error: any) {
       const stripeCode = String(error?.code || "").trim().toLowerCase();
       const stripeType = String(error?.type || "").trim().toLowerCase();
 
@@ -1457,6 +1585,11 @@ export class BillingController {
       console.error("BILLING_STAGE_FAIL", {
         stage: "checkout.exception",
         reason: String(error?.message || "checkout_failed"),
+      });
+      console.error("CHECKOUT_FAIL", {
+        requestId: checkoutRequestId,
+        reason: String(error?.message || "checkout_failed"),
+        elapsedMs: Date.now() - checkoutStartedAt,
       });
 
       return sendCheckoutError({

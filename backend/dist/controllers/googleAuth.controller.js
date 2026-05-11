@@ -12,6 +12,7 @@ const authCookies_1 = require("../utils/authCookies");
 const googleOAuthState_1 = require("../utils/googleOAuthState");
 const authBootstrap_service_1 = require("../services/authBootstrap.service");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 /* ======================================
 UTILS
 ====================================== */
@@ -76,7 +77,13 @@ GOOGLE CALLBACK
 ====================================== */
 const googleCallback = async (req, res) => {
     const startedAt = Date.now();
+    const isResponseCommitted = () => res.headersSent || res.writableEnded;
     try {
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "google_callback.entry",
+        });
         const user = req.user;
         const state = (0, googleOAuthState_1.verifyGoogleOAuthState)(req.query.state);
         const redirectOrigin = state?.redirectOrigin || (0, googleOAuthState_1.getDefaultFrontendOrigin)();
@@ -90,6 +97,10 @@ const googleCallback = async (req, res) => {
         if (!user || !user.id || !user.isActive) {
             return res.redirect(buildAuthErrorUrl(redirectOrigin, user?.id ? "account_inactive" : "oauth_failed"));
         }
+        const bootstrapBudgetMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0);
+        if (bootstrapBudgetMs <= 1200) {
+            return res.redirect(buildAuthErrorUrl(redirectOrigin, "session_expired"));
+        }
         const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
             userId: user.id,
             preferredBusinessId: user.businessId || null,
@@ -98,6 +109,11 @@ const googleCallback = async (req, res) => {
                 name: user.name || null,
                 avatar: user.avatar || null,
             },
+        });
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "google_callback.bootstrap",
         });
         const accessToken = (0, generateToken_1.generateAccessToken)(bootstrap.user.id, bootstrap.user.role, bootstrap.identity.businessId, bootstrap.user.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(bootstrap.user.id, bootstrap.user.tokenVersion);
@@ -111,6 +127,11 @@ const googleCallback = async (req, res) => {
                 ip: getIP(req),
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
+        });
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "google_callback.session_persisted",
         });
         (0, authCookies_1.setAuthCookies)(res, req, accessToken, refreshRaw);
         console.info("AUTH_GOOGLE_CALLBACK_OK", {
@@ -130,6 +151,9 @@ const googleCallback = async (req, res) => {
         return res.redirect(`${redirectOrigin}/dashboard`);
     }
     catch (err) {
+        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || isResponseCommitted()) {
+            return;
+        }
         console.error("GOOGLE CALLBACK ERROR", err);
         return res.redirect(buildAuthErrorUrl((0, googleOAuthState_1.getDefaultFrontendOrigin)(), "oauth_failed"));
     }

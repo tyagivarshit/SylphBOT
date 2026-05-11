@@ -57,14 +57,41 @@ const rbac_service_1 = require("./services/rbac.service");
 const AppError_1 = require("./utils/AppError");
 const asyncHandler_1 = require("./utils/asyncHandler");
 const sentry_1 = require("./observability/sentry");
+const requestLifecycle_1 = require("./utils/requestLifecycle");
 const app = (0, express_1.default)();
 const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
+const LATE_RESPONSE_BLOCKED_KEYS_LOCAL_KEY = "__lateResponseBlockedKeys";
 const hasExplicitFinalResponseWrite = (res) => Boolean(res.locals?.[RESPONSE_FINAL_WRITE_LOCAL_KEY]);
 const markExplicitFinalResponseWrite = (res) => {
     res.locals[RESPONSE_FINAL_WRITE_LOCAL_KEY] = true;
 };
 const isResponseCommitted = (res) => res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite(res);
+const recordLateResponseBlocked = (input) => {
+    const locals = input.res.locals;
+    const keys = locals[LATE_RESPONSE_BLOCKED_KEYS_LOCAL_KEY] ||
+        new Set();
+    locals[LATE_RESPONSE_BLOCKED_KEYS_LOCAL_KEY] = keys;
+    if (keys.has(input.operation)) {
+        return;
+    }
+    keys.add(input.operation);
+    const lifecycle = (0, requestLifecycle_1.getRequestLifecycle)({
+        req: input.req,
+        res: input.res,
+    });
+    console.warn("LATE_RESPONSE_BLOCKED", {
+        requestId: input.req.requestId || null,
+        route: input.req.originalUrl,
+        method: input.req.method,
+        operation: input.operation,
+        abortReason: lifecycle?.abortReason || null,
+        aborted: (0, requestLifecycle_1.isRequestLifecycleAborted)({
+            req: input.req,
+            res: input.res,
+        }),
+    });
+};
 const normalizeJsonResponseBody = (body, statusCode) => {
     const success = statusCode < 400;
     if (body === undefined) {
@@ -226,12 +253,22 @@ app.use((req, res, next) => {
     const originalRedirect = res.redirect.bind(res);
     res.setHeader = ((name, value) => {
         if (isResponseCommitted(res)) {
+            recordLateResponseBlocked({
+                req,
+                res,
+                operation: "setHeader",
+            });
             return res;
         }
         return originalSetHeader(name, value);
     });
     res.json = ((body) => {
         if (isResponseCommitted(res)) {
+            recordLateResponseBlocked({
+                req,
+                res,
+                operation: "json",
+            });
             return res;
         }
         const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
@@ -240,6 +277,11 @@ app.use((req, res, next) => {
     });
     res.send = ((body) => {
         if (isResponseCommitted(res)) {
+            recordLateResponseBlocked({
+                req,
+                res,
+                operation: "send",
+            });
             return res;
         }
         const response = originalSend(body);
@@ -248,6 +290,11 @@ app.use((req, res, next) => {
     });
     res.redirect = ((...args) => {
         if (isResponseCommitted(res)) {
+            recordLateResponseBlocked({
+                req,
+                res,
+                operation: "redirect",
+            });
             return res;
         }
         const response = originalRedirect(...args);
@@ -261,9 +308,87 @@ app.use((req, res, next) => {
     const startedAt = Date.now();
     const route = req.originalUrl || req.path || null;
     const timeoutMs = resolveRequestTimeoutMs(req.path || req.originalUrl || "");
-    res.locals.requestTimeoutMs = timeoutMs;
-    res.locals.requestTimeoutStartedAt = startedAt;
-    res.locals.requestDeadlineAt = startedAt + timeoutMs;
+    const locals = res.locals;
+    locals.requestTimeoutMs = timeoutMs;
+    locals.requestTimeoutStartedAt = startedAt;
+    locals.requestDeadlineAt = startedAt + timeoutMs;
+    (0, requestLifecycle_1.initRequestLifecycle)({
+        req,
+        res,
+        startedAt,
+        timeoutMs,
+    });
+    console.info("REQUEST_START", {
+        requestId: req.requestId || null,
+        route,
+        method: req.method,
+        timeoutMs,
+    });
+    let completionLogged = false;
+    const logRequestComplete = () => {
+        if (completionLogged) {
+            return;
+        }
+        completionLogged = true;
+        const lifecycle = (0, requestLifecycle_1.getRequestLifecycle)({
+            req,
+            res,
+        });
+        console.info("REQUEST_COMPLETE", {
+            requestId: req.requestId || null,
+            route,
+            method: req.method,
+            statusCode: res.statusCode,
+            durationMs: Date.now() - startedAt,
+            aborted: Boolean(lifecycle?.aborted),
+            abortReason: lifecycle?.abortReason || null,
+        });
+    };
+    req.on("aborted", () => {
+        const marked = (0, requestLifecycle_1.markRequestLifecycleAborted)({
+            req,
+            res,
+            reason: "client_aborted",
+        });
+        if (!marked) {
+            return;
+        }
+        console.warn("REQUEST_ABORTED", {
+            requestId: req.requestId || null,
+            route,
+            method: req.method,
+            reason: "client_aborted",
+            durationMs: Date.now() - startedAt,
+        });
+    });
+    res.on("close", () => {
+        if (res.writableEnded) {
+            return;
+        }
+        const marked = (0, requestLifecycle_1.markRequestLifecycleAborted)({
+            req,
+            res,
+            reason: "response_closed",
+        });
+        if (!marked) {
+            return;
+        }
+        console.warn("REQUEST_ABORTED", {
+            requestId: req.requestId || null,
+            route,
+            method: req.method,
+            reason: "response_closed",
+            durationMs: Date.now() - startedAt,
+        });
+    });
+    res.on("finish", () => {
+        (0, requestLifecycle_1.markRequestLifecycleAborted)({
+            req,
+            res,
+            reason: "response_finished",
+        });
+        logRequestComplete();
+    });
     res.setTimeout(timeoutMs, () => {
         const durationMs = Date.now() - startedAt;
         req.logger?.error({
@@ -273,7 +398,21 @@ app.use((req, res, next) => {
             route,
             requestId: req.requestId || null,
         }, "Request timeout");
-        res.locals.requestTimedOut = true;
+        const marked = (0, requestLifecycle_1.markRequestLifecycleAborted)({
+            req,
+            res,
+            reason: "request_timeout",
+        });
+        if (marked) {
+            console.warn("REQUEST_ABORTED", {
+                requestId: req.requestId || null,
+                route,
+                method: req.method,
+                reason: "request_timeout",
+                timeoutMs,
+                durationMs,
+            });
+        }
         if (isResponseCommitted(res)) {
             return;
         }

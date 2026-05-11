@@ -33,6 +33,11 @@ import {
 import { ensureAuthBootstrapContext } from "../services/authBootstrap.service";
 import { withDistributedLock } from "../services/distributedLock.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import {
+  getRequestRemainingMs,
+  isRequestLifecycleAborted,
+  throwIfRequestLifecycleAborted,
+} from "../utils/requestLifecycle";
 
 /* ======================================
 UTILS
@@ -281,6 +286,11 @@ LOGIN
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   const startedAt = Date.now();
   try {
+    throwIfRequestLifecycleAborted({
+      req,
+      res,
+      stage: "auth.login.start",
+    });
     await checkGlobalLimit(getIP(req));
 
     const email = normalizeEmail(String(req.body.email || ""));
@@ -324,16 +334,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       throw unauthorized("Invalid credentials");
     }
 
-    const bootstrapTask = ensureAuthBootstrapContext({
-      userId: user.id,
-      preferredBusinessId: user.businessId || null,
-      profileSeed: {
-        email: user.email,
-        name: user.name,
-        avatar: user.avatar || null,
-      },
-    });
-
     let resolvedUser = {
       id: user.id,
       role: user.role,
@@ -343,24 +343,29 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     };
     let businessId = user.businessId || null;
 
-    try {
-      const bootstrap = await withFastTimeout(
-        bootstrapTask,
-        LOGIN_BOOTSTRAP_TIMEOUT_MS
-      );
+    if (getRequestRemainingMs({ req, res }, 0) > LOGIN_BOOTSTRAP_TIMEOUT_MS + 250) {
+      try {
+        const bootstrap = await ensureAuthBootstrapContext({
+          userId: user.id,
+          preferredBusinessId: user.businessId || null,
+          profileSeed: {
+            email: user.email,
+            name: user.name,
+            avatar: user.avatar || null,
+          },
+        });
 
-      resolvedUser = {
-        id: bootstrap.user.id,
-        role: bootstrap.user.role,
-        tokenVersion: bootstrap.user.tokenVersion,
-        email: bootstrap.user.email,
-        name: bootstrap.user.name,
-      };
-      businessId = bootstrap.identity.businessId;
-    } catch {
-      // Fail open for login latency: continue with existing canonical user fields
-      // and allow bootstrap recovery to finish in background.
-      void bootstrapTask.catch(() => undefined);
+        resolvedUser = {
+          id: bootstrap.user.id,
+          role: bootstrap.user.role,
+          tokenVersion: bootstrap.user.tokenVersion,
+          email: bootstrap.user.email,
+          name: bootstrap.user.name,
+        };
+        businessId = bootstrap.identity.businessId;
+      } catch {
+        // Fail open for login latency: continue with existing canonical user fields.
+      }
     }
 
     const accessToken = generateAccessToken(
@@ -387,7 +392,11 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       },
     });
 
-    const sessionLedgerTask = issueSessionLedger({
+    if (
+      !isRequestLifecycleAborted({ req, res }) &&
+      getRequestRemainingMs({ req, res }, 0) > LOGIN_SESSION_LEDGER_TIMEOUT_MS + 200
+    ) {
+      await issueSessionLedger({
         businessId,
         tenantId: businessId,
         userId: resolvedUser.id,
@@ -400,11 +409,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           source: "auth.login",
         },
       }).catch(() => undefined);
-
-    void withFastTimeout(
-      sessionLedgerTask,
-      LOGIN_SESSION_LEDGER_TIMEOUT_MS
-    ).catch(() => undefined);
+    }
 
     void writeAuthAuditLog(req, {
       action: "auth.login",
@@ -680,15 +685,12 @@ GET ME
 export const getMe = async (req: any, res: Response, next: NextFunction) => {
   const startedAt = Date.now();
   try {
-    if (!req.user?.id) throw unauthorized("Not authenticated");
-
-    const bootstrapTask = ensureAuthBootstrapContext({
-      userId: req.user.id,
-      preferredBusinessId: req.user?.businessId || null,
-      profileSeed: {
-        email: req.user?.email || null,
-      },
+    throwIfRequestLifecycleAborted({
+      req,
+      res,
+      stage: "auth.me.start",
     });
+    if (!req.user?.id) throw unauthorized("Not authenticated");
 
     let payload = {
       id: String(req.user.id),
@@ -698,24 +700,34 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
       businessId: String(req.user?.businessId || "").trim() || null,
     };
 
-    try {
-      const bootstrap = await withFastTimeout(
-        bootstrapTask,
-        AUTH_ME_BOOTSTRAP_TIMEOUT_MS
-      );
+    if (getRequestRemainingMs({ req, res }, 0) > AUTH_ME_BOOTSTRAP_TIMEOUT_MS + 250) {
+      try {
+        const bootstrap = await ensureAuthBootstrapContext({
+          userId: req.user.id,
+          preferredBusinessId: req.user?.businessId || null,
+          profileSeed: {
+            email: req.user?.email || null,
+          },
+        });
 
-      payload = {
-        id: bootstrap.user.id,
-        name: bootstrap.user.name,
-        email: bootstrap.user.email,
-        role: bootstrap.user.role,
-        businessId: bootstrap.identity.businessId,
-      };
-    } catch {
-      void bootstrapTask.catch(() => undefined);
+        payload = {
+          id: bootstrap.user.id,
+          name: bootstrap.user.name,
+          email: bootstrap.user.email,
+          role: bootstrap.user.role,
+          businessId: bootstrap.identity.businessId,
+        };
+      } catch {
+        // continue to lightweight fallback
+      }
+    }
 
-      const fallbackUser = await withFastTimeout(
-        prisma.user.findUnique({
+    if (
+      payload.businessId == null &&
+      getRequestRemainingMs({ req, res }, 0) > AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS + 150
+    ) {
+      const fallbackUser = await prisma.user
+        .findUnique({
           where: { id: req.user.id },
           select: {
             id: true,
@@ -724,9 +736,8 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
             role: true,
             businessId: true,
           },
-        }),
-        AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS
-      ).catch(() => null);
+        })
+        .catch(() => null);
 
       if (fallbackUser) {
         payload = {

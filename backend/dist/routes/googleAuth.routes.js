@@ -8,6 +8,7 @@ const passport_1 = __importDefault(require("passport"));
 const redis_1 = __importDefault(require("../config/redis"));
 const googleAuth_controller_1 = require("../controllers/googleAuth.controller");
 const googleOAuthState_1 = require("../utils/googleOAuthState");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 const router = (0, express_1.Router)();
 /* ======================================
 UTILS
@@ -49,6 +50,9 @@ const oauthLimiter = async (req, res, next) => {
 SAFE WRAPPER
 ====================================== */
 const safeHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(() => {
+    if (res.headersSent || res.writableEnded || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+        return;
+    }
     const loginUrl = new URL("/auth/login", (0, googleOAuthState_1.getDefaultFrontendOrigin)());
     loginUrl.searchParams.set("authError", "oauth_failed");
     return res.redirect(loginUrl.toString());
@@ -91,6 +95,7 @@ const buildAuthErrorUrl = (redirectOrigin, authError) => {
     return loginUrl.toString();
 };
 const handleGoogleCallback = async (req, res, next) => {
+    const isResponseCommitted = () => res.headersSent || res.writableEnded;
     const state = (0, googleOAuthState_1.verifyGoogleOAuthState)(req.query.state);
     const redirectOrigin = (0, googleOAuthState_1.resolveGoogleOAuthRedirectOrigin)(state?.redirectOrigin || (0, googleOAuthState_1.getDefaultFrontendOrigin)());
     const loginUrl = buildAuthErrorUrl(redirectOrigin, req.query.error === "access_denied"
@@ -100,6 +105,9 @@ const handleGoogleCallback = async (req, res, next) => {
         return res.redirect(buildAuthErrorUrl((0, googleOAuthState_1.getDefaultFrontendOrigin)(), "oauth_state_invalid"));
     }
     const claimed = await claimGoogleOAuthState(state.nonce);
+    if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || isResponseCommitted()) {
+        return;
+    }
     // Browsers can replay the callback URL once cookies are already set.
     // Reuse the established session instead of re-spending the same auth code.
     if (claimed === false) {
@@ -109,10 +117,21 @@ const handleGoogleCallback = async (req, res, next) => {
     }
     let user;
     try {
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "google_callback.auth_start",
+        });
+        if ((0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) <= 1500) {
+            return res.redirect(buildAuthErrorUrl(redirectOrigin, "session_expired"));
+        }
         user = await authenticateGoogleUser(req, res, next);
     }
     catch (err) {
         await releaseGoogleOAuthState(state.nonce);
+        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || isResponseCommitted()) {
+            return;
+        }
         console.error("GOOGLE PASSPORT ERROR", {
             message: err?.message,
             code: err?.code,
@@ -124,14 +143,25 @@ const handleGoogleCallback = async (req, res, next) => {
     }
     if (!user) {
         await releaseGoogleOAuthState(state.nonce);
+        if (isResponseCommitted()) {
+            return;
+        }
         return res.redirect(loginUrl);
     }
     req.user = user;
     try {
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "google_callback.controller_start",
+        });
         await (0, googleAuth_controller_1.googleCallback)(req, res);
     }
     catch (error) {
         await releaseGoogleOAuthState(state.nonce);
+        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || isResponseCommitted()) {
+            return;
+        }
         console.error("GOOGLE CALLBACK ROUTE ERROR", error);
         return res.redirect(loginUrl);
     }

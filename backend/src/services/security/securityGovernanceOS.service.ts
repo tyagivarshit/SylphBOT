@@ -2041,13 +2041,22 @@ export const authorizeSuspiciousSessionChallenge = async (input: {
   challengeKey?: string | null;
   userId?: string | null;
   sessionKey?: string | null;
-}) =>
-  consumeMfaChallenge({
+  signal?: AbortSignal | null;
+}) => {
+  if (input.signal?.aborted) {
+    return {
+      consumed: false,
+      reason: "request_aborted",
+    };
+  }
+
+  return consumeMfaChallenge({
     challengeKey: input.challengeKey || null,
     action: "auth:session_continue",
     actorId: input.userId || null,
     sessionKey: input.sessionKey || null,
   });
+};
 
 export const revokeTrustedDevice = async (input: {
   businessId?: string | null;
@@ -2575,7 +2584,15 @@ export const trackSessionAnomaly = async (input: {
   ip?: string | null;
   userAgent?: string | null;
   deviceId?: string | null;
+  signal?: AbortSignal | null;
 }) => {
+  const assertActive = (stage: string) => {
+    if (input.signal?.aborted) {
+      throw new Error(`request_aborted:${stage}`);
+    }
+  };
+
+  assertActive("session_anomaly.start");
   const store = getStore();
   const existing =
     store.sessionLedger.get(input.sessionKey) ||
@@ -2588,6 +2605,7 @@ export const trackSessionAnomaly = async (input: {
       userAgent: input.userAgent || null,
       deviceId: input.deviceId || null,
     }));
+  assertActive("session_anomaly.issued");
 
   if (store.revokedSessionKeys.has(existing.sessionKey)) {
     existing.status = "REVOKED";
@@ -2646,6 +2664,7 @@ export const trackSessionAnomaly = async (input: {
     existing.revokedAt = now();
     store.revokedSessionKeys.add(existing.sessionKey);
 
+    assertActive("session_anomaly.fraud_signal");
     await recordFraudSignal({
       businessId: existing.businessId,
       tenantId: existing.tenantId,
@@ -2681,6 +2700,7 @@ export const trackSessionAnomaly = async (input: {
     if (pending) {
       challengeKey = pending.challengeKey;
     } else {
+      assertActive("session_anomaly.challenge_create");
       const challenge = await createMFAChallenge({
         businessId: existing.businessId,
         tenantId: existing.tenantId,
@@ -2702,6 +2722,7 @@ export const trackSessionAnomaly = async (input: {
     }
   }
 
+  assertActive("session_anomaly.persist");
   await withDbMirror(() =>
     db.sessionLedger.updateMany({
       where: {
@@ -2720,6 +2741,7 @@ export const trackSessionAnomaly = async (input: {
     })
   );
 
+  assertActive("session_anomaly.append_event");
   await appendAuthEvent({
     businessId: existing.businessId,
     tenantId: existing.tenantId,

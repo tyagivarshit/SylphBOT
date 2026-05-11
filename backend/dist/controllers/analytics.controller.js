@@ -43,6 +43,7 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const conversionTracker_service_1 = require("../services/salesAgent/conversionTracker.service");
 const followup_queue_1 = require("../queues/followup.queue");
 const tenant_service_1 = require("../services/tenant.service");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 const getBusinessId = async (userId, requestBusinessId) => {
     if (requestBusinessId) {
         return requestBusinessId;
@@ -54,15 +55,94 @@ const getBusinessId = async (userId, requestBusinessId) => {
         throw new Error("Business not found");
     return business.id;
 };
+const isResponseCommitted = (res) => res.headersSent || res.writableEnded;
+const withLifecycleBudget = async (input) => {
+    (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+        req: input.req,
+        res: input.res,
+        stage: `${input.label}.start`,
+    });
+    const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)({
+        req: input.req,
+        res: input.res,
+    }, 1200);
+    const timeoutMs = Math.max(120, Math.min(2500, remainingMs - 150));
+    const taskOutcome = input
+        .task()
+        .then((value) => ({
+        timedOut: false,
+        value,
+        error: null,
+    }))
+        .catch((error) => ({
+        timedOut: false,
+        value: input.fallback,
+        error: error,
+    }));
+    const timeoutOutcome = new Promise((resolve) => {
+        setTimeout(() => {
+            resolve({
+                timedOut: true,
+                value: input.fallback,
+                error: null,
+            });
+        }, timeoutMs);
+    });
+    const outcome = await Promise.race([taskOutcome, timeoutOutcome]);
+    if (outcome.timedOut) {
+        console.warn("REQUEST_ABORTED", {
+            requestId: input.req.requestId || null,
+            route: input.req.originalUrl,
+            method: input.req.method,
+            reason: `${input.label}_budget_exceeded`,
+            timeoutMs,
+        });
+        return {
+            value: input.fallback,
+            degraded: true,
+            reason: "projection_timeout",
+        };
+    }
+    if (!outcome.error) {
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req: input.req,
+            res: input.res,
+            stage: `${input.label}.completed`,
+        });
+        return {
+            value: outcome.value,
+            degraded: false,
+            reason: null,
+        };
+    }
+    throw outcome.error;
+};
 const getAnalyticsOverview = async (req, res) => {
     try {
         const userId = req.user.id;
         const range = req.query.range || "7d";
         const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
-        const data = await service.getOverview(businessId, range);
-        res.json({ success: true, data });
+        const projection = await withLifecycleBudget({
+            req,
+            res,
+            label: "analytics_overview",
+            fallback: {
+                totalLeads: 0,
+                messages: 0,
+                aiReplies: 0,
+                bookings: 0,
+            },
+            task: () => service.getOverview(businessId, range),
+        });
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
+        res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
     }
     catch (error) {
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
         console.error("Overview Error:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
@@ -73,10 +153,22 @@ const getAnalyticsCharts = async (req, res) => {
         const userId = req.user.id;
         const range = req.query.range || "7d";
         const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
-        const data = await service.getCharts(businessId, range);
-        res.json({ success: true, data });
+        const projection = await withLifecycleBudget({
+            req,
+            res,
+            label: "analytics_charts",
+            fallback: [],
+            task: () => service.getCharts(businessId, range),
+        });
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
+        res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
     }
     catch (error) {
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
         console.error("Charts Error:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
@@ -86,10 +178,22 @@ const getConversionFunnel = async (req, res) => {
     try {
         const userId = req.user.id;
         const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
-        const data = await service.getFunnel(businessId);
-        res.json({ success: true, data });
+        const projection = await withLifecycleBudget({
+            req,
+            res,
+            label: "analytics_funnel",
+            fallback: {},
+            task: () => service.getFunnel(businessId),
+        });
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
+        res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
     }
     catch (error) {
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
         console.error("Funnel Error:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
@@ -99,10 +203,22 @@ const getTopSources = async (req, res) => {
     try {
         const userId = req.user.id;
         const businessId = await getBusinessId(userId, (0, tenant_service_1.getRequestBusinessId)(req));
-        const data = await service.getSources(businessId);
-        res.json({ success: true, data });
+        const projection = await withLifecycleBudget({
+            req,
+            res,
+            label: "analytics_sources",
+            fallback: [],
+            task: () => service.getSources(businessId),
+        });
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
+        res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
     }
     catch (error) {
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
         console.error("Sources Error:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
@@ -119,15 +235,31 @@ const getDeepAnalyticsDashboard = async (req, res) => {
                 message: "Business not found",
             });
         }
-        const data = await (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey);
+        const projection = await withLifecycleBudget({
+            req,
+            res,
+            label: "analytics_dashboard",
+            fallback: (0, analyticsDashboard_service_1.buildAnalyticsDashboardFallback)(range, planKey),
+            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey),
+        });
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
         res.json({
             success: true,
-            data,
-            limited: data.meta.upgradeRequired,
-            upgradeRequired: data.meta.upgradeRequired,
+            data: projection.value,
+            limited: projection.value.meta.upgradeRequired,
+            upgradeRequired: projection.value.meta.upgradeRequired,
+            meta: {
+                degraded: projection.degraded,
+                reason: projection.reason,
+            },
         });
     }
     catch (error) {
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
         console.error("Deep Analytics Error:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
@@ -144,7 +276,17 @@ const getRevenueAnalytics = async (req, res) => {
                 message: "Business not found",
             });
         }
-        const dashboard = await (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey);
+        const projection = await withLifecycleBudget({
+            req,
+            res,
+            label: "analytics_revenue",
+            fallback: (0, analyticsDashboard_service_1.buildAnalyticsDashboardFallback)(range, planKey),
+            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey),
+        });
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
+        const dashboard = projection.value;
         res.json({
             success: true,
             data: dashboard.revenueEngine,
@@ -152,6 +294,9 @@ const getRevenueAnalytics = async (req, res) => {
         });
     }
     catch (error) {
+        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
+            return;
+        }
         console.error("Revenue Analytics Error:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }

@@ -1,6 +1,10 @@
 import { Request, Response } from "express";
 import { DashboardService } from "../services/dashboard.service";
-import { withTimeoutFallback } from "../utils/boundedTimeout";
+import {
+  getRequestRemainingMs,
+  isRequestLifecycleAborted,
+  throwIfRequestLifecycleAborted,
+} from "../utils/requestLifecycle";
 
 type AuthRequest = Request & {
   user?: {
@@ -63,6 +67,11 @@ async function baseHandler(
   options: BaseHandlerOptions
 ) {
   try {
+    throwIfRequestLifecycleAborted({
+      req,
+      res,
+      stage: `${options.timeoutLabel}.start`,
+    });
     const businessId = req.user?.businessId;
 
     if (!businessId) {
@@ -76,12 +85,49 @@ async function baseHandler(
       });
     }
 
-    const projection = await withTimeoutFallback({
-      label: options.timeoutLabel,
-      timeoutMs: options.timeoutMs || 1800,
-      task: handler(businessId),
-      fallback: options.fallback,
+    const fallbackValue = options.fallback;
+    const remainingMs = getRequestRemainingMs({ req, res }, options.timeoutMs || 1800);
+    const timeoutMs = Math.max(
+      120,
+      Math.min(options.timeoutMs || 1800, Math.max(120, remainingMs - 120))
+    );
+    const projectionTask = handler(businessId)
+      .then(
+        (value) =>
+          ({
+            timedOut: false,
+            failed: false,
+            value,
+          }) as const
+      )
+      .catch(() => ({
+        timedOut: false,
+        failed: true,
+        value: fallbackValue,
+      }));
+    const timeoutTask = new Promise<{
+      timedOut: true;
+      failed: false;
+      value: unknown;
+    }>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          timedOut: true,
+          failed: false,
+          value: fallbackValue,
+        });
+      }, timeoutMs);
     });
+    const projection = await Promise.race([projectionTask, timeoutTask]);
+    if (projection.timedOut) {
+      console.warn("REQUEST_ABORTED", {
+        requestId: req.requestId || null,
+        route: req.originalUrl,
+        method: req.method,
+        reason: `${options.timeoutLabel}_budget_exceeded`,
+        timeoutMs,
+      });
+    }
 
     if (options.projectionLog) {
       console.info(options.projectionLog, {
@@ -91,8 +137,15 @@ async function baseHandler(
       });
     }
 
+    if (isRequestLifecycleAborted({ req, res }) || res.headersSent || res.writableEnded) {
+      return;
+    }
+
     return sendSuccess(res, projection.value);
   } catch (error) {
+    if (isRequestLifecycleAborted({ req, res }) || res.headersSent || res.writableEnded) {
+      return;
+    }
     logError(req, error);
     return sendError(res, 500, error instanceof Error ? error.message : "Dashboard error");
   }

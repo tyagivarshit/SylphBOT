@@ -13,6 +13,7 @@ const authCookies_1 = require("../utils/authCookies");
 const requestContext_1 = require("../observability/requestContext");
 const tenant_service_1 = require("../services/tenant.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 const AUTH_CONTEXT_CACHE_TTL_MS = 15000;
 const SESSION_ANOMALY_RECHECK_MS = 10000;
 const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 180;
@@ -23,6 +24,7 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
     "/api/oauth",
     "/api/commerce",
 ];
+const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
 const authContextCache = new Map();
 const sessionAnomalyCheckedAt = new Map();
 const hashToken = (token) => crypto_1.default.createHash("sha256").update(token).digest("hex");
@@ -80,6 +82,9 @@ const resolveBusinessId = async (input) => {
     return identity.businessId;
 };
 const enforceSessionAnomalyGuard = async (req, input) => {
+    if (input.signal?.aborted || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+        return;
+    }
     const sessionKey = getSessionKeyFromRequest(req);
     if (!sessionKey) {
         return;
@@ -98,7 +103,11 @@ const enforceSessionAnomalyGuard = async (req, input) => {
         ip: getIpAddress(req),
         userAgent: getUserAgent(req),
         deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+        signal: input.signal || null,
     }).catch(() => null);
+    if (input.signal?.aborted || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+        return;
+    }
     if (anomaly?.locked) {
         throw (0, AppError_1.unauthorized)("Session locked due to anomaly");
     }
@@ -114,6 +123,7 @@ const enforceSessionAnomalyGuard = async (req, input) => {
             challengeKey,
             userId: input.userId,
             sessionKey,
+            signal: input.signal || null,
         }).catch(() => ({
             consumed: false,
             reason: "mfa_challenge_consume_failed",
@@ -123,41 +133,43 @@ const enforceSessionAnomalyGuard = async (req, input) => {
         }
     }
 };
-const withFastGuardTimeout = async (task, timeoutMs) => {
-    let timeoutHandle = null;
-    try {
-        return await Promise.race([
-            task,
-            new Promise((_, reject) => {
-                timeoutHandle = setTimeout(() => {
-                    reject(new Error("session_anomaly_guard_timeout"));
-                }, timeoutMs);
-            }),
-        ]);
-    }
-    finally {
-        if (timeoutHandle) {
-            clearTimeout(timeoutHandle);
-        }
-    }
-};
 const runSessionAnomalyGuard = async (req, input) => {
     const route = String(req.originalUrl || req.url || "").trim();
     const shouldEnforceSynchronously = req.method !== "GET" ||
         SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => route.startsWith(prefix));
-    const task = withFastGuardTimeout(enforceSessionAnomalyGuard(req, input), SESSION_ANOMALY_GUARD_TIMEOUT_MS).catch((error) => {
+    const requestBudgetMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req }, SESSION_ANOMALY_GUARD_TIMEOUT_MS);
+    const minimumRequiredBudgetMs = shouldEnforceSynchronously ? 500 : 280;
+    if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req }) || requestBudgetMs <= minimumRequiredBudgetMs) {
+        req.logger?.warn({
+            error: "session_anomaly_guard_timeout",
+            route,
+            method: req.method,
+            requestBudgetMs,
+        }, "Session anomaly guard skipped");
+        return;
+    }
+    const abortSignal = (0, requestLifecycle_1.getRequestAbortSignal)({ req });
+    try {
+        await enforceSessionAnomalyGuard(req, {
+            ...input,
+            signal: abortSignal,
+        });
+        return;
+    }
+    catch (error) {
+        if (String(error?.message || "").includes("request_aborted")) {
+            return;
+        }
         // Fail open: auth should remain responsive even if anomaly telemetry is slow.
         req.logger?.warn({
             error: error?.message || String(error || "unknown"),
             route,
             method: req.method,
+            timeoutMs: shouldEnforceSynchronously
+                ? SESSION_ANOMALY_GUARD_TIMEOUT_MS
+                : SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS,
         }, "Session anomaly guard skipped");
-    });
-    if (shouldEnforceSynchronously) {
-        await task;
-        return;
     }
-    void task;
 };
 const protect = async (req, res, next) => {
     const startedAt = Date.now();

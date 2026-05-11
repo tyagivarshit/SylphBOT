@@ -570,6 +570,11 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     const stripeCheckoutStartedAt = Date.now();
     let session: Stripe.Checkout.Session | null = null;
     let checkoutSuccess = false;
+    console.info("STRIPE_CHECKOUT_START", {
+      businessId: input.businessId,
+      paymentIntentKey: input.paymentIntentKey,
+      mode: sessionPayload.mode || null,
+    });
     try {
       session = await stripe.checkout.sessions.create(sessionPayload, {
         idempotencyKey: checkoutIdempotencyKey,
@@ -577,6 +582,12 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       checkoutSuccess = true;
     } catch (error) {
       const timeout = isStripeTimeoutError(error);
+      console.error("STRIPE_CHECKOUT_FAIL", {
+        businessId: input.businessId,
+        paymentIntentKey: input.paymentIntentKey,
+        reason: String((error as Error)?.message || "stripe_create_failed"),
+        timeout,
+      });
       console.error("STRIPE_CREATE_FAIL", {
         businessId: input.businessId,
         paymentIntentKey: input.paymentIntentKey,
@@ -598,6 +609,13 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     if (!session) {
       throw new Error("provider_checkout_failed");
     }
+    console.info("STRIPE_CHECKOUT_SUCCESS", {
+      businessId: input.businessId,
+      paymentIntentKey: input.paymentIntentKey,
+      sessionId: session.id,
+      mode: session.mode || null,
+      durationMs: Date.now() - stripeCheckoutStartedAt,
+    });
     console.info("STRIPE_CREATE_OK", {
       businessId: input.businessId,
       paymentIntentKey: input.paymentIntentKey,

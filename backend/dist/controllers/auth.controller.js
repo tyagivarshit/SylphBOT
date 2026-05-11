@@ -20,6 +20,7 @@ const securityGovernanceOS_service_1 = require("../services/security/securityGov
 const authBootstrap_service_1 = require("../services/authBootstrap.service");
 const distributedLock_service_1 = require("../services/distributedLock.service");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 /* ======================================
 UTILS
 ====================================== */
@@ -203,6 +204,11 @@ LOGIN
 const login = async (req, res, next) => {
     const startedAt = Date.now();
     try {
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "auth.login.start",
+        });
         await checkGlobalLimit(getIP(req));
         const email = normalizeEmail(String(req.body.email || ""));
         const password = String(req.body.password || "");
@@ -240,15 +246,6 @@ const login = async (req, res, next) => {
             }).catch(() => undefined);
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
-        const bootstrapTask = (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
-            userId: user.id,
-            preferredBusinessId: user.businessId || null,
-            profileSeed: {
-                email: user.email,
-                name: user.name,
-                avatar: user.avatar || null,
-            },
-        });
         let resolvedUser = {
             id: user.id,
             role: user.role,
@@ -257,21 +254,29 @@ const login = async (req, res, next) => {
             name: user.name,
         };
         let businessId = user.businessId || null;
-        try {
-            const bootstrap = await withFastTimeout(bootstrapTask, LOGIN_BOOTSTRAP_TIMEOUT_MS);
-            resolvedUser = {
-                id: bootstrap.user.id,
-                role: bootstrap.user.role,
-                tokenVersion: bootstrap.user.tokenVersion,
-                email: bootstrap.user.email,
-                name: bootstrap.user.name,
-            };
-            businessId = bootstrap.identity.businessId;
-        }
-        catch {
-            // Fail open for login latency: continue with existing canonical user fields
-            // and allow bootstrap recovery to finish in background.
-            void bootstrapTask.catch(() => undefined);
+        if ((0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > LOGIN_BOOTSTRAP_TIMEOUT_MS + 250) {
+            try {
+                const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
+                    userId: user.id,
+                    preferredBusinessId: user.businessId || null,
+                    profileSeed: {
+                        email: user.email,
+                        name: user.name,
+                        avatar: user.avatar || null,
+                    },
+                });
+                resolvedUser = {
+                    id: bootstrap.user.id,
+                    role: bootstrap.user.role,
+                    tokenVersion: bootstrap.user.tokenVersion,
+                    email: bootstrap.user.email,
+                    name: bootstrap.user.name,
+                };
+                businessId = bootstrap.identity.businessId;
+            }
+            catch {
+                // Fail open for login latency: continue with existing canonical user fields.
+            }
         }
         const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(resolvedUser.id, resolvedUser.tokenVersion);
@@ -285,20 +290,22 @@ const login = async (req, res, next) => {
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
         });
-        const sessionLedgerTask = (0, securityGovernanceOS_service_1.issueSessionLedger)({
-            businessId,
-            tenantId: businessId,
-            userId: resolvedUser.id,
-            sessionKey: hashToken(refreshRaw),
-            ip: getIP(req),
-            userAgent: String(getUA(req)),
-            deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-            metadata: {
-                source: "auth.login",
-            },
-        }).catch(() => undefined);
-        void withFastTimeout(sessionLedgerTask, LOGIN_SESSION_LEDGER_TIMEOUT_MS).catch(() => undefined);
+        if (!(0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) &&
+            (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > LOGIN_SESSION_LEDGER_TIMEOUT_MS + 200) {
+            await (0, securityGovernanceOS_service_1.issueSessionLedger)({
+                businessId,
+                tenantId: businessId,
+                userId: resolvedUser.id,
+                sessionKey: hashToken(refreshRaw),
+                ip: getIP(req),
+                userAgent: String(getUA(req)),
+                deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                metadata: {
+                    source: "auth.login",
+                },
+            }).catch(() => undefined);
+        }
         void writeAuthAuditLog(req, {
             action: "auth.login",
             userId: resolvedUser.id,
@@ -524,15 +531,13 @@ GET ME
 const getMe = async (req, res, next) => {
     const startedAt = Date.now();
     try {
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "auth.me.start",
+        });
         if (!req.user?.id)
             throw (0, AppError_1.unauthorized)("Not authenticated");
-        const bootstrapTask = (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
-            userId: req.user.id,
-            preferredBusinessId: req.user?.businessId || null,
-            profileSeed: {
-                email: req.user?.email || null,
-            },
-        });
         let payload = {
             id: String(req.user.id),
             name: "Workspace User",
@@ -540,19 +545,31 @@ const getMe = async (req, res, next) => {
             role: String(req.user?.role || "AGENT"),
             businessId: String(req.user?.businessId || "").trim() || null,
         };
-        try {
-            const bootstrap = await withFastTimeout(bootstrapTask, AUTH_ME_BOOTSTRAP_TIMEOUT_MS);
-            payload = {
-                id: bootstrap.user.id,
-                name: bootstrap.user.name,
-                email: bootstrap.user.email,
-                role: bootstrap.user.role,
-                businessId: bootstrap.identity.businessId,
-            };
+        if ((0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > AUTH_ME_BOOTSTRAP_TIMEOUT_MS + 250) {
+            try {
+                const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
+                    userId: req.user.id,
+                    preferredBusinessId: req.user?.businessId || null,
+                    profileSeed: {
+                        email: req.user?.email || null,
+                    },
+                });
+                payload = {
+                    id: bootstrap.user.id,
+                    name: bootstrap.user.name,
+                    email: bootstrap.user.email,
+                    role: bootstrap.user.role,
+                    businessId: bootstrap.identity.businessId,
+                };
+            }
+            catch {
+                // continue to lightweight fallback
+            }
         }
-        catch {
-            void bootstrapTask.catch(() => undefined);
-            const fallbackUser = await withFastTimeout(prisma_1.default.user.findUnique({
+        if (payload.businessId == null &&
+            (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS + 150) {
+            const fallbackUser = await prisma_1.default.user
+                .findUnique({
                 where: { id: req.user.id },
                 select: {
                     id: true,
@@ -561,7 +578,8 @@ const getMe = async (req, res, next) => {
                     role: true,
                     businessId: true,
                 },
-            }), AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS).catch(() => null);
+            })
+                .catch(() => null);
             if (fallbackUser) {
                 payload = {
                     id: fallbackUser.id,

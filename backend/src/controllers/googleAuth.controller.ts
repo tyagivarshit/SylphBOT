@@ -15,6 +15,11 @@ import {
 } from "../utils/googleOAuthState";
 import { ensureAuthBootstrapContext } from "../services/authBootstrap.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import {
+  getRequestRemainingMs,
+  isRequestLifecycleAborted,
+  throwIfRequestLifecycleAborted,
+} from "../utils/requestLifecycle";
 
 /* ======================================
 UTILS
@@ -104,7 +109,13 @@ GOOGLE CALLBACK
 
 export const googleCallback = async (req: Request, res: Response) => {
   const startedAt = Date.now();
+  const isResponseCommitted = () => res.headersSent || res.writableEnded;
   try {
+    throwIfRequestLifecycleAborted({
+      req,
+      res,
+      stage: "google_callback.entry",
+    });
     const user = req.user as any;
     const state = verifyGoogleOAuthState(req.query.state);
     const redirectOrigin = state?.redirectOrigin || getDefaultFrontendOrigin();
@@ -132,6 +143,11 @@ export const googleCallback = async (req: Request, res: Response) => {
       );
     }
 
+    const bootstrapBudgetMs = getRequestRemainingMs({ req, res }, 0);
+    if (bootstrapBudgetMs <= 1200) {
+      return res.redirect(buildAuthErrorUrl(redirectOrigin, "session_expired"));
+    }
+
     const bootstrap = await ensureAuthBootstrapContext({
       userId: user.id,
       preferredBusinessId: user.businessId || null,
@@ -140,6 +156,11 @@ export const googleCallback = async (req: Request, res: Response) => {
         name: user.name || null,
         avatar: user.avatar || null,
       },
+    });
+    throwIfRequestLifecycleAborted({
+      req,
+      res,
+      stage: "google_callback.bootstrap",
     });
 
     const accessToken = generateAccessToken(
@@ -166,6 +187,11 @@ export const googleCallback = async (req: Request, res: Response) => {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
+    throwIfRequestLifecycleAborted({
+      req,
+      res,
+      stage: "google_callback.session_persisted",
+    });
 
     setAuthCookies(res, req, accessToken, refreshRaw);
 
@@ -186,6 +212,9 @@ export const googleCallback = async (req: Request, res: Response) => {
 
     return res.redirect(`${redirectOrigin}/dashboard`);
   } catch (err) {
+    if (isRequestLifecycleAborted({ req, res }) || isResponseCommitted()) {
+      return;
+    }
     console.error("GOOGLE CALLBACK ERROR", err);
     return res.redirect(
       buildAuthErrorUrl(getDefaultFrontendOrigin(), "oauth_failed")

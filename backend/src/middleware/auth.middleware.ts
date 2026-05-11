@@ -18,6 +18,11 @@ import {
   authorizeSuspiciousSessionChallenge,
   trackSessionAnomaly,
 } from "../services/security/securityGovernanceOS.service";
+import {
+  getRequestAbortSignal,
+  getRequestRemainingMs,
+  isRequestLifecycleAborted,
+} from "../utils/requestLifecycle";
 
 const AUTH_CONTEXT_CACHE_TTL_MS = 15_000;
 const SESSION_ANOMALY_RECHECK_MS = 10_000;
@@ -29,6 +34,7 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
   "/api/oauth",
   "/api/commerce",
 ];
+const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
 
 type CachedAuthContext = {
   userId: string;
@@ -126,7 +132,11 @@ const resolveBusinessId = async (input: {
 const enforceSessionAnomalyGuard = async (req: Request, input: {
   userId: string;
   businessId: string | null;
+  signal?: AbortSignal | null;
 }) => {
+  if (input.signal?.aborted || isRequestLifecycleAborted({ req })) {
+    return;
+  }
   const sessionKey = getSessionKeyFromRequest(req);
   if (!sessionKey) {
     return;
@@ -147,7 +157,12 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
     ip: getIpAddress(req),
     userAgent: getUserAgent(req),
     deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+    signal: input.signal || null,
   }).catch(() => null);
+
+  if (input.signal?.aborted || isRequestLifecycleAborted({ req })) {
+    return;
+  }
 
   if (anomaly?.locked) {
     throw unauthorized("Session locked due to anomaly");
@@ -167,34 +182,13 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
       challengeKey,
       userId: input.userId,
       sessionKey,
+      signal: input.signal || null,
     }).catch(() => ({
       consumed: false,
       reason: "mfa_challenge_consume_failed",
     }));
     if (!consumed.consumed) {
       throw unauthorized("Suspicious login challenge not satisfied");
-    }
-  }
-};
-
-const withFastGuardTimeout = async <T>(
-  task: Promise<T>,
-  timeoutMs: number
-) => {
-  let timeoutHandle: NodeJS.Timeout | null = null;
-
-  try {
-    return await Promise.race([
-      task,
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          reject(new Error("session_anomaly_guard_timeout"));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
     }
   }
 };
@@ -210,27 +204,46 @@ const runSessionAnomalyGuard = async (
   const shouldEnforceSynchronously =
     req.method !== "GET" ||
     SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => route.startsWith(prefix));
-  const task = withFastGuardTimeout(
-    enforceSessionAnomalyGuard(req, input),
-    SESSION_ANOMALY_GUARD_TIMEOUT_MS
-  ).catch((error) => {
+  const requestBudgetMs = getRequestRemainingMs({ req }, SESSION_ANOMALY_GUARD_TIMEOUT_MS);
+  const minimumRequiredBudgetMs = shouldEnforceSynchronously ? 500 : 280;
+
+  if (isRequestLifecycleAborted({ req }) || requestBudgetMs <= minimumRequiredBudgetMs) {
+    req.logger?.warn(
+      {
+        error: "session_anomaly_guard_timeout",
+        route,
+        method: req.method,
+        requestBudgetMs,
+      },
+      "Session anomaly guard skipped"
+    );
+    return;
+  }
+
+  const abortSignal = getRequestAbortSignal({ req });
+  try {
+    await enforceSessionAnomalyGuard(req, {
+      ...input,
+      signal: abortSignal,
+    });
+    return;
+  } catch (error) {
+    if (String((error as Error)?.message || "").includes("request_aborted")) {
+      return;
+    }
     // Fail open: auth should remain responsive even if anomaly telemetry is slow.
     req.logger?.warn(
       {
         error: (error as Error)?.message || String(error || "unknown"),
         route,
         method: req.method,
+        timeoutMs: shouldEnforceSynchronously
+          ? SESSION_ANOMALY_GUARD_TIMEOUT_MS
+          : SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS,
       },
       "Session anomaly guard skipped"
     );
-  });
-
-  if (shouldEnforceSynchronously) {
-    await task;
-    return;
   }
-
-  void task;
 };
 
 export const protect = async (

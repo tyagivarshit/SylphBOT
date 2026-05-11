@@ -1,10 +1,18 @@
 import { Request, Response } from "express";
 import * as service from "../services/analytics.service"
-import { getAnalyticsDashboard } from "../services/analyticsDashboard.service";
+import {
+  buildAnalyticsDashboardFallback,
+  getAnalyticsDashboard,
+} from "../services/analyticsDashboard.service";
 import prisma from "../config/prisma";
 import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 import { scheduleFollowups } from "../queues/followup.queue";
 import { getRequestBusinessId } from "../services/tenant.service";
+import {
+  getRequestRemainingMs,
+  isRequestLifecycleAborted,
+  throwIfRequestLifecycleAborted,
+} from "../utils/requestLifecycle";
 
 const getBusinessId = async (
   userId: string,
@@ -23,6 +31,90 @@ const getBusinessId = async (
   return business.id;
 };
 
+const isResponseCommitted = (res: Response) => res.headersSent || res.writableEnded;
+
+const withLifecycleBudget = async <T>(input: {
+  req: Request;
+  res: Response;
+  label: string;
+  fallback: T;
+  task: () => Promise<T>;
+}) => {
+  throwIfRequestLifecycleAborted({
+    req: input.req,
+    res: input.res,
+    stage: `${input.label}.start`,
+  });
+
+  const remainingMs = getRequestRemainingMs(
+    {
+      req: input.req,
+      res: input.res,
+    },
+    1200
+  );
+  const timeoutMs = Math.max(120, Math.min(2500, remainingMs - 150));
+  const taskOutcome = input
+    .task()
+    .then(
+      (value) =>
+        ({
+          timedOut: false,
+          value,
+          error: null as Error | null,
+        }) as const
+    )
+    .catch((error) => ({
+      timedOut: false,
+      value: input.fallback,
+      error: error as Error,
+    }));
+  const timeoutOutcome = new Promise<{
+    timedOut: true;
+    value: T;
+    error: null;
+  }>((resolve) => {
+    setTimeout(() => {
+      resolve({
+        timedOut: true,
+        value: input.fallback,
+        error: null,
+      });
+    }, timeoutMs);
+  });
+
+  const outcome = await Promise.race([taskOutcome, timeoutOutcome]);
+  if (outcome.timedOut) {
+    console.warn("REQUEST_ABORTED", {
+      requestId: input.req.requestId || null,
+      route: input.req.originalUrl,
+      method: input.req.method,
+      reason: `${input.label}_budget_exceeded`,
+      timeoutMs,
+    });
+    return {
+      value: input.fallback,
+      degraded: true,
+      reason: "projection_timeout",
+    } as const;
+  }
+
+  if (!outcome.error) {
+    throwIfRequestLifecycleAborted({
+      req: input.req,
+      res: input.res,
+      stage: `${input.label}.completed`,
+    });
+    return {
+      value: outcome.value,
+      degraded: false,
+      reason: null as string | null,
+    } as const;
+  }
+
+  throw outcome.error;
+};
+
 export const getAnalyticsOverview = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
@@ -30,10 +122,27 @@ export const getAnalyticsOverview = async (req: Request, res: Response) => {
 
     const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
-    const data = await service.getOverview(businessId, range);
+    const projection = await withLifecycleBudget({
+      req,
+      res,
+      label: "analytics_overview",
+      fallback: {
+        totalLeads: 0,
+        messages: 0,
+        aiReplies: 0,
+        bookings: 0,
+      },
+      task: () => service.getOverview(businessId, range),
+    });
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
 
-    res.json({ success: true, data });
+    res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
   } catch (error) {
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
     console.error("Overview Error:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
@@ -46,10 +155,22 @@ export const getAnalyticsCharts = async (req: Request, res: Response) => {
 
     const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
-    const data = await service.getCharts(businessId, range);
+    const projection = await withLifecycleBudget({
+      req,
+      res,
+      label: "analytics_charts",
+      fallback: [] as Array<{ date: string; leads: number }>,
+      task: () => service.getCharts(businessId, range),
+    });
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
 
-    res.json({ success: true, data });
+    res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
   } catch (error) {
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
     console.error("Charts Error:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
@@ -61,10 +182,22 @@ export const getConversionFunnel = async (req: Request, res: Response) => {
 
     const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
-    const data = await service.getFunnel(businessId);
+    const projection = await withLifecycleBudget({
+      req,
+      res,
+      label: "analytics_funnel",
+      fallback: {} as Record<string, unknown>,
+      task: () => service.getFunnel(businessId),
+    });
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
 
-    res.json({ success: true, data });
+    res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
   } catch (error) {
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
     console.error("Funnel Error:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
@@ -76,10 +209,22 @@ export const getTopSources = async (req: Request, res: Response) => {
 
     const businessId = await getBusinessId(userId, getRequestBusinessId(req));
 
-    const data = await service.getSources(businessId);
+    const projection = await withLifecycleBudget({
+      req,
+      res,
+      label: "analytics_sources",
+      fallback: [] as Array<{ name: string; value: number }>,
+      task: () => service.getSources(businessId),
+    });
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
 
-    res.json({ success: true, data });
+    res.json({ success: true, data: projection.value, meta: { degraded: projection.degraded, reason: projection.reason } });
   } catch (error) {
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
     console.error("Sources Error:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
@@ -107,15 +252,31 @@ export const getDeepAnalyticsDashboard = async (
       });
     }
 
-    const data = await getAnalyticsDashboard(businessId, range, planKey);
+    const projection = await withLifecycleBudget({
+      req,
+      res,
+      label: "analytics_dashboard",
+      fallback: buildAnalyticsDashboardFallback(range, planKey),
+      task: () => getAnalyticsDashboard(businessId, range, planKey),
+    });
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
 
     res.json({
       success: true,
-      data,
-      limited: data.meta.upgradeRequired,
-      upgradeRequired: data.meta.upgradeRequired,
+      data: projection.value,
+      limited: projection.value.meta.upgradeRequired,
+      upgradeRequired: projection.value.meta.upgradeRequired,
+      meta: {
+        degraded: projection.degraded,
+        reason: projection.reason,
+      },
     });
   } catch (error) {
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
     console.error("Deep Analytics Error:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
@@ -140,7 +301,17 @@ export const getRevenueAnalytics = async (req: Request, res: Response) => {
       });
     }
 
-    const dashboard = await getAnalyticsDashboard(businessId, range, planKey);
+    const projection = await withLifecycleBudget({
+      req,
+      res,
+      label: "analytics_revenue",
+      fallback: buildAnalyticsDashboardFallback(range, planKey),
+      task: () => getAnalyticsDashboard(businessId, range, planKey),
+    });
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
+    const dashboard = projection.value;
 
     res.json({
       success: true,
@@ -148,6 +319,9 @@ export const getRevenueAnalytics = async (req: Request, res: Response) => {
       meta: dashboard.meta,
     });
   } catch (error) {
+    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
+      return;
+    }
     console.error("Revenue Analytics Error:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }

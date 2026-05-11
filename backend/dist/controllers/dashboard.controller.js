@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DashboardController = void 0;
 const dashboard_service_1 = require("../services/dashboard.service");
-const boundedTimeout_1 = require("../utils/boundedTimeout");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 function isValidString(value) {
     return typeof value === "string" && value.trim().length > 0;
 }
@@ -31,6 +31,11 @@ function logError(req, error) {
 }
 async function baseHandler(req, res, handler, options) {
     try {
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: `${options.timeoutLabel}.start`,
+        });
         const businessId = req.user?.businessId;
         if (!businessId) {
             return sendError(res, 403, "No business found. Please complete onboarding.");
@@ -41,12 +46,39 @@ async function baseHandler(req, res, handler, options) {
                 upgradeRequired: true,
             });
         }
-        const projection = await (0, boundedTimeout_1.withTimeoutFallback)({
-            label: options.timeoutLabel,
-            timeoutMs: options.timeoutMs || 1800,
-            task: handler(businessId),
-            fallback: options.fallback,
+        const fallbackValue = options.fallback;
+        const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, options.timeoutMs || 1800);
+        const timeoutMs = Math.max(120, Math.min(options.timeoutMs || 1800, Math.max(120, remainingMs - 120)));
+        const projectionTask = handler(businessId)
+            .then((value) => ({
+            timedOut: false,
+            failed: false,
+            value,
+        }))
+            .catch(() => ({
+            timedOut: false,
+            failed: true,
+            value: fallbackValue,
+        }));
+        const timeoutTask = new Promise((resolve) => {
+            setTimeout(() => {
+                resolve({
+                    timedOut: true,
+                    failed: false,
+                    value: fallbackValue,
+                });
+            }, timeoutMs);
         });
+        const projection = await Promise.race([projectionTask, timeoutTask]);
+        if (projection.timedOut) {
+            console.warn("REQUEST_ABORTED", {
+                requestId: req.requestId || null,
+                route: req.originalUrl,
+                method: req.method,
+                reason: `${options.timeoutLabel}_budget_exceeded`,
+                timeoutMs,
+            });
+        }
         if (options.projectionLog) {
             console.info(options.projectionLog, {
                 businessId,
@@ -54,9 +86,15 @@ async function baseHandler(req, res, handler, options) {
                 fallback: projection.timedOut || projection.failed,
             });
         }
+        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || res.headersSent || res.writableEnded) {
+            return;
+        }
         return sendSuccess(res, projection.value);
     }
     catch (error) {
+        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || res.headersSent || res.writableEnded) {
+            return;
+        }
         logError(req, error);
         return sendError(res, 500, error instanceof Error ? error.message : "Dashboard error");
     }

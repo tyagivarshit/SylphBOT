@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ShieldCheck, Sparkles } from "lucide-react";
 import { redirectToCheckout } from "@/lib/billing";
@@ -228,7 +228,13 @@ const getCheckoutFailureMessage = (reason: string | null) => {
     case "provider_timeout":
       return "Stripe took longer than expected. Please try again in a few seconds.";
     case "provider_unavailable":
-      return "Billing provider is temporarily unavailable. Please retry shortly.";
+      return "Stripe is temporarily unavailable. Please retry shortly.";
+    case "unauthorized":
+    case "session_expired":
+      return "Your auth session expired. Please sign in again and retry checkout.";
+    case "business_context_required":
+    case "billing_unavailable":
+      return "Billing is temporarily unavailable. Please retry in a moment.";
     case "manual_review_required":
       return "Checkout is paused for risk review. Contact support if this persists.";
     case "invalid_plan":
@@ -272,6 +278,7 @@ async function fetchJson<T>(url: string, timeoutMs = BILLING_API_TIMEOUT_MS) {
 function BillingPageContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState<PlanId | null>(null);
+  const [checkoutProgressMessage, setCheckoutProgressMessage] = useState<string | null>(null);
   const [billing, setBilling] = useState<BillingCycle>("monthly");
   const [currency, setCurrency] = useState<Currency>("INR");
   const [lockedCurrency, setLockedCurrency] = useState<Currency | null>(null);
@@ -285,6 +292,8 @@ function BillingPageContent() {
   });
   const [pageLoading, setPageLoading] = useState(true);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
+  const [hasLoadedAtLeastOnce, setHasLoadedAtLeastOnce] = useState(false);
+  const checkoutLockRef = useRef(false);
 
   const applyBillingState = useCallback((billingData: BillingApiResponse) => {
     setSubscription(billingData.subscription || null);
@@ -340,24 +349,31 @@ function BillingPageContent() {
       if (billingResult.status === "fulfilled") {
         resolvedBillingData = billingResult.value;
         applyBillingState(resolvedBillingData);
+        setHasLoadedAtLeastOnce(true);
 
         if (resolvedBillingData.meta?.degraded) {
           warnings.push("Live billing sync is delayed. Refresh to reconcile the latest provider state.");
         }
       } else {
-        warnings.push("Billing summary is temporarily unavailable. Retry in a moment.");
+        warnings.push("Billing summary sync is delayed. Retrying in the background.");
       }
 
       if (plansResult.status === "fulfilled") {
         resolvedPlansData = plansResult.value;
         applyPlansState(resolvedPlansData);
+        setHasLoadedAtLeastOnce(true);
 
         const degradedMeta = plansResult.value?.meta;
         if (degradedMeta?.degraded) {
           warnings.push("Plan catalog is running in recovery mode.");
         }
       } else {
-        warnings.push("Plan catalog is temporarily unavailable.");
+        warnings.push("Plan catalog sync is delayed.");
+      }
+
+      if (!resolvedBillingData && !resolvedPlansData && !hasLoadedAtLeastOnce) {
+        warnings.length = 0;
+        warnings.push("Billing data is still loading. Please retry in a few seconds.");
       }
 
       setLoadWarning(warnings.length ? warnings.join(" ") : null);
@@ -372,7 +388,7 @@ function BillingPageContent() {
         setPageLoading(false);
       }
     }
-  }, [applyBillingState, applyPlansState]);
+  }, [applyBillingState, applyPlansState, hasLoadedAtLeastOnce]);
 
   useEffect(() => {
     void loadBilling();
@@ -411,12 +427,14 @@ function BillingPageContent() {
   );
 
   const handleCheckout = async (plan: PlanId) => {
-    if (loading) {
+    if (loading || checkoutLockRef.current) {
       return;
     }
 
     try {
+      checkoutLockRef.current = true;
       setLoading(plan);
+      setCheckoutProgressMessage("Redirecting to secure checkout...");
 
       if (lockedCurrency && lockedCurrency !== currency) {
         throw new Error(
@@ -426,7 +444,9 @@ function BillingPageContent() {
 
       redirectToCheckout(plan, billing);
     } catch (checkoutError) {
+      checkoutLockRef.current = false;
       setLoading(null);
+      setCheckoutProgressMessage(null);
       notify.error(
         checkoutError instanceof Error
           ? checkoutError.message
@@ -470,6 +490,12 @@ function BillingPageContent() {
       {loadWarning ? (
         <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800">
           {loadWarning}
+        </div>
+      ) : null}
+
+      {checkoutProgressMessage ? (
+        <div className="rounded-[24px] border border-blue-200 bg-blue-50/90 px-5 py-4 text-sm text-blue-700 shadow-sm">
+          {checkoutProgressMessage}
         </div>
       ) : null}
 
@@ -612,7 +638,7 @@ function BillingPageContent() {
               <LoadingButton
                 onClick={() => void handleCheckout(plan.type)}
                 loading={loading === plan.type}
-                loadingLabel="Redirecting..."
+                loadingLabel="Redirecting to secure checkout..."
                 disabled={Boolean(loading) || current}
                 className={`mt-6 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                   current

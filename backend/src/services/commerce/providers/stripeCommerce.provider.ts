@@ -567,25 +567,36 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     }
 
     const checkoutIdempotencyKey = `checkout:${input.paymentIntentKey}`;
-    const createStripeSession = async (
-      payload: Stripe.Checkout.SessionCreateParams,
-      idempotencyKey: string
-    ) =>
-      withStripeTimeoutRetry(() =>
-        stripe.checkout.sessions.create(payload, {
-          idempotencyKey,
-        })
-      );
-    let session: Stripe.Checkout.Session;
+    const stripeCheckoutStartedAt = Date.now();
+    let session: Stripe.Checkout.Session | null = null;
+    let checkoutSuccess = false;
     try {
-      session = await createStripeSession(sessionPayload, checkoutIdempotencyKey);
+      session = await stripe.checkout.sessions.create(sessionPayload, {
+        idempotencyKey: checkoutIdempotencyKey,
+      });
+      checkoutSuccess = true;
     } catch (error) {
+      const timeout = isStripeTimeoutError(error);
       console.error("STRIPE_CREATE_FAIL", {
         businessId: input.businessId,
         paymentIntentKey: input.paymentIntentKey,
         reason: String((error as Error)?.message || "stripe_create_failed"),
+        timeout,
       });
+      if (timeout) {
+        throw new Error("provider_timeout");
+      }
       throw error;
+    } finally {
+      console.info("STRIPE_CHECKOUT_MS", {
+        durationMs: Date.now() - stripeCheckoutStartedAt,
+        success: checkoutSuccess,
+        sessionId: session?.id || null,
+      });
+    }
+
+    if (!session) {
+      throw new Error("provider_checkout_failed");
     }
     console.info("STRIPE_CREATE_OK", {
       businessId: input.businessId,

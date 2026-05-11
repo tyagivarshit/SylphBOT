@@ -263,7 +263,18 @@ export const createPaymentIntentService = () => {
       return row;
     });
     try {
-      const checkout = await adapter.createCheckout({
+      const providerCheckoutStartedAt = Date.now();
+      console.info("BILLING_STAGE_OK", {
+        stage: "provider.checkout.start",
+        businessId,
+        provider: normalizedProvider,
+        proposalKey,
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+      });
+
+      let checkout: Awaited<ReturnType<typeof adapter.createCheckout>>;
+      try {
+        checkout = await adapter.createCheckout({
           businessId,
           paymentIntentKey: paymentIntent.paymentIntentKey,
           amountMinor: paymentIntent.amountMinor,
@@ -314,6 +325,33 @@ export const createPaymentIntentService = () => {
             coupon: String(toRecord(paymentIntent.metadata).coupon || "").trim() || null,
             ...(metadata || {}),
           },
+        });
+      } catch (error) {
+        const reason = String((error as any)?.message || "provider_checkout_failed");
+        const normalizedReason = reason.toLowerCase();
+        const timeout =
+          normalizedReason.includes("provider_timeout") ||
+          normalizedReason.includes("timeout");
+        console.error("BILLING_STAGE_FAIL", {
+          stage: timeout ? "provider.checkout.timeout" : "provider.checkout.fail",
+          businessId,
+          provider: normalizedProvider,
+          proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          totalMs: Date.now() - providerCheckoutStartedAt,
+          reason,
+        });
+        throw error;
+      }
+
+      console.info("BILLING_STAGE_OK", {
+        stage: "provider.checkout.success",
+        businessId,
+        provider: normalizedProvider,
+        proposalKey,
+        paymentIntentKey: paymentIntent.paymentIntentKey,
+        providerPaymentIntentId: checkout.providerPaymentIntentId,
+        totalMs: Date.now() - providerCheckoutStartedAt,
       });
 
       const checkoutSessionId =

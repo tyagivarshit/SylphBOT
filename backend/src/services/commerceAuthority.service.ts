@@ -14,7 +14,6 @@ import {
 } from "./security/securityGovernanceOS.service";
 
 const IDEMPOTENCY_INFLIGHT_TIMEOUT_MS = 5 * 60 * 1000;
-const MANUAL_OVERRIDE_LOOKUP_TIMEOUT_MS = 250;
 
 const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -36,17 +35,6 @@ const toEncryptedRef = (value?: string | null) => {
 };
 
 const nowIso = () => new Date().toISOString();
-
-class ManualOverrideLookupTimeoutError extends Error {
-  readonly timeoutMs: number;
-
-  constructor(timeoutMs: number) {
-    super(`manual_override_lookup_timeout:${timeoutMs}`);
-    this.name = "ManualOverrideLookupTimeoutError";
-    this.timeoutMs = timeoutMs;
-  }
-}
-
 
 const buildProviderEventKey = (provider: CommerceProvider, providerEventId: string) =>
   `${provider}:${String(providerEventId || "").trim() || "unknown_event"}`;
@@ -125,28 +113,6 @@ export const createCommerceAuthorityService = () => {
 
   const isProviderMatch = (candidateProvider: string, expectedProvider: string) =>
     candidateProvider === "ALL" || candidateProvider === expectedProvider;
-
-  const withManualOverrideLookupTimeout = async <T>(
-    task: Promise<T>,
-    timeoutMs: number
-  ) => {
-    let timeoutHandle: NodeJS.Timeout | null = null;
-
-    try {
-      return await Promise.race([
-        task,
-        new Promise<T>((_, reject) => {
-          timeoutHandle = setTimeout(() => {
-            reject(new ManualOverrideLookupTimeoutError(timeoutMs));
-          }, timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
-  };
 
   const seedProviderCredentialIfMissing = async ({
     businessId,
@@ -427,7 +393,8 @@ export const createCommerceAuthorityService = () => {
       }
       throw error;
     } finally {
-      console.info("[COMMERCE_CREDENTIAL_RESOLVE_TIMING]", {
+      console.info("BILLING_STAGE_OK", {
+        stage: "credential.resolve",
         businessId,
         provider: normalizedProvider,
         slowPath,
@@ -613,59 +580,44 @@ export const createCommerceAuthorityService = () => {
     scope,
     provider = null,
     advisoryLookup = false,
-    timeoutMs = MANUAL_OVERRIDE_LOOKUP_TIMEOUT_MS,
   }: {
     businessId: string;
     scope: string;
     provider?: string | null;
     advisoryLookup?: boolean;
-    timeoutMs?: number;
   }) => {
     const startedAt = Date.now();
     const normalizedScope = normalizeOverrideScope(scope);
     const normalizedProvider = normalizeOverrideProvider(provider);
-    const providerCandidates = Array.from(
-      new Set(["ALL", normalizedProvider])
-    );
     let lookupMs = 0;
-    let timedOut = false;
-
-    console.info("[MANUAL_OVERRIDE_GATE]", {
-      checkpoint: "OVERRIDE 1 before lookup",
+    console.info("BILLING_STAGE_OK", {
+      stage: "manual_override.lookup.start",
       businessId,
       scope: normalizedScope,
       provider: normalizedProvider,
       advisoryLookup,
-      timeoutMs,
-      providerCandidates,
     });
 
     try {
       const lookupStartedAt = Date.now();
-      const lookupTask = getActiveManualOverride({
+      const active = await getActiveManualOverride({
         businessId,
         scope: normalizedScope,
         provider: normalizedProvider,
       });
-      const active =
-        timeoutMs > 0
-          ? await withManualOverrideLookupTimeout(lookupTask, timeoutMs)
-          : await lookupTask;
       lookupMs = Date.now() - lookupStartedAt;
 
-      console.info("[MANUAL_OVERRIDE_GATE]", {
-        checkpoint: "OVERRIDE 2 after lookup",
+      console.info("BILLING_STAGE_OK", {
+        stage: "manual_override.lookup.done",
         businessId,
         scope: normalizedScope,
         provider: normalizedProvider,
         lookupMs,
         overrideId: active?.id || null,
-        overrideScope: active?.scope || null,
-        overrideProvider: active?.provider || null,
       });
 
-      console.info("[MANUAL_OVERRIDE_GATE]", {
-        checkpoint: "OVERRIDE 3 before validation",
+      console.info("BILLING_STAGE_OK", {
+        stage: "manual_override.validation.start",
         businessId,
         scope: normalizedScope,
         provider: normalizedProvider,
@@ -684,8 +636,8 @@ export const createCommerceAuthorityService = () => {
           normalizedProvider
         );
 
-      console.info("[MANUAL_OVERRIDE_GATE]", {
-        checkpoint: "OVERRIDE 4 after validation",
+      console.info("BILLING_STAGE_OK", {
+        stage: "manual_override.validation.done",
         businessId,
         scope: normalizedScope,
         provider: normalizedProvider,
@@ -701,32 +653,23 @@ export const createCommerceAuthorityService = () => {
         `manual_commerce_override_active:${active.scope}:${active.reason}`
       );
     } catch (error) {
-      timedOut = error instanceof ManualOverrideLookupTimeoutError;
-
-      if (timedOut) {
-        console.warn("[MANUAL_OVERRIDE_GATE]", {
-          checkpoint: "OVERRIDE_TIMEOUT",
-          businessId,
-          scope: normalizedScope,
-          provider: normalizedProvider,
-          advisoryLookup,
-          timeoutMs,
-        });
-
-        if (advisoryLookup) {
-          return null;
-        }
-      }
-
-      throw error;
-    } finally {
-      console.info("[MANUAL_OVERRIDE_GATE]", {
-        checkpoint: "OVERRIDE_TOTAL",
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "manual_override",
         businessId,
         scope: normalizedScope,
         provider: normalizedProvider,
         advisoryLookup,
-        timedOut,
+        reason: String((error as Error)?.message || "manual_override_lookup_failed"),
+      });
+
+      throw error;
+    } finally {
+      console.info("BILLING_STAGE_OK", {
+        stage: "manual_override.total",
+        businessId,
+        scope: normalizedScope,
+        provider: normalizedProvider,
+        advisoryLookup,
         lookupMs,
         totalMs: Date.now() - startedAt,
       });

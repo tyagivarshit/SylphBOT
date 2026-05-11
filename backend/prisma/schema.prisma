@@ -2317,6 +2317,7 @@ model PaymentIntentLedger {
   paymentIntentKey      String   @unique
   provider              CommerceProvider @default(INTERNAL)
   providerPaymentIntentId String?
+  checkoutSessionId     String?
   status                PaymentIntentStatus @default(CREATED)
   source                CommerceActor @default(SYSTEM)
   amountMinor           Int
@@ -2339,6 +2340,9 @@ model PaymentIntentLedger {
 
   @@index([businessId, status, createdAt])
   @@index([provider, providerPaymentIntentId])
+  @@index([businessId, provider, providerPaymentIntentId])
+  @@index([businessId, provider, checkoutSessionId])
+  @@index([businessId, provider, updatedAt])
   @@index([proposalId, status])
 }
 

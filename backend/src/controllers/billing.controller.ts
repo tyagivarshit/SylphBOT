@@ -18,14 +18,8 @@ import {
   getPublicPricingPlans,
   TRIAL_DAYS,
 } from "../config/pricing.config";
-import { getPlanFromPrice } from "../config/stripe.price.map";
 import { getUsageOverview } from "../services/usage.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
-import {
-  TimeoutExceededError,
-  withTimeout,
-  withTimeoutFallback,
-} from "../utils/boundedTimeout";
 import { stripe } from "../services/stripe.service";
 import { assertStripeConfigReady } from "../services/commerce/providers/stripeConfig.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
@@ -93,14 +87,7 @@ const EMPTY_BILLING_CONTEXT: BillingContext = {
 
 type BillingConfirmApiState = "SUCCESS" | "ALREADY_PROCESSED" | "PENDING" | "FAILED";
 
-const BILLING_CONFIRM_REQUEST_TIMEOUT_MS = 1_800;
-const BILLING_CONFIRM_LOOKUP_TIMEOUT_MS = 700;
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60_000;
-const BILLING_CONFIRM_STRIPE_TIMEOUT_MS = 1_100;
-const BILLING_CONFIRM_RECONCILE_TIMEOUT_MS = 1_300;
-const BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS = 650;
-const BILLING_CHECKOUT_PROPOSAL_TIMEOUT_MS = 2_200;
-const BILLING_CHECKOUT_PAYMENT_INTENT_TIMEOUT_MS = 5_500;
 const BILLING_PROJECTION_CACHE_TTL_MS = 4_000;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 
@@ -124,41 +111,6 @@ type PlanRow = {
   type: string;
   priceIdINR: string | null;
   priceIdUSD: string | null;
-};
-
-type StripeLiveSnapshot = {
-  subscription: {
-    stripeSubscriptionId?: string | null;
-    currency?: "INR" | "USD" | null;
-    billingCycle?: "monthly" | "yearly" | null;
-    currentPeriodEnd?: string | null;
-    trialUsed?: boolean;
-    status?: string;
-    plan?: {
-      name?: string | null;
-      type?: string | null;
-    } | null;
-  } | null;
-  billingStatus: "INACTIVE" | "ACTIVE" | "TRIAL";
-  planKey: string | null;
-  invoices: Array<{
-    id: string;
-    invoiceKey: string;
-    status: string;
-    currency: string;
-    amount: number;
-    subtotal: number;
-    taxAmount: number;
-    paidAmount: number;
-    created: number;
-    createdAt: Date;
-    dueAt: Date | null;
-    issuedAt: Date | null;
-    paidAt: Date | null;
-    externalInvoiceId: string | null;
-    hosted_invoice_url: string | null;
-    invoice_pdf: string | null;
-  }>;
 };
 
 const mapPublicPlans = (plans: PlanRow[] = []) => {
@@ -204,45 +156,6 @@ const toRecord = (value: unknown) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-
-const ACTIVE_STRIPE_SUBSCRIPTION_STATUSES = new Set([
-  "active",
-  "past_due",
-  "unpaid",
-  "incomplete",
-]);
-
-const toIsoOrNull = (value: number | null | undefined) =>
-  Number.isFinite(Number(value)) && Number(value) > 0
-    ? new Date(Number(value) * 1000).toISOString()
-    : null;
-
-const toDateOrNull = (value: number | null | undefined) =>
-  Number.isFinite(Number(value)) && Number(value) > 0
-    ? new Date(Number(value) * 1000)
-    : null;
-
-const normalizeStripeCurrency = (value: unknown) => {
-  const normalized = String(value || "").trim().toUpperCase();
-  return normalized === "USD" ? "USD" : normalized === "INR" ? "INR" : null;
-};
-
-const normalizeStripeBillingCycle = (value: unknown) => {
-  const normalized = String(value || "").trim().toLowerCase();
-  return normalized === "year" ? "yearly" : normalized === "month" ? "monthly" : null;
-};
-
-const resolveStripeBillingStatus = (status: string) => {
-  if (status === "trialing") {
-    return "TRIAL" as const;
-  }
-
-  if (ACTIVE_STRIPE_SUBSCRIPTION_STATUSES.has(status)) {
-    return "ACTIVE" as const;
-  }
-
-  return "INACTIVE" as const;
-};
 
 type UserContext = {
   userId: string;
@@ -362,56 +275,31 @@ async function getUserContext(req: Request): Promise<UserContext> {
     };
   }
 
-  const userLookup = await withTimeoutFallback({
-    label: "billing_user_context_lookup",
-    timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
-    task: prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        businessId: true,
-      },
-    }),
-    fallback: null as { id: string; email: string; businessId: string | null } | null,
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      businessId: true,
+    },
   });
-  const user = userLookup.value;
 
   if (!user) {
-    if (emailFromRequest) {
-      return {
-        userId,
-        businessId: businessIdFromRequest,
-        email: emailFromRequest,
-      };
-    }
-
     throw new Error("Unauthorized");
   }
 
-  const businessIdHint =
-    String(businessIdFromRequest || user.businessId || "").trim() || null;
-  const identityResult = businessIdHint
-  ? {
-      businessId: businessIdHint,
-      workspace: null,
-      source: "request_fallback",
-    }
-  : await withTimeoutFallback({
-      label: "billing_workspace_identity_lookup",
-      timeoutMs: BILLING_USER_CONTEXT_LOOKUP_TIMEOUT_MS,
-      task: resolveUserWorkspaceIdentity({
+  const businessIdHint = String(businessIdFromRequest || user.businessId || "").trim() || null;
+  const identity = businessIdHint
+    ? {
+        businessId: businessIdHint,
+        workspace: null,
+        source: "request",
+      }
+    : await resolveUserWorkspaceIdentity({
         userId,
         preferredBusinessId:
           req.user?.businessId || user.businessId || businessIdFromRequest || null,
-      }),
-      fallback: {
-        businessId: user.businessId || null,
-        workspace: null,
-        source: "none",
-      },
-    });
-  const identity = "value" in identityResult ? identityResult.value : identityResult;
+      });
   const resolvedEmail = emailFromRequest || String(user.email || "").trim().toLowerCase();
 
   return {
@@ -436,7 +324,14 @@ export class BillingController {
       where: {
         businessId: input.businessId,
         provider: "STRIPE",
-        providerPaymentIntentId: input.sessionId,
+        OR: [
+          {
+            providerPaymentIntentId: input.sessionId,
+          },
+          {
+            paymentIntentKey: input.sessionId,
+          },
+        ],
       },
       select: {
         id: true,
@@ -454,43 +349,9 @@ export class BillingController {
     });
 
     if (directMatch) {
-      return directMatch as CheckoutConfirmIntentRow;
+      return directMatch;
     }
-
-    const recentRows = await prisma.paymentIntentLedger.findMany({
-      where: {
-        businessId: input.businessId,
-        provider: "STRIPE",
-      },
-      orderBy: {
-        updatedAt: "desc",
-      },
-      take: 40,
-      select: {
-        id: true,
-        businessId: true,
-        paymentIntentKey: true,
-        providerPaymentIntentId: true,
-        status: true,
-        metadata: true,
-        proposal: {
-          select: {
-            proposalKey: true,
-          },
-        },
-      },
-    });
-
-    const resolved = recentRows.find((row) => {
-      const metadata = toRecord(row.metadata);
-      const providerMetadata = toRecord(metadata.providerMetadata);
-      return (
-        String(metadata.stripeSessionId || "").trim() === input.sessionId ||
-        String(providerMetadata.stripeSessionId || "").trim() === input.sessionId
-      );
-    });
-
-    return resolved ? (resolved as CheckoutConfirmIntentRow) : null;
+    return null;
   }
 
   private static async updateCheckoutConfirmMetadata(input: {
@@ -553,7 +414,8 @@ export class BillingController {
         reason: "stripe_config_invalid",
       });
 
-      console.error("BILLING_CONFIRM_FAILED", {
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "checkout_confirm.stripe_config",
         businessId: input.businessId,
         sessionId: input.sessionId,
         paymentIntentKey: input.paymentIntent.paymentIntentKey,
@@ -562,18 +424,17 @@ export class BillingController {
       return;
     }
 
-    const stripeSessionResult = await withTimeoutFallback({
-      label: "billing_confirm_stripe_session",
-      timeoutMs: BILLING_CONFIRM_STRIPE_TIMEOUT_MS,
-      task: stripe.checkout.sessions.retrieve(input.sessionId),
-      fallback: null as Awaited<ReturnType<typeof stripe.checkout.sessions.retrieve>> | null,
-    });
-    const session = stripeSessionResult.value;
+    let session: Awaited<ReturnType<typeof stripe.checkout.sessions.retrieve>> | null = null;
+    try {
+      session = await stripe.checkout.sessions.retrieve(input.sessionId);
+    } catch {
+      session = null;
+    }
     const paymentStatus = String(session?.payment_status || "")
       .trim()
       .toLowerCase();
 
-    if (stripeSessionResult.timedOut || !session) {
+    if (!session) {
       await BillingController.updateCheckoutConfirmMetadata({
         paymentIntent: input.paymentIntent,
         sessionId: input.sessionId,
@@ -581,11 +442,11 @@ export class BillingController {
         reason: "stripe_session_pending",
       });
 
-      console.info("BILLING_CONFIRM_PENDING", {
+      console.info("BILLING_STAGE_OK", {
+        stage: "checkout_confirm.pending",
         businessId: input.businessId,
         sessionId: input.sessionId,
         paymentIntentKey: input.paymentIntent.paymentIntentKey,
-        timedOut: stripeSessionResult.timedOut,
         reason: "stripe_session_pending",
       });
       return;
@@ -599,7 +460,8 @@ export class BillingController {
         reason: `payment_status_${paymentStatus || "unknown"}`,
       });
 
-      console.info("BILLING_CONFIRM_PENDING", {
+      console.info("BILLING_STAGE_OK", {
+        stage: "checkout_confirm.pending",
         businessId: input.businessId,
         sessionId: input.sessionId,
         paymentIntentKey: input.paymentIntent.paymentIntentKey,
@@ -608,10 +470,8 @@ export class BillingController {
       return;
     }
 
-    const reconcileResult = await withTimeoutFallback({
-      label: "billing_confirm_reconcile",
-      timeoutMs: BILLING_CONFIRM_RECONCILE_TIMEOUT_MS,
-      task: commerceProjectionService.reconcileProviderWebhook({
+    try {
+      const reconcileResult = await commerceProjectionService.reconcileProviderWebhook({
         provider: "STRIPE",
         headers: {
           "x-commerce-manual-reconcile": "true",
@@ -639,29 +499,31 @@ export class BillingController {
             },
           },
         },
-      }),
-      fallback: null,
-    });
-
-    if (reconcileResult.timedOut || reconcileResult.failed) {
+      });
+      if ((reconcileResult as any)?.idempotency === "failed") {
+        throw new Error("reconcile_failed");
+      }
+    } catch (error) {
       await BillingController.updateCheckoutConfirmMetadata({
         paymentIntent: input.paymentIntent,
         sessionId: input.sessionId,
         state: "PENDING",
-        reason: reconcileResult.timedOut
-          ? "reconcile_timeout"
-          : "reconcile_retry_required",
+        reason: "reconcile_retry_required",
       });
 
-      console.info("BILLING_CONFIRM_PENDING", {
+      console.info("BILLING_STAGE_OK", {
+        stage: "checkout_confirm.pending",
         businessId: input.businessId,
         sessionId: input.sessionId,
         paymentIntentKey: input.paymentIntent.paymentIntentKey,
-        timedOut: reconcileResult.timedOut,
-        failed: reconcileResult.failed,
-        reason: reconcileResult.timedOut
-          ? "reconcile_timeout"
-          : "reconcile_retry_required",
+        reason: "reconcile_retry_required",
+      });
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "checkout_confirm.reconcile",
+        businessId: input.businessId,
+        sessionId: input.sessionId,
+        paymentIntentKey: input.paymentIntent.paymentIntentKey,
+        reason: String((error as Error)?.message || "reconcile_retry_required"),
       });
       return;
     }
@@ -673,7 +535,13 @@ export class BillingController {
       reason: "projection_reconciled",
     });
 
-    console.info("BILLING_CONFIRM_SUCCESS", {
+    console.info("BILLING_STAGE_OK", {
+      stage: "checkout_confirm.success",
+      businessId: input.businessId,
+      sessionId: input.sessionId,
+      paymentIntentKey: input.paymentIntent.paymentIntentKey,
+    });
+    console.info("RECONCILE_OK", {
       businessId: input.businessId,
       sessionId: input.sessionId,
       paymentIntentKey: input.paymentIntent.paymentIntentKey,
@@ -891,173 +759,6 @@ export class BillingController {
     return customers[0]?.id || null;
   }
 
-  private static async buildStripeLiveSnapshot(input: {
-    businessId: string;
-    fallbackSubscription: any;
-  }): Promise<StripeLiveSnapshot | null> {
-    const fallbackSubscription = input.fallbackSubscription || null;
-    const knownStripeSubscriptionId =
-      String(fallbackSubscription?.stripeSubscriptionId || "").trim() || null;
-
-    const latestStripeSubscription =
-      knownStripeSubscriptionId
-        ? null
-        : await prisma.subscriptionLedger.findFirst({
-            where: {
-              businessId: input.businessId,
-              provider: "STRIPE",
-              providerSubscriptionId: {
-                not: null,
-              },
-            },
-            orderBy: {
-              updatedAt: "desc",
-            },
-            select: {
-              providerSubscriptionId: true,
-            },
-          });
-
-    const stripeSubscriptionId =
-      knownStripeSubscriptionId ||
-      String(latestStripeSubscription?.providerSubscriptionId || "").trim() ||
-      null;
-
-    if (!stripeSubscriptionId) {
-      return null;
-    }
-
-    assertStripeConfigReady();
-
-    const stripeSubscription = await stripe.subscriptions
-      .retrieve(stripeSubscriptionId)
-      .catch(() => null);
-
-    if (!stripeSubscription) {
-      return null;
-    }
-
-    const subscriptionRaw = toRecord(stripeSubscription as unknown as Record<string, unknown>);
-    const metadata = toRecord(subscriptionRaw.metadata);
-    const items = Array.isArray(toRecord(subscriptionRaw.items).data)
-      ? (toRecord(subscriptionRaw.items).data as Array<Record<string, unknown>>)
-      : [];
-    const firstItem = toRecord(items[0]);
-    const firstPrice = toRecord(firstItem.price);
-    const firstRecurring = toRecord(firstPrice.recurring);
-    const priceId = String(firstPrice.id || "").trim() || null;
-
-    const planFromPrice = getPlanFromPrice(priceId);
-    const planCode =
-      String(metadata.planCode || fallbackSubscription?.plan?.type || planFromPrice || "")
-        .trim()
-        .toUpperCase() || null;
-    const billingCycle =
-      normalizeStripeBillingCycle(firstRecurring.interval) ||
-      String(fallbackSubscription?.billingCycle || "").trim().toLowerCase() ||
-      null;
-    const currency =
-      normalizeStripeCurrency(subscriptionRaw.currency) ||
-      normalizeStripeCurrency(fallbackSubscription?.currency) ||
-      null;
-    const stripeStatus = String(subscriptionRaw.status || "").trim().toLowerCase();
-    const billingStatus = resolveStripeBillingStatus(stripeStatus);
-
-    const customerId =
-      typeof stripeSubscription.customer === "string"
-        ? stripeSubscription.customer
-        : null;
-    const stripeInvoices = await stripe.invoices
-      .list({
-        customer: customerId || undefined,
-        subscription: stripeSubscriptionId,
-        limit: 20,
-      })
-      .catch(() => ({ data: [] as Array<Record<string, unknown>> }));
-    const invoices = (Array.isArray(stripeInvoices.data) ? stripeInvoices.data : []).map(
-      (invoice) => {
-        const invoiceRaw = toRecord(invoice as unknown as Record<string, unknown>);
-        const totalDetails = toRecord(invoiceRaw.total_details);
-        const statusTransitions = toRecord(invoiceRaw.status_transitions);
-        const taxAmount = Math.max(
-          0,
-          Math.floor(Number(totalDetails.amount_tax || 0))
-        );
-        const subtotal = Math.max(
-          0,
-          Math.floor(Number(invoiceRaw.subtotal || 0))
-        );
-        const amountPaid = Math.max(
-          0,
-          Math.floor(Number(invoiceRaw.amount_paid || invoiceRaw.amount_due || 0))
-        );
-        const amountTotal = Math.max(
-          amountPaid,
-          Math.floor(Number(invoiceRaw.total || amountPaid || 0))
-        );
-        const created = Math.max(
-          0,
-          Math.floor(Number(invoiceRaw.created || Date.now() / 1000))
-        );
-
-        return {
-          id: String(invoiceRaw.id || "").trim() || `stripe_invoice_${created}`,
-          invoiceKey:
-            String(invoiceRaw.id || "").trim() || `stripe_invoice_${created}`,
-          status: String(invoiceRaw.status || "").trim().toLowerCase() || "open",
-          currency:
-            normalizeStripeCurrency(invoiceRaw.currency) ||
-            currency ||
-            "INR",
-          amount: amountTotal,
-          subtotal,
-          taxAmount,
-          paidAmount: amountPaid,
-          created,
-          createdAt: new Date(created * 1000),
-          dueAt: toDateOrNull(Number(invoiceRaw.due_date || 0)),
-          issuedAt: toDateOrNull(
-            Number(statusTransitions.finalized_at || invoiceRaw.created || 0)
-          ),
-          paidAt: toDateOrNull(Number(statusTransitions.paid_at || 0)),
-          externalInvoiceId:
-            String(invoiceRaw.number || invoiceRaw.id || "").trim() || null,
-          hosted_invoice_url:
-            String(invoiceRaw.hosted_invoice_url || "").trim() || null,
-          invoice_pdf: String(invoiceRaw.invoice_pdf || "").trim() || null,
-        };
-      }
-    );
-
-    return {
-      subscription: {
-        ...fallbackSubscription,
-        stripeSubscriptionId,
-        currency: currency || fallbackSubscription?.currency || null,
-        billingCycle:
-          billingCycle === "yearly" || billingCycle === "monthly"
-            ? billingCycle
-            : fallbackSubscription?.billingCycle || null,
-        currentPeriodEnd:
-          toIsoOrNull(Number(subscriptionRaw.current_period_end || 0)) ||
-          fallbackSubscription?.currentPeriodEnd ||
-          null,
-        trialUsed:
-          billingStatus === "TRIAL"
-            ? false
-            : Boolean(fallbackSubscription?.trialUsed ?? true),
-        status: stripeStatus || fallbackSubscription?.status || "inactive",
-        plan: {
-          name: planCode || fallbackSubscription?.plan?.name || null,
-          type: planCode || fallbackSubscription?.plan?.type || null,
-        },
-      },
-      billingStatus,
-      planKey: planCode,
-      invoices,
-    };
-  }
-
   private static async buildBillingResponse(
     businessId: string | null,
     req: Request
@@ -1078,125 +779,44 @@ export class BillingController {
       };
     }
 
-    const [billingContextResult, usageResult, invoicesResult] = await Promise.all([
-      withTimeoutFallback({
-        label: "billing_context_projection",
-        timeoutMs: 1_350,
-        task: loadBillingContext(businessId),
-        fallback: {
-          subscription: null,
-          context: EMPTY_BILLING_CONTEXT,
+    const [billingContext, usage, invoicesRaw] = await Promise.all([
+      loadBillingContext(businessId),
+      getUsageOverview(businessId),
+      prisma.invoiceLedger.findMany({
+        where: {
+          businessId,
         },
-      }),
-      withTimeoutFallback({
-        label: "billing_usage_projection",
-        timeoutMs: 1_350,
-        task: getUsageOverview(businessId),
-        fallback: null,
-      }),
-      withTimeoutFallback({
-        label: "billing_invoice_projection",
-        timeoutMs: 1_350,
-        task: prisma.invoiceLedger.findMany({
-          where: {
-            businessId,
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
-          take: 20,
-          select: {
-            invoiceKey: true,
-            status: true,
-            currency: true,
-            subtotalMinor: true,
-            taxMinor: true,
-            totalMinor: true,
-            paidMinor: true,
-            dueAt: true,
-            issuedAt: true,
-            paidAt: true,
-            externalInvoiceId: true,
-            createdAt: true,
-            metadata: true,
-          },
-        }),
-        fallback: [],
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 20,
+        select: {
+          invoiceKey: true,
+          status: true,
+          currency: true,
+          subtotalMinor: true,
+          taxMinor: true,
+          totalMinor: true,
+          paidMinor: true,
+          dueAt: true,
+          issuedAt: true,
+          paidAt: true,
+          externalInvoiceId: true,
+          createdAt: true,
+          metadata: true,
+        },
       }),
     ]);
 
-    const billingContext = billingContextResult.value;
-    const usage = usageResult.value;
-    const invoicesRaw = Array.isArray(invoicesResult.value)
-      ? invoicesResult.value
-      : [];
     const invoices = invoicesRaw.map(mapInvoiceForClient);
-    const shouldAttemptStripeLive = Boolean(
-      String((billingContext.subscription as any)?.stripeSubscriptionId || "").trim()
-    );
-    const stripeLiveResult = shouldAttemptStripeLive
-      ? await withTimeoutFallback({
-          label: "billing_stripe_live_projection",
-          timeoutMs: 450,
-          task: BillingController.buildStripeLiveSnapshot({
-            businessId,
-            fallbackSubscription: billingContext.subscription,
-          }),
-          fallback: null as StripeLiveSnapshot | null,
-        })
-      : {
-          value: null as StripeLiveSnapshot | null,
-          timedOut: false,
-          failed: false,
-        };
-    const stripeLive = stripeLiveResult.value;
-    const hasStripeLiveInvoices = Boolean(stripeLive?.invoices?.length);
-    const effectiveSubscription =
-      stripeLive?.subscription || billingContext.subscription;
-    const effectiveBillingContext = {
-      ...billingContext.context,
-      ...(stripeLive?.planKey
-        ? {
-            planKey: stripeLive.planKey,
-            status: stripeLive.billingStatus,
-            isLimited: stripeLive.billingStatus === "INACTIVE",
-            upgradeRequired: stripeLive.billingStatus === "INACTIVE",
-          }
-        : {}),
-    };
-    const effectiveInvoices = hasStripeLiveInvoices ? stripeLive.invoices : invoices;
     const effectiveCurrency =
-      stripeLive?.subscription?.currency ||
-      billingContext.subscription?.currency ||
-      resolveBillingCurrency(req);
-    const degraded =
-      billingContextResult.timedOut ||
-      billingContextResult.failed ||
-      usageResult.timedOut ||
-      usageResult.failed ||
-      invoicesResult.timedOut ||
-      invoicesResult.failed ||
-      stripeLiveResult.timedOut ||
-      stripeLiveResult.failed;
-    const reasons = [
-      billingContextResult.timedOut ? "context_timeout" : null,
-      billingContextResult.failed ? "context_failed" : null,
-      usageResult.timedOut ? "usage_timeout" : null,
-      usageResult.failed ? "usage_failed" : null,
-      invoicesResult.timedOut ? "invoices_timeout" : null,
-      invoicesResult.failed ? "invoices_failed" : null,
-      stripeLiveResult.timedOut ? "stripe_live_timeout" : null,
-      stripeLiveResult.failed ? "stripe_live_failed" : null,
-    ].filter(Boolean);
+      billingContext.subscription?.currency || resolveBillingCurrency(req);
 
-    console.info("BILLING_PROJECTION_READY", {
+    console.info("BILLING_STAGE_OK", {
+      stage: "billing_projection.ready",
       businessId,
-      contextTimedOut: billingContextResult.timedOut,
-      usageTimedOut: usageResult.timedOut,
-      invoicesTimedOut: invoicesResult.timedOut,
-      stripeLiveTimedOut: stripeLiveResult.timedOut,
-      stripeLiveApplied: Boolean(stripeLive?.subscription || hasStripeLiveInvoices),
-      usedFallback: degraded,
+      invoiceCount: invoices.length,
+      hasSubscription: Boolean(billingContext.subscription),
     });
 
     const durationMs = Date.now() - startedAt;
@@ -1205,9 +825,7 @@ export class BillingController {
       value: durationMs,
       businessId,
       route: "billing_projection",
-      metadata: {
-        degraded,
-      },
+      metadata: null,
     });
     if (durationMs >= 900) {
       emitPerformanceMetric({
@@ -1220,8 +838,8 @@ export class BillingController {
 
     return {
       success: true,
-      subscription: effectiveSubscription,
-      billing: effectiveBillingContext,
+      subscription: billingContext.subscription,
+      billing: billingContext.context,
       usage: usage
         ? {
             aiCallsUsed: usage.usage.ai.monthlyUsed,
@@ -1231,10 +849,10 @@ export class BillingController {
           }
         : EMPTY_USAGE_SUMMARY,
       currency: effectiveCurrency,
-      invoices: effectiveInvoices,
+      invoices,
       meta: {
-        degraded,
-        reason: reasons.length ? reasons.join(",") : null,
+        degraded: false,
+        reason: null,
       },
     };
   }
@@ -1268,11 +886,12 @@ export class BillingController {
       );
     const isResponseCommitted = () =>
       res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite();
-    const logCheckoutStart = (
-      label: string,
+    const logStageOk = (
+      stage: string,
       details?: Record<string, unknown>
     ) => {
-      console.info(label, {
+      console.info("BILLING_STAGE_OK", {
+        stage,
         requestId: checkoutRequestId,
         route: req.originalUrl,
         method: req.method,
@@ -1280,7 +899,10 @@ export class BillingController {
         ...(details || {}),
       });
     };
-    logCheckoutStart("[START 1] checkout request received", {
+    console.info("BILLING_START", {
+      requestId: checkoutRequestId,
+      route: req.originalUrl,
+      method: req.method,
       redirectOnSuccess,
     });
     if (redirectOnSuccess) {
@@ -1315,16 +937,20 @@ export class BillingController {
       reason: string;
       code?: string;
     }) => {
-      logCheckoutStart("[START 8] response return", {
-        success: false,
-        status: input.status,
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "checkout.response",
         reason: input.reason,
+        status: input.status,
         code: input.code || null,
+        requestId: checkoutRequestId,
+        route: req.originalUrl,
+        method: req.method,
+        elapsedMs: Date.now() - checkoutStartedAt,
         redirectOnSuccess,
       });
 
       if (isResponseCommitted()) {
-        logCheckoutStart("[START 8] response skipped", {
+        logStageOk("checkout.response.skipped", {
           success: false,
           status: input.status,
           reason: input.reason,
@@ -1423,7 +1049,7 @@ export class BillingController {
       }
 
       const { businessId, email } = await getUserContext(req);
-      logCheckoutStart("[START 2] auth resolved", {
+      logStageOk("auth.resolved", {
         userId: String(req.user?.id || "").trim() || null,
         businessId: businessId || null,
       });
@@ -1436,7 +1062,7 @@ export class BillingController {
         });
       }
 
-      logCheckoutStart("[START 3] checkout context validated", {
+      logStageOk("checkout.context.validated", {
         businessId,
         plan: normalizedPlan,
         billingCycle: normalizedBilling,
@@ -1465,7 +1091,7 @@ export class BillingController {
         Number.isFinite(explicitUnitAmountMinor) && explicitUnitAmountMinor > 0
           ? Math.floor(explicitUnitAmountMinor)
           : Math.round(Number(unitPrice || 0) * 100);
-      logCheckoutStart("[START 4] pricing resolved", {
+      logStageOk("pricing.resolved", {
         businessId,
         plan: normalizedPlan,
         billingCycle: normalizedBilling,
@@ -1506,12 +1132,7 @@ export class BillingController {
         .digest("hex")
         .slice(0, 24);
 
-      let proposal: Awaited<ReturnType<typeof proposalEngineService.createProposal>>;
-      try {
-        proposal = await withTimeout({
-          label: "billing_checkout_proposal",
-          timeoutMs: BILLING_CHECKOUT_PROPOSAL_TIMEOUT_MS,
-          task: proposalEngineService.createProposal({
+      const proposal = await proposalEngineService.createProposal({
             businessId,
             planCode: normalizedPlan,
             billingCycle: normalizedBilling,
@@ -1537,19 +1158,7 @@ export class BillingController {
               seatBased: quantity > 1,
             },
             idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
-          }),
-        });
-      } catch (error) {
-        if (error instanceof TimeoutExceededError) {
-          return sendCheckoutError({
-            status: 504,
-            code: "BILLING_PROPOSAL_TIMEOUT",
-            message: "Checkout is taking longer than expected. Please retry.",
-            reason: "proposal_timeout",
           });
-        }
-        throw error;
-      }
 
       const readyProposal =
         proposal.status === "APPROVED" || proposal.status === "SENT"
@@ -1558,18 +1167,13 @@ export class BillingController {
               businessId,
               proposalKey: proposal.proposalKey,
             });
-      logCheckoutStart("[START 5] proposal created", {
+      logStageOk("proposal.created", {
         businessId,
         proposalKey: readyProposal.proposalKey,
         proposalStatus: readyProposal.status,
       });
 
-      let paymentIntent: Awaited<ReturnType<typeof paymentIntentService.createCheckout>>;
-      try {
-        paymentIntent = await withTimeout({
-          label: "billing_checkout_payment_intent",
-          timeoutMs: BILLING_CHECKOUT_PAYMENT_INTENT_TIMEOUT_MS,
-          task: paymentIntentService.createCheckout({
+      const paymentIntent = await paymentIntentService.createCheckout({
             businessId,
             proposalKey: readyProposal.proposalKey,
             provider: "STRIPE",
@@ -1600,20 +1204,8 @@ export class BillingController {
               seatBased: quantity > 1,
             },
             idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
-          }),
-        });
-      } catch (error) {
-        if (error instanceof TimeoutExceededError) {
-          return sendCheckoutError({
-            status: 504,
-            code: "BILLING_PROVIDER_TIMEOUT",
-            message: "Stripe took too long to respond. Please retry in a few seconds.",
-            reason: "provider_timeout",
           });
-        }
-        throw error;
-      }
-      logCheckoutStart("[START 6] payment intent created", {
+      logStageOk("payment_intent.created", {
         businessId,
         proposalKey: readyProposal.proposalKey,
         paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -1622,7 +1214,7 @@ export class BillingController {
       });
 
       const checkoutUrl = String(paymentIntent.checkoutUrl || "").trim();
-      logCheckoutStart("[START 7] checkout url evaluated", {
+      logStageOk("checkout_url.evaluated", {
         businessId,
         proposalKey: readyProposal.proposalKey,
         paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -1638,7 +1230,7 @@ export class BillingController {
       }
 
       if (isResponseCommitted()) {
-        logCheckoutStart("[START 8] response skipped", {
+        logStageOk("checkout.response.skipped", {
           success: true,
           businessId,
           proposalKey: readyProposal.proposalKey,
@@ -1650,7 +1242,7 @@ export class BillingController {
       }
 
       if (redirectOnSuccess) {
-        logCheckoutStart("[START 8] response return", {
+        logStageOk("checkout.response.redirect", {
           success: true,
           status: 303,
           businessId,
@@ -1661,7 +1253,7 @@ export class BillingController {
         return res.redirect(303, checkoutUrl);
       }
 
-      logCheckoutStart("[START 8] response return", {
+      logStageOk("checkout.response.json", {
         success: true,
         status: 200,
         businessId,
@@ -1725,7 +1317,7 @@ export class BillingController {
         });
       }
 
-      if (error.message?.includes("provider_credential_unavailable")) {
+      if (error.message?.includes("provider_credential_")) {
         return sendCheckoutError({
           status: 503,
           code: "BILLING_PROVIDER_UNAVAILABLE",
@@ -1743,7 +1335,10 @@ export class BillingController {
         });
       }
 
-      console.error("Billing checkout error:", error);
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "checkout.exception",
+        reason: String(error?.message || "checkout_failed"),
+      });
 
       return sendCheckoutError({
         status: 500,
@@ -1755,33 +1350,20 @@ export class BillingController {
 
   static async getPlans(req: Request, res: Response) {
     try {
-      const projection = await withTimeoutFallback({
-        label: "billing_plans_projection",
-        timeoutMs: 1800,
-        task: prisma.plan.findMany({
-          where: {
-            type: {
-              in: ["BASIC", "PRO", "ELITE"],
-            },
+      const plans = await prisma.plan.findMany({
+        where: {
+          type: {
+            in: ["BASIC", "PRO", "ELITE"],
           },
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            priceIdINR: true,
-            priceIdUSD: true,
-          },
-        }),
-        fallback: [] as Array<{
-          id: string;
-          name: string;
-          type: string;
-          priceIdINR: string | null;
-          priceIdUSD: string | null;
-        }>,
+        },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          priceIdINR: true,
+          priceIdUSD: true,
+        },
       });
-      const plans = Array.isArray(projection.value) ? projection.value : [];
-      const degraded = projection.timedOut || projection.failed;
 
       return res.json(
         buildPlansPayload({
@@ -1792,18 +1374,19 @@ export class BillingController {
             priceIdINR: plan.priceIdINR,
             priceIdUSD: plan.priceIdUSD,
           })),
-          degraded,
-          reason: degraded ? "plans_projection_degraded" : null,
+          degraded: false,
+          reason: null,
         })
       );
     } catch (error) {
-      console.error("Get plans error:", error);
-      return res.json(
-        buildPlansPayload({
-          degraded: true,
-          reason: "plans_fallback",
-        })
-      );
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "plans.fetch",
+        reason: String((error as Error)?.message || "plans_unavailable"),
+      });
+      return res.status(503).json({
+        success: false,
+        message: "Billing plans are temporarily unavailable.",
+      });
     }
   }
 
@@ -1811,15 +1394,7 @@ export class BillingController {
     try {
       const { businessId } = await getUserContext(req);
       if (businessId) {
-        void withTimeoutFallback({
-          label: "billing_portal_reconcile",
-          timeoutMs: 900,
-          task: BillingController.reconcileRecentPortalState(businessId),
-          fallback: {
-            attempted: false,
-            reason: "reconcile_skipped",
-          },
-        }).catch(() => undefined);
+        void BillingController.reconcileRecentPortalState(businessId).catch(() => undefined);
       }
       res.setHeader("Cache-Control", "no-store");
       const currencyHint = resolveBillingCurrency(req);
@@ -1855,27 +1430,10 @@ export class BillingController {
         });
       }
 
-      const computeProjection = (async () => {
-        const projection = await withTimeoutFallback({
-          label: "billing_projection_api_guard",
-          timeoutMs: BILLING_CONFIRM_REQUEST_TIMEOUT_MS,
-          task: BillingController.buildBillingResponse(businessId, req),
-          fallback: {
-            success: true,
-            subscription: null,
-            billing: EMPTY_BILLING_CONTEXT,
-            usage: EMPTY_USAGE_SUMMARY,
-            currency: currencyHint,
-            invoices: [],
-            meta: {
-              degraded: true,
-              reason: "billing_projection_timeout_guard",
-            },
-          },
-        });
-
-        return projection.value as Record<string, unknown>;
-      })();
+      const computeProjection = BillingController.buildBillingResponse(
+        businessId,
+        req
+      ) as Promise<Record<string, unknown>>;
 
       if (cacheKey) {
         billingProjectionCache.set(cacheKey, {
@@ -1907,19 +1465,14 @@ export class BillingController {
         });
       }
 
-      console.error("Billing fetch error:", error);
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "billing.fetch",
+        reason: String(error?.message || "billing_unavailable"),
+      });
       res.setHeader("Cache-Control", "no-store");
-      return res.json({
-        success: true,
-        subscription: null,
-        billing: EMPTY_BILLING_CONTEXT,
-        usage: EMPTY_USAGE_SUMMARY,
-        currency: resolveBillingCurrency(req),
-        invoices: [],
-        meta: {
-          degraded: true,
-          reason: "billing_projection_failed",
-        },
+      return res.status(503).json({
+        success: false,
+        message: "Billing projection is temporarily unavailable.",
       });
     }
   }
@@ -1949,13 +1502,15 @@ export class BillingController {
       });
     };
 
-    console.info("BILLING_CONFIRM_START", {
+    console.info("BILLING_START", {
+      stage: "checkout_confirm",
       businessId,
       sessionId: sessionId || null,
     });
 
     if (!sessionId) {
-      console.error("BILLING_CONFIRM_FAILED", {
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "checkout_confirm.validate",
         businessId,
         sessionId: null,
         reason: "session_id_missing",
@@ -1974,7 +1529,8 @@ export class BillingController {
     }
 
     if (!businessId) {
-      console.error("BILLING_CONFIRM_FAILED", {
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "checkout_confirm.validate",
         businessId: null,
         sessionId,
         reason: "business_context_missing",
@@ -1993,39 +1549,14 @@ export class BillingController {
     }
 
     try {
-      const lookup = await withTimeoutFallback({
-        label: "billing_confirm_intent_lookup",
-        timeoutMs: BILLING_CONFIRM_LOOKUP_TIMEOUT_MS,
-        task: BillingController.findCheckoutIntentForSession({
-          businessId,
-          sessionId,
-        }),
-        fallback: null as CheckoutConfirmIntentRow | null,
+      const paymentIntent = await BillingController.findCheckoutIntentForSession({
+        businessId,
+        sessionId,
       });
-      const paymentIntent = lookup.value;
 
       if (!paymentIntent) {
-        if (lookup.timedOut) {
-          console.info("BILLING_CONFIRM_PENDING", {
-            businessId,
-            sessionId,
-            reason: "intent_lookup_timeout",
-          });
-
-          return respond(
-            BillingController.buildConfirmPayload({
-              state: "PENDING",
-              sessionId,
-              message: "Payment is being verified. Please wait a moment.",
-              shouldPoll: true,
-              retryAfterMs: 1_000,
-              reason: "intent_lookup_timeout",
-              code: "INTENT_LOOKUP_TIMEOUT",
-            })
-          );
-        }
-
-        console.error("BILLING_CONFIRM_FAILED", {
+        console.error("BILLING_STAGE_FAIL", {
+          stage: "checkout_confirm.lookup",
           businessId,
           sessionId,
           reason: "checkout_session_not_found",
@@ -2053,7 +1584,8 @@ export class BillingController {
         confirmState === "ALREADY_PROCESSED";
 
       if (alreadyProcessed) {
-        console.info("BILLING_CONFIRM_ALREADY_PROCESSED", {
+        console.info("BILLING_STAGE_OK", {
+          stage: "checkout_confirm.already_processed",
           businessId,
           sessionId,
           paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -2075,7 +1607,8 @@ export class BillingController {
       }
 
       if (TERMINAL_PAYMENT_INTENT_STATUSES.has(status)) {
-        console.error("BILLING_CONFIRM_FAILED", {
+        console.error("BILLING_STAGE_FAIL", {
+          stage: "checkout_confirm.terminal",
           businessId,
           sessionId,
           paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -2096,7 +1629,8 @@ export class BillingController {
       }
 
       if (isCheckoutConfirmStillProcessing(paymentIntent.metadata)) {
-        console.info("BILLING_CONFIRM_PENDING", {
+        console.info("BILLING_STAGE_OK", {
+          stage: "checkout_confirm.pending",
           businessId,
           sessionId,
           paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -2141,7 +1675,8 @@ export class BillingController {
         sessionId,
         paymentIntent,
       }).catch((error) => {
-        console.error("BILLING_CONFIRM_FAILED", {
+        console.error("BILLING_STAGE_FAIL", {
+          stage: "checkout_confirm.async",
           businessId,
           sessionId,
           paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -2149,7 +1684,8 @@ export class BillingController {
         });
       });
 
-      console.info("BILLING_CONFIRM_PENDING", {
+      console.info("BILLING_STAGE_OK", {
+        stage: "checkout_confirm.pending",
         businessId,
         sessionId,
         paymentIntentKey: paymentIntent.paymentIntentKey,
@@ -2168,7 +1704,8 @@ export class BillingController {
         })
       );
     } catch (error: any) {
-      console.error("BILLING_CONFIRM_FAILED", {
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "checkout_confirm.exception",
         businessId,
         sessionId,
         reason: String(error?.message || "confirm_failed"),
@@ -2327,7 +1864,10 @@ export class BillingController {
         url: session.url,
       });
     } catch (error: any) {
-      console.error("Create billing portal error:", error);
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "portal.create",
+        reason: String((error as Error)?.message || "portal_create_failed"),
+      });
 
       if (error?.message?.includes("stripe_config_invalid")) {
         return res.status(503).json({
@@ -2387,7 +1927,10 @@ export class BillingController {
         message: "Subscription cancellation submitted",
       });
     } catch (error) {
-      console.error("Cancel error:", error);
+      console.error("BILLING_STAGE_FAIL", {
+        stage: "subscription.cancel",
+        reason: String((error as Error)?.message || "subscription_cancel_failed"),
+      });
 
       return res.status(500).json({
         success: false,

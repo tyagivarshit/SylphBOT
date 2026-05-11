@@ -471,7 +471,7 @@ export const createCommerceProjectionService = () => {
       event.type === "checkout.completed"
     ) {
       try {
-        await settleSuccessfulCheckout({
+        const settlement = await settleSuccessfulCheckout({
           paymentIntentId: paymentIntent?.id || null,
           providerPaymentIntentId: event.providerPaymentIntentId || null,
           paymentIntentKey:
@@ -480,6 +480,20 @@ export const createCommerceProjectionService = () => {
           occurredAt: event.occurredAt,
           source: "provider_webhook",
         });
+        if (
+          settlement.settled &&
+          "subscriptionId" in settlement &&
+          "invoiceId" in settlement &&
+          "planCode" in settlement
+        ) {
+          console.info("SUBSCRIPTION_ACTIVATED", {
+            businessId,
+            paymentIntentId: settlement.paymentIntentId,
+            subscriptionId: settlement.subscriptionId,
+            invoiceId: settlement.invoiceId,
+            planCode: settlement.planCode,
+          });
+        }
       } catch (error) {
         await commerceAuthorityService
           .markExternalIdempotencyFailed({
@@ -1072,6 +1086,20 @@ export const createCommerceProjectionService = () => {
         unresolved,
         overrideLocked: Boolean((reconciled as any).overrideLocked),
       },
+    });
+
+    console.info("WEBHOOK_OK", {
+      businessId,
+      provider: parsed.provider,
+      providerEventId: parsed.providerEventId,
+      providerType: parsed.type,
+    });
+    console.info("RECONCILE_OK", {
+      businessId,
+      provider: parsed.provider,
+      providerEventId: parsed.providerEventId,
+      providerType: parsed.type,
+      paymentIntentId: paymentIntent?.id || null,
     });
 
     return {

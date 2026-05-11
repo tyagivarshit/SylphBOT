@@ -279,7 +279,9 @@ function BillingPageContent() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingContext, setBillingContext] = useState<BillingContext | null>(null);
   const [plansResponse, setPlansResponse] = useState<PlansResponse>({
-    ...FALLBACK_PLANS_RESPONSE,
+    plans: [],
+    addons: [],
+    trialDays: 7,
   });
   const [pageLoading, setPageLoading] = useState(true);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
@@ -311,16 +313,10 @@ function BillingPageContent() {
       ? plansData.addons
       : [];
 
-    if (!normalizedPlans.length) {
-      return;
-    }
-
     setPlansResponse({
       plans: normalizedPlans,
-      addons: normalizedAddons.length
-        ? normalizedAddons
-        : FALLBACK_PLANS_RESPONSE.addons,
-      trialDays: plansData.trialDays || FALLBACK_PLANS_RESPONSE.trialDays || 7,
+      addons: normalizedAddons,
+      trialDays: plansData.trialDays || 7,
     });
   }, []);
 
@@ -361,7 +357,7 @@ function BillingPageContent() {
           warnings.push("Plan catalog is running in recovery mode.");
         }
       } else {
-        warnings.push("Plan catalog live sync is delayed. Showing standard catalog.");
+        warnings.push("Plan catalog is temporarily unavailable.");
       }
 
       setLoadWarning(warnings.length ? warnings.join(" ") : null);

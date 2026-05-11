@@ -525,7 +525,7 @@ export const settleSuccessfulCheckout = async (input: {
       .catch(() => undefined),
   ]);
 
-  return {
+  const result = {
     settled: true,
     paymentIntentId: paymentIntent.id,
     subscriptionId: settled.subscription.id,
@@ -537,6 +537,15 @@ export const settleSuccessfulCheckout = async (input: {
     pendingEntitlementReconcile,
     entitlementReconcileReasons,
   };
+  console.info("SUBSCRIPTION_ACTIVATED", {
+    businessId: paymentIntent.businessId,
+    paymentIntentId: result.paymentIntentId,
+    subscriptionId: result.subscriptionId,
+    invoiceId: result.invoiceId,
+    planCode: result.planCode,
+    billingCycle: result.billingCycle,
+  });
+  return result;
 };
 
 export const reconcilePendingEntitlementSync = async ({

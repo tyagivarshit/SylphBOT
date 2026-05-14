@@ -1058,9 +1058,13 @@ export class BillingController {
 
   private static async buildBillingResponse(
     businessId: string | null,
-    req: Request
+    req: Request,
+    options?: {
+      lightweight?: boolean;
+    }
   ) {
     const startedAt = Date.now();
+    const lightweight = Boolean(options?.lightweight);
     if (!businessId) {
       return {
         success: true,
@@ -1078,7 +1082,7 @@ export class BillingController {
 
     const [billingContext, usage, invoicesRaw] = await Promise.all([
       loadBillingContext(businessId),
-      getUsageOverview(businessId),
+      lightweight ? Promise.resolve(null) : getUsageOverview(businessId),
       prisma.invoiceLedger.findMany({
         where: {
           businessId,
@@ -1086,7 +1090,7 @@ export class BillingController {
         orderBy: {
           createdAt: "desc",
         },
-        take: 20,
+        take: lightweight ? 12 : 20,
         select: {
           invoiceKey: true,
           status: true,
@@ -1123,6 +1127,7 @@ export class BillingController {
       businessId,
       metadata: {
         source: "billing_build_projection",
+        lightweight,
       },
     });
     if (durationMs >= 900) {
@@ -1499,9 +1504,17 @@ export class BillingController {
       }
 
       const authStartedAt = Date.now();
-      const { businessId, email } = await getUserContext(req);
+      let businessId = BillingController.getBusinessIdFromRequest(req);
+      let email = String(req.user?.email || "").trim().toLowerCase();
+      const hasFastPathContext = Boolean(businessId && email);
+      if (!hasFastPathContext) {
+        const userContext = await getUserContext(req);
+        businessId = businessId || userContext.businessId;
+        email = email || userContext.email;
+      }
       emitCheckoutMetric("auth_ms", Date.now() - authStartedAt, {
         stage: "auth_resolved",
+        source: hasFastPathContext ? "request_context_fast_path" : "user_context_lookup",
       });
       throwIfRequestLifecycleAborted({
         req,
@@ -1968,7 +1981,13 @@ export class BillingController {
 
   static async getBilling(req: Request, res: Response) {
     try {
-      const { businessId } = await getUserContext(req);
+      const surface = String(req.query.surface || "").trim().toLowerCase();
+      const lightweight = surface === "checkout" || surface === "billing";
+      let businessId = BillingController.getBusinessIdFromRequest(req);
+      if (!businessId) {
+        const context = await getUserContext(req);
+        businessId = context.businessId;
+      }
       res.setHeader("Cache-Control", "no-store");
       const currencyHint = resolveBillingCurrency(req);
       const cacheKey = businessId
@@ -2072,7 +2091,8 @@ export class BillingController {
             task: () =>
               BillingController.buildBillingResponse(
                 businessId,
-                req
+                req,
+                { lightweight }
               ) as Promise<Record<string, unknown>>,
           });
           const sharedProjectionPromise = computeProjection
@@ -2142,7 +2162,8 @@ export class BillingController {
           task: () =>
             BillingController.buildBillingResponse(
               businessId,
-              req
+              req,
+              { lightweight }
             ) as Promise<Record<string, unknown>>,
         });
       }

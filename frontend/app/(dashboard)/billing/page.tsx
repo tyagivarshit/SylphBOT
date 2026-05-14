@@ -96,9 +96,10 @@ const DEFAULT_BILLING_CONTEXT: BillingContext = {
   remainingEarly: 0,
 };
 
+const BILLING_SNAPSHOT_ENDPOINT = "/api/billing?surface=checkout";
 const BILLING_API_TIMEOUT_MS = 7_000;
 const BILLING_BOOTSTRAP_CACHE_TTL_MS = 30_000;
-const BILLING_BACKGROUND_REFRESH_INTERVAL_MS = 45_000;
+const BILLING_BACKGROUND_REFRESH_INTERVAL_MS = 90_000;
 const BILLING_REQUEST_COOLDOWN_MS = 1_200;
 const BILLING_FAILURE_COOLDOWN_MS = 8_000;
 
@@ -239,7 +240,7 @@ const fetchBillingSummary = async (options?: { background?: boolean }) => {
 
   if (billingRequestInFlight) {
     recordBillingTelemetry("duplicate_fetch_blocked", {
-      endpoint: "/api/billing",
+      endpoint: BILLING_SNAPSHOT_ENDPOINT,
       reason: "inflight",
       background: isBackground,
     });
@@ -248,7 +249,7 @@ const fetchBillingSummary = async (options?: { background?: boolean }) => {
 
   if (isBackground && now < billingFailureCooldownUntil) {
     recordBillingTelemetry("duplicate_fetch_blocked", {
-      endpoint: "/api/billing",
+      endpoint: BILLING_SNAPSHOT_ENDPOINT,
       reason: "failure_cooldown",
       background: true,
       waitMs: billingFailureCooldownUntil - now,
@@ -258,7 +259,7 @@ const fetchBillingSummary = async (options?: { background?: boolean }) => {
 
   if (isBackground && now - lastBillingRequestAt < BILLING_REQUEST_COOLDOWN_MS) {
     recordBillingTelemetry("duplicate_fetch_blocked", {
-      endpoint: "/api/billing",
+      endpoint: BILLING_SNAPSHOT_ENDPOINT,
       reason: "request_cooldown",
       background: true,
       waitMs: BILLING_REQUEST_COOLDOWN_MS - (now - lastBillingRequestAt),
@@ -268,7 +269,7 @@ const fetchBillingSummary = async (options?: { background?: boolean }) => {
 
   lastBillingRequestAt = now;
   billingRequestInFlight = fetchJsonWithRetry<BillingApiResponse>(
-    "/api/billing",
+    BILLING_SNAPSHOT_ENDPOINT,
     isBackground ? 0 : 1,
     BILLING_API_TIMEOUT_MS
   )
@@ -585,7 +586,7 @@ function BillingPageContent() {
           initialTelemetryRecordedRef.current = true;
           recordBillingTelemetry("billing_page_initial_requests", {
             requestCount: 2,
-            endpoints: ["/api/billing", "/api/billing/plans"],
+            endpoints: [BILLING_SNAPSHOT_ENDPOINT, "/api/billing/plans"],
           });
         }
 

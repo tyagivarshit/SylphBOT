@@ -2,11 +2,12 @@
 
 import { Bell } from "lucide-react";
 import { useEffect, useState } from "react";
-import { socket } from "@/lib/socket";
 import {
   fetchNotifications,
   markAllNotificationsRead,
 } from "@/lib/userApi";
+import { usePathname } from "next/navigation";
+import type { Socket } from "socket.io-client";
 
 type NotificationItem = {
   id: string;
@@ -17,16 +18,27 @@ type NotificationItem = {
 
 export default function NotificationsDropdown({
   userId,
+  suspended = false,
 }: {
   userId?: string;
+  suspended?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
+  const pathname = usePathname();
+  const isBillingRoute = pathname.startsWith("/billing");
+  const shouldSuspend = suspended || isBillingRoute;
+
+  useEffect(() => {
+    if (shouldSuspend && open) {
+      setOpen(false);
+    }
+  }, [open, shouldSuspend]);
 
   /* ---------------- FETCH INITIAL ---------------- */
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || shouldSuspend) return;
 
     const loadNotifications = async () => {
       try {
@@ -45,21 +57,42 @@ export default function NotificationsDropdown({
     };
 
     loadNotifications();
-  }, [userId]);
+  }, [userId, shouldSuspend]);
 
   /* ---------------- SOCKET ---------------- */
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || shouldSuspend) return;
 
-    socket.on("new_notification", (notification: NotificationItem) => {
-      setNotifications((prev) => [notification, ...prev]);
-      setUnread((prev) => prev + 1);
-    });
+    let mounted = true;
+    let activeSocket: Socket | null = null;
+    let notificationHandler: ((notification: NotificationItem) => void) | null = null;
+
+    void import("@/lib/socket")
+      .then(({ socket }) => {
+        if (!mounted) {
+          return;
+        }
+
+        activeSocket = socket;
+        if (!activeSocket.connected) {
+          activeSocket.connect();
+        }
+
+        notificationHandler = (notification: NotificationItem) => {
+          setNotifications((prev) => [notification, ...prev]);
+          setUnread((prev) => prev + 1);
+        };
+        activeSocket.on("new_notification", notificationHandler);
+      })
+      .catch(() => undefined);
 
     return () => {
-      socket.off("new_notification");
+      mounted = false;
+      if (activeSocket && notificationHandler) {
+        activeSocket.off("new_notification", notificationHandler);
+      }
     };
-  }, [userId]);
+  }, [userId, shouldSuspend]);
 
   /* ---------------- MARK READ ---------------- */
   const markAllRead = async () => {

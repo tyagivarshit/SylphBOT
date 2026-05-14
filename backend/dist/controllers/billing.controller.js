@@ -774,8 +774,9 @@ class BillingController {
         }
         return customers[0]?.id || null;
     }
-    static async buildBillingResponse(businessId, req) {
+    static async buildBillingResponse(businessId, req, options) {
         const startedAt = Date.now();
+        const lightweight = Boolean(options?.lightweight);
         if (!businessId) {
             return {
                 success: true,
@@ -792,7 +793,7 @@ class BillingController {
         }
         const [billingContext, usage, invoicesRaw] = await Promise.all([
             (0, subscription_middleware_1.loadBillingContext)(businessId),
-            (0, usage_service_1.getUsageOverview)(businessId),
+            lightweight ? Promise.resolve(null) : (0, usage_service_1.getUsageOverview)(businessId),
             prisma_1.default.invoiceLedger.findMany({
                 where: {
                     businessId,
@@ -800,7 +801,7 @@ class BillingController {
                 orderBy: {
                     createdAt: "desc",
                 },
-                take: 20,
+                take: lightweight ? 12 : 20,
                 select: {
                     invoiceKey: true,
                     status: true,
@@ -834,6 +835,7 @@ class BillingController {
             businessId,
             metadata: {
                 source: "billing_build_projection",
+                lightweight,
             },
         });
         if (durationMs >= 900) {
@@ -1138,9 +1140,17 @@ class BillingController {
                 });
             }
             const authStartedAt = Date.now();
-            const { businessId, email } = await getUserContext(req);
+            let businessId = BillingController.getBusinessIdFromRequest(req);
+            let email = String(req.user?.email || "").trim().toLowerCase();
+            const hasFastPathContext = Boolean(businessId && email);
+            if (!hasFastPathContext) {
+                const userContext = await getUserContext(req);
+                businessId = businessId || userContext.businessId;
+                email = email || userContext.email;
+            }
             emitCheckoutMetric("auth_ms", Date.now() - authStartedAt, {
                 stage: "auth_resolved",
+                source: hasFastPathContext ? "request_context_fast_path" : "user_context_lookup",
             });
             (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
                 req,
@@ -1569,7 +1579,13 @@ class BillingController {
     }
     static async getBilling(req, res) {
         try {
-            const { businessId } = await getUserContext(req);
+            const surface = String(req.query.surface || "").trim().toLowerCase();
+            const lightweight = surface === "checkout" || surface === "billing";
+            let businessId = BillingController.getBusinessIdFromRequest(req);
+            if (!businessId) {
+                const context = await getUserContext(req);
+                businessId = context.businessId;
+            }
             res.setHeader("Cache-Control", "no-store");
             const currencyHint = (0, billingGeo_service_1.resolveBillingCurrency)(req);
             const cacheKey = businessId
@@ -1666,7 +1682,7 @@ class BillingController {
                         label: "billing_projection",
                         businessId,
                         computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
-                        task: () => BillingController.buildBillingResponse(businessId, req),
+                        task: () => BillingController.buildBillingResponse(businessId, req, { lightweight }),
                     });
                     const sharedProjectionPromise = computeProjection
                         .then((value) => {
@@ -1724,7 +1740,7 @@ class BillingController {
                     label: "billing_projection",
                     businessId,
                     computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
-                    task: () => BillingController.buildBillingResponse(businessId, req),
+                    task: () => BillingController.buildBillingResponse(businessId, req, { lightweight }),
                 });
             }
             const projection = await waitForBillingProjection(projectionPromise, waitBudgetMs, (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }));

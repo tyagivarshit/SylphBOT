@@ -40,6 +40,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const isBillingRoute = pathname.startsWith("/billing");
 
   const debounced = useDebounce(search, 300);
   const normalizedQuery = debounced.trim();
@@ -179,7 +180,10 @@ function TopbarComponent({ setOpen }: TopbarProps) {
         </div>
 
         <div className="relative z-[100] flex-shrink-0">
-          <NotificationsDropdown userId={user?.id} />
+          <NotificationsDropdown
+            userId={user?.id}
+            suspended={isBillingRoute}
+          />
         </div>
 
         <div className="relative z-[1000] flex-shrink-0">

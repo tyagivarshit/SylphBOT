@@ -19,9 +19,9 @@ type QueueEntry = {
 };
 
 const PRIORITY_LIMITS: Record<PriorityClass, number> = {
-  CRITICAL: 6,
-  NORMAL: 4,
-  LOW: 2,
+  CRITICAL: 7,
+  NORMAL: 3,
+  LOW: 1,
 };
 
 const GLOBAL_INFLIGHT_LIMIT = 8;
@@ -54,35 +54,37 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
   const path = String(req.path || req.originalUrl || "").trim();
 
   if (
+    path.startsWith("/api/auth") ||
+    path.startsWith("/api/user/me") ||
+    path.startsWith("/api/user/workspace") ||
     path.startsWith("/api/webhooks/commerce") ||
     path.startsWith("/api/webhook/") ||
     path.startsWith("/webhook/") ||
+    path.startsWith("/api/billing") ||
     path.startsWith("/api/billing/checkout") ||
     path.startsWith("/api/billing/create-checkout-session") ||
     path.startsWith("/api/billing/upgrade") ||
+    path.startsWith("/api/commerce") ||
     path.startsWith("/api/security")
   ) {
     return "CRITICAL";
   }
 
   if (
-    path === "/api/billing" ||
-    path === "/api/billing/" ||
-    path.startsWith("/api/billing/plans")
-  ) {
-    return "NORMAL";
-  }
-
-  if (
+    path.startsWith("/api/notifications") ||
+    path.startsWith("/api/search") ||
     path.startsWith("/api/automation") ||
     path.startsWith("/api/knowledge") ||
     path.startsWith("/api/comment-triggers") ||
     path.startsWith("/api/comment-automation/triggers") ||
     path.startsWith("/api/triggers") ||
-    path.startsWith("/api/booking/list") ||
+    path.startsWith("/api/booking") ||
+    path.startsWith("/api/availability") ||
     path.startsWith("/api/analytics") ||
     path.startsWith("/api/dashboard") ||
-    path.startsWith("/api/autonomous")
+    path.startsWith("/api/autonomous") ||
+    path.startsWith("/api/conversations") ||
+    path.startsWith("/api/integrations/onboarding")
   ) {
     return "LOW";
   }

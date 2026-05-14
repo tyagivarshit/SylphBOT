@@ -8,7 +8,23 @@ export type PerformanceMetricName =
   | "CACHE_MISS"
   | "DB_SLOW"
   | "PROJECTION_MS"
-  | "TIMEOUT_PREVENTED";
+  | "TIMEOUT_PREVENTED"
+  | "projection_compute_ms"
+  | "projection_cache_hit"
+  | "projection_deduped"
+  | "projection_cancelled"
+  | "projection_budget_exceeded"
+  | "auth_ms"
+  | "billing_context_ms"
+  | "pricing_ms"
+  | "proposal_ms"
+  | "payment_intent_ms"
+  | "credential_resolve_ms"
+  | "stripe_checkout_ms"
+  | "webhook_ms"
+  | "reconcile_ms"
+  | "subscription_activation_ms"
+  | "total_checkout_ms";
 
 type EmitPerformanceMetricInput = {
   name: PerformanceMetricName;
@@ -54,4 +70,3 @@ export const emitPerformanceMetric = (input: EmitPerformanceMetricInput) => {
     metadata: payload,
   }).catch(() => undefined);
 };
-

@@ -1,6 +1,7 @@
 import { Currency, RefundStatus } from "@prisma/client";
 import Stripe from "stripe";
 import { env } from "../../../config/env";
+import { emitPerformanceMetric } from "../../../observability/performanceMetrics";
 import {
   BillingInterval,
   PlanType,
@@ -401,6 +402,29 @@ const resolveRefundPaymentIntentId = async (paymentIntentId: string) => {
   return resolved;
 };
 
+const isAbsoluteHttpUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const resolveCheckoutReturnUrl = ({
+  candidate,
+  fallback,
+}: {
+  candidate?: string | null;
+  fallback: string;
+}) => {
+  const normalizedCandidate = String(candidate || "").trim();
+  if (normalizedCandidate && isAbsoluteHttpUrl(normalizedCandidate)) {
+    return normalizedCandidate;
+  }
+  return fallback;
+};
+
 export const stripeCommerceProvider: CommerceProviderAdapter = {
   provider: "STRIPE",
 
@@ -464,6 +488,16 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     };
     const nowSeconds = Math.floor(Date.now() / 1000);
     const checkoutExpiresAtSeconds = nowSeconds + 2 * 60 * 60;
+    const fallbackSuccessUrl = `${env.FRONTEND_URL}/billing/success?payment_intent_key=${input.paymentIntentKey}`;
+    const fallbackCancelUrl = `${env.FRONTEND_URL}/billing/cancel?payment_intent_key=${input.paymentIntentKey}`;
+    const successUrl = resolveCheckoutReturnUrl({
+      candidate: input.successUrl,
+      fallback: fallbackSuccessUrl,
+    });
+    const cancelUrl = resolveCheckoutReturnUrl({
+      candidate: input.cancelUrl,
+      fallback: fallbackCancelUrl,
+    });
 
     const sessionPayload: Stripe.Checkout.SessionCreateParams = {
       payment_method_types: ["card"],
@@ -478,12 +512,8 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
         },
       },
       expires_at: checkoutExpiresAtSeconds,
-      success_url:
-        input.successUrl ||
-        `${env.FRONTEND_URL}/billing/success?payment_intent_key=${input.paymentIntentKey}`,
-      cancel_url:
-        input.cancelUrl ||
-        `${env.FRONTEND_URL}/billing/cancel?payment_intent_key=${input.paymentIntentKey}`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
     };
 
     if (discounts?.length) {
@@ -570,6 +600,22 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
     const stripeCheckoutStartedAt = Date.now();
     let session: Stripe.Checkout.Session | null = null;
     let checkoutSuccess = false;
+    const emitStripeCheckoutMetric = (
+      value: number,
+      metadata: Record<string, unknown>
+    ) => {
+      emitPerformanceMetric({
+        name: "stripe_checkout_ms",
+        value,
+        businessId: input.businessId,
+        route: "billing_checkout",
+        metadata: {
+          provider: "STRIPE",
+          paymentIntentKey: input.paymentIntentKey,
+          ...metadata,
+        },
+      });
+    };
     console.info("STRIPE_CHECKOUT_START", {
       businessId: input.businessId,
       paymentIntentKey: input.paymentIntentKey,
@@ -599,6 +645,9 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       }
       throw error;
     } finally {
+      emitStripeCheckoutMetric(Date.now() - stripeCheckoutStartedAt, {
+        success: checkoutSuccess,
+      });
       console.info("STRIPE_CHECKOUT_MS", {
         durationMs: Date.now() - stripeCheckoutStartedAt,
         success: checkoutSuccess,
@@ -623,10 +672,20 @@ export const stripeCommerceProvider: CommerceProviderAdapter = {
       mode: session.mode || null,
     });
 
+    let checkoutUrl = String(session.url || "").trim();
+    if (!checkoutUrl) {
+      try {
+        const refreshed = await stripe.checkout.sessions.retrieve(session.id);
+        checkoutUrl = String(refreshed.url || "").trim();
+      } catch {
+        checkoutUrl = "";
+      }
+    }
+
     return {
       provider: "STRIPE",
       providerPaymentIntentId: session.id,
-      checkoutUrl: session.url,
+      checkoutUrl: checkoutUrl || null,
       status: "REQUIRES_ACTION",
       expiresAt:
         typeof session.expires_at === "number"

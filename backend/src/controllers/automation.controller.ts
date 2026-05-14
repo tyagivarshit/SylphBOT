@@ -3,7 +3,11 @@ import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { getPlanKey, type PlanType } from "../config/plan.config";
 import { getCanonicalSubscriptionSnapshot } from "../services/subscriptionAuthority.service";
-import { withTimeoutFallback } from "../utils/boundedTimeout";
+import {
+  getProjectionSnapshot,
+  invalidateProjectionSnapshots,
+} from "../services/projectionCoordinator.service";
+import { getRequestAbortSignal } from "../utils/requestLifecycle";
 
 type AutomationStepInput = {
   type?: string;
@@ -45,6 +49,14 @@ const allowedStepTypesByPlan: Record<PlanType, string[]> = {
 };
 
 const getRequestBusinessId = (req: Request) => req.user?.businessId || null;
+const AUTOMATION_PROJECTION_CACHE_TTL_MS = 10_000;
+const AUTOMATION_PROJECTION_STALE_TTL_MS = 45_000;
+const AUTOMATION_PROJECTION_WAIT_MS = 140;
+const AUTOMATION_PROJECTION_COMPUTE_BUDGET_MS = 4_500;
+const AUTOMATION_PROJECTION_MAX_ROWS = 120;
+const AUTOMATION_PROJECTION_CACHE_PREFIX = "automation:flows:v1:";
+const buildAutomationProjectionCacheKey = (businessId: string) =>
+  `${AUTOMATION_PROJECTION_CACHE_PREFIX}${businessId}`;
 
 const getBusinessPlan = async (businessId: string) => {
   const snapshot = await getCanonicalSubscriptionSnapshot(businessId);
@@ -182,6 +194,9 @@ export const createAutomationFlow = async (req: Request, res: Response) => {
         },
       });
     });
+    invalidateProjectionSnapshots({
+      key: buildAutomationProjectionCacheKey(businessId),
+    });
 
     return res.status(201).json({
       success: true,
@@ -217,46 +232,58 @@ export const getFlows = async (req: Request, res: Response) => {
       });
     }
 
-    const flowsResult = await withTimeoutFallback({
+    const projection = await getProjectionSnapshot({
+      cacheKey: buildAutomationProjectionCacheKey(businessId),
       label: "automation_projection",
-      timeoutMs: 1800,
-      task: prisma.automationFlow.findMany({
-        where: {
-          businessId,
-        },
-        select: {
-          id: true,
-          name: true,
-          channel: true,
-          triggerType: true,
-          triggerValue: true,
-          status: true,
-          createdAt: true,
-          updatedAt: true,
-          steps: {
-            select: {
-              stepKey: true,
-              stepType: true,
-              message: true,
-              condition: true,
-              nextStep: true,
-              metadata: true,
-            },
-            orderBy: { createdAt: "asc" },
+      businessId,
+      cacheTtlMs: AUTOMATION_PROJECTION_CACHE_TTL_MS,
+      staleTtlMs: AUTOMATION_PROJECTION_STALE_TTL_MS,
+      computeBudgetMs: AUTOMATION_PROJECTION_COMPUTE_BUDGET_MS,
+      initialWaitMs: AUTOMATION_PROJECTION_WAIT_MS,
+      requestSignal: getRequestAbortSignal({ req, res }),
+      fallback: [] as Array<Record<string, unknown>>,
+      compute: () =>
+        prisma.automationFlow.findMany({
+          where: {
+            businessId,
           },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      }),
-      fallback: [],
+          select: {
+            id: true,
+            name: true,
+            channel: true,
+            triggerType: true,
+            triggerValue: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            steps: {
+              select: {
+                stepKey: true,
+                stepType: true,
+                message: true,
+                condition: true,
+                nextStep: true,
+                metadata: true,
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: AUTOMATION_PROJECTION_MAX_ROWS,
+        }),
     });
-    const flows = flowsResult.value;
+    const flows = projection.value;
 
     console.info("AUTOMATION_PROJECTION_READY", {
       businessId,
-      timedOut: flowsResult.timedOut,
-      fallback: flowsResult.timedOut || flowsResult.failed,
+      source: projection.meta.source,
+      stale: projection.meta.stale,
+      deduped: projection.meta.deduped,
+      cancelled: projection.meta.cancelled,
+      budgetExceeded: projection.meta.budgetExceeded,
+      fallback: projection.meta.source === "fallback",
       count: Array.isArray(flows) ? flows.length : 0,
     });
 
@@ -358,6 +385,9 @@ export const updateAutomationFlow = async (req: Request, res: Response) => {
         },
       });
     });
+    invalidateProjectionSnapshots({
+      key: buildAutomationProjectionCacheKey(businessId),
+    });
 
     return res.json({
       success: true,
@@ -437,6 +467,9 @@ export const deleteAutomationFlow = async (req: Request, res: Response) => {
           businessId,
         },
       });
+    });
+    invalidateProjectionSnapshots({
+      key: buildAutomationProjectionCacheKey(businessId),
     });
 
     return res.json({

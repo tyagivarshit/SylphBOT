@@ -240,7 +240,9 @@ const getDeepAnalyticsDashboard = async (req, res) => {
             res,
             label: "analytics_dashboard",
             fallback: (0, analyticsDashboard_service_1.buildAnalyticsDashboardFallback)(range, planKey),
-            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey),
+            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey, {
+                requestSignal: (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }),
+            }),
         });
         if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
             return;
@@ -281,7 +283,9 @@ const getRevenueAnalytics = async (req, res) => {
             res,
             label: "analytics_revenue",
             fallback: (0, analyticsDashboard_service_1.buildAnalyticsDashboardFallback)(range, planKey),
-            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey),
+            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey, {
+                requestSignal: (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }),
+            }),
         });
         if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
             return;

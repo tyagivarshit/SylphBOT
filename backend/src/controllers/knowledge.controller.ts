@@ -2,11 +2,16 @@ import { Response } from "express";
 import prisma from "../config/prisma";
 import { createEmbedding } from "../services/embedding.service";
 import {
+  getProjectionSnapshot,
+  invalidateProjectionSnapshots,
+} from "../services/projectionCoordinator.service";
+import {
   getScopedTrainingClient,
   getSystemClient,
   normalizeClientId,
 } from "../services/clientScope.service";
 import { AuthenticatedRequest } from "../types/request";
+import { getRequestAbortSignal } from "../utils/requestLifecycle";
 
 type KnowledgeQuery = {
   clientId?: string;
@@ -19,6 +24,13 @@ type KnowledgeBody = {
   clientId?: string;
 };
 
+const KNOWLEDGE_PROJECTION_CACHE_TTL_MS = 10_000;
+const KNOWLEDGE_PROJECTION_STALE_TTL_MS = 60_000;
+const KNOWLEDGE_PROJECTION_WAIT_MS = 120;
+const KNOWLEDGE_PROJECTION_COMPUTE_BUDGET_MS = 4_000;
+const KNOWLEDGE_PROJECTION_MAX_ROWS = 300;
+const KNOWLEDGE_PROJECTION_CACHE_PREFIX = "knowledge:list:v1:";
+
 const getRequestedClientId = (
   req: AuthenticatedRequest<any, any, KnowledgeQuery>
 ) => normalizeClientId(req.body?.clientId || req.query?.clientId);
@@ -29,9 +41,13 @@ const getScopedKnowledgeClientId = (client: { platform?: string; id: string }) =
 const hasResponseCommitted = (res: Response) =>
   res.headersSent || res.writableEnded || res.writableFinished;
 
-/* =====================================================
-CREATE KNOWLEDGE
-===================================================== */
+const buildKnowledgeProjectionCacheKey = (
+  businessId: string,
+  scopedClientId: string | null
+) => `${KNOWLEDGE_PROJECTION_CACHE_PREFIX}${businessId}:${scopedClientId || "shared"}`;
+
+const buildKnowledgeProjectionBusinessPrefix = (businessId: string) =>
+  `${KNOWLEDGE_PROJECTION_CACHE_PREFIX}${businessId}:`;
 
 export const createKnowledge = async (
   req: AuthenticatedRequest<KnowledgeBody, any, KnowledgeQuery>,
@@ -59,22 +75,24 @@ export const createKnowledge = async (
       });
     }
 
-    /* 🔥 EMBEDDING */
     const embedding = await createEmbedding(`${title} ${content}`);
 
-    /* 🔥 CREATE (STRICT MANUAL KB ONLY) */
     const knowledge = await prisma.knowledgeBase.create({
       data: {
         businessId,
         clientId: scopedKnowledgeClientId,
         title,
         content,
-        sourceType: "MANUAL", // 🔥 FORCE MANUAL
+        sourceType: "MANUAL",
         sourceUrl: sourceUrl || null,
-        priority: "MEDIUM",   // 🔥 DEFAULT PRIORITY
+        priority: "MEDIUM",
         embedding,
         isActive: true,
       },
+    });
+
+    invalidateProjectionSnapshots({
+      prefix: buildKnowledgeProjectionBusinessPrefix(businessId),
     });
 
     return res.status(201).json({
@@ -98,10 +116,6 @@ export const createKnowledge = async (
   }
 };
 
-/* =====================================================
-GET KNOWLEDGE LIST
-===================================================== */
-
 export const getKnowledge = async (
   req: AuthenticatedRequest<any, any, KnowledgeQuery>,
   res: Response
@@ -120,21 +134,66 @@ export const getKnowledge = async (
     const client = await getScopedTrainingClient(businessId, requestedClientId);
     const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
 
-    const knowledge = await prisma.knowledgeBase.findMany({
-      where: {
+    const projection = await getProjectionSnapshot({
+      cacheKey: buildKnowledgeProjectionCacheKey(
         businessId,
-        clientId: scopedKnowledgeClientId,
-        sourceType: "MANUAL", // 🔥 FILTER
-        isActive: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
+        scopedKnowledgeClientId
+      ),
+      label: "knowledge_projection",
+      businessId,
+      cacheTtlMs: KNOWLEDGE_PROJECTION_CACHE_TTL_MS,
+      staleTtlMs: KNOWLEDGE_PROJECTION_STALE_TTL_MS,
+      computeBudgetMs: KNOWLEDGE_PROJECTION_COMPUTE_BUDGET_MS,
+      initialWaitMs: KNOWLEDGE_PROJECTION_WAIT_MS,
+      requestSignal: getRequestAbortSignal({ req, res }),
+      fallback: [] as Array<Record<string, unknown>>,
+      compute: () =>
+        prisma.knowledgeBase.findMany({
+          where: {
+            businessId,
+            clientId: scopedKnowledgeClientId,
+            sourceType: "MANUAL",
+            isActive: true,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: KNOWLEDGE_PROJECTION_MAX_ROWS,
+          select: {
+            id: true,
+            businessId: true,
+            clientId: true,
+            title: true,
+            content: true,
+            sourceType: true,
+            sourceUrl: true,
+            priority: true,
+            reinforcementScore: true,
+            retrievalCount: true,
+            successCount: true,
+            lastRetrievedAt: true,
+            lastReinforcedAt: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        }),
+    });
+
+    console.info("KNOWLEDGE_PROJECTION_READY", {
+      businessId,
+      clientId: scopedKnowledgeClientId,
+      source: projection.meta.source,
+      stale: projection.meta.stale,
+      deduped: projection.meta.deduped,
+      cancelled: projection.meta.cancelled,
+      budgetExceeded: projection.meta.budgetExceeded,
+      count: Array.isArray(projection.value) ? projection.value.length : 0,
     });
 
     return res.json({
       success: true,
-      knowledge,
+      knowledge: projection.value,
     });
   } catch (error: any) {
     console.error("Fetch knowledge error:", error);
@@ -151,10 +210,6 @@ export const getKnowledge = async (
     });
   }
 };
-
-/* =====================================================
-GET SINGLE KNOWLEDGE
-===================================================== */
 
 export const getSingleKnowledge = async (
   req: AuthenticatedRequest<any, { id: string }, KnowledgeQuery>,
@@ -175,7 +230,7 @@ export const getSingleKnowledge = async (
       where: {
         id,
         businessId,
-        sourceType: "MANUAL", // 🔥 SAFE FILTER
+        sourceType: "MANUAL",
         isActive: true,
       },
     });
@@ -204,10 +259,6 @@ export const getSingleKnowledge = async (
   }
 };
 
-/* =====================================================
-UPDATE KNOWLEDGE
-===================================================== */
-
 export const updateKnowledge = async (
   req: AuthenticatedRequest<KnowledgeBody, { id: string }, KnowledgeQuery>,
   res: Response
@@ -229,7 +280,7 @@ export const updateKnowledge = async (
       where: {
         id,
         businessId,
-        sourceType: "MANUAL", // 🔥 SAFE
+        sourceType: "MANUAL",
         isActive: true,
       },
     });
@@ -249,9 +300,7 @@ export const updateKnowledge = async (
       ? await getScopedTrainingClient(businessId, requestedClientId)
       : currentScopeClient;
 
-    /* 🔥 RE-EMBED IF CONTENT CHANGED */
     let embedding = knowledge.embedding;
-
     if (title || content) {
       embedding = await createEmbedding(
         `${title || knowledge.title} ${content || knowledge.content}`
@@ -267,6 +316,10 @@ export const updateKnowledge = async (
         sourceUrl: sourceUrl ?? knowledge.sourceUrl,
         embedding,
       },
+    });
+
+    invalidateProjectionSnapshots({
+      prefix: buildKnowledgeProjectionBusinessPrefix(businessId),
     });
 
     return res.json({
@@ -290,10 +343,6 @@ export const updateKnowledge = async (
   }
 };
 
-/* =====================================================
-DELETE KNOWLEDGE
-===================================================== */
-
 export const deleteKnowledge = async (
   req: AuthenticatedRequest<any, { id: string }, KnowledgeQuery>,
   res: Response
@@ -313,7 +362,7 @@ export const deleteKnowledge = async (
       where: {
         id,
         businessId,
-        sourceType: "MANUAL", // 🔥 SAFE
+        sourceType: "MANUAL",
         isActive: true,
       },
     });
@@ -325,12 +374,15 @@ export const deleteKnowledge = async (
       });
     }
 
-    /* 🔥 SOFT DELETE */
     await prisma.knowledgeBase.update({
       where: { id },
       data: {
         isActive: false,
       },
+    });
+
+    invalidateProjectionSnapshots({
+      prefix: buildKnowledgeProjectionBusinessPrefix(businessId),
     });
 
     return res.json({

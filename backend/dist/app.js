@@ -52,6 +52,7 @@ const runtimePolicy_service_1 = require("./services/runtimePolicy.service");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const monitoring_middleware_1 = require("./middleware/monitoring.middleware");
 const requestContext_middleware_1 = require("./middleware/requestContext.middleware");
+const requestPriority_middleware_1 = require("./middleware/requestPriority.middleware");
 const apiKey_middleware_1 = require("./middleware/apiKey.middleware");
 const rbac_service_1 = require("./services/rbac.service");
 const AppError_1 = require("./utils/AppError");
@@ -435,6 +436,7 @@ app.use((req, res, next) => {
     });
     next();
 });
+app.use(requestPriority_middleware_1.requestPriorityMiddleware);
 app.use("/api/webhooks/commerce", express_1.default.raw({ type: "*/*", limit: "1mb" }), commerceWebhook_routes_1.default);
 app.use("/api/webhook/whatsapp", express_1.default.raw({ type: "application/json" }), whatsapp_webhook_1.default);
 app.use("/api/webhook/instagram", express_1.default.raw({
@@ -549,7 +551,7 @@ app.post("/v1/messages", apiKey_middleware_1.optionalApiKeyAuth, (0, asyncHandle
 app.use("/api/auth", auth_routes_1.default);
 app.use("/api/auth", googleAuth_routes_1.default);
 app.use("/api/dashboard", auth_middleware_1.protect, dashboard_routes_1.default);
-app.use("/api/billing", auth_middleware_1.protect, billing_routes_1.default);
+app.use("/api/billing", billing_routes_1.default);
 app.use("/api/commerce", commerce_routes_1.default);
 app.use("/api/usage", auth_middleware_1.protect, usage_routes_1.default);
 app.use("/api/help-ai", auth_middleware_1.protect, helpAi_routes_1.default);

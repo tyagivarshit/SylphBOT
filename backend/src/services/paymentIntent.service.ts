@@ -10,6 +10,7 @@ import { commerceAuthorityService } from "./commerceAuthority.service";
 import { commerceProviderRegistry } from "./commerce/providers/commerceProviderRegistry.service";
 import { getIntelligenceRuntimeInfluence } from "./intelligence/intelligenceRuntimeInfluence.service";
 import type { ProviderWebhookEvent } from "./commerce/providers/commerceProvider.types";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   PAYMENT_ATTEMPT_TRANSITIONS,
   PAYMENT_INTENT_TRANSITIONS,
@@ -95,11 +96,30 @@ export const createPaymentIntentService = () => {
     metadata?: Record<string, unknown> | null;
     idempotencyKey?: string | null;
   }) => {
+    const checkoutCreateStartedAt = Date.now();
     const inputMetadata = toRecord(metadata);
     const isCheckoutFastLane =
       String(inputMetadata.checkoutSource || inputMetadata.origin || "")
         .trim()
         .toLowerCase() === "billing_controller";
+    const emitCheckoutTimingMetric = (
+      name: "credential_resolve_ms" | "payment_intent_ms",
+      value: number,
+      metadataInput?: Record<string, unknown>
+    ) => {
+      emitPerformanceMetric({
+        name,
+        value,
+        businessId,
+        route: "billing_checkout",
+        metadata: {
+          provider,
+          proposalKey,
+          fastLane: isCheckoutFastLane,
+          ...(metadataInput || {}),
+        },
+      });
+    };
     const proposal = await prisma.proposalLedger.findUnique({
       where: {
         proposalKey,
@@ -141,10 +161,21 @@ export const createPaymentIntentService = () => {
       scope: "CHECKOUT",
       provider: normalizedProvider,
     });
-    await commerceAuthorityService.resolveProviderCredential({
-      businessId,
-      provider: normalizedProvider,
-    });
+    const credentialResolveStartedAt = Date.now();
+    try {
+      await commerceAuthorityService.resolveProviderCredential({
+        businessId,
+        provider: normalizedProvider,
+      });
+    } finally {
+      emitCheckoutTimingMetric(
+        "credential_resolve_ms",
+        Date.now() - credentialResolveStartedAt,
+        {
+          provider: normalizedProvider,
+        }
+      );
+    }
     const adapter = commerceProviderRegistry.resolve(normalizedProvider);
     const rawIdempotency = String(idempotencyKey || "").trim() || null;
     const normalizedIdempotency =
@@ -178,7 +209,55 @@ export const createPaymentIntentService = () => {
         });
 
     if (existing) {
+      emitCheckoutTimingMetric(
+        "payment_intent_ms",
+        Date.now() - checkoutCreateStartedAt,
+        {
+          source: "idempotency_hit",
+          paymentIntentId: existing.id,
+          paymentIntentKey: existing.paymentIntentKey,
+        }
+      );
       return existing;
+    }
+    const reusableCheckout = await prisma.paymentIntentLedger.findFirst({
+      where: {
+        businessId,
+        proposalId: proposal.id,
+        provider: normalizedProvider,
+        status: {
+          in: ["CREATED", "REQUIRES_ACTION"],
+        },
+        checkoutUrl: {
+          not: null,
+        },
+        OR: [
+          {
+            checkoutExpiresAt: null,
+          },
+          {
+            checkoutExpiresAt: {
+              gt: new Date(Date.now() + 30_000),
+            },
+          },
+        ],
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
+
+    if (reusableCheckout) {
+      emitCheckoutTimingMetric(
+        "payment_intent_ms",
+        Date.now() - checkoutCreateStartedAt,
+        {
+          source: "reused_checkout_session",
+          paymentIntentId: reusableCheckout.id,
+          paymentIntentKey: reusableCheckout.paymentIntentKey,
+        }
+      );
+      return reusableCheckout;
     }
 
     const paymentIntent = await prisma.$transaction(async (tx) => {
@@ -419,8 +498,26 @@ export const createPaymentIntentService = () => {
         });
       }
 
+      emitCheckoutTimingMetric(
+        "payment_intent_ms",
+        Date.now() - checkoutCreateStartedAt,
+        {
+          source: "created_checkout_session",
+          paymentIntentId: updated.id,
+          paymentIntentKey: updated.paymentIntentKey,
+          providerPaymentIntentId: updated.providerPaymentIntentId || null,
+        }
+      );
       return updated;
     } catch (error) {
+      emitCheckoutTimingMetric(
+        "payment_intent_ms",
+        Date.now() - checkoutCreateStartedAt,
+        {
+          source: "create_failed",
+          reason: String((error as any)?.message || "provider_checkout_failed"),
+        }
+      );
       if (normalizedProvider === "STRIPE") {
         console.error("STRIPE_CREATE_FAIL", {
           businessId,

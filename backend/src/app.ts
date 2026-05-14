@@ -56,6 +56,7 @@ import {
 } from "./middleware/rateLimit.middleware";
 import { monitoringMiddleware } from "./middleware/monitoring.middleware";
 import { requestContextMiddleware } from "./middleware/requestContext.middleware";
+import { requestPriorityMiddleware } from "./middleware/requestPriority.middleware";
 import { optionalApiKeyAuth } from "./middleware/apiKey.middleware";
 import { hasPermission } from "./services/rbac.service";
 
@@ -522,6 +523,8 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(requestPriorityMiddleware);
+
 app.use(
   "/api/webhooks/commerce",
   express.raw({ type: "*/*", limit: "1mb" }),
@@ -691,7 +694,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
 
 app.use("/api/dashboard", protect, dashboardRoutes);
-app.use("/api/billing", protect, billingRoutes);
+app.use("/api/billing", billingRoutes);
 app.use("/api/commerce", commerceRoutes);
 app.use("/api/usage", protect, usageRoutes);
 app.use("/api/help-ai", protect, helpAiRoutes);

@@ -645,6 +645,7 @@ model Lead {
   deletedAt      DateTime?
 
   @@index([businessId])
+  @@index([businessId, createdAt])
   @@index([phone])
   @@index([instagramId])
   @@index([clientId])
@@ -1512,6 +1513,7 @@ model AutomationFlow {
   updatedAt   DateTime @updatedAt
 
   @@index([businessId])
+  @@index([businessId, createdAt])
   @@index([channel])
 }
 
@@ -1629,6 +1631,7 @@ model RefreshToken {
   createdAt  DateTime @default(now())
 
   @@index([userId])
+  @@index([userId, expiresAt])
 }
 
 model ApiKey {
@@ -1840,6 +1843,7 @@ model Appointment {
   updatedAt  DateTime @updatedAt
 
   @@index([businessId])
+  @@index([businessId, createdAt])
   @@index([leadId])
 }
 
@@ -2153,6 +2157,7 @@ model KnowledgeBase {
   @@index([businessId, clientId])
 
   @@index([businessId, clientId, title])
+  @@index([businessId, clientId, sourceType, isActive, createdAt])
 }
 model Notification {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
@@ -2228,6 +2233,7 @@ model ProposalLedger {
   updatedAt             DateTime @updatedAt
 
   @@index([businessId, status, createdAt])
+  @@index([businessId, status, updatedAt])
   @@index([businessId, leadId, createdAt])
 }
 
@@ -2343,6 +2349,7 @@ model PaymentIntentLedger {
   @@index([businessId, provider, providerPaymentIntentId])
   @@index([businessId, provider, checkoutSessionId])
   @@index([businessId, provider, updatedAt])
+  @@index([businessId, provider, status, updatedAt])
   @@index([proposalId, status])
 }
 
@@ -2417,6 +2424,7 @@ model InvoiceLedger {
   updatedAt             DateTime @updatedAt
 
   @@index([businessId, status, createdAt])
+  @@index([businessId, createdAt])
   @@index([subscriptionId, status, dueAt])
   @@index([externalInvoiceId])
 }
@@ -2565,8 +2573,10 @@ model SubscriptionLedger {
   updatedAt             DateTime @updatedAt
 
   @@index([businessId, status, createdAt])
+  @@index([businessId, status, updatedAt])
   @@index([businessId, updatedAt])
   @@index([businessId, renewAt, status])
+  @@index([businessId, provider, updatedAt])
   @@index([provider, providerSubscriptionId])
 }
 
@@ -5478,6 +5488,8 @@ model Analytics {
   type       String
   meta       Json?
   createdAt  DateTime @default(now())
+  @@index([businessId, createdAt])
+  @@index([businessId, type, createdAt])
 }
 model reminderLog {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId

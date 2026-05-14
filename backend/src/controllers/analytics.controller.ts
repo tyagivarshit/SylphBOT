@@ -9,6 +9,7 @@ import { recordConversionEvent } from "../services/salesAgent/conversionTracker.
 import { scheduleFollowups } from "../queues/followup.queue";
 import { getRequestBusinessId } from "../services/tenant.service";
 import {
+  getRequestAbortSignal,
   getRequestRemainingMs,
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
@@ -257,7 +258,10 @@ export const getDeepAnalyticsDashboard = async (
       res,
       label: "analytics_dashboard",
       fallback: buildAnalyticsDashboardFallback(range, planKey),
-      task: () => getAnalyticsDashboard(businessId, range, planKey),
+      task: () =>
+        getAnalyticsDashboard(businessId, range, planKey, {
+          requestSignal: getRequestAbortSignal({ req, res }),
+        }),
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;
@@ -306,7 +310,10 @@ export const getRevenueAnalytics = async (req: Request, res: Response) => {
       res,
       label: "analytics_revenue",
       fallback: buildAnalyticsDashboardFallback(range, planKey),
-      task: () => getAnalyticsDashboard(businessId, range, planKey),
+      task: () =>
+        getAnalyticsDashboard(businessId, range, planKey, {
+          requestSignal: getRequestAbortSignal({ req, res }),
+        }),
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;

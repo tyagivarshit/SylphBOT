@@ -6,13 +6,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteKnowledge = exports.updateKnowledge = exports.getSingleKnowledge = exports.getKnowledge = exports.createKnowledge = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const embedding_service_1 = require("../services/embedding.service");
+const projectionCoordinator_service_1 = require("../services/projectionCoordinator.service");
 const clientScope_service_1 = require("../services/clientScope.service");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
+const KNOWLEDGE_PROJECTION_CACHE_TTL_MS = 10000;
+const KNOWLEDGE_PROJECTION_STALE_TTL_MS = 60000;
+const KNOWLEDGE_PROJECTION_WAIT_MS = 120;
+const KNOWLEDGE_PROJECTION_COMPUTE_BUDGET_MS = 4000;
+const KNOWLEDGE_PROJECTION_MAX_ROWS = 300;
+const KNOWLEDGE_PROJECTION_CACHE_PREFIX = "knowledge:list:v1:";
 const getRequestedClientId = (req) => (0, clientScope_service_1.normalizeClientId)(req.body?.clientId || req.query?.clientId);
 const getScopedKnowledgeClientId = (client) => client.platform === "SYSTEM" ? null : client.id;
 const hasResponseCommitted = (res) => res.headersSent || res.writableEnded || res.writableFinished;
-/* =====================================================
-CREATE KNOWLEDGE
-===================================================== */
+const buildKnowledgeProjectionCacheKey = (businessId, scopedClientId) => `${KNOWLEDGE_PROJECTION_CACHE_PREFIX}${businessId}:${scopedClientId || "shared"}`;
+const buildKnowledgeProjectionBusinessPrefix = (businessId) => `${KNOWLEDGE_PROJECTION_CACHE_PREFIX}${businessId}:`;
 const createKnowledge = async (req, res) => {
     try {
         const businessId = req.user?.businessId;
@@ -32,21 +39,22 @@ const createKnowledge = async (req, res) => {
                 message: "Title and content required",
             });
         }
-        /* 🔥 EMBEDDING */
         const embedding = await (0, embedding_service_1.createEmbedding)(`${title} ${content}`);
-        /* 🔥 CREATE (STRICT MANUAL KB ONLY) */
         const knowledge = await prisma_1.default.knowledgeBase.create({
             data: {
                 businessId,
                 clientId: scopedKnowledgeClientId,
                 title,
                 content,
-                sourceType: "MANUAL", // 🔥 FORCE MANUAL
+                sourceType: "MANUAL",
                 sourceUrl: sourceUrl || null,
-                priority: "MEDIUM", // 🔥 DEFAULT PRIORITY
+                priority: "MEDIUM",
                 embedding,
                 isActive: true,
             },
+        });
+        (0, projectionCoordinator_service_1.invalidateProjectionSnapshots)({
+            prefix: buildKnowledgeProjectionBusinessPrefix(businessId),
         });
         return res.status(201).json({
             success: true,
@@ -68,9 +76,6 @@ const createKnowledge = async (req, res) => {
     }
 };
 exports.createKnowledge = createKnowledge;
-/* =====================================================
-GET KNOWLEDGE LIST
-===================================================== */
 const getKnowledge = async (req, res) => {
     try {
         const businessId = req.user?.businessId;
@@ -83,20 +88,60 @@ const getKnowledge = async (req, res) => {
         const requestedClientId = getRequestedClientId(req);
         const client = await (0, clientScope_service_1.getScopedTrainingClient)(businessId, requestedClientId);
         const scopedKnowledgeClientId = getScopedKnowledgeClientId(client);
-        const knowledge = await prisma_1.default.knowledgeBase.findMany({
-            where: {
-                businessId,
-                clientId: scopedKnowledgeClientId,
-                sourceType: "MANUAL", // 🔥 FILTER
-                isActive: true,
-            },
-            orderBy: {
-                createdAt: "desc",
-            },
+        const projection = await (0, projectionCoordinator_service_1.getProjectionSnapshot)({
+            cacheKey: buildKnowledgeProjectionCacheKey(businessId, scopedKnowledgeClientId),
+            label: "knowledge_projection",
+            businessId,
+            cacheTtlMs: KNOWLEDGE_PROJECTION_CACHE_TTL_MS,
+            staleTtlMs: KNOWLEDGE_PROJECTION_STALE_TTL_MS,
+            computeBudgetMs: KNOWLEDGE_PROJECTION_COMPUTE_BUDGET_MS,
+            initialWaitMs: KNOWLEDGE_PROJECTION_WAIT_MS,
+            requestSignal: (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }),
+            fallback: [],
+            compute: () => prisma_1.default.knowledgeBase.findMany({
+                where: {
+                    businessId,
+                    clientId: scopedKnowledgeClientId,
+                    sourceType: "MANUAL",
+                    isActive: true,
+                },
+                orderBy: {
+                    createdAt: "desc",
+                },
+                take: KNOWLEDGE_PROJECTION_MAX_ROWS,
+                select: {
+                    id: true,
+                    businessId: true,
+                    clientId: true,
+                    title: true,
+                    content: true,
+                    sourceType: true,
+                    sourceUrl: true,
+                    priority: true,
+                    reinforcementScore: true,
+                    retrievalCount: true,
+                    successCount: true,
+                    lastRetrievedAt: true,
+                    lastReinforcedAt: true,
+                    isActive: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            }),
+        });
+        console.info("KNOWLEDGE_PROJECTION_READY", {
+            businessId,
+            clientId: scopedKnowledgeClientId,
+            source: projection.meta.source,
+            stale: projection.meta.stale,
+            deduped: projection.meta.deduped,
+            cancelled: projection.meta.cancelled,
+            budgetExceeded: projection.meta.budgetExceeded,
+            count: Array.isArray(projection.value) ? projection.value.length : 0,
         });
         return res.json({
             success: true,
-            knowledge,
+            knowledge: projection.value,
         });
     }
     catch (error) {
@@ -113,9 +158,6 @@ const getKnowledge = async (req, res) => {
     }
 };
 exports.getKnowledge = getKnowledge;
-/* =====================================================
-GET SINGLE KNOWLEDGE
-===================================================== */
 const getSingleKnowledge = async (req, res) => {
     try {
         const businessId = req.user?.businessId;
@@ -130,7 +172,7 @@ const getSingleKnowledge = async (req, res) => {
             where: {
                 id,
                 businessId,
-                sourceType: "MANUAL", // 🔥 SAFE FILTER
+                sourceType: "MANUAL",
                 isActive: true,
             },
         });
@@ -157,9 +199,6 @@ const getSingleKnowledge = async (req, res) => {
     }
 };
 exports.getSingleKnowledge = getSingleKnowledge;
-/* =====================================================
-UPDATE KNOWLEDGE
-===================================================== */
 const updateKnowledge = async (req, res) => {
     try {
         const businessId = req.user?.businessId;
@@ -175,7 +214,7 @@ const updateKnowledge = async (req, res) => {
             where: {
                 id,
                 businessId,
-                sourceType: "MANUAL", // 🔥 SAFE
+                sourceType: "MANUAL",
                 isActive: true,
             },
         });
@@ -192,7 +231,6 @@ const updateKnowledge = async (req, res) => {
         const nextScopeClient = requestedClientId
             ? await (0, clientScope_service_1.getScopedTrainingClient)(businessId, requestedClientId)
             : currentScopeClient;
-        /* 🔥 RE-EMBED IF CONTENT CHANGED */
         let embedding = knowledge.embedding;
         if (title || content) {
             embedding = await (0, embedding_service_1.createEmbedding)(`${title || knowledge.title} ${content || knowledge.content}`);
@@ -206,6 +244,9 @@ const updateKnowledge = async (req, res) => {
                 sourceUrl: sourceUrl ?? knowledge.sourceUrl,
                 embedding,
             },
+        });
+        (0, projectionCoordinator_service_1.invalidateProjectionSnapshots)({
+            prefix: buildKnowledgeProjectionBusinessPrefix(businessId),
         });
         return res.json({
             success: true,
@@ -227,9 +268,6 @@ const updateKnowledge = async (req, res) => {
     }
 };
 exports.updateKnowledge = updateKnowledge;
-/* =====================================================
-DELETE KNOWLEDGE
-===================================================== */
 const deleteKnowledge = async (req, res) => {
     try {
         const businessId = req.user?.businessId;
@@ -244,7 +282,7 @@ const deleteKnowledge = async (req, res) => {
             where: {
                 id,
                 businessId,
-                sourceType: "MANUAL", // 🔥 SAFE
+                sourceType: "MANUAL",
                 isActive: true,
             },
         });
@@ -254,12 +292,14 @@ const deleteKnowledge = async (req, res) => {
                 message: "Knowledge not found",
             });
         }
-        /* 🔥 SOFT DELETE */
         await prisma_1.default.knowledgeBase.update({
             where: { id },
             data: {
                 isActive: false,
             },
+        });
+        (0, projectionCoordinator_service_1.invalidateProjectionSnapshots)({
+            prefix: buildKnowledgeProjectionBusinessPrefix(businessId),
         });
         return res.json({
             success: true,

@@ -14,7 +14,6 @@ import {
   AnalyticsTrackedMessageRecord,
   getAllLeadAppointments,
   getAllLeads,
-  getAppointmentsForLeadIds,
   getAppointmentsInRange,
   getBusinessProfile,
   getConversionEventsInRange,
@@ -25,6 +24,7 @@ import {
 } from "../analytics/analyticsDashboard.repository";
 import { getVariantPerformance } from "./salesAgent/abTesting.service";
 import { runSalesOptimizer } from "./salesAgent/optimizer.service";
+import { getProjectionSnapshot } from "./projectionCoordinator.service";
 
 type PlanKey = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE";
 type MetricFormat = "number" | "percent" | "minutes";
@@ -92,47 +92,15 @@ const STAGE_LABELS: Record<string, string> = {
 
 const ANALYTICS_DASHBOARD_CACHE_TTL_MS = 15_000;
 const ANALYTICS_DASHBOARD_STALE_TTL_MS = 60_000;
-const ANALYTICS_DASHBOARD_REFRESH_WAIT_MS = 900;
-const ANALYTICS_DASHBOARD_NON_ELITE_TTL_MS = 30_000;
-
-const analyticsDashboardCache = new Map<
-  string,
-  {
-    value?: Awaited<ReturnType<typeof computeAnalyticsDashboardProjection>>;
-    expiresAt: number;
-    staleUntil: number;
-    promise?: Promise<Awaited<ReturnType<typeof computeAnalyticsDashboardProjection>>>;
-  }
->();
+const ANALYTICS_DASHBOARD_REFRESH_WAIT_MS = 180;
+const ANALYTICS_DASHBOARD_COMPUTE_BUDGET_MS = 7_000;
+const ANALYTICS_DASHBOARD_MIN_REFRESH_INTERVAL_MS = 1_500;
 
 const buildAnalyticsDashboardCacheKey = (
   businessId: string,
   range: string,
   planKey: PlanKey
 ) => `${businessId}:${range}:${planKey}`;
-
-const waitWithTimeoutFallback = async <T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  fallback: T
-) => {
-  let timeoutHandle: NodeJS.Timeout | null = null;
-
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((resolve) => {
-        timeoutHandle = setTimeout(() => {
-          resolve(fallback);
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-    }
-  }
-};
 
 function getDateWindow(inputRange: string): DateWindow {
   const config = RANGE_CONFIG[inputRange] || RANGE_CONFIG["30d"];
@@ -1199,10 +1167,14 @@ async function computeAnalyticsDashboardProjection(
     getVariantPerformance({ businessId }),
   ]);
 
-  const [currentLeadAppointments, previousLeadAppointments] = await Promise.all([
-    getAppointmentsForLeadIds(currentLeads.map((lead) => lead.id)),
-    getAppointmentsForLeadIds(previousLeads.map((lead) => lead.id)),
-  ]);
+  const currentLeadIdSet = new Set(currentLeads.map((lead) => lead.id));
+  const previousLeadIdSet = new Set(previousLeads.map((lead) => lead.id));
+  const currentLeadAppointments = allLeadAppointments.filter((appointment) =>
+    appointment.leadId ? currentLeadIdSet.has(appointment.leadId) : false
+  );
+  const previousLeadAppointments = allLeadAppointments.filter((appointment) =>
+    appointment.leadId ? previousLeadIdSet.has(appointment.leadId) : false
+  );
 
   const currentLeadBookedIds = getActiveBookedLeadIds(currentLeadAppointments);
   const previousLeadBookedIds = getActiveBookedLeadIds(previousLeadAppointments);
@@ -1417,155 +1389,51 @@ async function computeAnalyticsDashboardProjection(
   };
 }
 
-const primeAnalyticsDashboardProjection = (
-  cacheKey: string,
-  businessId: string,
-  range: string,
-  planKey: PlanKey
-) => {
-  const current = analyticsDashboardCache.get(cacheKey);
-
-  if (current?.promise) {
-    return current.promise;
-  }
-
-  const previousValue = current?.value;
-  const projectionPromise = computeAnalyticsDashboardProjection(
-    businessId,
-    range,
-    planKey
-  )
-    .then((value) => {
-      analyticsDashboardCache.set(cacheKey, {
-        value,
-        expiresAt: Date.now() + ANALYTICS_DASHBOARD_CACHE_TTL_MS,
-        staleUntil: Date.now() + ANALYTICS_DASHBOARD_STALE_TTL_MS,
-      });
-      return value;
-    })
-    .catch((error) => {
-      if (previousValue) {
-        analyticsDashboardCache.set(cacheKey, {
-          value: previousValue,
-          expiresAt: Date.now() + Math.floor(ANALYTICS_DASHBOARD_CACHE_TTL_MS / 3),
-          staleUntil: Date.now() + ANALYTICS_DASHBOARD_STALE_TTL_MS,
-        });
-        return previousValue;
-      }
-
-      throw error;
-    })
-    .finally(() => {
-      const latest = analyticsDashboardCache.get(cacheKey);
-      if (latest?.promise === projectionPromise) {
-        analyticsDashboardCache.set(cacheKey, {
-          value: latest.value,
-          expiresAt: latest.expiresAt,
-          staleUntil: latest.staleUntil,
-        });
-      }
-    });
-
-  analyticsDashboardCache.set(cacheKey, {
-    value: current?.value,
-    expiresAt: current?.expiresAt || 0,
-    staleUntil: current?.staleUntil || 0,
-    promise: projectionPromise,
-  });
-
-  return projectionPromise;
-};
-
 export async function getAnalyticsDashboard(
   businessId: string,
   range: string,
-  planKey: PlanKey
+  planKey: PlanKey,
+  options?: {
+    requestSignal?: AbortSignal | null;
+  }
 ) {
   const cacheKey = buildAnalyticsDashboardCacheKey(businessId, range, planKey);
-  const nowMs = Date.now();
-  const cached = analyticsDashboardCache.get(cacheKey);
-
-  if (cached?.value && cached.expiresAt > nowMs) {
-    console.info("[ANALYTICS_DASHBOARD_CACHE]", {
-      mode: "HIT",
-      businessId,
-      range,
-      planKey,
-    });
-    return cached.value;
-  }
 
   if (planKey !== "ELITE") {
-    const fallback = buildAnalyticsDashboardFallback(range, planKey);
-    analyticsDashboardCache.set(cacheKey, {
-      value: fallback,
-      expiresAt: nowMs + ANALYTICS_DASHBOARD_NON_ELITE_TTL_MS,
-      staleUntil: nowMs + ANALYTICS_DASHBOARD_NON_ELITE_TTL_MS,
-    });
     console.info("[ANALYTICS_DASHBOARD_CACHE]", {
       mode: "NON_ELITE_FAST_FALLBACK",
       businessId,
       range,
       planKey,
     });
-    return fallback;
-  }
-
-  const projectionPromise = primeAnalyticsDashboardProjection(
-    cacheKey,
-    businessId,
-    range,
-    planKey
-  );
-
-  if (cached?.value && cached.staleUntil > nowMs) {
-    console.info("[ANALYTICS_DASHBOARD_CACHE]", {
-      mode: "STALE_RETURN_REFRESH",
-      businessId,
-      range,
-      planKey,
-      waitMs: ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
-    });
-
-    const refreshed = await waitWithTimeoutFallback(
-      projectionPromise,
-      ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
-      cached.value
-    );
-
-    if (refreshed === cached.value) {
-      console.info("[ANALYTICS_DASHBOARD_CACHE]", {
-        mode: "STALE_TIMEOUT_FALLBACK",
-        businessId,
-        range,
-        planKey,
-      });
-    }
-
-    return refreshed;
+    return buildAnalyticsDashboardFallback(range, planKey);
   }
 
   const fallback = buildAnalyticsDashboardFallback(range, planKey);
-  const projection = await waitWithTimeoutFallback(
-    projectionPromise,
-    ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
-    fallback
-  );
-
-  if (projection === fallback) {
-    console.info("[ANALYTICS_DASHBOARD_CACHE]", {
-      mode: "MISS_TIMEOUT_FALLBACK",
-      businessId,
-      range,
-      planKey,
-    });
-  }
+  const snapshot = await getProjectionSnapshot({
+    cacheKey,
+    label: "analytics_dashboard",
+    businessId,
+    cacheTtlMs: ANALYTICS_DASHBOARD_CACHE_TTL_MS,
+    staleTtlMs: ANALYTICS_DASHBOARD_STALE_TTL_MS,
+    computeBudgetMs: ANALYTICS_DASHBOARD_COMPUTE_BUDGET_MS,
+    initialWaitMs: ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
+    minRefreshIntervalMs: ANALYTICS_DASHBOARD_MIN_REFRESH_INTERVAL_MS,
+    requestSignal: options?.requestSignal || null,
+    fallback,
+    compute: () => computeAnalyticsDashboardProjection(businessId, range, planKey),
+  });
 
   console.info("[ANALYTICS_DASHBOARD_CACHE]", {
-    mode: projection === fallback ? "MISS_FALLBACK" : "MISS_WAIT",
+    mode: snapshot.meta.source,
     businessId,
     range,
     planKey,
+    stale: snapshot.meta.stale,
+    deduped: snapshot.meta.deduped,
+    waitMs: snapshot.meta.waitMs,
+    budgetExceeded: snapshot.meta.budgetExceeded,
+    cancelled: snapshot.meta.cancelled,
   });
-  return projection;
+  return snapshot.value;
 }

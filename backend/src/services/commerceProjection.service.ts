@@ -11,6 +11,7 @@ import { subscriptionEngineService } from "./subscriptionEngine.service";
 import { settleSuccessfulCheckout } from "./billingSettlement.service";
 import { invalidateBillingContextCache } from "../middleware/subscription.middleware";
 import { getPlanFromPrice } from "../config/stripe.price.map";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   compareProviderVersion,
   mergeMetadata,
@@ -160,6 +161,7 @@ export const createCommerceProjectionService = () => {
     strictBusinessId,
   }: {
     event: {
+      provider?: string | null;
       providerPaymentIntentId?: string | null;
       providerSubscriptionId?: string | null;
       providerInvoiceId?: string | null;
@@ -170,22 +172,37 @@ export const createCommerceProjectionService = () => {
   }) => {
     const paymentIntentKey = String(event.metadata?.paymentIntentKey || "").trim();
 
-    const paymentIntent = event.providerPaymentIntentId || paymentIntentKey
-      ? await prisma.paymentIntentLedger.findFirst({
-          where: {
-            ...(strictBusinessId ? { businessId: strictBusinessId } : {}),
-            OR: [
-              event.providerPaymentIntentId
-                ? { providerPaymentIntentId: event.providerPaymentIntentId }
-                : undefined,
-              event.providerPaymentIntentId
-                ? { paymentIntentKey: event.providerPaymentIntentId }
-                : undefined,
-              paymentIntentKey ? { paymentIntentKey } : undefined,
-            ].filter(Boolean) as any,
-          },
-        })
-      : null;
+    const normalizedProvider =
+      String(event.provider || "").trim().toUpperCase() || null;
+    let paymentIntent = null as Awaited<ReturnType<typeof prisma.paymentIntentLedger.findFirst>>;
+
+    if (event.providerPaymentIntentId) {
+      paymentIntent = await prisma.paymentIntentLedger.findFirst({
+        where: {
+          ...(strictBusinessId ? { businessId: strictBusinessId } : {}),
+          ...(normalizedProvider ? { provider: normalizedProvider as any } : {}),
+          OR: [
+            { providerPaymentIntentId: event.providerPaymentIntentId },
+            { paymentIntentKey: event.providerPaymentIntentId },
+          ],
+        },
+      });
+    }
+
+    if (!paymentIntent && paymentIntentKey) {
+      const byPaymentIntentKey = await prisma.paymentIntentLedger.findUnique({
+        where: {
+          paymentIntentKey,
+        },
+      });
+
+      if (
+        byPaymentIntentKey &&
+        (!strictBusinessId || byPaymentIntentKey.businessId === strictBusinessId)
+      ) {
+        paymentIntent = byPaymentIntentKey;
+      }
+    }
 
     const invoice = event.providerInvoiceId
       ? await prisma.invoiceLedger.findFirst({
@@ -209,6 +226,7 @@ export const createCommerceProjectionService = () => {
       ? await prisma.subscriptionLedger.findFirst({
           where: {
             ...(strictBusinessId ? { businessId: strictBusinessId } : {}),
+            ...(normalizedProvider ? { provider: normalizedProvider as any } : {}),
             providerSubscriptionId: event.providerSubscriptionId,
           },
         })
@@ -230,6 +248,7 @@ export const createCommerceProjectionService = () => {
       ? await prisma.refundLedger.findFirst({
           where: {
             ...(strictBusinessId ? { businessId: strictBusinessId } : {}),
+            ...(normalizedProvider ? { provider: normalizedProvider as any } : {}),
             providerRefundId: event.providerRefundId,
           },
         })
@@ -277,6 +296,20 @@ export const createCommerceProjectionService = () => {
     body: unknown;
     strictBusinessId?: string | null;
   }) => {
+    const webhookStartedAt = Date.now();
+    const emitWebhookTimingMetric = (input: {
+      businessId?: string | null;
+      metadata?: Record<string, unknown>;
+    }) => {
+      emitPerformanceMetric({
+        name: "webhook_ms",
+        value: Date.now() - webhookStartedAt,
+        businessId: input.businessId || strictBusinessId || null,
+        route: "commerce_webhook",
+        metadata: input.metadata || null,
+      });
+    };
+    try {
     const parsed = await commerceProviderRegistry.parseWebhook({
       provider,
       headers,
@@ -325,6 +358,14 @@ export const createCommerceProjectionService = () => {
     });
 
     if (claim.state === "REPLAYED") {
+      emitWebhookTimingMetric({
+        metadata: {
+          provider: parsed.provider,
+          providerType: parsed.type,
+          providerEventId: parsed.providerEventId,
+          idempotency: "replayed",
+        },
+      });
       return {
         event: parsed,
         replay: true,
@@ -334,6 +375,14 @@ export const createCommerceProjectionService = () => {
     }
 
     if (claim.state === "INFLIGHT") {
+      emitWebhookTimingMetric({
+        metadata: {
+          provider: parsed.provider,
+          providerType: parsed.type,
+          providerEventId: parsed.providerEventId,
+          idempotency: "inflight",
+        },
+      });
       return {
         event: parsed,
         replay: true,
@@ -342,6 +391,7 @@ export const createCommerceProjectionService = () => {
       };
     }
 
+    const reconcileStartedAt = Date.now();
     const reconciled = await paymentIntentService
       .reconcileParsedProviderWebhook({
         event: parsed,
@@ -360,6 +410,22 @@ export const createCommerceProjectionService = () => {
           .catch(() => undefined);
 
         throw error;
+      })
+      .finally(() => {
+        emitPerformanceMetric({
+          name: "reconcile_ms",
+          value: Date.now() - reconcileStartedAt,
+          businessId:
+            strictBusinessId ||
+            String(toRecord(parsed.metadata).businessId || "").trim() ||
+            null,
+          route: "commerce_reconcile",
+          metadata: {
+            provider: parsed.provider,
+            providerType: parsed.type,
+            providerEventId: parsed.providerEventId,
+          },
+        });
       });
 
     const event = (reconciled.event || parsed) as typeof parsed;
@@ -391,6 +457,16 @@ export const createCommerceProjectionService = () => {
         },
       });
 
+      emitWebhookTimingMetric({
+        businessId,
+        metadata: {
+          provider: parsed.provider,
+          providerType: parsed.type,
+          providerEventId: parsed.providerEventId,
+          stale: true,
+          idempotency: "processed",
+        },
+      });
       return {
         ...reconciled,
         stale: true,
@@ -412,6 +488,16 @@ export const createCommerceProjectionService = () => {
         },
       });
 
+      emitWebhookTimingMetric({
+        businessId,
+        metadata: {
+          provider: parsed.provider,
+          providerType: parsed.type,
+          providerEventId: parsed.providerEventId,
+          staleByContextVersion: true,
+          idempotency: "processed",
+        },
+      });
       return {
         ...reconciled,
         stale: true,
@@ -433,6 +519,16 @@ export const createCommerceProjectionService = () => {
         },
       });
 
+      emitWebhookTimingMetric({
+        businessId,
+        metadata: {
+          provider: parsed.provider,
+          providerType: parsed.type,
+          providerEventId: parsed.providerEventId,
+          overrideLocked: true,
+          idempotency: "processed",
+        },
+      });
       return {
         ...reconciled,
         idempotency: "processed",
@@ -450,6 +546,15 @@ export const createCommerceProjectionService = () => {
           providerType: parsed.type,
           providerObjectId,
           paymentIntentId: paymentIntent?.id || null,
+        },
+      });
+      emitWebhookTimingMetric({
+        metadata: {
+          provider: parsed.provider,
+          providerType: parsed.type,
+          providerEventId: parsed.providerEventId,
+          idempotency: "failed",
+          reason: "webhook_context_unresolved",
         },
       });
       return {
@@ -470,6 +575,7 @@ export const createCommerceProjectionService = () => {
       event.type === "payment_intent.succeeded" ||
       event.type === "checkout.completed"
     ) {
+      const subscriptionActivationStartedAt = Date.now();
       try {
         const settlement = await settleSuccessfulCheckout({
           paymentIntentId: paymentIntent?.id || null,
@@ -479,6 +585,18 @@ export const createCommerceProjectionService = () => {
           providerSubscriptionId: event.providerSubscriptionId || null,
           occurredAt: event.occurredAt,
           source: "provider_webhook",
+        });
+        emitPerformanceMetric({
+          name: "subscription_activation_ms",
+          value: Date.now() - subscriptionActivationStartedAt,
+          businessId,
+          route: "billing_settlement",
+          metadata: {
+            provider: parsed.provider,
+            providerType: parsed.type,
+            providerEventId: parsed.providerEventId,
+            settled: Boolean((settlement as any)?.settled),
+          },
         });
         if (
           settlement.settled &&
@@ -495,6 +613,24 @@ export const createCommerceProjectionService = () => {
           });
         }
       } catch (error) {
+        emitPerformanceMetric({
+          name: "subscription_activation_ms",
+          value: Date.now() - subscriptionActivationStartedAt,
+          businessId,
+          route: "billing_settlement",
+          metadata: {
+            provider: parsed.provider,
+            providerType: parsed.type,
+            providerEventId: parsed.providerEventId,
+            settled: false,
+            failed: true,
+            reason: String(
+              (error as { message?: unknown })?.message ||
+                error ||
+                "checkout_settlement_failed"
+            ),
+          },
+        });
         await commerceAuthorityService
           .markExternalIdempotencyFailed({
             id: claim.row.id,
@@ -1102,11 +1238,31 @@ export const createCommerceProjectionService = () => {
       paymentIntentId: paymentIntent?.id || null,
     });
 
+    emitWebhookTimingMetric({
+      businessId,
+      metadata: {
+        provider: parsed.provider,
+        providerType: parsed.type,
+        providerEventId: parsed.providerEventId,
+        idempotency: "processed",
+        unresolved,
+      },
+    });
     return {
       ...reconciled,
       unmatched: unresolved,
       idempotency: "processed",
     };
+    } catch (error) {
+      emitWebhookTimingMetric({
+        metadata: {
+          failed: true,
+          reason: String((error as { message?: unknown })?.message || "webhook_failed"),
+          provider: String(provider || "").trim().toUpperCase() || null,
+        },
+      });
+      throw error;
+    }
   };
 
   const replayPendingProviderWebhooks = async ({

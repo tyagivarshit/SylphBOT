@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import crypto from "crypto";
 import prisma from "../config/prisma";
+import redis from "../config/redis";
 import { env } from "../config/env";
 import { resolveBillingCurrency } from "../services/billingGeo.service";
 import {
@@ -23,7 +24,9 @@ import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import { stripe } from "../services/stripe.service";
 import { assertStripeConfigReady } from "../services/commerce/providers/stripeConfig.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import { runProjectionComputeTask } from "../services/projectionCoordinator.service";
 import {
+  getRequestAbortSignal,
   getRequestRemainingMs,
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
@@ -93,17 +96,23 @@ const EMPTY_BILLING_CONTEXT: BillingContext = {
 type BillingConfirmApiState = "SUCCESS" | "ALREADY_PROCESSED" | "PENDING" | "FAILED";
 
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60_000;
-const BILLING_PROJECTION_CACHE_TTL_MS = 4_000;
-const BILLING_PROJECTION_MAX_WAIT_MS = 10_500;
+const BILLING_PROJECTION_CACHE_TTL_MS = 12_000;
+const BILLING_PROJECTION_MAX_WAIT_MS = 2_200;
 const BILLING_PROJECTION_TIMEOUT_BUFFER_MS = 350;
+const BILLING_PROJECTION_REDIS_CACHE_PREFIX = "billing:projection:v2:";
+const BILLING_PROJECTION_REDIS_CACHE_TTL_SECONDS = 45;
+const BILLING_PROJECTION_STALE_MAX_AGE_MS = 90_000;
+const BILLING_PROJECTION_COMPUTE_BUDGET_MS = 6_500;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 const CHECKOUT_IN_FLIGHT_WINDOW_MS = 20_000;
+const CHECKOUT_CONFIRM_IN_FLIGHT_WINDOW_MS = 30_000;
 
 const billingProjectionCache = new Map<
   string,
   {
     value?: Record<string, unknown>;
     expiresAt: number;
+    updatedAt?: number;
     promise?: Promise<Record<string, unknown>>;
   }
 >();
@@ -114,19 +123,132 @@ const checkoutInFlight = new Map<
     requestId: string | null;
   }
 >();
+const checkoutConfirmInFlight = new Map<
+  string,
+  {
+    startedAt: number;
+    promise: Promise<void>;
+  }
+>();
 
 const getBillingProjectionCacheKey = (
   businessId: string,
   currencyHint: string
 ) => `${businessId}:${currencyHint}`;
 
+const getBillingProjectionRedisKey = (cacheKey: string) =>
+  `${BILLING_PROJECTION_REDIS_CACHE_PREFIX}${cacheKey}`;
+
+const emitProjectionTelemetry = (input: {
+  name:
+    | "projection_compute_ms"
+    | "projection_cache_hit"
+    | "projection_deduped"
+    | "projection_cancelled"
+    | "projection_budget_exceeded";
+  value?: number;
+  businessId?: string | null;
+  metadata?: Record<string, unknown>;
+}) => {
+  emitPerformanceMetric({
+    name: input.name,
+    value: input.value,
+    businessId: input.businessId || null,
+    route: "billing_projection",
+    metadata: input.metadata || null,
+  });
+};
+
+const readRedisBillingProjectionSnapshot = async (cacheKey: string) => {
+  const raw = await redis
+    .get(getBillingProjectionRedisKey(cacheKey))
+    .catch(() => null);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      await redis
+        .del(getBillingProjectionRedisKey(cacheKey))
+        .catch(() => undefined);
+      return null;
+    }
+
+    const payload = parsed as Record<string, unknown>;
+    const updatedAt = Number(payload.updatedAt || 0);
+    const data =
+      payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+        ? (payload.data as Record<string, unknown>)
+        : null;
+
+    if (!data || !Number.isFinite(updatedAt) || updatedAt <= 0) {
+      await redis
+        .del(getBillingProjectionRedisKey(cacheKey))
+        .catch(() => undefined);
+      return null;
+    }
+
+    return {
+      data,
+      updatedAt,
+    };
+  } catch {
+    await redis.del(getBillingProjectionRedisKey(cacheKey)).catch(() => undefined);
+    return null;
+  }
+};
+
+const writeRedisBillingProjectionSnapshot = async (
+  cacheKey: string,
+  value: Record<string, unknown>
+) => {
+  const payload = {
+    updatedAt: Date.now(),
+    data: value,
+  };
+  await redis
+    .set(
+      getBillingProjectionRedisKey(cacheKey),
+      JSON.stringify(payload),
+      "EX",
+      BILLING_PROJECTION_REDIS_CACHE_TTL_SECONDS
+    )
+    .catch(() => undefined);
+};
+
+const markBillingSnapshotAsStale = (
+  value: Record<string, unknown>,
+  reason: string
+): Record<string, unknown> => {
+  const meta =
+    value.meta && typeof value.meta === "object" && !Array.isArray(value.meta)
+      ? (value.meta as Record<string, unknown>)
+      : {};
+  return {
+    ...value,
+    meta: {
+      ...meta,
+      degraded: true,
+      reason,
+    },
+  };
+};
+
 type BillingProjectionWaitResult =
   | {
       timedOut: false;
+      cancelled: false;
       value: Record<string, unknown>;
     }
   | {
       timedOut: true;
+      cancelled: false;
+    }
+  | {
+      timedOut: false;
+      cancelled: true;
     };
 
 const hasExplicitFinalResponseWrite = (res: Response) =>
@@ -160,30 +282,63 @@ const resolveBillingProjectionWaitBudgetMs = (res: Response) => {
 
 const waitForBillingProjection = async (
   promise: Promise<Record<string, unknown>>,
-  timeoutMs: number
+  timeoutMs: number,
+  requestSignal?: AbortSignal | null
 ): Promise<BillingProjectionWaitResult> =>
   new Promise((resolve, reject) => {
     let settled = false;
     const boundedTimeoutMs = Math.max(1, Math.floor(timeoutMs));
-    const timeoutHandle = setTimeout(() => {
+    const signal = requestSignal || null;
+
+    const cleanup = () => {
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+      clearTimeout(timeoutHandle);
+    };
+
+    const settle = (value: BillingProjectionWaitResult) => {
       if (settled) {
         return;
       }
       settled = true;
-      resolve({
+      cleanup();
+      resolve(value);
+    };
+
+    const onAbort = () => {
+      settle({
+        timedOut: false,
+        cancelled: true,
+      });
+    };
+
+    const timeoutHandle = setTimeout(() => {
+      settle({
         timedOut: true,
+        cancelled: false,
       });
     }, boundedTimeoutMs);
 
+    if (signal?.aborted) {
+      settle({
+        timedOut: false,
+        cancelled: true,
+      });
+      return;
+    }
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, {
+        once: true,
+      });
+    }
+
     promise
       .then((value) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timeoutHandle);
-        resolve({
+        settle({
           timedOut: false,
+          cancelled: false,
           value,
         });
       })
@@ -192,7 +347,7 @@ const waitForBillingProjection = async (
           return;
         }
         settled = true;
-        clearTimeout(timeoutHandle);
+        cleanup();
         reject(error);
       });
   });
@@ -201,8 +356,9 @@ const hasProjectionValue = (
   result: BillingProjectionWaitResult
 ): result is {
   timedOut: false;
+  cancelled: false;
   value: Record<string, unknown>;
-} => !result.timedOut;
+} => !result.timedOut && !result.cancelled;
 
 type PlanRow = {
   id: string;
@@ -419,37 +575,79 @@ export class BillingController {
     businessId: string;
     sessionId: string;
   }): Promise<CheckoutConfirmIntentRow | null> {
-    const directMatch = await prisma.paymentIntentLedger.findFirst({
+    const select = {
+      id: true,
+      businessId: true,
+      paymentIntentKey: true,
+      providerPaymentIntentId: true,
+      status: true,
+      metadata: true,
+      proposal: {
+        select: {
+          proposalKey: true,
+        },
+      },
+    } as const;
+
+    const normalizedSessionId = String(input.sessionId || "").trim();
+    if (!normalizedSessionId) {
+      return null;
+    }
+
+    const byProviderPaymentIntentId = await prisma.paymentIntentLedger.findFirst({
       where: {
         businessId: input.businessId,
         provider: "STRIPE",
-        OR: [
-          {
-            providerPaymentIntentId: input.sessionId,
-          },
-          {
-            paymentIntentKey: input.sessionId,
-          },
-        ],
+        providerPaymentIntentId: normalizedSessionId,
       },
-      select: {
-        id: true,
-        businessId: true,
-        paymentIntentKey: true,
-        providerPaymentIntentId: true,
-        status: true,
-        metadata: true,
-        proposal: {
-          select: {
-            proposalKey: true,
-          },
-        },
-      },
+      select,
     });
 
-    if (directMatch) {
-      return directMatch;
+    if (byProviderPaymentIntentId) {
+      return byProviderPaymentIntentId;
     }
+
+    const byPaymentIntentKey = await prisma.paymentIntentLedger.findUnique({
+      where: {
+        paymentIntentKey: normalizedSessionId,
+      },
+      select,
+    });
+
+    if (byPaymentIntentKey && byPaymentIntentKey.businessId === input.businessId) {
+      return byPaymentIntentKey;
+    }
+
+    const boundedMetadataFallback = await prisma.paymentIntentLedger.findMany({
+      where: {
+        businessId: input.businessId,
+        provider: "STRIPE",
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+      take: 40,
+      select,
+    });
+    const byMetadataSession = boundedMetadataFallback.find((row) => {
+      const metadata = toRecord(row.metadata);
+      const providerMetadata = toRecord(metadata.providerMetadata);
+      const checkoutConfirmMetadata = getCheckoutConfirmMetadata(metadata);
+      const metadataSessionId =
+        String(
+          row.providerPaymentIntentId ||
+            metadata.stripeSessionId ||
+            providerMetadata.stripeSessionId ||
+            checkoutConfirmMetadata.sessionId ||
+            ""
+        ).trim() || null;
+      return metadataSessionId === normalizedSessionId;
+    });
+
+    if (byMetadataSession) {
+      return byMetadataSession;
+    }
+
     return null;
   }
 
@@ -919,6 +1117,14 @@ export class BillingController {
       route: "billing_projection",
       metadata: null,
     });
+    emitProjectionTelemetry({
+      name: "projection_compute_ms",
+      value: durationMs,
+      businessId,
+      metadata: {
+        source: "billing_build_projection",
+      },
+    });
     if (durationMs >= 900) {
       emitPerformanceMetric({
         name: "DB_SLOW",
@@ -1009,7 +1215,37 @@ export class BillingController {
   ) {
     const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
     const checkoutStartedAt = Date.now();
+    let checkoutLastStageAt = checkoutStartedAt;
+    const checkoutStageTimings: Array<{
+      stage: string;
+      stageMs: number;
+      elapsedMs: number;
+    }> = [];
+    let checkoutTimingReported = false;
     const checkoutRequestId = String((req as any)?.requestId || "").trim() || null;
+    const emitCheckoutMetric = (
+      name:
+        | "auth_ms"
+        | "billing_context_ms"
+        | "pricing_ms"
+        | "proposal_ms"
+        | "payment_intent_ms"
+        | "total_checkout_ms",
+      value: number,
+      metadata?: Record<string, unknown>
+    ) => {
+      emitPerformanceMetric({
+        name,
+        value,
+        businessId: BillingController.getBusinessIdFromRequest(req),
+        route: "billing_checkout",
+        metadata: {
+          requestId: checkoutRequestId,
+          redirectOnSuccess,
+          ...(metadata || {}),
+        },
+      });
+    };
     const hasExplicitFinalResponseWrite = () =>
       Boolean(
         (res.locals as Record<string, unknown> | undefined)?.[
@@ -1018,22 +1254,59 @@ export class BillingController {
       );
     const isResponseCommitted = () =>
       res.headersSent || res.writableEnded || hasExplicitFinalResponseWrite();
+    const pushCheckoutStageTiming = (stage: string) => {
+      const now = Date.now();
+      const timing = {
+        stage,
+        stageMs: now - checkoutLastStageAt,
+        elapsedMs: now - checkoutStartedAt,
+      };
+      checkoutLastStageAt = now;
+      checkoutStageTimings.push(timing);
+      return timing;
+    };
+    const reportCheckoutTiming = (
+      outcome: "success" | "failed",
+      details?: Record<string, unknown>
+    ) => {
+      if (checkoutTimingReported) {
+        return;
+      }
+      checkoutTimingReported = true;
+      const totalCheckoutMs = Date.now() - checkoutStartedAt;
+      emitCheckoutMetric("total_checkout_ms", totalCheckoutMs, {
+        outcome,
+        ...(details || {}),
+      });
+      console.info("CHECKOUT_TIMING_BREAKDOWN", {
+        requestId: checkoutRequestId,
+        route: req.originalUrl,
+        method: req.method,
+        outcome,
+        totalMs: totalCheckoutMs,
+        stages: checkoutStageTimings,
+        ...(details || {}),
+      });
+    };
     const logStageOk = (
       stage: string,
       details?: Record<string, unknown>
     ) => {
+      const timing = pushCheckoutStageTiming(stage);
       console.info("BILLING_STAGE_OK", {
         stage,
         requestId: checkoutRequestId,
         route: req.originalUrl,
         method: req.method,
-        elapsedMs: Date.now() - checkoutStartedAt,
+        elapsedMs: timing.elapsedMs,
+        stageMs: timing.stageMs,
         ...(details || {}),
       });
       console.info("CHECKOUT_STAGE_OK", {
         stage,
         requestId: checkoutRequestId,
-        elapsedMs: Date.now() - checkoutStartedAt,
+        elapsedMs: timing.elapsedMs,
+        stageMs: timing.stageMs,
         ...(details || {}),
       });
     };
@@ -1042,13 +1315,15 @@ export class BillingController {
       reason: string,
       details?: Record<string, unknown>
     ) => {
+      const timing = pushCheckoutStageTiming(stage);
       console.error("CHECKOUT_STAGE_FAIL", {
         stage,
         reason,
         requestId: checkoutRequestId,
         route: req.originalUrl,
         method: req.method,
-        elapsedMs: Date.now() - checkoutStartedAt,
+        elapsedMs: timing.elapsedMs,
+        stageMs: timing.stageMs,
         ...(details || {}),
       });
     };
@@ -1112,6 +1387,11 @@ export class BillingController {
         method: req.method,
         elapsedMs: Date.now() - checkoutStartedAt,
         redirectOnSuccess,
+      });
+      reportCheckoutTiming("failed", {
+        status: input.status,
+        reason: input.reason,
+        code: input.code || null,
       });
 
       if (isResponseCommitted()) {
@@ -1218,7 +1498,11 @@ export class BillingController {
         });
       }
 
+      const authStartedAt = Date.now();
       const { businessId, email } = await getUserContext(req);
+      emitCheckoutMetric("auth_ms", Date.now() - authStartedAt, {
+        stage: "auth_resolved",
+      });
       throwIfRequestLifecycleAborted({
         req,
         res,
@@ -1237,6 +1521,7 @@ export class BillingController {
         });
       }
 
+      const billingContextStartedAt = Date.now();
       logStageOk("checkout.context.validated", {
         businessId,
         plan: normalizedPlan,
@@ -1250,7 +1535,12 @@ export class BillingController {
         res,
         stage: "checkout.stripe_config",
       });
+      emitCheckoutMetric("billing_context_ms", Date.now() - billingContextStartedAt, {
+        businessId,
+        stage: "context_validated",
+      });
 
+      const pricingStartedAt = Date.now();
       const currency = resolveBillingCurrency(req);
       const pricingPlan = getPricingPlanConfig(normalizedPlan);
       const unitPrice =
@@ -1296,6 +1586,12 @@ export class BillingController {
         res,
         stage: "checkout.subscription_lookup",
       });
+      emitCheckoutMetric("pricing_ms", Date.now() - pricingStartedAt, {
+        businessId,
+        plan: normalizedPlan,
+        billingCycle: normalizedBilling,
+        currency,
+      });
       const subscriptionMeta = (activeSubscription?.metadata || {}) as Record<string, unknown>;
       const checkoutProposalFingerprint = crypto
         .createHash("sha256")
@@ -1336,6 +1632,7 @@ export class BillingController {
       });
 
       try {
+        const proposalStartedAt = Date.now();
         const proposal = await proposalEngineService.createProposal({
             businessId,
             planCode: normalizedPlan,
@@ -1381,44 +1678,59 @@ export class BillingController {
           res,
           stage: "checkout.proposal_ready",
         });
+        emitCheckoutMetric("proposal_ms", Date.now() - proposalStartedAt, {
+          businessId,
+          plan: normalizedPlan,
+          billingCycle: normalizedBilling,
+          checkoutType,
+        });
         logStageOk("proposal.created", {
           businessId,
           proposalKey: readyProposal.proposalKey,
           proposalStatus: readyProposal.status,
         });
 
-        const paymentIntent = await paymentIntentService.createCheckout({
+        const paymentIntentStartedAt = Date.now();
+        let paymentIntent: Awaited<ReturnType<typeof paymentIntentService.createCheckout>>;
+        try {
+          paymentIntent = await paymentIntentService.createCheckout({
+              businessId,
+              proposalKey: readyProposal.proposalKey,
+              provider: "STRIPE",
+              source: "SELF",
+              description: `${normalizedPlan} ${normalizedBilling} plan checkout`,
+              successUrl: `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
+              cancelUrl: `${env.FRONTEND_URL}/billing/cancel?plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
+              metadata: {
+                coupon: couponCode,
+                origin: "billing_controller",
+                planCode: normalizedPlan,
+                billingCycle: normalizedBilling,
+                quantity,
+                checkoutType,
+                trialDays,
+                providerSubscriptionId:
+                  String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
+                  null,
+                stripeCustomerId:
+                  String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
+                  null,
+                customerEmail: email,
+                checkoutAttempt,
+                checkoutStartRequestId: checkoutRequestId,
+                checkoutStartPath: req.originalUrl,
+                prorationBehavior:
+                  String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
+                seatBased: quantity > 1,
+              },
+              idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
+            });
+        } finally {
+          emitCheckoutMetric("payment_intent_ms", Date.now() - paymentIntentStartedAt, {
             businessId,
             proposalKey: readyProposal.proposalKey,
-            provider: "STRIPE",
-            source: "SELF",
-            description: `${normalizedPlan} ${normalizedBilling} plan checkout`,
-            successUrl: `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}&plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
-            cancelUrl: `${env.FRONTEND_URL}/billing/cancel?plan=${normalizedPlan}&billing=${normalizedBilling}&proposal=${readyProposal.proposalKey}`,
-            metadata: {
-              coupon: couponCode,
-              origin: "billing_controller",
-              planCode: normalizedPlan,
-              billingCycle: normalizedBilling,
-              quantity,
-              checkoutType,
-              trialDays,
-              providerSubscriptionId:
-                String(readInput("providerSubscriptionId") || activeSubscription?.providerSubscriptionId || "").trim() ||
-                null,
-              stripeCustomerId:
-                String(readInput("stripeCustomerId") || subscriptionMeta.stripeCustomerId || "").trim() ||
-                null,
-              customerEmail: email,
-              checkoutAttempt,
-              checkoutStartRequestId: checkoutRequestId,
-              checkoutStartPath: req.originalUrl,
-              prorationBehavior:
-                String(readInput("prorationBehavior") || "").trim().toLowerCase() || null,
-              seatBased: quantity > 1,
-            },
-            idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
           });
+        }
         throwIfRequestLifecycleAborted({
           req,
           res,
@@ -1483,6 +1795,12 @@ export class BillingController {
             checkoutUrl,
             elapsedMs: Date.now() - checkoutStartedAt,
           });
+          reportCheckoutTiming("success", {
+            status: 303,
+            businessId,
+            proposalKey: readyProposal.proposalKey,
+            paymentIntentKey: paymentIntent.paymentIntentKey,
+          });
           return res.redirect(303, checkoutUrl);
         }
 
@@ -1501,6 +1819,12 @@ export class BillingController {
           proposalKey: readyProposal.proposalKey,
           paymentIntentKey: paymentIntent.paymentIntentKey,
           redirectOnSuccess,
+        });
+        reportCheckoutTiming("success", {
+          status: 200,
+          businessId,
+          proposalKey: readyProposal.proposalKey,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
         });
         return res.json({
           success: true,
@@ -1652,11 +1976,14 @@ export class BillingController {
         : null;
       const waitBudgetMs = resolveBillingProjectionWaitBudgetMs(res);
       let staleCacheValue: Record<string, unknown> | undefined;
+      let staleCacheUpdatedAt = 0;
       let projectionPromise: Promise<Record<string, unknown>> | null = null;
 
       if (cacheKey) {
         const cached = billingProjectionCache.get(cacheKey);
         staleCacheValue = cached?.value;
+        staleCacheUpdatedAt = Number(cached?.updatedAt || 0);
+
         if (cached?.value && cached.expiresAt > Date.now()) {
           emitPerformanceMetric({
             name: "CACHE_HIT",
@@ -1664,6 +1991,15 @@ export class BillingController {
             route: "billing_projection",
             metadata: {
               cache: "memory_billing_projection",
+            },
+          });
+          emitProjectionTelemetry({
+            name: "projection_cache_hit",
+            value: 1,
+            businessId,
+            metadata: {
+              cache: "memory_billing_projection",
+              stale: false,
             },
           });
           console.info("BILLING_STAGE_OK", {
@@ -1678,8 +2014,46 @@ export class BillingController {
           return res.json(cached.value);
         }
 
+        if (!staleCacheValue) {
+          const redisSnapshot = await readRedisBillingProjectionSnapshot(cacheKey);
+          if (redisSnapshot?.data) {
+            staleCacheValue = redisSnapshot.data;
+            staleCacheUpdatedAt = redisSnapshot.updatedAt;
+            billingProjectionCache.set(cacheKey, {
+              value: redisSnapshot.data,
+              updatedAt: redisSnapshot.updatedAt,
+              expiresAt: Date.now() + Math.floor(BILLING_PROJECTION_CACHE_TTL_MS / 2),
+            });
+            emitPerformanceMetric({
+              name: "CACHE_HIT",
+              businessId,
+              route: "billing_projection",
+              metadata: {
+                cache: "redis_billing_projection",
+              },
+            });
+            emitProjectionTelemetry({
+              name: "projection_cache_hit",
+              value: 1,
+              businessId,
+              metadata: {
+                cache: "redis_billing_projection",
+                stale: true,
+              },
+            });
+          }
+        }
+
         if (cached?.promise) {
           projectionPromise = cached.promise;
+          emitProjectionTelemetry({
+            name: "projection_deduped",
+            value: 1,
+            businessId,
+            metadata: {
+              cache: "memory_billing_projection",
+            },
+          });
         } else {
           emitPerformanceMetric({
             name: "CACHE_MISS",
@@ -1690,16 +2064,26 @@ export class BillingController {
             },
           });
 
-          const computeProjection = BillingController.buildBillingResponse(
+          const computeProjection = runProjectionComputeTask({
+            cacheKey,
+            label: "billing_projection",
             businessId,
-            req
-          ) as Promise<Record<string, unknown>>;
+            computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+            task: () =>
+              BillingController.buildBillingResponse(
+                businessId,
+                req
+              ) as Promise<Record<string, unknown>>,
+          });
           const sharedProjectionPromise = computeProjection
             .then((value) => {
+              const updatedAt = Date.now();
               billingProjectionCache.set(cacheKey, {
                 value,
-                expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                updatedAt,
+                expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
               });
+              void writeRedisBillingProjectionSnapshot(cacheKey, value);
               return value;
             })
             .catch((error) => {
@@ -1709,23 +2093,82 @@ export class BillingController {
 
           billingProjectionCache.set(cacheKey, {
             expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+            value: staleCacheValue,
+            updatedAt: staleCacheUpdatedAt || Date.now(),
             promise: sharedProjectionPromise,
           });
           projectionPromise = sharedProjectionPromise;
         }
+
+        const staleAgeMs =
+          staleCacheUpdatedAt > 0 ? Date.now() - staleCacheUpdatedAt : Number.POSITIVE_INFINITY;
+        if (
+          staleCacheValue &&
+          staleAgeMs <= BILLING_PROJECTION_STALE_MAX_AGE_MS &&
+          waitBudgetMs < 1_400
+        ) {
+          emitPerformanceMetric({
+            name: "TIMEOUT_PREVENTED",
+            value: waitBudgetMs,
+            businessId,
+            route: "billing_projection",
+            metadata: {
+              reason: "stale_snapshot_served",
+              staleAgeMs,
+            },
+          });
+          emitProjectionTelemetry({
+            name: "projection_cache_hit",
+            value: 1,
+            businessId,
+            metadata: {
+              cache: "stale_billing_projection",
+              stale: true,
+              staleAgeMs,
+            },
+          });
+          return res.status(200).json(
+            markBillingSnapshotAsStale(staleCacheValue, "stale_revalidate")
+          );
+        }
       }
 
       if (!projectionPromise) {
-        projectionPromise = BillingController.buildBillingResponse(
+        projectionPromise = runProjectionComputeTask({
+          cacheKey: cacheKey || `billing:anon:${String(req.requestId || "unknown")}`,
+          label: "billing_projection",
           businessId,
-          req
-        ) as Promise<Record<string, unknown>>;
+          computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+          task: () =>
+            BillingController.buildBillingResponse(
+              businessId,
+              req
+            ) as Promise<Record<string, unknown>>,
+        });
       }
 
       const projection = await waitForBillingProjection(
         projectionPromise,
-        waitBudgetMs
+        waitBudgetMs,
+        getRequestAbortSignal({ req, res })
       );
+      if (projection.cancelled) {
+        emitProjectionTelemetry({
+          name: "projection_cancelled",
+          value: 1,
+          businessId,
+          metadata: {
+            reason: "request_aborted",
+          },
+        });
+        if (staleCacheValue && !isResponseCommitted(res)) {
+          return res.status(200).json(
+            markBillingSnapshotAsStale(staleCacheValue, "projection_request_cancelled")
+          );
+        }
+        return;
+      }
+
       if (!hasProjectionValue(projection)) {
         emitPerformanceMetric({
           name: "TIMEOUT_PREVENTED",
@@ -1737,9 +2180,24 @@ export class BillingController {
             reason: "projection_wait_budget_exceeded",
           },
         });
+        emitProjectionTelemetry({
+          name: "projection_budget_exceeded",
+          value: 1,
+          businessId,
+          metadata: {
+            timeoutMs: waitBudgetMs,
+            reason: "projection_wait_budget_exceeded",
+          },
+        });
 
         if (isResponseCommitted(res)) {
           return;
+        }
+
+        if (staleCacheValue) {
+          return res.status(200).json(
+            markBillingSnapshotAsStale(staleCacheValue, "projection_timeout_stale")
+          );
         }
 
         return res.status(200).json(
@@ -1774,6 +2232,16 @@ export class BillingController {
     } catch (error: any) {
       if (isRequestLifecycleClosed(req, res) || isResponseCommitted(res)) {
         return;
+      }
+      if (String(error?.message || "").includes("projection_budget_exceeded")) {
+        emitProjectionTelemetry({
+          name: "projection_budget_exceeded",
+          value: 1,
+          businessId: BillingController.getBusinessIdFromRequest(req),
+          metadata: {
+            reason: String(error?.message || "projection_budget_exceeded"),
+          },
+        });
       }
 
       if (error?.message === "Unauthorized") {
@@ -1916,8 +2384,7 @@ export class BillingController {
             state: "ALREADY_PROCESSED",
             sessionId,
             message: "Payment confirmation is already complete.",
-            shouldPoll: true,
-            retryAfterMs: 900,
+            shouldPoll: false,
             reason: "already_processed",
             code: "ALREADY_PROCESSED",
           })
@@ -1942,6 +2409,34 @@ export class BillingController {
             shouldPoll: false,
             reason: "payment_intent_terminal_non_success",
             code: "PAYMENT_INTENT_TERMINAL",
+          })
+        );
+      }
+
+      const confirmInFlightKey = `${businessId}:${sessionId}`;
+      const activeConfirmInFlight = checkoutConfirmInFlight.get(confirmInFlightKey);
+      if (
+        activeConfirmInFlight &&
+        Date.now() - activeConfirmInFlight.startedAt <=
+          CHECKOUT_CONFIRM_IN_FLIGHT_WINDOW_MS
+      ) {
+        console.info("BILLING_STAGE_OK", {
+          stage: "checkout_confirm.pending",
+          businessId,
+          sessionId,
+          paymentIntentKey: paymentIntent.paymentIntentKey,
+          reason: "confirm_inflight_deduped",
+        });
+
+        return respond(
+          BillingController.buildConfirmPayload({
+            state: "PENDING",
+            sessionId,
+            message: "Payment verification is already in progress.",
+            shouldPoll: true,
+            retryAfterMs: 900,
+            reason: "confirm_inflight_deduped",
+            code: "CONFIRM_INFLIGHT_DEDUPED",
           })
         );
       }
@@ -1988,19 +2483,31 @@ export class BillingController {
           .catch(() => undefined);
       }
 
-      void BillingController.finalizeCheckoutConfirmationAsync({
+      const inFlightPromise = BillingController.finalizeCheckoutConfirmationAsync({
         businessId,
         sessionId,
         paymentIntent,
-      }).catch((error) => {
-        console.error("BILLING_STAGE_FAIL", {
-          stage: "checkout_confirm.async",
-          businessId,
-          sessionId,
-          paymentIntentKey: paymentIntent.paymentIntentKey,
-          reason: String((error as Error)?.message || "confirm_async_failed"),
+      })
+        .catch((error) => {
+          console.error("BILLING_STAGE_FAIL", {
+            stage: "checkout_confirm.async",
+            businessId,
+            sessionId,
+            paymentIntentKey: paymentIntent.paymentIntentKey,
+            reason: String((error as Error)?.message || "confirm_async_failed"),
+          });
+        })
+        .finally(() => {
+          const active = checkoutConfirmInFlight.get(confirmInFlightKey);
+          if (active?.promise === inFlightPromise) {
+            checkoutConfirmInFlight.delete(confirmInFlightKey);
+          }
         });
+      checkoutConfirmInFlight.set(confirmInFlightKey, {
+        startedAt: Date.now(),
+        promise: inFlightPromise,
       });
+      void inFlightPromise;
 
       console.info("BILLING_STAGE_OK", {
         stage: "checkout_confirm.pending",

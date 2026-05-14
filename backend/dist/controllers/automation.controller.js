@@ -7,7 +7,8 @@ exports.deleteAutomationFlow = exports.updateAutomationFlow = exports.getFlows =
 const prisma_1 = __importDefault(require("../config/prisma"));
 const plan_config_1 = require("../config/plan.config");
 const subscriptionAuthority_service_1 = require("../services/subscriptionAuthority.service");
-const boundedTimeout_1 = require("../utils/boundedTimeout");
+const projectionCoordinator_service_1 = require("../services/projectionCoordinator.service");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 class AutomationControllerError extends Error {
     constructor(message, statusCode) {
         super(message);
@@ -23,6 +24,13 @@ const allowedStepTypesByPlan = {
     ELITE: ["MESSAGE", "DELAY", "CONDITION", "BOOKING"],
 };
 const getRequestBusinessId = (req) => req.user?.businessId || null;
+const AUTOMATION_PROJECTION_CACHE_TTL_MS = 10000;
+const AUTOMATION_PROJECTION_STALE_TTL_MS = 45000;
+const AUTOMATION_PROJECTION_WAIT_MS = 140;
+const AUTOMATION_PROJECTION_COMPUTE_BUDGET_MS = 4500;
+const AUTOMATION_PROJECTION_MAX_ROWS = 120;
+const AUTOMATION_PROJECTION_CACHE_PREFIX = "automation:flows:v1:";
+const buildAutomationProjectionCacheKey = (businessId) => `${AUTOMATION_PROJECTION_CACHE_PREFIX}${businessId}`;
 const getBusinessPlan = async (businessId) => {
     const snapshot = await (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId);
     return snapshot
@@ -129,6 +137,9 @@ const createAutomationFlow = async (req, res) => {
                 },
             });
         });
+        (0, projectionCoordinator_service_1.invalidateProjectionSnapshots)({
+            key: buildAutomationProjectionCacheKey(businessId),
+        });
         return res.status(201).json({
             success: true,
             data: {
@@ -157,10 +168,17 @@ const getFlows = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const flowsResult = await (0, boundedTimeout_1.withTimeoutFallback)({
+        const projection = await (0, projectionCoordinator_service_1.getProjectionSnapshot)({
+            cacheKey: buildAutomationProjectionCacheKey(businessId),
             label: "automation_projection",
-            timeoutMs: 1800,
-            task: prisma_1.default.automationFlow.findMany({
+            businessId,
+            cacheTtlMs: AUTOMATION_PROJECTION_CACHE_TTL_MS,
+            staleTtlMs: AUTOMATION_PROJECTION_STALE_TTL_MS,
+            computeBudgetMs: AUTOMATION_PROJECTION_COMPUTE_BUDGET_MS,
+            initialWaitMs: AUTOMATION_PROJECTION_WAIT_MS,
+            requestSignal: (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }),
+            fallback: [],
+            compute: () => prisma_1.default.automationFlow.findMany({
                 where: {
                     businessId,
                 },
@@ -188,14 +206,18 @@ const getFlows = async (req, res) => {
                 orderBy: {
                     createdAt: "desc",
                 },
+                take: AUTOMATION_PROJECTION_MAX_ROWS,
             }),
-            fallback: [],
         });
-        const flows = flowsResult.value;
+        const flows = projection.value;
         console.info("AUTOMATION_PROJECTION_READY", {
             businessId,
-            timedOut: flowsResult.timedOut,
-            fallback: flowsResult.timedOut || flowsResult.failed,
+            source: projection.meta.source,
+            stale: projection.meta.stale,
+            deduped: projection.meta.deduped,
+            cancelled: projection.meta.cancelled,
+            budgetExceeded: projection.meta.budgetExceeded,
+            fallback: projection.meta.source === "fallback",
             count: Array.isArray(flows) ? flows.length : 0,
         });
         return res.json({
@@ -283,6 +305,9 @@ const updateAutomationFlow = async (req, res) => {
                 },
             });
         });
+        (0, projectionCoordinator_service_1.invalidateProjectionSnapshots)({
+            key: buildAutomationProjectionCacheKey(businessId),
+        });
         return res.json({
             success: true,
             data: {
@@ -350,6 +375,9 @@ const deleteAutomationFlow = async (req, res) => {
                     businessId,
                 },
             });
+        });
+        (0, projectionCoordinator_service_1.invalidateProjectionSnapshots)({
+            key: buildAutomationProjectionCacheKey(businessId),
         });
         return res.json({
             success: true,

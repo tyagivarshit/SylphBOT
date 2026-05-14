@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { monitorEventLoopDelay } from "perf_hooks";
 import { captureExceptionWithContext } from "../observability/sentry";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
@@ -16,18 +17,55 @@ const HIGH_VALUE_OBSERVABILITY_PATH_PREFIXES = [
   "/api/commerce",
 ];
 
+const eventLoopLagMonitor = monitorEventLoopDelay({
+  resolution: 20,
+});
+eventLoopLagMonitor.enable();
+
+let inflightRequestCount = 0;
+let peakInflightRequestCount = 0;
+
+const readEventLoopLagMs = () => {
+  const mean = Number(eventLoopLagMonitor.mean || 0);
+  if (!Number.isFinite(mean) || mean <= 0) {
+    return 0;
+  }
+  return Number((mean / 1_000_000).toFixed(2));
+};
+
 export const monitoringMiddleware = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   const startedAt = Date.now();
+  inflightRequestCount += 1;
+  peakInflightRequestCount = Math.max(peakInflightRequestCount, inflightRequestCount);
+  let releasedInflight = false;
+  const releaseInflight = () => {
+    if (releasedInflight) {
+      return;
+    }
+    releasedInflight = true;
+    inflightRequestCount = Math.max(0, inflightRequestCount - 1);
+  };
+
+  res.on("close", releaseInflight);
 
   res.on("finish", () => {
+    releaseInflight();
     const businessId = getRequestBusinessId(req);
     const traceId = req.requestId || null;
     const statusCode = res.statusCode;
     const durationMs = Date.now() - startedAt;
+    const priorityClass =
+      String((res.locals as Record<string, unknown>)?.requestPriorityClass || "NORMAL")
+        .trim()
+        .toUpperCase() || "NORMAL";
+    const queueWaitMs = Number(
+      (res.locals as Record<string, unknown>)?.requestQueueWaitMs || 0
+    );
+    const eventLoopLagMs = readEventLoopLagMs();
     const shouldPersistDetailedObservability =
       statusCode >= 400 ||
       durationMs >= monitoringConfig.slowRequestMs ||
@@ -43,6 +81,11 @@ export const monitoringMiddleware = (
         ip: req.ip,
         userId: req.user?.id || null,
         businessId,
+        priorityClass,
+        queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
+        inflightRequestCount,
+        peakInflightRequestCount,
+        eventLoopLagMs,
       },
       "Request completed"
     );
@@ -89,6 +132,10 @@ export const monitoringMiddleware = (
           durationMs,
           method: req.method,
           route: req.originalUrl,
+          priorityClass,
+          queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
+          inflightRequestCount,
+          eventLoopLagMs,
         },
       }).catch(() => undefined);
     }
@@ -101,6 +148,10 @@ export const monitoringMiddleware = (
       metadata: {
         method: req.method,
         statusCode,
+        priorityClass,
+        queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
+        inflightRequestCount,
+        eventLoopLagMs,
       },
     });
 
@@ -124,6 +175,10 @@ export const monitoringMiddleware = (
           method: req.method,
           statusCode,
           thresholdMs: monitoringConfig.slowRequestMs,
+          priorityClass,
+          queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
+          inflightRequestCount,
+          eventLoopLagMs,
         },
       });
     }

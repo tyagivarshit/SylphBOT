@@ -1,0 +1,274 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import AutomationBuilder, {
+  type AutomationBuilderStepInput,
+  type AutomationPayloadStep,
+} from "./AutomationBuilder";
+import LoadingButton from "@/components/ui/LoadingButton";
+import {
+  createAutomationFlow,
+  updateAutomationFlow,
+} from "@/lib/automation.service";
+import { notify } from "@/lib/toast";
+
+type AutomationDraft = {
+  id: string;
+  name?: string | null;
+  triggerValue?: string | null;
+  triggerType?: string | null;
+  channel?: string | null;
+  status?: string | null;
+  steps?: AutomationBuilderStepInput[];
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  lastTriggeredAt?: string | null;
+};
+
+type CreateAutomationModalProps = {
+  open: boolean;
+  onClose: () => void;
+  onSaved?: (automation: AutomationDraft) => void;
+  initialData?: AutomationDraft | null;
+  plan?: "BASIC" | "PRO" | "ELITE";
+};
+
+const mapPayloadStepsToFlowSteps = (steps: AutomationPayloadStep[]) =>
+  steps.map((step, index) => ({
+    stepKey: `STEP_${index + 1}`,
+    stepType: step.type,
+    message: step.config.message || null,
+    condition: step.config.condition || null,
+    nextStep: index < steps.length - 1 ? `STEP_${index + 2}` : null,
+    metadata: step.config,
+  }));
+
+export default function CreateAutomationModal({
+  open,
+  onClose,
+  onSaved,
+  initialData,
+  plan = "BASIC",
+}: CreateAutomationModalProps) {
+  const isEdit = Boolean(initialData?.id);
+
+  const [name, setName] = useState("");
+  const [trigger, setTrigger] = useState("");
+  const [steps, setSteps] = useState<AutomationPayloadStep[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const modalTitle = isEdit ? "Edit Automation" : "Create Automation";
+
+  useEffect(() => {
+    if (!open) {
+      setName("");
+      setTrigger("");
+      setSteps([]);
+      setError("");
+      setLoading(false);
+      return;
+    }
+
+    setName(initialData?.name || "");
+    setTrigger(initialData?.triggerValue || "");
+    setError("");
+  }, [initialData, open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  const handleSubmit = async () => {
+    if (!name.trim() || !trigger.trim()) {
+      const message = "Automation name and trigger keyword are required.";
+      setError(message);
+      return;
+    }
+
+    if (!steps.length) {
+      const message = "Add at least one step before saving.";
+      setError(message);
+      return;
+    }
+
+    const invalidTemplateStep = steps.find(
+      (step) =>
+        step.type === "MESSAGE" &&
+        step.config.replyMode !== "AI" &&
+        !step.config.message?.trim()
+    );
+
+    if (invalidTemplateStep) {
+      const message = "Add a template reply to every template message step.";
+      setError(message);
+      return;
+    }
+
+    const invalidAIStep = steps.find(
+      (step) =>
+        step.type === "MESSAGE" &&
+        step.config.replyMode === "AI" &&
+        !step.config.aiPrompt?.trim() &&
+        !step.config.message?.trim()
+    );
+
+    if (invalidAIStep) {
+      const message = "Add an AI instruction or fallback reply to every AI step.";
+      setError(message);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+
+      const payload = {
+        name: name.trim(),
+        triggerValue: trigger.toLowerCase().trim(),
+        triggerType: initialData?.triggerType || "KEYWORD",
+        channel: initialData?.channel || "INSTAGRAM",
+        status: initialData?.status || "ACTIVE",
+        steps,
+      };
+
+      const data = isEdit
+        ? await updateAutomationFlow(initialData?.id || "", payload)
+        : await createAutomationFlow(payload);
+
+      if (data?.success === false) {
+        throw new Error(
+          data?.message ||
+            (isEdit ? "Failed to update automation" : "Failed to create automation")
+        );
+      }
+
+      const savedAutomation: AutomationDraft =
+        data?.flow ||
+        ({
+          id: initialData?.id || crypto.randomUUID(),
+          ...payload,
+          createdAt: initialData?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          lastTriggeredAt: initialData?.lastTriggeredAt || null,
+          steps: mapPayloadStepsToFlowSteps(steps),
+        } satisfies AutomationDraft);
+
+      onSaved?.(savedAutomation);
+      notify.success(isEdit ? "Automation updated" : "Automation created");
+      onClose();
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : isEdit
+            ? "Failed to update automation"
+            : "Failed to create automation";
+
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm">
+      <div className="flex h-[100dvh] items-center justify-center p-2 sm:p-4">
+        <div className="flex h-[min(92dvh,820px)] w-full max-w-6xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.26)] sm:h-[min(90dvh,840px)]">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+            <h2 className="text-xl font-semibold text-slate-900 sm:text-2xl">
+              {modalTitle}
+            </h2>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+              aria-label={isEdit ? "Close edit automation modal" : "Close create automation modal"}
+            >
+              X
+            </button>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-4 bg-slate-50 p-3 xl:grid xl:grid-cols-[320px_minmax(0,1fr)] xl:p-4">
+            <div className="grid shrink-0 gap-3 xl:max-h-full xl:overflow-y-auto xl:pr-1">
+              {error ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  {error}
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                <label className="text-sm font-semibold text-slate-700">
+                  Automation Name
+                </label>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Instagram pricing follow-up"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                <label className="text-sm font-semibold text-slate-700">
+                  Trigger Keyword
+                </label>
+                <input
+                  value={trigger}
+                  onChange={(event) => setTrigger(event.target.value)}
+                  placeholder="hi / price / start"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                />
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+              <div className="shrink-0 border-b border-slate-200 px-4 py-3 sm:px-5">
+                <p className="text-lg font-semibold text-slate-900">Flow editor</p>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2.5 sm:px-4 sm:py-3">
+                <AutomationBuilder
+                  key={initialData?.id || "create-automation-builder"}
+                  plan={plan}
+                  initialSteps={initialData?.steps}
+                  onChange={(data) => setSteps(data)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-4">
+            <button
+              onClick={onClose}
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            >
+              Cancel
+            </button>
+
+            <LoadingButton
+              onClick={handleSubmit}
+              loading={loading}
+              loadingLabel="Saving..."
+              className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isEdit ? "Save Changes" : "Create Automation"}
+            </LoadingButton>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

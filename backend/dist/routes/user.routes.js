@@ -12,6 +12,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const authCookies_1 = require("../utils/authCookies");
 const apiKey_service_1 = require("../services/apiKey.service");
 const tenant_service_1 = require("../services/tenant.service");
+const authBootstrap_service_1 = require("../services/authBootstrap.service");
 const rbac_middleware_1 = require("../middleware/rbac.middleware");
 const rateLimit_middleware_1 = require("../middleware/rateLimit.middleware");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
@@ -27,8 +28,13 @@ const safeUserSelect = {
     businessId: true,
 };
 const USER_ME_CACHE_TTL_MS = 10000;
+const USER_ME_AUTH_SURFACE_CACHE_TTL_MS = 3000;
 const currentUserCache = new Map();
 const buildCurrentUserCacheKey = (userId, preferredBusinessId) => `${String(userId || "").trim()}:${String(preferredBusinessId || "").trim()}`;
+const isAuthSurfaceRequest = (req) => {
+    const surface = String(req.query.surface || "").trim().toLowerCase();
+    return surface === "auth";
+};
 const invalidateCurrentUserCache = (userId) => {
     const normalizedUserId = String(userId || "").trim();
     if (!normalizedUserId) {
@@ -76,6 +82,33 @@ const buildFallbackCurrentUser = (user, preferredBusinessId) => {
             },
             totalConnected: 0,
         },
+    };
+};
+const buildAuthSurfaceCurrentUser = (user, preferredBusinessId) => {
+    const businessId = String(preferredBusinessId || "").trim() ||
+        String(user.businessId || "").trim() ||
+        null;
+    return {
+        ...user,
+        businessId,
+        business: businessId
+            ? {
+                id: businessId,
+                name: null,
+                website: null,
+                industry: null,
+                teamSize: null,
+                type: null,
+                timezone: null,
+            }
+            : null,
+        workspace: businessId
+            ? {
+                id: businessId,
+                name: null,
+            }
+            : null,
+        connectedAccounts: null,
     };
 };
 const getCurrentUser = async (input) => {
@@ -204,7 +237,8 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
             return res.status(404).json({ error: "User not found" });
         }
         const preferredBusinessId = req.user?.businessId || baseUser.businessId || null;
-        const cacheKey = buildCurrentUserCacheKey(userId, preferredBusinessId);
+        const authSurface = isAuthSurfaceRequest(req);
+        const cacheKey = buildCurrentUserCacheKey(userId, `${String(preferredBusinessId || "").trim()}:${authSurface ? "auth" : "full"}`);
         const cached = currentUserCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
             (0, performanceMetrics_1.emitPerformanceMetric)({
@@ -226,6 +260,24 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                 cache: "memory_user_me",
             },
         });
+        if (authSurface) {
+            const user = buildAuthSurfaceCurrentUser(baseUser, preferredBusinessId);
+            currentUserCache.set(cacheKey, {
+                value: user,
+                expiresAt: Date.now() + USER_ME_AUTH_SURFACE_CACHE_TTL_MS,
+            });
+            (0, authBootstrap_service_1.primeAuthBootstrapContext)({
+                userId,
+                preferredBusinessId: user.businessId,
+                profileSeed: {
+                    email: user.email,
+                    name: user.name,
+                    avatar: user.avatar || null,
+                },
+            });
+            res.setHeader("Cache-Control", "no-store");
+            return res.json(user);
+        }
         const userHydration = await (0, boundedTimeout_1.withTimeoutFallback)({
             label: "user_me_hydration",
             timeoutMs: 1800,

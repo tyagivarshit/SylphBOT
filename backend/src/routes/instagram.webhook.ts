@@ -1,7 +1,6 @@
 import { Request, Response, Router } from "express";
 import crypto from "crypto";
 import prisma from "../config/prisma";
-import { fetchInstagramUsername } from "../services/instagramProfile.service";
 import { processWebhookEvent } from "../services/webhookDedup.service";
 import { captureExceptionWithContext } from "../observability/sentry";
 import { reconcileRevenueTouchDeliveryByProviderMessageId } from "../services/revenueTouchLedger.service";
@@ -29,6 +28,20 @@ const isProduction = process.env.NODE_ENV === "production";
 
 const log = (...args: any[]) => {
   console.log("[INSTAGRAM WEBHOOK]", ...args);
+};
+
+const runWebhookBackgroundTask = (
+  label: string,
+  task: () => Promise<void>
+) => {
+  setImmediate(() => {
+    void task().catch((error) => {
+      console.error("[INSTAGRAM WEBHOOK] background task failed", {
+        label,
+        reason: String((error as Error)?.message || "background_task_failed"),
+      });
+    });
+  });
 };
 
 const normalizeIdentifier = (value?: unknown) => {
@@ -62,22 +75,6 @@ const clientBusinessInclude = {
       ownerId: true,
     },
   },
-};
-
-const attachResolvedBusinessContext = (
-  req: Request,
-  client: { id: string; businessId: string; platform: string }
-) => {
-  (req as any).businessId = client.businessId;
-  req.tenant = {
-    businessId: client.businessId,
-  };
-
-  log("businessId resolved", {
-    businessId: client.businessId,
-    clientId: client.id,
-    platform: client.platform,
-  });
 };
 
 const findInstagramClient = async ({
@@ -396,28 +393,32 @@ router.post("/", async (req: any, res: Response) => {
     const deliveryMessageIds = getInstagramDeliveryMessageIds(entry);
 
     if (deliveryMessageIds.length) {
-      for (const providerMessageId of deliveryMessageIds) {
-        await reconcileRevenueTouchDeliveryByProviderMessageId({
-          providerMessageId,
-          deliveredAt: new Date(),
-        }).catch(() => undefined);
-      }
+      runWebhookBackgroundTask("delivery_reconcile", async () => {
+        await Promise.allSettled(
+          deliveryMessageIds.map((providerMessageId) =>
+            reconcileRevenueTouchDeliveryByProviderMessageId({
+              providerMessageId,
+              deliveredAt: new Date(),
+            }).catch(() => undefined)
+          )
+        );
 
-      await recordObservabilityEvent({
-        eventType: "webhook.instagram.delivery_reconciled",
-        message: "Instagram delivery reconciliation processed",
-        severity: "info",
-        context: {
-          traceId: webhookTraceId,
-          correlationId: webhookTraceId,
-          provider: "INSTAGRAM",
-          component: "webhook-reconciliation",
-          phase: "providers",
-        },
-        metadata: {
-          deliveryCount: deliveryMessageIds.length,
-        },
-      }).catch(() => undefined);
+        await recordObservabilityEvent({
+          eventType: "webhook.instagram.delivery_reconciled",
+          message: "Instagram delivery reconciliation processed",
+          severity: "info",
+          context: {
+            traceId: webhookTraceId,
+            correlationId: webhookTraceId,
+            provider: "INSTAGRAM",
+            component: "webhook-reconciliation",
+            phase: "providers",
+          },
+          metadata: {
+            deliveryCount: deliveryMessageIds.length,
+          },
+        }).catch(() => undefined);
+      });
     }
 
     for (const change of entry?.changes || []) {
@@ -484,51 +485,48 @@ router.post("/", async (req: any, res: Response) => {
           mediaId,
           senderId,
         });
+        runWebhookBackgroundTask("comment_intake", async () => {
+          const client = await findInstagramClient({
+            pageIds,
+          });
 
-        const client = await findInstagramClient({
-          pageIds,
-        });
+          if (!client) {
+            return;
+          }
 
-        if (!client) {
-          continue;
-        }
-
-        attachResolvedBusinessContext(req, client);
-        await recordInboundProviderWebhook({
-          businessId: client.businessId,
-          tenantId: client.businessId,
-          provider: "INSTAGRAM",
-          environment: "LIVE",
-          success: true,
-          details: {
-            webhookType: "comment",
-            commentId: commentId || null,
-          },
-        }).catch(() => undefined);
-        await enforceSecurityGovernanceInfluence({
-          domain: "RECEPTION",
-          action: "messages:enqueue",
-          businessId: client.businessId,
-          tenantId: client.businessId,
-          actorId: "instagram_webhook",
-          actorType: "WEBHOOK",
-          role: "SERVICE",
-          permissions: ["messages:enqueue"],
-          scopes: ["WRITE"],
-          resourceType: "INSTAGRAM_COMMENT",
-          resourceId: commentEventId,
-          resourceTenantId: client.businessId,
-          purpose: "INBOUND_MESSAGE",
-          metadata: {
+          await recordInboundProviderWebhook({
+            businessId: client.businessId,
+            tenantId: client.businessId,
             provider: "INSTAGRAM",
-            webhookType: "comment",
-          },
-        });
-        const lead = await resolveOrCreateReceptionLead({
-          businessId: client.businessId,
-          clientId: client.id,
-          adapter: "INSTAGRAM",
-          payload: {
+            environment: "LIVE",
+            success: true,
+            details: {
+              webhookType: "comment",
+              commentId: commentId || null,
+            },
+          }).catch(() => undefined);
+
+          await enforceSecurityGovernanceInfluence({
+            domain: "RECEPTION",
+            action: "messages:enqueue",
+            businessId: client.businessId,
+            tenantId: client.businessId,
+            actorId: "instagram_webhook",
+            actorType: "WEBHOOK",
+            role: "SERVICE",
+            permissions: ["messages:enqueue"],
+            scopes: ["WRITE"],
+            resourceType: "INSTAGRAM_COMMENT",
+            resourceId: commentEventId,
+            resourceTenantId: client.businessId,
+            purpose: "INBOUND_MESSAGE",
+            metadata: {
+              provider: "INSTAGRAM",
+              webhookType: "comment",
+            },
+          });
+
+          const payload = {
             comment: {
               text: commentText,
             },
@@ -538,33 +536,31 @@ router.post("/", async (req: any, res: Response) => {
             mediaId,
             messageId: commentId || commentEventId,
             receivedAt: new Date().toISOString(),
-          },
-        });
-        await receiveInboundInteraction({
-          businessId: client.businessId,
-          leadId: lead.id,
-          clientId: client.id,
-          adapter: "INSTAGRAM",
-          payload: {
-            comment: {
-              text: commentText,
+          };
+
+          const lead = await resolveOrCreateReceptionLead({
+            businessId: client.businessId,
+            clientId: client.id,
+            adapter: "INSTAGRAM",
+            payload,
+          });
+
+          await receiveInboundInteraction({
+            businessId: client.businessId,
+            leadId: lead.id,
+            clientId: client.id,
+            adapter: "INSTAGRAM",
+            payload,
+            interactionTypeHint: "COMMENT",
+            providerMessageIdHint: commentId || commentEventId,
+            correlationId: req.requestId || commentEventId,
+            traceId: req.requestId || commentEventId,
+            metadata: {
+              webhook: "instagram_comment",
+              requestId: req.requestId,
+              mediaId,
             },
-            from: {
-              id: senderId,
-            },
-            mediaId,
-            messageId: commentId || commentEventId,
-            receivedAt: new Date().toISOString(),
-          },
-          interactionTypeHint: "COMMENT",
-          providerMessageIdHint: commentId || commentEventId,
-          correlationId: req.requestId || commentEventId,
-          traceId: req.requestId || commentEventId,
-          metadata: {
-            webhook: "instagram_comment",
-            requestId: req.requestId,
-            mediaId,
-          },
+          });
         });
 
       } catch (commentError) {
@@ -654,140 +650,131 @@ router.post("/", async (req: any, res: Response) => {
     log("message identifiers", {
       pageIds,
     });
+    runWebhookBackgroundTask("message_intake", async () => {
+      const client = await findInstagramClient({
+        pageIds,
+        includeBusiness: true,
+      });
 
-    const client = await findInstagramClient({
-      pageIds,
-      includeBusiness: true,
-    });
+      if (!client) {
+        return;
+      }
 
-    if (!client) {
-      return res.sendStatus(200);
-    }
-    checkpointReached = "[STEP 5] client mapping resolved";
-    log("[STEP 5] client mapping resolved");
+      checkpointReached = "[STEP 5] client mapping resolved";
+      log("[STEP 5] client mapping resolved");
 
-    attachResolvedBusinessContext(req, client);
-    await recordInboundProviderWebhook({
-      businessId: client.businessId,
-      tenantId: client.businessId,
-      provider: "INSTAGRAM",
-      environment: "LIVE",
-      success: true,
-      details: {
-        webhookType: "message",
-        eventId: eventId || null,
-      },
-    }).catch(() => undefined);
-    await enforceSecurityGovernanceInfluence({
-      domain: "RECEPTION",
-      action: "messages:enqueue",
-      businessId: client.businessId,
-      tenantId: client.businessId,
-      actorId: "instagram_webhook",
-      actorType: "WEBHOOK",
-      role: "SERVICE",
-      permissions: ["messages:enqueue"],
-      scopes: ["WRITE"],
-      resourceType: "INSTAGRAM_MESSAGE",
-      resourceId: eventId,
-      resourceTenantId: client.businessId,
-      purpose: "INBOUND_MESSAGE",
-      metadata: {
+      await recordInboundProviderWebhook({
+        businessId: client.businessId,
+        tenantId: client.businessId,
         provider: "INSTAGRAM",
-        webhookType: "message",
-      },
-    });
-    let lead = await resolveOrCreateReceptionLead({
-      businessId: client.businessId,
-      clientId: client.id,
-      adapter: "INSTAGRAM",
-      payload: {
-        message: text,
-        mid: eventId,
-        from: {
-          id: senderId,
+        environment: "LIVE",
+        success: true,
+        details: {
+          webhookType: "message",
+          eventId: eventId || null,
         },
-        threadId: pageIds[0],
-        receivedAt: new Date().toISOString(),
-      },
-    });
-    checkpointReached = "[STEP 6] lead resolved";
-    log("[STEP 6] lead resolved");
+      }).catch(() => undefined);
 
-    const instagramUsername = await fetchInstagramUsername(
-      senderId,
-      client.accessToken
-    );
-
-    if (instagramUsername && !lead.name) {
-      lead = await prisma.lead.update({
-        where: {
-          id: lead.id,
-        },
-        data: {
-          name: instagramUsername,
+      await enforceSecurityGovernanceInfluence({
+        domain: "RECEPTION",
+        action: "messages:enqueue",
+        businessId: client.businessId,
+        tenantId: client.businessId,
+        actorId: "instagram_webhook",
+        actorType: "WEBHOOK",
+        role: "SERVICE",
+        permissions: ["messages:enqueue"],
+        scopes: ["WRITE"],
+        resourceType: "INSTAGRAM_MESSAGE",
+        resourceId: eventId,
+        resourceTenantId: client.businessId,
+        purpose: "INBOUND_MESSAGE",
+        metadata: {
+          provider: "INSTAGRAM",
+          webhookType: "message",
         },
       });
-    }
-    checkpointReached = "[STEP 7] username enrichment complete";
-    log("[STEP 7] username enrichment complete");
-    checkpointReached = "[STEP 8] before receiveInboundInteraction";
-    log("[STEP 8] before receiveInboundInteraction");
 
-    const intake = await receiveInboundInteraction({
-      businessId: client.businessId,
-      leadId: lead.id,
-      clientId: client.id,
-      adapter: "INSTAGRAM",
-      payload: {
-        message: text,
-        mid: eventId,
-        from: {
-          id: senderId,
-          username: instagramUsername || undefined,
+      const lead = await resolveOrCreateReceptionLead({
+        businessId: client.businessId,
+        clientId: client.id,
+        adapter: "INSTAGRAM",
+        payload: {
+          message: text,
+          mid: eventId,
+          from: {
+            id: senderId,
+          },
+          threadId: pageIds[0],
+          receivedAt: new Date().toISOString(),
         },
-        threadId: pageIds[0],
-        receivedAt: new Date().toISOString(),
-      },
-      interactionTypeHint: "DM",
-      providerMessageIdHint: eventId,
-      correlationId: req.requestId || eventId,
-      traceId: req.requestId || eventId,
-      metadata: {
-        webhook: "instagram_message",
-        requestId: req.requestId,
-        pageId: pageIds[0],
-      },
-    });
-    checkpointReached = "[STEP 9] intake complete";
-    log("[STEP 9] intake complete");
+      });
+      checkpointReached = "[STEP 6] lead resolved";
+      log("[STEP 6] lead resolved");
 
-    if (WEBHOOK_DEBUG) {
-      log("Canonical interaction accepted", {
+      const instagramUsername =
+        lead.name ||
+        (diagnosticSenderId ? `ig:${diagnosticSenderId.slice(0, 8)}` : null);
+      checkpointReached = "[STEP 7] username enrichment complete";
+      log("[STEP 7] username enrichment complete");
+      checkpointReached = "[STEP 8] before receiveInboundInteraction";
+      log("[STEP 8] before receiveInboundInteraction");
+
+      const intake = await receiveInboundInteraction({
         businessId: client.businessId,
         leadId: lead.id,
-        interactionId: intake.interaction.id,
-        externalInteractionKey: intake.interaction.externalInteractionKey,
+        clientId: client.id,
+        adapter: "INSTAGRAM",
+        payload: {
+          message: text,
+          mid: eventId,
+          from: {
+            id: senderId,
+            username: instagramUsername || undefined,
+          },
+          threadId: pageIds[0],
+          receivedAt: new Date().toISOString(),
+        },
+        interactionTypeHint: "DM",
+        providerMessageIdHint: eventId,
+        correlationId: req.requestId || eventId,
+        traceId: req.requestId || eventId,
+        metadata: {
+          webhook: "instagram_message",
+          requestId: req.requestId,
+          pageId: pageIds[0],
+        },
       });
-    }
+      checkpointReached = "[STEP 9] intake complete";
+      log("[STEP 9] intake complete");
 
-    await recordTraceLedger({
-      traceId: webhookTraceId,
-      correlationId: webhookTraceId,
-      businessId: client.businessId,
-      tenantId: client.businessId,
-      leadId: lead.id,
-      interactionId: intake.interaction.id,
-      stage: "webhook:instagram:completed",
-      status: "COMPLETED",
-      endedAt: new Date(),
-      metadata: {
-        externalInteractionKey: intake.interaction.externalInteractionKey,
-      },
-    }).catch(() => undefined);
+      if (WEBHOOK_DEBUG) {
+        log("Canonical interaction accepted", {
+          businessId: client.businessId,
+          leadId: lead.id,
+          interactionId: intake.interaction.id,
+          externalInteractionKey: intake.interaction.externalInteractionKey,
+        });
+      }
 
-    checkpointReached = "[STEP 10] returning 200";
-    log("[STEP 10] returning 200");
+      await recordTraceLedger({
+        traceId: webhookTraceId,
+        correlationId: webhookTraceId,
+        businessId: client.businessId,
+        tenantId: client.businessId,
+        leadId: lead.id,
+        interactionId: intake.interaction.id,
+        stage: "webhook:instagram:completed",
+        status: "COMPLETED",
+        endedAt: new Date(),
+        metadata: {
+          externalInteractionKey: intake.interaction.externalInteractionKey,
+        },
+      }).catch(() => undefined);
+    });
+
+    checkpointReached = "[STEP 10] returning fast ack";
+    log("[STEP 10] returning fast ack");
     return res.sendStatus(200);
   } catch (error) {
     req.logger?.error({ error }, "Instagram webhook error");

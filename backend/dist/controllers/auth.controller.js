@@ -39,9 +39,7 @@ const verifyPassword = async (plainTextPassword, storedHash) => {
     }
 };
 const isStrongPassword = (password) => /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
-const LOGIN_BOOTSTRAP_TIMEOUT_MS = 2200;
 const LOGIN_SESSION_LEDGER_TIMEOUT_MS = 400;
-const AUTH_ME_BOOTSTRAP_TIMEOUT_MS = 1600;
 const AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS = 700;
 const withFastTimeout = async (task, timeoutMs) => {
     let timeoutHandle = null;
@@ -246,38 +244,14 @@ const login = async (req, res, next) => {
             }).catch(() => undefined);
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
-        let resolvedUser = {
+        const resolvedUser = {
             id: user.id,
             role: user.role,
             tokenVersion: user.tokenVersion,
             email: user.email,
             name: user.name,
         };
-        let businessId = user.businessId || null;
-        if ((0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > LOGIN_BOOTSTRAP_TIMEOUT_MS + 250) {
-            try {
-                const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
-                    userId: user.id,
-                    preferredBusinessId: user.businessId || null,
-                    profileSeed: {
-                        email: user.email,
-                        name: user.name,
-                        avatar: user.avatar || null,
-                    },
-                });
-                resolvedUser = {
-                    id: bootstrap.user.id,
-                    role: bootstrap.user.role,
-                    tokenVersion: bootstrap.user.tokenVersion,
-                    email: bootstrap.user.email,
-                    name: bootstrap.user.name,
-                };
-                businessId = bootstrap.identity.businessId;
-            }
-            catch {
-                // Fail open for login latency: continue with existing canonical user fields.
-            }
-        }
+        const businessId = user.businessId || null;
         const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(resolvedUser.id, resolvedUser.tokenVersion);
         await pruneRefreshTokens(resolvedUser.id, 4);
@@ -332,6 +306,15 @@ const login = async (req, res, next) => {
             route: "auth.login",
             metadata: {
                 source: "password",
+            },
+        });
+        (0, authBootstrap_service_1.primeAuthBootstrapContext)({
+            userId: resolvedUser.id,
+            preferredBusinessId: businessId,
+            profileSeed: {
+                email: resolvedUser.email,
+                name: resolvedUser.name,
+                avatar: user.avatar || null,
             },
         });
     }
@@ -545,28 +528,7 @@ const getMe = async (req, res, next) => {
             role: String(req.user?.role || "AGENT"),
             businessId: String(req.user?.businessId || "").trim() || null,
         };
-        if ((0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > AUTH_ME_BOOTSTRAP_TIMEOUT_MS + 250) {
-            try {
-                const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
-                    userId: req.user.id,
-                    preferredBusinessId: req.user?.businessId || null,
-                    profileSeed: {
-                        email: req.user?.email || null,
-                    },
-                });
-                payload = {
-                    id: bootstrap.user.id,
-                    name: bootstrap.user.name,
-                    email: bootstrap.user.email,
-                    role: bootstrap.user.role,
-                    businessId: bootstrap.identity.businessId,
-                };
-            }
-            catch {
-                // continue to lightweight fallback
-            }
-        }
-        if (payload.businessId == null &&
+        if ((payload.businessId == null || !payload.email || payload.name === "Workspace User") &&
             (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS + 150) {
             const fallbackUser = await prisma_1.default.user
                 .findUnique({
@@ -590,6 +552,14 @@ const getMe = async (req, res, next) => {
                 };
             }
         }
+        (0, authBootstrap_service_1.primeAuthBootstrapContext)({
+            userId: String(req.user.id),
+            preferredBusinessId: payload.businessId,
+            profileSeed: {
+                email: payload.email || null,
+                name: payload.name || null,
+            },
+        });
         res.setHeader("Cache-Control", "no-store");
         res.json({
             success: true,

@@ -40,7 +40,8 @@ function TopbarComponent({ setOpen }: TopbarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
-  const isBillingRoute = pathname.startsWith("/billing");
+  const isCriticalRoute =
+    pathname.startsWith("/billing") || pathname.startsWith("/conversations");
 
   const debounced = useDebounce(search, 300);
   const normalizedQuery = debounced.trim();
@@ -182,7 +183,7 @@ function TopbarComponent({ setOpen }: TopbarProps) {
         <div className="relative z-[100] flex-shrink-0">
           <NotificationsDropdown
             userId={user?.id}
-            suspended={isBillingRoute}
+            suspended={isCriticalRoute}
           />
         </div>
 

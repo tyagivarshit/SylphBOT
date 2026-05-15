@@ -7,6 +7,7 @@ import { protect } from "../middleware/auth.middleware";
 import { clearAuthCookies } from "../utils/authCookies";
 import { ensureWorkspaceApiKey } from "../services/apiKey.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
+import { primeAuthBootstrapContext } from "../services/authBootstrap.service";
 import { requirePermission } from "../middleware/rbac.middleware";
 import { userActionLimiter } from "../middleware/rateLimit.middleware";
 import { withTimeoutFallback } from "../utils/boundedTimeout";
@@ -25,6 +26,7 @@ const safeUserSelect = {
 } as const;
 
 const USER_ME_CACHE_TTL_MS = 10_000;
+const USER_ME_AUTH_SURFACE_CACHE_TTL_MS = 3_000;
 
 const currentUserCache = new Map<
   string,
@@ -39,6 +41,11 @@ const buildCurrentUserCacheKey = (
   preferredBusinessId?: string | null
 ) =>
   `${String(userId || "").trim()}:${String(preferredBusinessId || "").trim()}`;
+
+const isAuthSurfaceRequest = (req: express.Request) => {
+  const surface = String(req.query.surface || "").trim().toLowerCase();
+  return surface === "auth";
+};
 
 const invalidateCurrentUserCache = (userId?: string | null) => {
   const normalizedUserId = String(userId || "").trim();
@@ -99,6 +106,39 @@ const buildFallbackCurrentUser = (
       },
       totalConnected: 0,
     },
+  };
+};
+
+const buildAuthSurfaceCurrentUser = (
+  user: SafeUserRecord,
+  preferredBusinessId?: string | null
+) => {
+  const businessId =
+    String(preferredBusinessId || "").trim() ||
+    String(user.businessId || "").trim() ||
+    null;
+
+  return {
+    ...user,
+    businessId,
+    business: businessId
+      ? {
+          id: businessId,
+          name: null,
+          website: null,
+          industry: null,
+          teamSize: null,
+          type: null,
+          timezone: null,
+        }
+      : null,
+    workspace: businessId
+      ? {
+          id: businessId,
+          name: null,
+        }
+      : null,
+    connectedAccounts: null,
   };
 };
 
@@ -259,9 +299,10 @@ router.get("/me", protect, async (req: any, res) => {
     }
 
     const preferredBusinessId = req.user?.businessId || baseUser.businessId || null;
+    const authSurface = isAuthSurfaceRequest(req);
     const cacheKey = buildCurrentUserCacheKey(
       userId,
-      preferredBusinessId
+      `${String(preferredBusinessId || "").trim()}:${authSurface ? "auth" : "full"}`
     );
     const cached = currentUserCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
@@ -285,6 +326,28 @@ router.get("/me", protect, async (req: any, res) => {
         cache: "memory_user_me",
       },
     });
+
+    if (authSurface) {
+      const user = buildAuthSurfaceCurrentUser(baseUser, preferredBusinessId);
+
+      currentUserCache.set(cacheKey, {
+        value: user,
+        expiresAt: Date.now() + USER_ME_AUTH_SURFACE_CACHE_TTL_MS,
+      });
+
+      primeAuthBootstrapContext({
+        userId,
+        preferredBusinessId: user.businessId,
+        profileSeed: {
+          email: user.email,
+          name: user.name,
+          avatar: user.avatar || null,
+        },
+      });
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json(user);
+    }
 
     const userHydration = await withTimeoutFallback({
       label: "user_me_hydration",

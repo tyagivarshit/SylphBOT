@@ -5,9 +5,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markAsRead = exports.sendMessage = exports.getMessagesByLead = exports.getConversations = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
-const instagramProfile_service_1 = require("../services/instagramProfile.service");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 const sendMessage_service_1 = require("../services/sendMessage.service");
+const DEFAULT_CONVERSATION_PAGE_SIZE = 40;
+const MAX_CONVERSATION_PAGE_SIZE = 80;
+const DEFAULT_MESSAGE_PAGE_SIZE = 80;
+const MAX_MESSAGE_PAGE_SIZE = 200;
+const parsePositiveInt = (value, input) => {
+    const parsed = Number.parseInt(String(value || ""), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return input.fallback;
+    }
+    const min = Math.max(1, input.min || 1);
+    const max = Math.max(min, input.max || parsed);
+    return Math.max(min, Math.min(max, parsed));
+};
 const normalizeSender = (value) => {
     const normalizedSender = String(value || "USER").trim().toUpperCase();
     if (normalizedSender === "USER" ||
@@ -44,18 +56,33 @@ const getConversations = async (req, res) => {
                 },
             });
         }
+        const limit = parsePositiveInt(req.query.limit, {
+            fallback: DEFAULT_CONVERSATION_PAGE_SIZE,
+            min: 1,
+            max: MAX_CONVERSATION_PAGE_SIZE,
+        });
+        const offset = parsePositiveInt(req.query.offset, {
+            fallback: 0,
+            min: 0,
+            max: 2000,
+        });
         const leads = await prisma_1.default.lead.findMany({
             where: {
                 businessId,
                 deletedAt: null,
             },
-            include: {
-                client: {
-                    select: {
-                        accessToken: true,
-                    },
-                },
+            select: {
+                id: true,
+                name: true,
+                phone: true,
+                instagramId: true,
+                platform: true,
+                unreadCount: true,
                 messages: {
+                    select: {
+                        content: true,
+                        createdAt: true,
+                    },
                     orderBy: { createdAt: "desc" },
                     take: 1,
                 },
@@ -63,42 +90,33 @@ const getConversations = async (req, res) => {
             orderBy: {
                 lastMessageAt: "desc",
             },
+            skip: offset,
+            take: limit + 1,
         });
-        const conversations = await Promise.all(leads.map(async (lead) => {
-            let instagramUsername = lead.name || null;
-            if (!instagramUsername &&
-                lead.platform === "INSTAGRAM" &&
-                lead.instagramId &&
-                lead.client?.accessToken) {
-                instagramUsername = await (0, instagramProfile_service_1.fetchInstagramUsername)(lead.instagramId, lead.client.accessToken);
-                if (instagramUsername) {
-                    await prisma_1.default.lead.updateMany({
-                        where: {
-                            id: lead.id,
-                            businessId,
-                            deletedAt: null,
-                        },
-                        data: { name: instagramUsername },
-                    });
-                }
-            }
-            return {
-                id: lead.id,
-                name: lead.platform === "WHATSAPP"
-                    ? lead.phone || lead.name || "User"
-                    : instagramUsername || lead.name || "User",
-                phone: lead.phone || null,
-                instagramId: lead.instagramId || null,
-                platform: lead.platform || null,
-                lastMessage: lead.messages[0]?.content || "",
-                lastMessageTime: lead.messages[0]?.createdAt || null,
-                unreadCount: lead.unreadCount || 0,
-            };
+        const hasMore = leads.length > limit;
+        const boundedLeads = hasMore ? leads.slice(0, limit) : leads;
+        const conversations = boundedLeads.map((lead) => ({
+            id: lead.id,
+            name: lead.platform === "WHATSAPP"
+                ? lead.phone || lead.name || "User"
+                : lead.name || lead.instagramId || "User",
+            phone: lead.phone || null,
+            instagramId: lead.instagramId || null,
+            platform: lead.platform || null,
+            lastMessage: lead.messages[0]?.content || "",
+            lastMessageTime: lead.messages[0]?.createdAt || null,
+            unreadCount: lead.unreadCount || 0,
         }));
         return res.json({
             success: true,
             data: {
                 conversations,
+                page: {
+                    limit,
+                    offset,
+                    hasMore,
+                    nextOffset: hasMore ? offset + limit : null,
+                },
             },
         });
     }
@@ -115,6 +133,14 @@ const getMessagesByLead = async (req, res) => {
     try {
         const businessId = req.user?.businessId || null;
         const leadId = req.params.leadId;
+        const limit = parsePositiveInt(req.query.limit, {
+            fallback: DEFAULT_MESSAGE_PAGE_SIZE,
+            min: 1,
+            max: MAX_MESSAGE_PAGE_SIZE,
+        });
+        const beforeRaw = String(req.query.before || "").trim();
+        const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+        const hasValidBefore = Boolean(beforeDate && !Number.isNaN(beforeDate.getTime()));
         if (!businessId) {
             return res.status(401).json({
                 success: false,
@@ -140,22 +166,38 @@ const getMessagesByLead = async (req, res) => {
                 message: "Lead not found",
             });
         }
-        const messages = await prisma_1.default.message.findMany({
+        const messagesDesc = await prisma_1.default.message.findMany({
             where: {
                 leadId: lead.id,
                 lead: {
                     businessId,
                     deletedAt: null,
                 },
+                ...(hasValidBefore
+                    ? {
+                        createdAt: {
+                            lt: beforeDate,
+                        },
+                    }
+                    : {}),
             },
             orderBy: {
-                createdAt: "asc",
+                createdAt: "desc",
             },
+            take: limit,
         });
+        const messages = messagesDesc.slice().reverse();
+        const nextBefore = messagesDesc.length === limit
+            ? messagesDesc[messagesDesc.length - 1]?.createdAt?.toISOString() || null
+            : null;
         return res.json({
             success: true,
             data: {
                 messages: messages.map((message) => (0, sendMessage_service_1.formatConversationMessage)(message)),
+                page: {
+                    limit,
+                    nextBefore,
+                },
             },
         });
     }

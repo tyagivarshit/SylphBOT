@@ -15,6 +15,8 @@ type EnsureAuthBootstrapContextInput = {
   profileSeed?: ProfileSeed | null;
 };
 
+const AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS = 1_900;
+
 const normalizeText = (value?: string | null) => {
   const normalized = String(value || "").trim();
   return normalized || null;
@@ -247,4 +249,45 @@ export const ensureAuthBootstrapContext = async (
     identity,
     backfilledFields,
   };
+};
+
+const withTimeout = async <T>(task: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error("auth_bootstrap_timeout"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
+export const primeAuthBootstrapContext = (
+  input: EnsureAuthBootstrapContextInput,
+  options?: {
+    timeoutMs?: number;
+  }
+) => {
+  const timeoutMs = Math.max(
+    500,
+    Math.floor(options?.timeoutMs || AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS)
+  );
+
+  setImmediate(() => {
+    void withTimeout(ensureAuthBootstrapContext(input), timeoutMs).catch((error) => {
+      console.warn("AUTH_BOOTSTRAP_DEFERRED_FAILED", {
+        userId: input.userId,
+        preferredBusinessId: input.preferredBusinessId || null,
+        reason: String((error as Error)?.message || "auth_bootstrap_failed"),
+      });
+    });
+  });
 };

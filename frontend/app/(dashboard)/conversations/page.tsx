@@ -6,6 +6,7 @@ import ChatSidebar from "@/components/conversations/ChatSidebar";
 import ChatWindow from "@/components/conversations/ChatWindow";
 import { apiFetch } from "@/lib/apiClient";
 import { socket } from "@/lib/socket";
+import { setDashboardRoutePrefetchPaused } from "@/lib/dashboardRoutePrefetch";
 import { SkeletonCard } from "@/components/ui/feedback";
 
 export interface Lead {
@@ -227,6 +228,13 @@ function ConversationsPageContent() {
   const seenStateRef = useRef<SeenConversationState>({});
   const selectedLeadRef = useRef<Lead | null>(null);
 
+  useEffect(() => {
+    setDashboardRoutePrefetchPaused(true);
+    return () => {
+      setDashboardRoutePrefetchPaused(false);
+    };
+  }, []);
+
   const persistSeenState = useCallback(
     (
       leadId: string,
@@ -323,9 +331,12 @@ function ConversationsPageContent() {
       setLeadsLoading(true);
       setLeadsError(null);
 
-      const response = await apiFetch<{ conversations?: Lead[] }>("/api/conversations", {
-        credentials: "include",
-      });
+      const response = await apiFetch<{ conversations?: Lead[] }>(
+        "/api/conversations?limit=40&offset=0",
+        {
+          credentials: "include",
+        }
+      );
 
       if (!response.success) {
         throw new Error(response.message || "We couldn't load your conversations.");
@@ -382,7 +393,7 @@ function ConversationsPageContent() {
         const activeLastMessageTime = lead.lastMessageTime;
 
         const response = await apiFetch<{ messages?: unknown[] }>(
-          `/api/conversations/${activeLeadId}/messages`,
+          `/api/conversations/${activeLeadId}/messages?limit=120`,
           {
             credentials: "include",
           }

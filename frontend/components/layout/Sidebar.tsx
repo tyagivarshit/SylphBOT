@@ -90,7 +90,8 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const isBillingRoute = pathname.startsWith("/billing");
+  const isCriticalRoute =
+    pathname.startsWith("/billing") || pathname.startsWith("/conversations");
 
   useEffect(() => {
     const saved = sessionStorage.getItem("sidebar_scroll");
@@ -187,9 +188,9 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
                     <Link
                       key={item.name}
                       href={item.href as any}
-                      prefetch={!isBillingRoute}
+                      prefetch={!isCriticalRoute}
                       onMouseEnter={() => {
-                        if (isBillingRoute) {
+                        if (isCriticalRoute) {
                           return;
                         }
                         router.prefetch(item.href);

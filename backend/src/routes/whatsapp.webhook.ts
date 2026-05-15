@@ -40,22 +40,6 @@ const buildClientLookupOr = ({
   ...phoneNumberIds.map((phoneNumberId) => ({ phoneNumberId })),
 ];
 
-const attachResolvedBusinessContext = (
-  req: Request,
-  client: { id: string; businessId: string; platform: string }
-) => {
-  (req as any).businessId = client.businessId;
-  req.tenant = {
-    businessId: client.businessId,
-  };
-
-  console.log("[WHATSAPP WEBHOOK] businessId resolved", {
-    businessId: client.businessId,
-    clientId: client.id,
-    platform: client.platform,
-  });
-};
-
 const findWhatsAppClient = async ({
   phoneNumberIds,
   pageIds = [],
@@ -120,6 +104,20 @@ const getWhatsAppDeliveryStatuses = (body: any) =>
       )
     : [];
 
+const runWebhookBackgroundTask = (
+  label: string,
+  task: () => Promise<void>
+) => {
+  setImmediate(() => {
+    void task().catch((error) => {
+      console.error("[WHATSAPP WEBHOOK] background task failed", {
+        label,
+        reason: String((error as Error)?.message || "background_task_failed"),
+      });
+    });
+  });
+};
+
 const enforceWebhookSecurity = async (req: Request, body: any) => {
   const rawBody = Buffer.isBuffer((req as any).body)
     ? ((req as any).body as Buffer)
@@ -182,119 +180,119 @@ router.post("/", async (req: any, res: Response) => {
       return res.sendStatus(403);
     }
 
+    const requestId = String(req.requestId || "").trim() || null;
     const deliveryStatuses = getWhatsAppDeliveryStatuses(body);
-    let reconciledDeliveryStatus = false;
-
-    for (const status of deliveryStatuses) {
-      const providerMessageId = normalizeIdentifier(
-        status?.id || status?.message_id
-      );
-      const deliveryStatus = String(status?.status || "").trim().toLowerCase();
-
-      if (
-        providerMessageId &&
-        ["sent", "delivered", "read"].includes(deliveryStatus)
-      ) {
-        await reconcileRevenueTouchDeliveryByProviderMessageId({
-          providerMessageId,
-          deliveredAt: new Date(),
-        }).catch(() => undefined);
-        reconciledDeliveryStatus = true;
-      }
-    }
+    const deliveryProviderMessageIds = deliveryStatuses
+      .map((status) => ({
+        providerMessageId: normalizeIdentifier(status?.id || status?.message_id),
+        deliveryStatus: String(status?.status || "").trim().toLowerCase(),
+      }))
+      .filter(
+        (status): status is { providerMessageId: string; deliveryStatus: string } =>
+          Boolean(status.providerMessageId) &&
+          ["sent", "delivered", "read"].includes(status.deliveryStatus)
+      )
+      .map((status) => status.providerMessageId);
 
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-    if (!message) {
-      if (reconciledDeliveryStatus) {
+    const eventId = normalizeIdentifier(message?.id);
+    if (eventId) {
+      const shouldProcess = await processWebhookEvent({
+        eventId,
+        platform: "WHATSAPP",
+      });
+
+      if (!shouldProcess) {
+        console.log("[WHATSAPP WEBHOOK] duplicate webhook ignored");
         return res.sendStatus(200);
       }
-
-      return res.sendStatus(200);
     }
 
-    const eventId = message?.id;
-    const shouldProcess = await processWebhookEvent({
-      eventId,
-      platform: "WHATSAPP",
-    });
-
-    if (!shouldProcess) {
-      console.log("[WHATSAPP WEBHOOK] duplicate webhook ignored");
-      return res.sendStatus(200);
-    }
-
-    const from = message.from;
-    const phoneNumberId =
-      body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
-    const phoneNumberIds = [normalizeIdentifier(phoneNumberId)].filter(
+    const from = normalizeIdentifier(message?.from);
+    const phoneNumberId = normalizeIdentifier(
+      body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
+    );
+    const phoneNumberIds = [phoneNumberId].filter(
       (value): value is string => Boolean(value)
     );
+    const intakePayload = {
+      ...body.entry?.[0]?.changes?.[0]?.value,
+      receivedAt: new Date().toISOString(),
+    };
 
-    if (!from || !phoneNumberIds.length) {
-      return res.sendStatus(200);
+    if (deliveryProviderMessageIds.length) {
+      runWebhookBackgroundTask("delivery_reconcile", async () => {
+        await Promise.allSettled(
+          deliveryProviderMessageIds.map((providerMessageId) =>
+            reconcileRevenueTouchDeliveryByProviderMessageId({
+              providerMessageId,
+              deliveredAt: new Date(),
+            }).catch(() => undefined)
+          )
+        );
+      });
     }
 
-    console.log("[WHATSAPP WEBHOOK] identifiers", {
-      phoneNumberIds,
-    });
+    if (from && phoneNumberIds.length && message) {
+      runWebhookBackgroundTask("reception_intake", async () => {
+        console.log("[WHATSAPP WEBHOOK] identifiers", {
+          phoneNumberIds,
+        });
 
-    const client = await findWhatsAppClient({
-      phoneNumberIds,
-    });
+        const client = await findWhatsAppClient({
+          phoneNumberIds,
+        });
 
-    if (!client) {
-      console.log("[WHATSAPP WEBHOOK] client not found");
-      return res.sendStatus(200);
+        if (!client) {
+          console.log("[WHATSAPP WEBHOOK] client not found");
+          return;
+        }
+
+        await recordInboundProviderWebhook({
+          businessId: client.businessId,
+          tenantId: client.businessId,
+          provider: "WHATSAPP",
+          environment: "LIVE",
+          success: true,
+          details: {
+            eventId,
+            phoneNumberId: phoneNumberIds[0] || null,
+            eventTimestampMs: toEpochMs(message?.timestamp || body?.entry?.[0]?.time),
+          },
+        }).catch(() => undefined);
+
+        const lead = await resolveOrCreateReceptionLead({
+          businessId: client.businessId,
+          clientId: client.id,
+          adapter: "WHATSAPP",
+          payload: intakePayload,
+        });
+
+        const intake = await receiveInboundInteraction({
+          businessId: client.businessId,
+          leadId: lead.id,
+          clientId: client.id,
+          adapter: "WHATSAPP",
+          payload: intakePayload,
+          providerMessageIdHint: eventId || null,
+          correlationId: requestId || eventId || phoneNumberIds[0],
+          traceId: requestId || eventId || null,
+          metadata: {
+            webhook: "whatsapp",
+            requestId,
+            phoneNumberId: phoneNumberIds[0],
+          },
+        });
+
+        console.log("[WHATSAPP WEBHOOK] canonical interaction received", {
+          businessId: client.businessId,
+          leadId: lead.id,
+          interactionId: intake.interaction.id,
+          externalInteractionKey: intake.interaction.externalInteractionKey,
+        });
+      });
     }
-
-    attachResolvedBusinessContext(req, client);
-    await recordInboundProviderWebhook({
-      businessId: client.businessId,
-      tenantId: client.businessId,
-      provider: "WHATSAPP",
-      environment: "LIVE",
-      success: true,
-      details: {
-        eventId: eventId || null,
-        phoneNumberId: phoneNumberIds[0] || null,
-        eventTimestampMs: toEpochMs(message?.timestamp || body?.entry?.[0]?.time),
-      },
-    }).catch(() => undefined);
-    const lead = await resolveOrCreateReceptionLead({
-      businessId: client.businessId,
-      clientId: client.id,
-      adapter: "WHATSAPP",
-      payload: {
-        ...body.entry?.[0]?.changes?.[0]?.value,
-        receivedAt: new Date().toISOString(),
-      },
-    });
-    const intake = await receiveInboundInteraction({
-      businessId: client.businessId,
-      leadId: lead.id,
-      clientId: client.id,
-      adapter: "WHATSAPP",
-      payload: {
-        ...body.entry?.[0]?.changes?.[0]?.value,
-        receivedAt: new Date().toISOString(),
-      },
-      providerMessageIdHint: eventId || null,
-      correlationId: req.requestId || eventId,
-      traceId: req.requestId || eventId || null,
-      metadata: {
-        webhook: "whatsapp",
-        requestId: req.requestId,
-        phoneNumberId: phoneNumberIds[0],
-      },
-    });
-
-    console.log("[WHATSAPP WEBHOOK] canonical interaction received", {
-      businessId: client.businessId,
-      leadId: lead.id,
-      interactionId: intake.interaction.id,
-      externalInteractionKey: intake.interaction.externalInteractionKey,
-    });
 
     return res.sendStatus(200);
   } catch (error) {

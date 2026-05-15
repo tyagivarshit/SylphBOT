@@ -30,7 +30,10 @@ import {
   issueSessionLedger,
   recordFraudSignal,
 } from "../services/security/securityGovernanceOS.service";
-import { ensureAuthBootstrapContext } from "../services/authBootstrap.service";
+import {
+  ensureAuthBootstrapContext,
+  primeAuthBootstrapContext,
+} from "../services/authBootstrap.service";
 import { withDistributedLock } from "../services/distributedLock.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
@@ -69,9 +72,7 @@ const verifyPassword = async (
 const isStrongPassword = (password: string) =>
   /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
 
-const LOGIN_BOOTSTRAP_TIMEOUT_MS = 2200;
 const LOGIN_SESSION_LEDGER_TIMEOUT_MS = 400;
-const AUTH_ME_BOOTSTRAP_TIMEOUT_MS = 1600;
 const AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS = 700;
 
 const withFastTimeout = async <T>(
@@ -334,39 +335,14 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       throw unauthorized("Invalid credentials");
     }
 
-    let resolvedUser = {
+    const resolvedUser = {
       id: user.id,
       role: user.role,
       tokenVersion: user.tokenVersion,
       email: user.email,
       name: user.name,
     };
-    let businessId = user.businessId || null;
-
-    if (getRequestRemainingMs({ req, res }, 0) > LOGIN_BOOTSTRAP_TIMEOUT_MS + 250) {
-      try {
-        const bootstrap = await ensureAuthBootstrapContext({
-          userId: user.id,
-          preferredBusinessId: user.businessId || null,
-          profileSeed: {
-            email: user.email,
-            name: user.name,
-            avatar: user.avatar || null,
-          },
-        });
-
-        resolvedUser = {
-          id: bootstrap.user.id,
-          role: bootstrap.user.role,
-          tokenVersion: bootstrap.user.tokenVersion,
-          email: bootstrap.user.email,
-          name: bootstrap.user.name,
-        };
-        businessId = bootstrap.identity.businessId;
-      } catch {
-        // Fail open for login latency: continue with existing canonical user fields.
-      }
-    }
+    const businessId = user.businessId || null;
 
     const accessToken = generateAccessToken(
       resolvedUser.id,
@@ -440,6 +416,16 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       route: "auth.login",
       metadata: {
         source: "password",
+      },
+    });
+
+    primeAuthBootstrapContext({
+      userId: resolvedUser.id,
+      preferredBusinessId: businessId,
+      profileSeed: {
+        email: resolvedUser.email,
+        name: resolvedUser.name,
+        avatar: user.avatar || null,
       },
     });
 
@@ -700,30 +686,8 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
       businessId: String(req.user?.businessId || "").trim() || null,
     };
 
-    if (getRequestRemainingMs({ req, res }, 0) > AUTH_ME_BOOTSTRAP_TIMEOUT_MS + 250) {
-      try {
-        const bootstrap = await ensureAuthBootstrapContext({
-          userId: req.user.id,
-          preferredBusinessId: req.user?.businessId || null,
-          profileSeed: {
-            email: req.user?.email || null,
-          },
-        });
-
-        payload = {
-          id: bootstrap.user.id,
-          name: bootstrap.user.name,
-          email: bootstrap.user.email,
-          role: bootstrap.user.role,
-          businessId: bootstrap.identity.businessId,
-        };
-      } catch {
-        // continue to lightweight fallback
-      }
-    }
-
     if (
-      payload.businessId == null &&
+      (payload.businessId == null || !payload.email || payload.name === "Workspace User") &&
       getRequestRemainingMs({ req, res }, 0) > AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS + 150
     ) {
       const fallbackUser = await prisma.user
@@ -749,6 +713,15 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
         };
       }
     }
+
+    primeAuthBootstrapContext({
+      userId: String(req.user.id),
+      preferredBusinessId: payload.businessId,
+      profileSeed: {
+        email: payload.email || null,
+        name: payload.name || null,
+      },
+    });
 
     res.setHeader("Cache-Control", "no-store");
 

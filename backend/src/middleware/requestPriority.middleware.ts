@@ -25,6 +25,11 @@ const PRIORITY_LIMITS: Record<PriorityClass, number> = {
 };
 
 const GLOBAL_INFLIGHT_LIMIT = 8;
+const RESERVED_CRITICAL_INFLIGHT_SLOTS = 2;
+const NON_CRITICAL_INFLIGHT_LIMIT = Math.max(
+  1,
+  GLOBAL_INFLIGHT_LIMIT - RESERVED_CRITICAL_INFLIGHT_SLOTS
+);
 const QUEUE_WAIT_BUFFER_MS = 250;
 const MIN_QUEUE_WAIT_MS = 150;
 
@@ -52,6 +57,18 @@ const sumQueued = () =>
 
 const classifyRequestPriority = (req: Request): PriorityClass => {
   const path = String(req.path || req.originalUrl || "").trim();
+  const method = String(req.method || "GET").trim().toUpperCase();
+  const bookingCanonicalPath =
+    path.startsWith("/api/booking/canonical/") ||
+    path === "/api/booking/canonical/request";
+  const conversationPath = path.startsWith("/api/conversations");
+  const criticalBookingLifecyclePath =
+    bookingCanonicalPath &&
+    (path.includes("/hold") ||
+      path.includes("/confirm") ||
+      path.includes("/reschedule") ||
+      path.includes("/cancel") ||
+      path.endsWith("/request"));
 
   if (
     path.startsWith("/api/auth") ||
@@ -65,7 +82,10 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
     path.startsWith("/api/billing/create-checkout-session") ||
     path.startsWith("/api/billing/upgrade") ||
     path.startsWith("/api/commerce") ||
-    path.startsWith("/api/security")
+    path.startsWith("/api/security") ||
+    conversationPath ||
+    criticalBookingLifecyclePath ||
+    (bookingCanonicalPath && method === "POST")
   ) {
     return "CRITICAL";
   }
@@ -83,7 +103,6 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
     path.startsWith("/api/analytics") ||
     path.startsWith("/api/dashboard") ||
     path.startsWith("/api/autonomous") ||
-    path.startsWith("/api/conversations") ||
     path.startsWith("/api/integrations/onboarding")
   ) {
     return "LOW";
@@ -93,7 +112,12 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
 };
 
 const canAcquireSlot = (priority: PriorityClass) => {
-  if (sumActive() >= GLOBAL_INFLIGHT_LIMIT) {
+  const activeTotal = sumActive();
+  if (priority === "CRITICAL") {
+    if (activeTotal >= GLOBAL_INFLIGHT_LIMIT) {
+      return false;
+    }
+  } else if (activeTotal >= NON_CRITICAL_INFLIGHT_LIMIT) {
     return false;
   }
 

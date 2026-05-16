@@ -478,6 +478,37 @@ const writeAuthContextCache = async (
     .catch(() => undefined);
 };
 
+export const primeAuthContextCacheForToken = (input: {
+  accessToken: string;
+  userId: string;
+  role: string;
+  tokenVersion: number;
+  email?: string | null;
+  businessId?: string | null;
+}) => {
+  const accessToken = String(input.accessToken || "").trim();
+  if (!accessToken) {
+    return;
+  }
+
+  const tokenKey = hashToken(accessToken);
+  const context: CachedAuthContext = {
+    userId: String(input.userId || "").trim(),
+    role: String(input.role || "").trim() || "AGENT",
+    tokenVersion: Number(input.tokenVersion || 0),
+    businessId: String(input.businessId || "").trim() || null,
+    email: String(input.email || "").trim() || undefined,
+    expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+  };
+
+  if (!context.userId || !Number.isFinite(context.tokenVersion)) {
+    return;
+  }
+
+  authContextCache.set(tokenKey, context);
+  void writeAuthContextCache(tokenKey, context);
+};
+
 const getUserWithBusiness = async (userId: string) =>
   prisma.user.findUnique({
     where: { id: userId },
@@ -536,6 +567,7 @@ const resolveBusinessId = async (input: {
   userId: string;
   userBusinessId: string | null;
   preferredBusinessId?: string | null;
+  allowWorkspaceFallback?: boolean;
 }) => {
   const fastPathBusinessId =
     String(input.userBusinessId || "").trim() ||
@@ -546,6 +578,10 @@ const resolveBusinessId = async (input: {
     return fastPathBusinessId;
   }
 
+  if (input.allowWorkspaceFallback === false) {
+    return null;
+  }
+
   const identity = await resolveUserWorkspaceIdentity({
     userId: input.userId,
     preferredBusinessId: input.preferredBusinessId || null,
@@ -554,6 +590,19 @@ const resolveBusinessId = async (input: {
   });
 
   return identity.businessId;
+};
+
+const shouldUseShallowWorkspaceResolution = (req: Request) => {
+  const path = String(req.path || req.originalUrl || req.url || "").trim();
+  const surface = String((req.query as Record<string, unknown>)?.surface || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    surface === "auth" ||
+    path.startsWith("/api/user/me") ||
+    path.startsWith("/api/auth/me")
+  );
 };
 
 const enforceSessionAnomalyGuard = async (req: Request, input: {
@@ -1071,6 +1120,7 @@ export const protect = async (
                     userId: user.id,
                     userBusinessId: user.businessId || null,
                     preferredBusinessId: decoded.businessId || null,
+                    allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
                   }),
               });
 
@@ -1267,6 +1317,7 @@ export const protect = async (
               userId: user.id,
               userBusinessId: user.businessId || null,
               preferredBusinessId: null,
+              allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
             }),
         });
 

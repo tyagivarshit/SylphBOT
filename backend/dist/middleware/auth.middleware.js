@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.protect = void 0;
+exports.protect = exports.primeAuthContextCacheForToken = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const AppError_1 = require("../utils/AppError");
 const crypto_1 = __importDefault(require("crypto"));
@@ -302,6 +302,27 @@ const writeAuthContextCache = async (tokenKey, context) => {
         .set(getAuthRedisCacheKey(tokenKey), JSON.stringify(context), "EX", AUTH_REDIS_CACHE_TTL_SECONDS)
         .catch(() => undefined);
 };
+const primeAuthContextCacheForToken = (input) => {
+    const accessToken = String(input.accessToken || "").trim();
+    if (!accessToken) {
+        return;
+    }
+    const tokenKey = hashToken(accessToken);
+    const context = {
+        userId: String(input.userId || "").trim(),
+        role: String(input.role || "").trim() || "AGENT",
+        tokenVersion: Number(input.tokenVersion || 0),
+        businessId: String(input.businessId || "").trim() || null,
+        email: String(input.email || "").trim() || undefined,
+        expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+    };
+    if (!context.userId || !Number.isFinite(context.tokenVersion)) {
+        return;
+    }
+    authContextCache.set(tokenKey, context);
+    void writeAuthContextCache(tokenKey, context);
+};
+exports.primeAuthContextCacheForToken = primeAuthContextCacheForToken;
 const getUserWithBusiness = async (userId) => prisma_1.default.user.findUnique({
     where: { id: userId },
     select: {
@@ -347,6 +368,9 @@ const resolveBusinessId = async (input) => {
     if (fastPathBusinessId) {
         return fastPathBusinessId;
     }
+    if (input.allowWorkspaceFallback === false) {
+        return null;
+    }
     const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
         userId: input.userId,
         preferredBusinessId: input.preferredBusinessId || null,
@@ -354,6 +378,15 @@ const resolveBusinessId = async (input) => {
         persistResolvedBusinessId: false,
     });
     return identity.businessId;
+};
+const shouldUseShallowWorkspaceResolution = (req) => {
+    const path = String(req.path || req.originalUrl || req.url || "").trim();
+    const surface = String(req.query?.surface || "")
+        .trim()
+        .toLowerCase();
+    return (surface === "auth" ||
+        path.startsWith("/api/user/me") ||
+        path.startsWith("/api/auth/me"));
 };
 const enforceSessionAnomalyGuard = async (req, input) => {
     if (input.signal?.aborted || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
@@ -772,6 +805,7 @@ const protect = async (req, res, next) => {
                                     userId: user.id,
                                     userBusinessId: user.businessId || null,
                                     preferredBusinessId: decoded.businessId || null,
+                                    allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
                                 }),
                             });
                             const resolvedContext = {
@@ -923,6 +957,7 @@ const protect = async (req, res, next) => {
                         userId: user.id,
                         userBusinessId: user.businessId || null,
                         preferredBusinessId: null,
+                        allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
                     }),
                 });
                 return {

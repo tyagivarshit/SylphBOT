@@ -16,6 +16,9 @@ type EnsureAuthBootstrapContextInput = {
 };
 
 const AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS = 1_900;
+const AUTH_BOOTSTRAP_BACKGROUND_DELAY_MS = 35;
+
+const authBootstrapPrimeInFlight = new Map<string, Promise<void>>();
 
 const normalizeText = (value?: string | null) => {
   const normalized = String(value || "").trim();
@@ -274,20 +277,53 @@ export const primeAuthBootstrapContext = (
   input: EnsureAuthBootstrapContextInput,
   options?: {
     timeoutMs?: number;
+    shouldRun?: () => boolean;
   }
 ) => {
+  const userId = String(input.userId || "").trim();
+  if (!userId) {
+    return;
+  }
+
+  if (options?.shouldRun && !options.shouldRun()) {
+    return;
+  }
+
   const timeoutMs = Math.max(
     500,
     Math.floor(options?.timeoutMs || AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS)
   );
+  const primeKey = [
+    userId,
+    String(input.preferredBusinessId || "").trim() || "none",
+  ].join(":");
 
-  setImmediate(() => {
-    void withTimeout(ensureAuthBootstrapContext(input), timeoutMs).catch((error) => {
-      console.warn("AUTH_BOOTSTRAP_DEFERRED_FAILED", {
-        userId: input.userId,
-        preferredBusinessId: input.preferredBusinessId || null,
-        reason: String((error as Error)?.message || "auth_bootstrap_failed"),
-      });
-    });
+  if (authBootstrapPrimeInFlight.has(primeKey)) {
+    return;
+  }
+
+  const run = new Promise<void>((resolve) => {
+    setTimeout(() => {
+      if (options?.shouldRun && !options.shouldRun()) {
+        resolve();
+        return;
+      }
+
+      void withTimeout(ensureAuthBootstrapContext(input), timeoutMs)
+        .catch((error) => {
+          console.warn("AUTH_BOOTSTRAP_DEFERRED_FAILED", {
+            userId: input.userId,
+            preferredBusinessId: input.preferredBusinessId || null,
+            reason: String((error as Error)?.message || "auth_bootstrap_failed"),
+          });
+        })
+        .finally(() => {
+          resolve();
+        });
+    }, AUTH_BOOTSTRAP_BACKGROUND_DELAY_MS);
+  }).finally(() => {
+    authBootstrapPrimeInFlight.delete(primeKey);
   });
+
+  authBootstrapPrimeInFlight.set(primeKey, run);
 };

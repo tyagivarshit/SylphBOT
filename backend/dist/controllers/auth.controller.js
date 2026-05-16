@@ -21,6 +21,7 @@ const authBootstrap_service_1 = require("../services/authBootstrap.service");
 const distributedLock_service_1 = require("../services/distributedLock.service");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
+const auth_middleware_1 = require("../middleware/auth.middleware");
 /* ======================================
 UTILS
 ====================================== */
@@ -41,6 +42,8 @@ const verifyPassword = async (plainTextPassword, storedHash) => {
 const isStrongPassword = (password) => /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
 const LOGIN_SESSION_LEDGER_TIMEOUT_MS = 400;
 const AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS = 700;
+const LOGIN_REFRESH_TOKEN_TIMEOUT_MS = 1800;
+const LOGIN_BACKGROUND_TASK_TIMEOUT_MS = 1200;
 const withFastTimeout = async (task, timeoutMs) => {
     let timeoutHandle = null;
     try {
@@ -58,6 +61,16 @@ const withFastTimeout = async (task, timeoutMs) => {
             clearTimeout(timeoutHandle);
         }
     }
+};
+const runDetachedAuthTask = (label, task) => {
+    setTimeout(() => {
+        void task().catch((error) => {
+            console.warn("AUTH_BACKGROUND_TASK_FAILED", {
+                label,
+                reason: String(error?.message || "auth_background_task_failed"),
+            });
+        });
+    }, 20);
 };
 /* ======================================
 RATE LIMIT
@@ -244,6 +257,11 @@ const login = async (req, res, next) => {
             }).catch(() => undefined);
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "auth.login.verified",
+        });
         const resolvedUser = {
             id: user.id,
             role: user.role,
@@ -254,32 +272,29 @@ const login = async (req, res, next) => {
         const businessId = user.businessId || null;
         const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(resolvedUser.id, resolvedUser.tokenVersion);
-        await pruneRefreshTokens(resolvedUser.id, 4);
-        await prisma_1.default.refreshToken.create({
+        const hashedRefreshToken = hashToken(refreshRaw);
+        await withFastTimeout(prisma_1.default.refreshToken.create({
             data: {
-                token: hashToken(refreshRaw),
+                token: hashedRefreshToken,
                 userId: resolvedUser.id,
                 userAgent: getUA(req),
                 ip: getIP(req),
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
+        }), LOGIN_REFRESH_TOKEN_TIMEOUT_MS);
+        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+            req,
+            res,
+            stage: "auth.login.session_persisted",
         });
-        if (!(0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) &&
-            (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) > LOGIN_SESSION_LEDGER_TIMEOUT_MS + 200) {
-            await (0, securityGovernanceOS_service_1.issueSessionLedger)({
-                businessId,
-                tenantId: businessId,
-                userId: resolvedUser.id,
-                sessionKey: hashToken(refreshRaw),
-                ip: getIP(req),
-                userAgent: String(getUA(req)),
-                deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                metadata: {
-                    source: "auth.login",
-                },
-            }).catch(() => undefined);
-        }
+        (0, auth_middleware_1.primeAuthContextCacheForToken)({
+            accessToken,
+            userId: resolvedUser.id,
+            role: resolvedUser.role,
+            tokenVersion: resolvedUser.tokenVersion,
+            email: resolvedUser.email,
+            businessId,
+        });
         void writeAuthAuditLog(req, {
             action: "auth.login",
             userId: resolvedUser.id,
@@ -289,6 +304,9 @@ const login = async (req, res, next) => {
                 role: resolvedUser.role,
             },
         });
+        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || res.headersSent || res.writableEnded) {
+            return;
+        }
         setCookies(req, res, accessToken, refreshRaw);
         res.json({
             success: true,
@@ -308,6 +326,24 @@ const login = async (req, res, next) => {
                 source: "password",
             },
         });
+        runDetachedAuthTask("auth.login.prune_refresh_tokens", async () => {
+            await withFastTimeout(pruneRefreshTokens(resolvedUser.id, 4), LOGIN_BACKGROUND_TASK_TIMEOUT_MS);
+        });
+        runDetachedAuthTask("auth.login.session_ledger", async () => {
+            await withFastTimeout((0, securityGovernanceOS_service_1.issueSessionLedger)({
+                businessId,
+                tenantId: businessId,
+                userId: resolvedUser.id,
+                sessionKey: hashedRefreshToken,
+                ip: getIP(req),
+                userAgent: String(getUA(req)),
+                deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                metadata: {
+                    source: "auth.login",
+                },
+            }), Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS));
+        });
         (0, authBootstrap_service_1.primeAuthBootstrapContext)({
             userId: resolvedUser.id,
             preferredBusinessId: businessId,
@@ -316,6 +352,8 @@ const login = async (req, res, next) => {
                 name: resolvedUser.name,
                 avatar: user.avatar || null,
             },
+        }, {
+            shouldRun: () => !(0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }),
         });
     }
     catch (err) {
@@ -552,6 +590,9 @@ const getMe = async (req, res, next) => {
                 };
             }
         }
+        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || res.headersSent || res.writableEnded) {
+            return;
+        }
         (0, authBootstrap_service_1.primeAuthBootstrapContext)({
             userId: String(req.user.id),
             preferredBusinessId: payload.businessId,
@@ -559,6 +600,8 @@ const getMe = async (req, res, next) => {
                 email: payload.email || null,
                 name: payload.name || null,
             },
+        }, {
+            shouldRun: () => !(0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }),
         });
         res.setHeader("Cache-Control", "no-store");
         res.json({

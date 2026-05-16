@@ -1075,6 +1075,7 @@ class BillingController {
                 res,
                 stage: "checkout.entry",
             });
+            const requestAbortSignal = (0, requestLifecycle_1.getRequestAbortSignal)({ req, res });
             const plan = readInput("plan");
             const coupon = readInput("coupon");
             const requestedQuantity = Number(readInput("seats") || readInput("quantity") || 1);
@@ -1268,6 +1269,11 @@ class BillingController {
                 requestId: checkoutRequestId,
             });
             try {
+                (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+                    req,
+                    res,
+                    stage: "checkout.proposal_start",
+                });
                 const proposalStartedAt = Date.now();
                 const proposal = await proposalEngine_service_1.proposalEngineService.createProposal({
                     businessId,
@@ -1292,6 +1298,8 @@ class BillingController {
                         seatBased: quantity > 1,
                     },
                     idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
+                    requestSignal: requestAbortSignal,
+                    deferNonCriticalWork: true,
                 });
                 (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
                     req,
@@ -1323,6 +1331,11 @@ class BillingController {
                 const paymentIntentStartedAt = Date.now();
                 let paymentIntent;
                 try {
+                    (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+                        req,
+                        res,
+                        stage: "checkout.payment_intent_start",
+                    });
                     paymentIntent = await paymentIntent_service_1.paymentIntentService.createCheckout({
                         businessId,
                         proposalKey: readyProposal.proposalKey,
@@ -1351,6 +1364,8 @@ class BillingController {
                             seatBased: quantity > 1,
                         },
                         idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
+                        requestSignal: requestAbortSignal,
+                        deferNonCriticalWork: true,
                     });
                 }
                 finally {
@@ -1385,6 +1400,11 @@ class BillingController {
                         reason: "checkout_url_missing",
                     });
                 }
+                (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+                    req,
+                    res,
+                    stage: "checkout.response_finalize",
+                });
                 if (isResponseCommitted()) {
                     logStageOk("checkout.response.skipped", {
                         success: true,

@@ -85,6 +85,8 @@ export const createPaymentIntentService = () => {
     cancelUrl = null,
     metadata = null,
     idempotencyKey = null,
+    requestSignal = null,
+    deferNonCriticalWork = false,
   }: {
     businessId: string;
     proposalKey: string;
@@ -95,13 +97,37 @@ export const createPaymentIntentService = () => {
     cancelUrl?: string | null;
     metadata?: Record<string, unknown> | null;
     idempotencyKey?: string | null;
+    requestSignal?: AbortSignal | null;
+    deferNonCriticalWork?: boolean;
   }) => {
+    const assertRequestActive = (stage: string) => {
+      if (requestSignal?.aborted) {
+        throw new Error(`request_aborted:${stage}`);
+      }
+    };
+    const queueDeferredTask = (
+      stage: string,
+      task: () => Promise<unknown>
+    ) => {
+      setTimeout(() => {
+        void task().catch((error) => {
+          console.error("BILLING_STAGE_FAIL", {
+            stage,
+            businessId,
+            proposalKey,
+            reason: String((error as Error)?.message || "deferred_task_failed"),
+          });
+        });
+      }, 0);
+    };
     const checkoutCreateStartedAt = Date.now();
     const inputMetadata = toRecord(metadata);
     const isCheckoutFastLane =
       String(inputMetadata.checkoutSource || inputMetadata.origin || "")
         .trim()
         .toLowerCase() === "billing_controller";
+    const shouldDeferNonCriticalWork =
+      isCheckoutFastLane && deferNonCriticalWork;
     const emitCheckoutTimingMetric = (
       name: "credential_resolve_ms" | "payment_intent_ms",
       value: number,
@@ -120,9 +146,24 @@ export const createPaymentIntentService = () => {
         },
       });
     };
+    assertRequestActive("payment_intent.start");
     const proposal = await prisma.proposalLedger.findUnique({
       where: {
         proposalKey,
+      },
+      select: {
+        id: true,
+        businessId: true,
+        leadId: true,
+        status: true,
+        totalMinor: true,
+        currency: true,
+        quantity: true,
+        unitPriceMinor: true,
+        subtotalMinor: true,
+        taxMinor: true,
+        pricingSnapshot: true,
+        metadata: true,
       },
     });
 
@@ -133,6 +174,7 @@ export const createPaymentIntentService = () => {
     if (!["APPROVED", "SENT", "ACCEPTED", "CONTRACT_GENERATED"].includes(proposal.status)) {
       throw new Error(`proposal_not_checkout_ready:${proposal.status}`);
     }
+    assertRequestActive("payment_intent.proposal_ready");
     const runtime = isCheckoutFastLane
       ? null
       : await getIntelligenceRuntimeInfluence({
@@ -156,6 +198,7 @@ export const createPaymentIntentService = () => {
     }
 
     const normalizedProvider = normalizeProvider(provider);
+    assertRequestActive("payment_intent.override_lookup");
     await commerceAuthorityService.assertNoActiveManualOverride({
       businessId,
       scope: "CHECKOUT",
@@ -163,6 +206,7 @@ export const createPaymentIntentService = () => {
     });
     const credentialResolveStartedAt = Date.now();
     try {
+      assertRequestActive("payment_intent.credential_resolve.start");
       await commerceAuthorityService.resolveProviderCredential({
         businessId,
         provider: normalizedProvider,
@@ -176,6 +220,7 @@ export const createPaymentIntentService = () => {
         }
       );
     }
+    assertRequestActive("payment_intent.credential_resolved");
     const adapter = commerceProviderRegistry.resolve(normalizedProvider);
     const rawIdempotency = String(idempotencyKey || "").trim() || null;
     const normalizedIdempotency =
@@ -190,23 +235,32 @@ export const createPaymentIntentService = () => {
         amount: proposal.totalMinor,
       });
 
-    const existing = rawIdempotency
-      ? await prisma.paymentIntentLedger.findFirst({
+    let existing = null as Awaited<
+      ReturnType<typeof prisma.paymentIntentLedger.findUnique>
+    >;
+    if (rawIdempotency) {
+      const candidates = getScopedAndLegacyIdempotencyCandidates({
+        businessId,
+        idempotencyKey: rawIdempotency,
+      });
+      for (const candidate of candidates) {
+        const row = await prisma.paymentIntentLedger.findUnique({
           where: {
-            businessId,
-            idempotencyKey: {
-              in: getScopedAndLegacyIdempotencyCandidates({
-                businessId,
-                idempotencyKey: rawIdempotency,
-              }),
-            },
-          },
-        })
-      : await prisma.paymentIntentLedger.findUnique({
-          where: {
-            idempotencyKey: normalizedIdempotency,
+            idempotencyKey: candidate,
           },
         });
+        if (row && row.businessId === businessId) {
+          existing = row;
+          break;
+        }
+      }
+    } else {
+      existing = await prisma.paymentIntentLedger.findUnique({
+        where: {
+          idempotencyKey: normalizedIdempotency,
+        },
+      });
+    }
 
     if (existing) {
       emitCheckoutTimingMetric(
@@ -220,7 +274,8 @@ export const createPaymentIntentService = () => {
       );
       return existing;
     }
-    const reusableCheckout = await prisma.paymentIntentLedger.findFirst({
+    assertRequestActive("payment_intent.idempotency_checked");
+    const reusableCandidates = await prisma.paymentIntentLedger.findMany({
       where: {
         businessId,
         proposalId: proposal.id,
@@ -228,24 +283,23 @@ export const createPaymentIntentService = () => {
         status: {
           in: ["CREATED", "REQUIRES_ACTION"],
         },
-        checkoutUrl: {
-          not: null,
-        },
-        OR: [
-          {
-            checkoutExpiresAt: null,
-          },
-          {
-            checkoutExpiresAt: {
-              gt: new Date(Date.now() + 30_000),
-            },
-          },
-        ],
       },
       orderBy: {
         updatedAt: "desc",
       },
+      take: 6,
     });
+    const reusableCheckout =
+      reusableCandidates.find((candidate) => {
+        const checkoutUrl = String(candidate.checkoutUrl || "").trim();
+        if (!checkoutUrl) {
+          return false;
+        }
+        if (!candidate.checkoutExpiresAt) {
+          return true;
+        }
+        return candidate.checkoutExpiresAt.getTime() > Date.now() + 30_000;
+      }) || null;
 
     if (reusableCheckout) {
       emitCheckoutTimingMetric(
@@ -259,90 +313,122 @@ export const createPaymentIntentService = () => {
       );
       return reusableCheckout;
     }
+    assertRequestActive("payment_intent.reuse_checked");
 
-    const paymentIntent = await prisma.$transaction(async (tx) => {
-      const row = await tx.paymentIntentLedger.create({
-        data: {
-          businessId,
-          proposalId: proposal.id,
-          paymentIntentKey: buildLedgerKey("payment_intent"),
-          provider: normalizedProvider,
-          status: "CREATED",
-          source: normalizeActor(source),
-          amountMinor: toMinor(proposal.totalMinor),
-          currency: proposal.currency,
-          metadata: mergeMetadata(
-            {
-              proposalKey,
-              description,
-              planCode:
-                String(toRecord(proposal.pricingSnapshot).planCode || toRecord(proposal.metadata).planCode || "")
-                  .trim()
-                  .toUpperCase() || null,
-              billingCycle:
-                String(
-                  toRecord(proposal.pricingSnapshot).billingCycle ||
-                    toRecord(proposal.metadata).billingCycle ||
-                    "monthly"
-                )
-                  .trim()
-                  .toLowerCase() || "monthly",
-              quantity: Math.max(1, Number(proposal.quantity || 1)),
-              unitPriceMinor: Math.max(0, Number(proposal.unitPriceMinor || 0)),
-              coupon:
-                String(toRecord(proposal.metadata).coupon || toRecord(metadata).coupon || "")
-                  .trim() || null,
-              checkoutType:
-                String(
-                  toRecord(proposal.metadata).checkoutType ||
-                    toRecord(metadata).checkoutType ||
-                    "subscription"
-                )
-                  .trim()
-                  .toLowerCase() || "subscription",
-              trialDays: Math.max(
-                0,
-                Math.floor(
-                  Number(
-                    toRecord(proposal.metadata).trialDays ||
-                      toRecord(metadata).trialDays ||
-                      0
-                  )
-                )
-              ),
-              proposalSubtotalMinor: Math.max(0, Number(proposal.subtotalMinor || 0)),
-              proposalTaxMinor: Math.max(0, Number(proposal.taxMinor || 0)),
-              proposalTotalMinor: Math.max(0, Number(proposal.totalMinor || 0)),
-            },
-            metadata || undefined
-          ) as Prisma.InputJsonValue,
-          idempotencyKey: normalizedIdempotency,
-        },
-      });
-
-      await publishCommerceEvent({
-        tx,
-        event: "commerce.payment_intent.created",
-        businessId,
-        aggregateType: "payment_intent_ledger",
-        aggregateId: row.id,
-        eventKey: row.paymentIntentKey,
-        payload: {
-          businessId,
-          proposalId: proposal.id,
+    const paymentIntentCreateData = {
+      businessId,
+      proposalId: proposal.id,
+      paymentIntentKey: buildLedgerKey("payment_intent"),
+      provider: normalizedProvider,
+      status: "CREATED" as const,
+      source: normalizeActor(source),
+      amountMinor: toMinor(proposal.totalMinor),
+      currency: proposal.currency,
+      metadata: mergeMetadata(
+        {
           proposalKey,
-          paymentIntentId: row.id,
-          paymentIntentKey: row.paymentIntentKey,
-          provider: normalizedProvider,
-          amountMinor: row.amountMinor,
-          currency: row.currency,
+          description,
+          planCode:
+            String(
+              toRecord(proposal.pricingSnapshot).planCode ||
+                toRecord(proposal.metadata).planCode ||
+                ""
+            )
+              .trim()
+              .toUpperCase() || null,
+          billingCycle:
+            String(
+              toRecord(proposal.pricingSnapshot).billingCycle ||
+                toRecord(proposal.metadata).billingCycle ||
+                "monthly"
+            )
+              .trim()
+              .toLowerCase() || "monthly",
+          quantity: Math.max(1, Number(proposal.quantity || 1)),
+          unitPriceMinor: Math.max(0, Number(proposal.unitPriceMinor || 0)),
+          coupon:
+            String(toRecord(proposal.metadata).coupon || toRecord(metadata).coupon || "")
+              .trim() || null,
+          checkoutType:
+            String(
+              toRecord(proposal.metadata).checkoutType ||
+                toRecord(metadata).checkoutType ||
+                "subscription"
+            )
+              .trim()
+              .toLowerCase() || "subscription",
+          trialDays: Math.max(
+            0,
+            Math.floor(
+              Number(toRecord(proposal.metadata).trialDays || toRecord(metadata).trialDays || 0)
+            )
+          ),
+          proposalSubtotalMinor: Math.max(0, Number(proposal.subtotalMinor || 0)),
+          proposalTaxMinor: Math.max(0, Number(proposal.taxMinor || 0)),
+          proposalTotalMinor: Math.max(0, Number(proposal.totalMinor || 0)),
         },
-      });
+        metadata || undefined
+      ) as Prisma.InputJsonValue,
+      idempotencyKey: normalizedIdempotency,
+    };
 
-      return row;
-    });
+    assertRequestActive("payment_intent.create.start");
+    const paymentIntent = shouldDeferNonCriticalWork
+      ? await prisma.paymentIntentLedger.create({
+          data: paymentIntentCreateData,
+        })
+      : await prisma.$transaction(async (tx) => {
+          const row = await tx.paymentIntentLedger.create({
+            data: paymentIntentCreateData,
+          });
+
+          await publishCommerceEvent({
+            tx,
+            event: "commerce.payment_intent.created",
+            businessId,
+            aggregateType: "payment_intent_ledger",
+            aggregateId: row.id,
+            eventKey: row.paymentIntentKey,
+            payload: {
+              businessId,
+              proposalId: proposal.id,
+              proposalKey,
+              paymentIntentId: row.id,
+              paymentIntentKey: row.paymentIntentKey,
+              provider: normalizedProvider,
+              amountMinor: row.amountMinor,
+              currency: row.currency,
+            },
+          });
+
+          return row;
+        });
+
+    if (shouldDeferNonCriticalWork) {
+      queueDeferredTask("payment_intent.fastlane_event.created", async () => {
+        await publishCommerceEvent({
+          event: "commerce.payment_intent.created",
+          businessId,
+          aggregateType: "payment_intent_ledger",
+          aggregateId: paymentIntent.id,
+          eventKey: paymentIntent.paymentIntentKey,
+          payload: {
+            businessId,
+            proposalId: proposal.id,
+            proposalKey,
+            paymentIntentId: paymentIntent.id,
+            paymentIntentKey: paymentIntent.paymentIntentKey,
+            provider: normalizedProvider,
+            amountMinor: paymentIntent.amountMinor,
+            currency: paymentIntent.currency,
+            deferred: true,
+          },
+        });
+      });
+    }
     try {
       const providerCheckoutStartedAt = Date.now();
+      assertRequestActive("payment_intent.provider_checkout.start");
       console.info("BILLING_STAGE_OK", {
         stage: "provider.checkout.start",
         businessId,
@@ -458,44 +544,54 @@ export const createPaymentIntentService = () => {
         },
       });
 
-      await prisma.paymentAttemptLedger.create({
-        data: {
-          businessId,
-          paymentIntentId: updated.id,
-          attemptKey: buildLedgerKey("payment_attempt"),
-          provider: updated.provider,
-          providerEventId: checkout.providerPaymentIntentId,
-          status: "INITIATED",
-          amountMinor: updated.amountMinor,
-          currency: updated.currency,
-          metadata: {
-            checkoutUrl: updated.checkoutUrl,
-          } as Prisma.InputJsonValue,
-          idempotencyKey: buildDeterministicDigest({
-            paymentIntentId: updated.id,
-            providerEventId: checkout.providerPaymentIntentId,
-            status: "INITIATED",
-          }),
-        },
-      });
-
-      if (paymentIntent.status !== updated.status) {
-        await publishCommerceEvent({
-          event: "commerce.payment_intent.status_changed",
-          businessId,
-          aggregateType: "payment_intent_ledger",
-          aggregateId: updated.id,
-          eventKey: `${updated.paymentIntentKey}:${paymentIntent.status}:${updated.status}`,
-          payload: {
+      const recordAttemptAndStatusEvent = async () => {
+        await prisma.paymentAttemptLedger.create({
+          data: {
             businessId,
             paymentIntentId: updated.id,
-            paymentIntentKey: updated.paymentIntentKey,
+            attemptKey: buildLedgerKey("payment_attempt"),
             provider: updated.provider,
-            from: paymentIntent.status,
-            to: updated.status,
-            checkoutUrl: updated.checkoutUrl,
+            providerEventId: checkout.providerPaymentIntentId,
+            status: "INITIATED",
+            amountMinor: updated.amountMinor,
+            currency: updated.currency,
+            metadata: {
+              checkoutUrl: updated.checkoutUrl,
+            } as Prisma.InputJsonValue,
+            idempotencyKey: buildDeterministicDigest({
+              paymentIntentId: updated.id,
+              providerEventId: checkout.providerPaymentIntentId,
+              status: "INITIATED",
+            }),
           },
         });
+
+        if (paymentIntent.status !== updated.status) {
+          await publishCommerceEvent({
+            event: "commerce.payment_intent.status_changed",
+            businessId,
+            aggregateType: "payment_intent_ledger",
+            aggregateId: updated.id,
+            eventKey: `${updated.paymentIntentKey}:${paymentIntent.status}:${updated.status}`,
+            payload: {
+              businessId,
+              paymentIntentId: updated.id,
+              paymentIntentKey: updated.paymentIntentKey,
+              provider: updated.provider,
+              from: paymentIntent.status,
+              to: updated.status,
+              checkoutUrl: updated.checkoutUrl,
+            },
+          });
+        }
+      };
+
+      if (shouldDeferNonCriticalWork) {
+        queueDeferredTask("payment_intent.fastlane_finalize.post_checkout", async () => {
+          await recordAttemptAndStatusEvent();
+        });
+      } else {
+        await recordAttemptAndStatusEvent();
       }
 
       emitCheckoutTimingMetric(
@@ -538,22 +634,32 @@ export const createPaymentIntentService = () => {
         },
       });
 
-      await publishCommerceEvent({
-        event: "commerce.payment_intent.status_changed",
-        businessId,
-        aggregateType: "payment_intent_ledger",
-        aggregateId: failed.id,
-        eventKey: `${failed.paymentIntentKey}:${paymentIntent.status}:FAILED`,
-        payload: {
+      const publishFailureEvent = async () => {
+        await publishCommerceEvent({
+          event: "commerce.payment_intent.status_changed",
           businessId,
-          paymentIntentId: failed.id,
-          paymentIntentKey: failed.paymentIntentKey,
-          provider: failed.provider,
-          from: paymentIntent.status,
-          to: "FAILED",
-          reason: String((error as any)?.message || "provider_checkout_failed"),
-        },
-      }).catch(() => undefined);
+          aggregateType: "payment_intent_ledger",
+          aggregateId: failed.id,
+          eventKey: `${failed.paymentIntentKey}:${paymentIntent.status}:FAILED`,
+          payload: {
+            businessId,
+            paymentIntentId: failed.id,
+            paymentIntentKey: failed.paymentIntentKey,
+            provider: failed.provider,
+            from: paymentIntent.status,
+            to: "FAILED",
+            reason: String((error as any)?.message || "provider_checkout_failed"),
+          },
+        });
+      };
+
+      if (shouldDeferNonCriticalWork) {
+        queueDeferredTask("payment_intent.fastlane_event.failed", async () => {
+          await publishFailureEvent();
+        });
+      } else {
+        await publishFailureEvent().catch(() => undefined);
+      }
 
       throw error;
     }

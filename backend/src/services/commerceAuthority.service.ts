@@ -127,14 +127,12 @@ export const createCommerceAuthorityService = () => {
       return null;
     }
 
-    const existing = await prisma.commerceProviderCredential.findFirst({
+    const existing = await prisma.commerceProviderCredential.findUnique({
       where: {
-        businessId,
-        provider: normalizedProvider,
-        OR: [{ revokedAt: null }, { revokedAt: { isSet: false } }],
-      },
-      orderBy: {
-        createdAt: "desc",
+        businessId_provider: {
+          businessId,
+          provider: normalizedProvider,
+        },
       },
     });
 
@@ -286,14 +284,12 @@ export const createCommerceAuthorityService = () => {
     try {
       const lookupCredential = async () => {
         const queryStartedAt = Date.now();
-        const credential = await prisma.commerceProviderCredential.findFirst({
+        const credential = await prisma.commerceProviderCredential.findUnique({
           where: {
-            businessId,
-            provider: normalizedProvider,
-            OR: [{ revokedAt: null }, { revokedAt: { isSet: false } }],
-          },
-          orderBy: {
-            createdAt: "desc",
+            businessId_provider: {
+              businessId,
+              provider: normalizedProvider,
+            },
           },
         });
         const ms = Date.now() - queryStartedAt;

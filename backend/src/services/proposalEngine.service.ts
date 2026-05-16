@@ -21,15 +21,6 @@ import {
 } from "./commerce/shared";
 import { toRecord } from "./reception.shared";
 
-const pickPricingCatalog = (rows: any[], businessId: string) => {
-  const businessSpecific = rows.find((row) => row.businessId === businessId);
-  if (businessSpecific) {
-    return businessSpecific;
-  }
-
-  return rows.find((row) => !row.businessId) || null;
-};
-
 const computeAutoApprovalThreshold = (policy: any | null) => {
   const workflow = toRecord(policy?.discountApprovalWorkflow);
   const threshold = Number(workflow.autoApprovePercent);
@@ -43,17 +34,22 @@ const computeAutoApprovalThreshold = (policy: any | null) => {
 
 export const createProposalEngineService = () => {
   const resolveCommercePolicy = async (businessId: string) => {
-    const policies = await prisma.commercePolicy.findMany({
+    const policy = await prisma.commercePolicy.findFirst({
       where: {
         businessId,
       },
       orderBy: {
         createdAt: "desc",
       },
-      take: 1,
+      select: {
+        policyKey: true,
+        version: true,
+        taxRules: true,
+        discountApprovalWorkflow: true,
+      },
     });
 
-    return policies[0] || null;
+    return policy || null;
   };
 
   const resolvePricingCatalog = async ({
@@ -67,28 +63,39 @@ export const createProposalEngineService = () => {
     currency: string;
     billingCycle: string;
   }) => {
-    const rows = await prisma.pricingCatalog.findMany({
+    const normalizedPlanCode = String(planCode || "").trim().toUpperCase();
+    const normalizedCurrency = normalizeCurrency(currency);
+    const normalizedBillingCycle = normalizeBillingCycle(billingCycle);
+
+    const businessSpecific = await prisma.pricingCatalog.findFirst({
       where: {
-        planCode: String(planCode || "").trim().toUpperCase(),
-        currency: normalizeCurrency(currency),
-        billingCycle: normalizeBillingCycle(billingCycle),
+        businessId,
+        planCode: normalizedPlanCode,
+        currency: normalizedCurrency,
+        billingCycle: normalizedBillingCycle,
         isActive: true,
-        OR: [
-          {
-            businessId,
-          },
-          {
-            businessId: null,
-          },
-        ],
       },
       orderBy: {
         createdAt: "desc",
       },
-      take: 10,
     });
 
-    return pickPricingCatalog(rows, businessId);
+    if (businessSpecific) {
+      return businessSpecific;
+    }
+
+    return prisma.pricingCatalog.findFirst({
+      where: {
+        businessId: null,
+        planCode: normalizedPlanCode,
+        currency: normalizedCurrency,
+        billingCycle: normalizedBillingCycle,
+        isActive: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
   };
 
   const createProposal = async ({
@@ -105,6 +112,8 @@ export const createProposalEngineService = () => {
     source = "SYSTEM",
     requestedBy = "SYSTEM",
     idempotencyKey = null,
+    requestSignal = null,
+    deferNonCriticalWork = false,
   }: {
     businessId: string;
     leadId?: string | null;
@@ -119,7 +128,30 @@ export const createProposalEngineService = () => {
     source?: string;
     requestedBy?: string;
     idempotencyKey?: string | null;
+    requestSignal?: AbortSignal | null;
+    deferNonCriticalWork?: boolean;
   }) => {
+    const assertRequestActive = (stage: string) => {
+      if (requestSignal?.aborted) {
+        throw new Error(`request_aborted:${stage}`);
+      }
+    };
+    const queueDeferredTask = (
+      stage: string,
+      task: () => Promise<unknown>
+    ) => {
+      setTimeout(() => {
+        void task().catch((error) => {
+          console.error("BILLING_STAGE_FAIL", {
+            stage,
+            businessId,
+            reason: String((error as Error)?.message || "deferred_task_failed"),
+          });
+        });
+      }, 0);
+    };
+
+    assertRequestActive("proposal.start");
     const normalizedIdempotency = String(idempotencyKey || "").trim() || null;
     const scopedIdempotency = scopeIdempotencyKey({
       businessId,
@@ -127,20 +159,20 @@ export const createProposalEngineService = () => {
     });
 
     if (normalizedIdempotency) {
-      const existing = await prisma.proposalLedger.findFirst({
-        where: {
-          businessId,
-          idempotencyKey: {
-            in: getScopedAndLegacyIdempotencyCandidates({
-              businessId,
-              idempotencyKey: normalizedIdempotency,
-            }),
-          },
-        },
+      const candidates = getScopedAndLegacyIdempotencyCandidates({
+        businessId,
+        idempotencyKey: normalizedIdempotency,
       });
 
-      if (existing) {
-        return existing;
+      for (const candidate of candidates) {
+        const existing = await prisma.proposalLedger.findUnique({
+          where: {
+            idempotencyKey: candidate,
+          },
+        });
+        if (existing && existing.businessId === businessId) {
+          return existing;
+        }
       }
     }
 
@@ -154,7 +186,10 @@ export const createProposalEngineService = () => {
       String(requestMetadata.checkoutSource || requestMetadata.origin || "")
         .trim()
         .toLowerCase() === "billing_controller";
+    const shouldDeferNonCriticalWork =
+      isCheckoutFastLane && deferNonCriticalWork;
 
+    assertRequestActive("proposal.pricing_policy_resolve.start");
     const [pricing, policy] = await Promise.all([
       resolvePricingCatalog({
         businessId,
@@ -170,6 +205,7 @@ export const createProposalEngineService = () => {
           businessId,
           leadId,
         });
+    assertRequestActive("proposal.pricing_policy_resolved");
 
     const baseUnitPriceMinor =
       customUnitPriceMinor !== null && customUnitPriceMinor !== undefined
@@ -197,64 +233,133 @@ export const createProposalEngineService = () => {
     );
     const requiresApproval = normalizedDiscount > autoApproveThreshold;
     const status: ProposalStatus = requiresApproval ? "PENDING_APPROVAL" : "APPROVED";
+    const shouldUseLightweightCheckoutPath =
+      shouldDeferNonCriticalWork && !requiresApproval;
+
+    const proposalCreateData = {
+      businessId,
+      leadId,
+      proposalKey: buildLedgerKey("proposal"),
+      source: normalizeActor(source),
+      status,
+      currency: normalizedCurrency,
+      subtotalMinor,
+      taxMinor,
+      totalMinor,
+      quantity: normalizedQuantity,
+      unitPriceMinor,
+      discountRequestedMinor,
+      discountApprovedMinor: requiresApproval ? 0 : discountRequestedMinor,
+      discountPercent: normalizedDiscount,
+      lineItems: (lineItems || []) as Prisma.InputJsonValue,
+      pricingSnapshot: {
+        planCode: normalizedPlanCode,
+        billingCycle: normalizedBillingCycle,
+        catalogKey: pricing?.catalogKey || null,
+        pricingModel: pricing?.pricingModel || null,
+        rawPricing: pricing || null,
+      } as Prisma.InputJsonValue,
+      policySnapshot: policy
+        ? ({
+            policyKey: policy.policyKey,
+            version: policy.version,
+            autoApproveThreshold,
+          } as Prisma.InputJsonValue)
+        : undefined,
+      metadata: mergeMetadata(
+        {
+          requestedBy: normalizeActor(requestedBy),
+          billingCycle: normalizedBillingCycle,
+          planCode: normalizedPlanCode,
+          digest: buildDeterministicDigest({
+            businessId,
+            leadId,
+            normalizedPlanCode,
+            normalizedBillingCycle,
+            normalizedCurrency,
+            normalizedQuantity,
+            normalizedDiscount,
+          }).slice(0, 24),
+          intelligencePriceMultiplier:
+            customUnitPriceMinor !== null && customUnitPriceMinor !== undefined
+              ? 1
+              : intelligenceMultiplier,
+          intelligenceDiscountThreshold: autoApproveThreshold,
+          intelligencePolicyVersion: runtime?.policyVersion || null,
+        },
+        metadata || undefined
+      ) as Prisma.InputJsonValue,
+      idempotencyKey: scopedIdempotency,
+    };
+
+    assertRequestActive("proposal.create.start");
+    if (shouldUseLightweightCheckoutPath) {
+      const proposal = await prisma.proposalLedger.create({
+        data: proposalCreateData,
+      });
+      assertRequestActive("proposal.created");
+
+      queueDeferredTask("proposal.fastlane_event.created", async () => {
+        await publishCommerceEvent({
+          event: "commerce.proposal.created",
+          businessId,
+          aggregateType: "proposal_ledger",
+          aggregateId: proposal.id,
+          eventKey: proposal.proposalKey,
+          payload: {
+            businessId,
+            leadId,
+            proposalId: proposal.id,
+            proposalKey: proposal.proposalKey,
+            status,
+            totalMinor,
+            currency: normalizedCurrency,
+            planCode: normalizedPlanCode,
+            billingCycle: normalizedBillingCycle,
+            quantity: normalizedQuantity,
+            discountPercent: normalizedDiscount,
+            requiresApproval,
+            deferred: true,
+          },
+        });
+      });
+
+      queueDeferredTask("proposal.fastlane_tax.record", async () => {
+        await taxComplianceService.recordTaxEvent({
+          businessId,
+          eventType: "PROPOSAL",
+          jurisdiction: String(toRecord(policy?.taxRules).jurisdiction || "GLOBAL"),
+          taxType: String(
+            toRecord(policy?.taxRules).taxType ||
+              (normalizedCurrency === "INR" ? "GST" : "VAT")
+          ),
+          reverseCharge: Boolean(toRecord(policy?.taxRules).reverseCharge),
+          exemptionCode:
+            String(toRecord(policy?.taxRules).exemptionCode || "").trim() || null,
+          withholdingMinor: Number(toRecord(policy?.taxRules).withholdingMinor || 0),
+          taxableMinor: subtotalAfterDiscount,
+          taxMinor,
+          totalMinor,
+          currency: normalizedCurrency,
+          proposalKey: proposal.proposalKey,
+          mappingRef: `proposal:${proposal.proposalKey}`,
+          metadata: {
+            policyKey: policy?.policyKey || null,
+            policyVersion: policy?.version || null,
+            planCode: normalizedPlanCode,
+            billingCycle: normalizedBillingCycle,
+            deferred: true,
+          },
+          idempotencyKey: `tax:proposal:${proposal.id}`,
+        });
+      });
+
+      return proposal;
+    }
 
     const createdProposal = await prisma.$transaction(async (tx) => {
       const proposal = await tx.proposalLedger.create({
-        data: {
-          businessId,
-          leadId,
-          proposalKey: buildLedgerKey("proposal"),
-          source: normalizeActor(source),
-          status,
-          currency: normalizedCurrency,
-          subtotalMinor,
-          taxMinor,
-          totalMinor,
-          quantity: normalizedQuantity,
-          unitPriceMinor,
-          discountRequestedMinor,
-          discountApprovedMinor: requiresApproval ? 0 : discountRequestedMinor,
-          discountPercent: normalizedDiscount,
-          lineItems: (lineItems || []) as Prisma.InputJsonValue,
-          pricingSnapshot: {
-            planCode: normalizedPlanCode,
-            billingCycle: normalizedBillingCycle,
-            catalogKey: pricing?.catalogKey || null,
-            pricingModel: pricing?.pricingModel || null,
-            rawPricing: pricing || null,
-          } as Prisma.InputJsonValue,
-          policySnapshot: policy
-            ? ({
-                policyKey: policy.policyKey,
-                version: policy.version,
-                autoApproveThreshold,
-              } as Prisma.InputJsonValue)
-            : undefined,
-          metadata: mergeMetadata(
-            {
-              requestedBy: normalizeActor(requestedBy),
-              billingCycle: normalizedBillingCycle,
-              planCode: normalizedPlanCode,
-              digest: buildDeterministicDigest({
-                businessId,
-                leadId,
-                normalizedPlanCode,
-                normalizedBillingCycle,
-                normalizedCurrency,
-                normalizedQuantity,
-                normalizedDiscount,
-              }).slice(0, 24),
-              intelligencePriceMultiplier:
-                customUnitPriceMinor !== null && customUnitPriceMinor !== undefined
-                  ? 1
-                  : intelligenceMultiplier,
-              intelligenceDiscountThreshold: autoApproveThreshold,
-              intelligencePolicyVersion: runtime?.policyVersion || null,
-            },
-            metadata || undefined
-          ) as Prisma.InputJsonValue,
-          idempotencyKey: scopedIdempotency,
-        },
+        data: proposalCreateData,
       });
 
       await publishCommerceEvent({

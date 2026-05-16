@@ -1428,6 +1428,7 @@ export class BillingController {
         res,
         stage: "checkout.entry",
       });
+      const requestAbortSignal = getRequestAbortSignal({ req, res });
       const plan = readInput("plan");
       const coupon = readInput("coupon");
       const requestedQuantity = Number(readInput("seats") || readInput("quantity") || 1);
@@ -1645,6 +1646,11 @@ export class BillingController {
       });
 
       try {
+        throwIfRequestLifecycleAborted({
+          req,
+          res,
+          stage: "checkout.proposal_start",
+        });
         const proposalStartedAt = Date.now();
         const proposal = await proposalEngineService.createProposal({
             businessId,
@@ -1672,6 +1678,8 @@ export class BillingController {
               seatBased: quantity > 1,
             },
             idempotencyKey: `checkout:proposal:${businessId}:${checkoutProposalFingerprint}`,
+            requestSignal: requestAbortSignal,
+            deferNonCriticalWork: true,
           });
         throwIfRequestLifecycleAborted({
           req,
@@ -1706,6 +1714,11 @@ export class BillingController {
         const paymentIntentStartedAt = Date.now();
         let paymentIntent: Awaited<ReturnType<typeof paymentIntentService.createCheckout>>;
         try {
+          throwIfRequestLifecycleAborted({
+            req,
+            res,
+            stage: "checkout.payment_intent_start",
+          });
           paymentIntent = await paymentIntentService.createCheckout({
               businessId,
               proposalKey: readyProposal.proposalKey,
@@ -1737,6 +1750,8 @@ export class BillingController {
                 seatBased: quantity > 1,
               },
               idempotencyKey: `checkout:payment_intent:${businessId}:${readyProposal.proposalKey}:${checkoutAttempt}`,
+              requestSignal: requestAbortSignal,
+              deferNonCriticalWork: true,
             });
         } finally {
           emitCheckoutMetric("payment_intent_ms", Date.now() - paymentIntentStartedAt, {
@@ -1773,6 +1788,11 @@ export class BillingController {
           });
         }
 
+        throwIfRequestLifecycleAborted({
+          req,
+          res,
+          stage: "checkout.response_finalize",
+        });
         if (isResponseCommitted()) {
           logStageOk("checkout.response.skipped", {
             success: true,

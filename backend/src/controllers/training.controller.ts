@@ -1,6 +1,6 @@
 import { Response } from "express";
 import prisma from "../config/prisma";
-import { createEmbedding } from "../services/embedding.service";
+import { createEmbedding, createEmbeddingsBatch } from "../services/embedding.service";
 import {
   getScopedTrainingClient,
   normalizeClientId,
@@ -110,8 +110,11 @@ export const saveBusinessInfo = async (
       .map((chunk) => chunk.trim())
       .filter((chunk) => chunk.length > 20);
 
-    for (const chunk of chunks) {
-      const embedding = await createEmbedding(chunk);
+    const embeddings = await createEmbeddingsBatch(chunks);
+
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index];
+      const embedding = embeddings[index] || [];
 
       await prisma.knowledgeBase.create({
         data: {

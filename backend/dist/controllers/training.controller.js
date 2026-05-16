@@ -64,8 +64,10 @@ const saveBusinessInfo = async (req, res) => {
             .split(/\.|\n/)
             .map((chunk) => chunk.trim())
             .filter((chunk) => chunk.length > 20);
-        for (const chunk of chunks) {
-            const embedding = await (0, embedding_service_1.createEmbedding)(chunk);
+        const embeddings = await (0, embedding_service_1.createEmbeddingsBatch)(chunks);
+        for (let index = 0; index < chunks.length; index += 1) {
+            const chunk = chunks[index];
+            const embedding = embeddings[index] || [];
             await prisma_1.default.knowledgeBase.create({
                 data: {
                     businessId,

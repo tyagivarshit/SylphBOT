@@ -33,6 +33,7 @@ const startWorkerRuntime = async () => {
             calendarSync: true,
             receptionRuntime: true,
             humanReminder: true,
+            webhookIntake: true,
         });
     }
     catch (error) {

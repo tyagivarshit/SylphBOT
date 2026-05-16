@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processWebhookEvent = void 0;
+exports.rollbackWebhookEvent = exports.processWebhookEvent = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const redisState_service_1 = require("./redisState.service");
@@ -129,3 +129,36 @@ const processWebhookEvent = async ({ eventId, platform, }) => {
     }
 };
 exports.processWebhookEvent = processWebhookEvent;
+const rollbackWebhookEvent = async ({ eventId, platform, }) => {
+    if (!eventId) {
+        return;
+    }
+    const traceId = `webhook_${platform}_${eventId}`;
+    const redisKey = buildKey(eventId, platform);
+    const [redisResult, dbResult] = await Promise.allSettled([
+        redis_1.default.del(redisKey),
+        prisma_1.default.webhookEvent.deleteMany({
+            where: {
+                eventId,
+            },
+        }),
+    ]);
+    await (0, reliabilityOS_service_1.recordObservabilityEvent)({
+        eventType: "webhook.dedupe.rollback",
+        message: `Webhook dedupe rollback executed for ${platform}`,
+        severity: "warn",
+        context: {
+            traceId,
+            correlationId: traceId,
+            provider: platform,
+            component: "webhook-reconciliation",
+            phase: "providers",
+        },
+        metadata: {
+            eventId,
+            redisRollback: redisResult.status,
+            dbRollback: dbResult.status,
+        },
+    }).catch(() => undefined);
+};
+exports.rollbackWebhookEvent = rollbackWebhookEvent;

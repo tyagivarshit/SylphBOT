@@ -41,6 +41,10 @@ import {
   initHumanReminderQueue,
 } from "../queues/humanReminder.queue";
 import {
+  closeWebhookIntakeQueues,
+  initWebhookIntakeQueues,
+} from "../queues/webhookIntake.queue";
+import {
   closeCRMRefreshQueue,
   initCRMRefreshQueue,
 } from "../services/crm/refreshQueue.service";
@@ -85,6 +89,10 @@ import {
   initHumanReminderWorker,
 } from "../workers/humanReminder.worker";
 import {
+  closeWebhookIntakeWorkers,
+  initWebhookIntakeWorkers,
+} from "../workers/webhookIntake.worker";
+import {
   startCRMRefreshWorker,
   stopCRMRefreshWorker,
 } from "../workers/crmRefresh.worker";
@@ -114,6 +122,7 @@ export type WorkerLifecycleOptions = {
   calendarSync?: boolean;
   receptionRuntime?: boolean;
   humanReminder?: boolean;
+  webhookIntake?: boolean;
 };
 
 const globalForLifecycle = globalThis as typeof globalThis & {
@@ -157,6 +166,7 @@ export const initQueues = async () => {
     initRevenueBrainEventQueues();
     initReceptionRuntimeQueues();
     initHumanReminderQueue();
+    initWebhookIntakeQueues();
     globalForLifecycle.__sylphQueuesInitialized = true;
   })();
 
@@ -210,6 +220,10 @@ export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
   if (options.humanReminder) {
     initHumanReminderWorker();
   }
+
+  if (options.webhookIntake) {
+    initWebhookIntakeWorkers();
+  }
 };
 
 export const initCrons = () => {
@@ -258,6 +272,7 @@ export const shutdown = async () => {
     closeAuthEmailWorker(),
     closeReceptionRuntimeWorkers(),
     closeHumanReminderWorker(),
+    closeWebhookIntakeWorkers(),
     stopRevenueBrainEventWorker(),
     stopCRMRefreshWorker(),
     closeCRMRefreshQueue(),
@@ -269,6 +284,7 @@ export const shutdown = async () => {
     closeCalendarSyncQueue(),
     closeReceptionRuntimeQueues(),
     closeHumanReminderQueue(),
+    closeWebhookIntakeQueues(),
     prisma.$disconnect(),
     closeRedisConnection(),
   ]);

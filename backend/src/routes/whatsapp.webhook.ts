@@ -1,20 +1,49 @@
 import { Router, Request, Response } from "express";
-import prisma from "../config/prisma";
-import { processWebhookEvent } from "../services/webhookDedup.service";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { captureExceptionWithContext } from "../observability/sentry";
-import { reconcileRevenueTouchDeliveryByProviderMessageId } from "../services/revenueTouchLedger.service";
+import {
+  enqueueProviderDeliveryReconcileJob,
+  enqueueWhatsAppMessageIngestJob,
+} from "../queues/webhookIntake.queue";
+import {
+  processWebhookEvent,
+  rollbackWebhookEvent,
+} from "../services/webhookDedup.service";
 import {
   extractMetaWebhookTimestamp,
   guardWebhookReplay,
   isWebhookTimestampFresh,
   verifyMetaWebhookSignature,
 } from "../services/webhookSecurity.service";
-import { resolveOrCreateReceptionLead } from "../services/receptionLead.service";
-import { receiveInboundInteraction } from "../services/receptionIntake.service";
-import { recordInboundProviderWebhook } from "../services/saasPackagingConnectHubOS.service";
 
 const router = Router();
+const WEBHOOK_RUNTIME_BUDGET_MS = Math.max(
+  250,
+  Number(process.env.WEBHOOK_RUNTIME_BUDGET_MS || 1200)
+);
 const isProduction = process.env.NODE_ENV === "production";
+
+const emitWebhookMetric = (
+  name:
+    | "webhook_ingest_ms"
+    | "enqueue_ms"
+    | "webhook_post_response_work"
+    | "webhook_runtime_budget_exceeded"
+    | "webhook_deduped"
+    | "webhook_degraded",
+  value: number,
+  metadata?: Record<string, unknown>
+) => {
+  emitPerformanceMetric({
+    name,
+    value,
+    route: "whatsapp_webhook",
+    metadata: {
+      provider: "WHATSAPP",
+      ...(metadata || {}),
+    },
+  });
+};
 
 const normalizeIdentifier = (value?: unknown) => {
   const normalized = String(value || "").trim();
@@ -27,59 +56,6 @@ const toEpochMs = (value: unknown) => {
     return Date.now();
   }
   return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
-};
-
-const buildClientLookupOr = ({
-  pageIds = [],
-  phoneNumberIds = [],
-}: {
-  pageIds?: string[];
-  phoneNumberIds?: string[];
-}) => [
-  ...pageIds.map((pageId) => ({ pageId })),
-  ...phoneNumberIds.map((phoneNumberId) => ({ phoneNumberId })),
-];
-
-const findWhatsAppClient = async ({
-  phoneNumberIds,
-  pageIds = [],
-}: {
-  phoneNumberIds: string[];
-  pageIds?: string[];
-}) => {
-  const lookupOr = buildClientLookupOr({
-    phoneNumberIds,
-    pageIds,
-  });
-
-  if (!lookupOr.length) {
-    return null;
-  }
-
-  const client = await prisma.client.findFirst({
-    where: {
-      OR: lookupOr,
-      isActive: true,
-    },
-  });
-
-  if (!client) {
-    console.error("❌ CRITICAL: Client mapping missing", {
-      pageId: pageIds[0] || null,
-      phoneNumberId: phoneNumberIds[0] || null,
-      action: "Reconnect required",
-    });
-    return null;
-  }
-
-  console.log("[WHATSAPP WEBHOOK] client found", {
-    phoneNumberIds,
-    pageIds,
-    clientId: client.id,
-    businessId: client.businessId,
-  });
-
-  return client;
 };
 
 const getSignatureHeader = (req: Request) =>
@@ -104,20 +80,6 @@ const getWhatsAppDeliveryStatuses = (body: any) =>
       )
     : [];
 
-const runWebhookBackgroundTask = (
-  label: string,
-  task: () => Promise<void>
-) => {
-  setImmediate(() => {
-    void task().catch((error) => {
-      console.error("[WHATSAPP WEBHOOK] background task failed", {
-        label,
-        reason: String((error as Error)?.message || "background_task_failed"),
-      });
-    });
-  });
-};
-
 const enforceWebhookSecurity = async (req: Request, body: any) => {
   const rawBody = Buffer.isBuffer((req as any).body)
     ? ((req as any).body as Buffer)
@@ -125,11 +87,15 @@ const enforceWebhookSecurity = async (req: Request, body: any) => {
   const signature = getSignatureHeader(req);
   const secret = process.env.META_APP_SECRET?.trim() || null;
 
-  if ((isProduction || secret) && (!rawBody || !verifyMetaWebhookSignature({
-    rawBody,
-    signature,
-    secret,
-  }))) {
+  if (
+    (isProduction || secret) &&
+    (!rawBody ||
+      !verifyMetaWebhookSignature({
+        rawBody,
+        signature,
+        secret,
+      }))
+  ) {
     return false;
   }
 
@@ -170,14 +136,35 @@ router.get("/", (req: Request, res: Response) => {
 });
 
 router.post("/", async (req: any, res: Response) => {
-  try {
-    console.log("[WHATSAPP WEBHOOK] hit");
+  const startedAt = Date.now();
+  let enqueuedJobs = 0;
+  let dedupedEvents = 0;
 
+  const sendWebhookResponse = (statusCode: number, reason?: string) => {
+    const ingestMs = Math.max(0, Date.now() - startedAt);
+    emitWebhookMetric("webhook_ingest_ms", ingestMs, {
+      statusCode,
+      enqueuedJobs,
+      dedupedEvents,
+      reason: reason || null,
+    });
+    emitWebhookMetric("webhook_post_response_work", 0, {
+      statusCode,
+    });
+    if (ingestMs > WEBHOOK_RUNTIME_BUDGET_MS) {
+      emitWebhookMetric("webhook_runtime_budget_exceeded", ingestMs, {
+        thresholdMs: WEBHOOK_RUNTIME_BUDGET_MS,
+        statusCode,
+      });
+    }
+    return res.sendStatus(statusCode);
+  };
+
+  try {
     const body = parseBody(req);
 
     if (!(await enforceWebhookSecurity(req, body))) {
-      console.log("[WHATSAPP WEBHOOK] security validation failed");
-      return res.sendStatus(403);
+      return sendWebhookResponse(403, "security_rejected");
     }
 
     const requestId = String(req.requestId || "").trim() || null;
@@ -195,7 +182,6 @@ router.post("/", async (req: any, res: Response) => {
       .map((status) => status.providerMessageId);
 
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-
     const eventId = normalizeIdentifier(message?.id);
     if (eventId) {
       const shouldProcess = await processWebhookEvent({
@@ -204,8 +190,12 @@ router.post("/", async (req: any, res: Response) => {
       });
 
       if (!shouldProcess) {
-        console.log("[WHATSAPP WEBHOOK] duplicate webhook ignored");
-        return res.sendStatus(200);
+        dedupedEvents += 1;
+        emitWebhookMetric("webhook_deduped", 1, {
+          webhookTask: "message_intake",
+          eventId,
+        });
+        return sendWebhookResponse(200, "duplicate_message");
       }
     }
 
@@ -219,82 +209,80 @@ router.post("/", async (req: any, res: Response) => {
     const intakePayload = {
       ...body.entry?.[0]?.changes?.[0]?.value,
       receivedAt: new Date().toISOString(),
-    };
+    } as Record<string, unknown>;
 
     if (deliveryProviderMessageIds.length) {
-      runWebhookBackgroundTask("delivery_reconcile", async () => {
-        await Promise.allSettled(
-          deliveryProviderMessageIds.map((providerMessageId) =>
-            reconcileRevenueTouchDeliveryByProviderMessageId({
-              providerMessageId,
-              deliveredAt: new Date(),
-            }).catch(() => undefined)
-          )
+      const enqueueStartedAt = Date.now();
+      try {
+        await enqueueProviderDeliveryReconcileJob({
+          provider: "WHATSAPP",
+          traceId: requestId,
+          requestId,
+          providerMessageIds: deliveryProviderMessageIds,
+          deliveredAtIso: new Date().toISOString(),
+        });
+        emitWebhookMetric(
+          "enqueue_ms",
+          Math.max(0, Date.now() - enqueueStartedAt),
+          {
+            webhookTask: "delivery_reconcile",
+            deliveryCount: deliveryProviderMessageIds.length,
+          }
         );
-      });
+        enqueuedJobs += 1;
+      } catch (error) {
+        emitWebhookMetric("webhook_degraded", 1, {
+          webhookTask: "delivery_reconcile",
+          reason: "enqueue_failed",
+          error: String(
+            (error as { message?: unknown })?.message || error || "enqueue_failed"
+          ),
+        });
+      }
     }
 
     if (from && phoneNumberIds.length && message) {
-      runWebhookBackgroundTask("reception_intake", async () => {
-        console.log("[WHATSAPP WEBHOOK] identifiers", {
+      const enqueueStartedAt = Date.now();
+      try {
+        await enqueueWhatsAppMessageIngestJob({
+          requestId,
+          eventId,
+          from,
           phoneNumberIds,
+          eventTimestampMs: toEpochMs(message?.timestamp || body?.entry?.[0]?.time),
+          intakePayload,
         });
-
-        const client = await findWhatsAppClient({
-          phoneNumberIds,
-        });
-
-        if (!client) {
-          console.log("[WHATSAPP WEBHOOK] client not found");
-          return;
+      } catch (error) {
+        if (eventId) {
+          await rollbackWebhookEvent({
+            eventId,
+            platform: "WHATSAPP",
+          }).catch(() => undefined);
         }
 
-        await recordInboundProviderWebhook({
-          businessId: client.businessId,
-          tenantId: client.businessId,
-          provider: "WHATSAPP",
-          environment: "LIVE",
-          success: true,
-          details: {
-            eventId,
-            phoneNumberId: phoneNumberIds[0] || null,
-            eventTimestampMs: toEpochMs(message?.timestamp || body?.entry?.[0]?.time),
-          },
-        }).catch(() => undefined);
-
-        const lead = await resolveOrCreateReceptionLead({
-          businessId: client.businessId,
-          clientId: client.id,
-          adapter: "WHATSAPP",
-          payload: intakePayload,
+        emitWebhookMetric("webhook_degraded", 1, {
+          webhookTask: "message_intake",
+          reason: "enqueue_failed",
+          eventId: eventId || null,
+          error: String(
+            (error as { message?: unknown })?.message || error || "enqueue_failed"
+          ),
         });
+        return sendWebhookResponse(503, "message_enqueue_failed");
+      }
 
-        const intake = await receiveInboundInteraction({
-          businessId: client.businessId,
-          leadId: lead.id,
-          clientId: client.id,
-          adapter: "WHATSAPP",
-          payload: intakePayload,
-          providerMessageIdHint: eventId || null,
-          correlationId: requestId || eventId || phoneNumberIds[0],
-          traceId: requestId || eventId || null,
-          metadata: {
-            webhook: "whatsapp",
-            requestId,
-            phoneNumberId: phoneNumberIds[0],
-          },
-        });
-
-        console.log("[WHATSAPP WEBHOOK] canonical interaction received", {
-          businessId: client.businessId,
-          leadId: lead.id,
-          interactionId: intake.interaction.id,
-          externalInteractionKey: intake.interaction.externalInteractionKey,
-        });
-      });
+      emitWebhookMetric(
+        "enqueue_ms",
+        Math.max(0, Date.now() - enqueueStartedAt),
+        {
+          webhookTask: "message_intake",
+          eventId: eventId || null,
+        }
+      );
+      enqueuedJobs += 1;
     }
 
-    return res.sendStatus(200);
+    return sendWebhookResponse(200, "accepted");
   } catch (error) {
     req.logger?.error({ error }, "WhatsApp webhook error");
     captureExceptionWithContext(error, {
@@ -303,8 +291,7 @@ router.post("/", async (req: any, res: Response) => {
       },
     });
 
-    console.error("[WHATSAPP WEBHOOK] error:", error);
-    return res.sendStatus(500);
+    return sendWebhookResponse(500, "unhandled_error");
   }
 });
 

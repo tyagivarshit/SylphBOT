@@ -166,3 +166,42 @@ export const processWebhookEvent = async ({
     return true;
   }
 };
+
+export const rollbackWebhookEvent = async ({
+  eventId,
+  platform,
+}: WebhookCheckInput) => {
+  if (!eventId) {
+    return;
+  }
+
+  const traceId = `webhook_${platform}_${eventId}`;
+  const redisKey = buildKey(eventId, platform);
+
+  const [redisResult, dbResult] = await Promise.allSettled([
+    redis.del(redisKey),
+    prisma.webhookEvent.deleteMany({
+      where: {
+        eventId,
+      },
+    }),
+  ]);
+
+  await recordObservabilityEvent({
+    eventType: "webhook.dedupe.rollback",
+    message: `Webhook dedupe rollback executed for ${platform}`,
+    severity: "warn",
+    context: {
+      traceId,
+      correlationId: traceId,
+      provider: platform,
+      component: "webhook-reconciliation",
+      phase: "providers",
+    },
+    metadata: {
+      eventId,
+      redisRollback: redisResult.status,
+      dbRollback: dbResult.status,
+    },
+  }).catch(() => undefined);
+};

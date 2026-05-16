@@ -5,13 +5,15 @@ import prisma from "../config/prisma";
 import { getWorkerRedisConnection } from "../config/redis";
 import {
   AIJobPayload,
+  AIQueueDescriptor,
   AIMessagePayload,
   AIQueuePayload,
   AI_QUEUE_PARTITIONS,
   CommentReplyJobPayload,
   enqueueAIDeadLetterJob,
   enqueueAIBatch,
-  getAIQueueNames,
+  getAIQueues,
+  getAIQueueTopology,
 } from "../queues/ai.queue";
 import {
   acquireLeadProcessingLock,
@@ -85,6 +87,7 @@ import {
 } from "./workerManager";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
 import { handleCommentAutomation } from "../services/commentAutomation.service";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 
 const shouldRunWorker =
@@ -96,17 +99,211 @@ const globalForAIPartitionWorker = globalThis as typeof globalThis & {
   __sylphAIPartitionWorkers?: Worker<AIQueuePayload>[];
 };
 
-const AI_WORKER_CONCURRENCY = Math.max(
+const AI_WORKER_TOTAL_CONCURRENCY = Math.max(
   1,
   resolveWorkerConcurrency(
     "AI_WORKER_CONCURRENCY",
     Number(process.env.AI_WORKER_CONCURRENCY || env.AI_WORKER_CONCURRENCY || Math.max(getWorkerCount(), 4))
   )
 );
+const AI_QUEUE_BACKLOG_SAMPLE_INTERVAL_MS = Math.max(
+  1000,
+  Number(process.env.AI_QUEUE_BACKLOG_SAMPLE_INTERVAL_MS || 5000)
+);
+const AI_PARTITION_SATURATION_BACKLOG = Math.max(
+  50,
+  Number(process.env.AI_PARTITION_SATURATION_BACKLOG || 400)
+);
 const INSTAGRAM_SEND_DELAY_MS = Math.max(
   0,
   Number(process.env.INSTAGRAM_SEND_DELAY_MS || 250)
 );
+
+const partitionActiveCounts = new Map<string, number>();
+const partitionBacklogSampleAt = new Map<string, number>();
+
+const emitQueueWorkerMetric = (
+  name:
+    | "queue_wait_ms"
+    | "queue_backlog_by_partition"
+    | "partition_concurrency"
+    | "lightweight_vs_heavy_latency"
+    | "retry_amplification"
+    | "partition_saturation"
+    | "worker_utilization"
+    | "queue_degraded",
+  value: number,
+  metadata?: Record<string, unknown>
+) => {
+  emitPerformanceMetric({
+    name,
+    value,
+    route: "ai_partition_worker",
+    metadata: metadata || null,
+  });
+};
+
+const resolveWorkloadClass = (descriptor?: AIQueueDescriptor | null) =>
+  descriptor?.lightweight ? "lightweight" : "heavy";
+
+const computeJobQueueWaitMs = (job?: AIWorkerJob | null) => {
+  const queuedAt = Number(job?.timestamp || 0);
+  const startedAt = Number(job?.processedOn || Date.now());
+
+  if (!Number.isFinite(queuedAt) || queuedAt <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, startedAt - queuedAt);
+};
+
+const computeJobLatencyMs = (job?: AIWorkerJob | null) => {
+  const queuedAt = Number(job?.timestamp || 0);
+  const finishedAt = Number(job?.finishedOn || Date.now());
+
+  if (!Number.isFinite(queuedAt) || queuedAt <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, finishedAt - queuedAt);
+};
+
+const updatePartitionConcurrency = (
+  queueName: string,
+  descriptor: AIQueueDescriptor,
+  delta: number
+) => {
+  const next = Math.max(0, (partitionActiveCounts.get(queueName) || 0) + delta);
+  partitionActiveCounts.set(queueName, next);
+
+  emitQueueWorkerMetric("partition_concurrency", next, {
+    queueName,
+    lane: descriptor.lane,
+    partition: descriptor.partition,
+    partitions: descriptor.partitions,
+  });
+
+  return next;
+};
+
+const maybeEmitPartitionBacklog = async ({
+  queueName,
+  descriptor,
+  reason,
+}: {
+  queueName: string;
+  descriptor: AIQueueDescriptor;
+  reason: string;
+}) => {
+  const now = Date.now();
+  const nextAllowedAt = partitionBacklogSampleAt.get(queueName) || 0;
+
+  if (now < nextAllowedAt) {
+    return;
+  }
+
+  partitionBacklogSampleAt.set(queueName, now + AI_QUEUE_BACKLOG_SAMPLE_INTERVAL_MS);
+
+  const queue = getAIQueues().find((candidate) => candidate.name === queueName);
+  if (!queue) {
+    return;
+  }
+
+  const counts = await queue.getJobCounts("wait", "active", "delayed", "failed");
+  const wait = Math.max(0, Number(counts.wait || 0));
+  const active = Math.max(0, Number(counts.active || 0));
+  const delayed = Math.max(0, Number(counts.delayed || 0));
+  const failed = Math.max(0, Number(counts.failed || 0));
+  const backlog = wait + active + delayed;
+  const workerUtilization = active / Math.max(1, wait + active);
+
+  emitQueueWorkerMetric("queue_backlog_by_partition", backlog, {
+    reason,
+    queueName,
+    lane: descriptor.lane,
+    partition: descriptor.partition,
+    partitions: descriptor.partitions,
+    wait,
+    active,
+    delayed,
+    failed,
+    lightweight: descriptor.lightweight,
+  });
+
+  emitQueueWorkerMetric("worker_utilization", workerUtilization, {
+    reason,
+    queueName,
+    lane: descriptor.lane,
+    partition: descriptor.partition,
+  });
+
+  if (backlog >= AI_PARTITION_SATURATION_BACKLOG) {
+    emitQueueWorkerMetric("partition_saturation", 1, {
+      reason,
+      queueName,
+      lane: descriptor.lane,
+      partition: descriptor.partition,
+      backlog,
+      threshold: AI_PARTITION_SATURATION_BACKLOG,
+      lightweight: descriptor.lightweight,
+    });
+  }
+};
+
+const buildWorkerConcurrencyPlan = (
+  descriptors: AIQueueDescriptor[],
+  totalConcurrency: number
+) => {
+  const safeDescriptors = descriptors.filter(Boolean);
+  const result = new Map<string, number>();
+
+  if (!safeDescriptors.length) {
+    return result;
+  }
+
+  for (const descriptor of safeDescriptors) {
+    result.set(descriptor.queueName, 1);
+  }
+
+  let remaining = Math.max(0, totalConcurrency - safeDescriptors.length);
+  if (remaining <= 0) {
+    return result;
+  }
+
+  const weightTotal = safeDescriptors.reduce(
+    (acc, descriptor) => acc + Math.max(1, Number(descriptor.weight || 1)),
+    0
+  );
+
+  const fractions = safeDescriptors.map((descriptor) => {
+    const weight = Math.max(1, Number(descriptor.weight || 1));
+    const exactShare = (remaining * weight) / Math.max(1, weightTotal);
+    const extra = Math.floor(exactShare);
+    result.set(descriptor.queueName, (result.get(descriptor.queueName) || 1) + extra);
+    return {
+      descriptor,
+      remainder: exactShare - extra,
+    };
+  });
+
+  const allocated = safeDescriptors.reduce(
+    (acc, descriptor) => acc + ((result.get(descriptor.queueName) || 1) - 1),
+    0
+  );
+  let leftovers = Math.max(0, remaining - allocated);
+
+  fractions.sort((left, right) => right.remainder - left.remainder);
+
+  let pointer = 0;
+  while (leftovers > 0 && fractions.length > 0) {
+    const descriptor = fractions[pointer % fractions.length].descriptor;
+    result.set(descriptor.queueName, (result.get(descriptor.queueName) || 1) + 1);
+    leftovers -= 1;
+    pointer += 1;
+  }
+
+  return result;
+};
 
 class LeadQueueBusyError extends Error {
   constructor(leadId: string) {
@@ -2170,22 +2367,51 @@ export const initAIPartitionWorkers = () => {
 
   initializeSentry();
 
-  const workers = getAIQueueNames().map((queueName) => {
+  const queueDescriptors = getAIQueueTopology();
+  const concurrencyPlan = buildWorkerConcurrencyPlan(
+    queueDescriptors,
+    AI_WORKER_TOTAL_CONCURRENCY
+  );
+
+  const workers = queueDescriptors.map((descriptor) => {
+    const queueName = descriptor.queueName;
+    const queueConcurrency = Math.max(
+      1,
+      Number(concurrencyPlan.get(queueName) || 1)
+    );
+
     const worker = new Worker<AIQueuePayload>(
       queueName,
       withRedisWorkerFailSafe(queueName, async (job) => processAIJob(job)),
       {
         connection: getWorkerRedisConnection(),
         prefix: env.AI_QUEUE_PREFIX,
-        concurrency: AI_WORKER_CONCURRENCY,
+        concurrency: queueConcurrency,
       }
     );
 
     worker.on("active", (job) => {
+      const queueWaitMs = computeJobQueueWaitMs(job);
+      updatePartitionConcurrency(queueName, descriptor, 1);
+      emitQueueWorkerMetric("queue_wait_ms", queueWaitMs, {
+        queueName,
+        lane: descriptor.lane,
+        partition: descriptor.partition,
+        workloadClass: resolveWorkloadClass(descriptor),
+      });
+      void maybeEmitPartitionBacklog({
+        queueName,
+        descriptor,
+        reason: "worker_active",
+      }).catch(() => undefined);
+
       logger.info(
         {
           jobId: job.id,
           queueName,
+          lane: descriptor.lane,
+          partition: descriptor.partition,
+          queueWaitMs,
           leadId: getJobLeadId(job),
         },
         "AI worker activated job"
@@ -2193,10 +2419,27 @@ export const initAIPartitionWorkers = () => {
     });
 
     worker.on("completed", (job) => {
+      updatePartitionConcurrency(queueName, descriptor, -1);
+      const latencyMs = computeJobLatencyMs(job);
+      emitQueueWorkerMetric("lightweight_vs_heavy_latency", latencyMs, {
+        queueName,
+        lane: descriptor.lane,
+        partition: descriptor.partition,
+        workloadClass: resolveWorkloadClass(descriptor),
+      });
+      void maybeEmitPartitionBacklog({
+        queueName,
+        descriptor,
+        reason: "worker_completed",
+      }).catch(() => undefined);
+
       logger.info(
         {
           jobId: job.id,
           queueName,
+          lane: descriptor.lane,
+          partition: descriptor.partition,
+          latencyMs,
           leadId: getJobLeadId(job),
         },
         "AI worker completed job"
@@ -2204,14 +2447,41 @@ export const initAIPartitionWorkers = () => {
     });
 
     worker.on("failed", (job, error) => {
+      updatePartitionConcurrency(queueName, descriptor, -1);
       const maxAttempts = Number(job?.opts?.attempts || 1);
       const attemptsMade = Number(job?.attemptsMade || 0);
+      const queueWaitMs = computeJobQueueWaitMs(job);
+
+      if (attemptsMade > 0) {
+        emitQueueWorkerMetric("retry_amplification", attemptsMade, {
+          queueName,
+          lane: descriptor.lane,
+          partition: descriptor.partition,
+          maxAttempts,
+          workloadClass: resolveWorkloadClass(descriptor),
+        });
+      }
+
+      emitQueueWorkerMetric("queue_wait_ms", queueWaitMs, {
+        queueName,
+        lane: descriptor.lane,
+        partition: descriptor.partition,
+        workloadClass: resolveWorkloadClass(descriptor),
+        event: "failed",
+      });
+      void maybeEmitPartitionBacklog({
+        queueName,
+        descriptor,
+        reason: "worker_failed",
+      }).catch(() => undefined);
 
       if (error instanceof LeadQueueBusyError) {
         logger.warn(
           {
             jobId: job?.id,
             queueName,
+            lane: descriptor.lane,
+            partition: descriptor.partition,
             leadId: getJobLeadId(job),
           },
           "Lead queue busy, BullMQ will retry"
@@ -2224,6 +2494,8 @@ export const initAIPartitionWorkers = () => {
           {
             jobId: job?.id,
             queueName,
+            lane: descriptor.lane,
+            partition: descriptor.partition,
             leadId: getJobLeadId(job),
             retryAfterMs: error.retryAfterMs,
             scope: error.scope,
@@ -2237,6 +2509,8 @@ export const initAIPartitionWorkers = () => {
         {
           jobId: job?.id,
           queueName,
+          lane: descriptor.lane,
+          partition: descriptor.partition,
           leadId: getJobLeadId(job),
           error,
         },
@@ -2256,6 +2530,15 @@ export const initAIPartitionWorkers = () => {
       if (!job || attemptsMade < maxAttempts) {
         return;
       }
+
+      emitQueueWorkerMetric("queue_degraded", 1, {
+        reason: "terminal_failure",
+        queueName,
+        lane: descriptor.lane,
+        partition: descriptor.partition,
+        attemptsMade,
+        maxAttempts,
+      });
 
       void markAIJobTerminalFailure(job, error);
       void enqueueAIDeadLetterJob({
@@ -2277,6 +2560,8 @@ export const initAIPartitionWorkers = () => {
           {
             jobId: job.id,
             queueName,
+            lane: descriptor.lane,
+            partition: descriptor.partition,
             error: deadLetterError,
           },
           "AI dead-letter enqueue failed"
@@ -2285,9 +2570,17 @@ export const initAIPartitionWorkers = () => {
     });
 
     worker.on("error", (error) => {
+      emitQueueWorkerMetric("queue_degraded", 1, {
+        reason: "worker_error",
+        queueName,
+        lane: descriptor.lane,
+        partition: descriptor.partition,
+      });
       logger.error(
         {
           queueName,
+          lane: descriptor.lane,
+          partition: descriptor.partition,
           error,
         },
         "AI partition worker error"
@@ -2307,14 +2600,22 @@ export const initAIPartitionWorkers = () => {
     {
       partitions: AI_QUEUE_PARTITIONS,
       workers: workers.length,
-      concurrencyPerPartition: AI_WORKER_CONCURRENCY,
+      totalConcurrencyBudget: AI_WORKER_TOTAL_CONCURRENCY,
+      queueConcurrency: queueDescriptors.map((descriptor) => ({
+        queueName: descriptor.queueName,
+        lane: descriptor.lane,
+        partition: descriptor.partition,
+        weight: descriptor.weight,
+        lightweight: descriptor.lightweight,
+        concurrency: concurrencyPlan.get(descriptor.queueName) || 1,
+      })),
     },
     "AI partition workers started"
   );
 
   if (workers.length > 0) {
-    console.log("✅ Worker initialized", {
-      queues: getAIQueueNames(),
+    console.log("Worker initialized", {
+      queues: queueDescriptors.map((descriptor) => descriptor.queueName),
     });
   } else {
     console.error("[ai.partition.worker] No workers started");
@@ -2329,3 +2630,4 @@ export const closeAIPartitionWorkers = async () => {
   await Promise.allSettled(workers.map((worker) => worker.close()));
   globalForAIPartitionWorker.__sylphAIPartitionWorkers = undefined;
 };
+

@@ -94,6 +94,11 @@ const EMPTY_BILLING_CONTEXT: BillingContext = {
 };
 
 type BillingConfirmApiState = "SUCCESS" | "ALREADY_PROCESSED" | "PENDING" | "FAILED";
+type BillingConfirmLifecycleState =
+  | "PENDING"
+  | "PROCESSING"
+  | "CONFIRMED"
+  | "FAILED_TERMINAL";
 
 const BILLING_CONFIRM_DUPLICATE_WINDOW_MS = 60_000;
 const BILLING_PROJECTION_CACHE_TTL_MS = 12_000;
@@ -853,9 +858,23 @@ export class BillingController {
     retryAfterMs?: number;
     reason?: string | null;
     code?: string | null;
+    lifecycleState?: BillingConfirmLifecycleState;
   }) {
+    const normalizedLifecycleState =
+      input.lifecycleState ||
+      (input.state === "SUCCESS" || input.state === "ALREADY_PROCESSED"
+        ? "CONFIRMED"
+        : input.state === "FAILED" && !input.shouldPoll
+        ? "FAILED_TERMINAL"
+        : input.state === "PENDING"
+        ? "PROCESSING"
+        : "PROCESSING");
+    const terminal = normalizedLifecycleState === "FAILED_TERMINAL";
+
     return {
       state: input.state,
+      lifecycleState: normalizedLifecycleState,
+      terminal,
       sessionId: input.sessionId,
       message: input.message,
       shouldPoll: input.shouldPoll,
@@ -2346,6 +2365,7 @@ export class BillingController {
       return respond(
         BillingController.buildConfirmPayload({
           state: "FAILED",
+          lifecycleState: "FAILED_TERMINAL",
           sessionId: "",
           message: "session_id is required",
           shouldPoll: false,
@@ -2366,6 +2386,7 @@ export class BillingController {
       return respond(
         BillingController.buildConfirmPayload({
           state: "FAILED",
+          lifecycleState: "FAILED_TERMINAL",
           sessionId,
           message: "Business context is required",
           shouldPoll: false,
@@ -2392,6 +2413,7 @@ export class BillingController {
         return respond(
           BillingController.buildConfirmPayload({
             state: "FAILED",
+            lifecycleState: "FAILED_TERMINAL",
             sessionId,
             message: "Checkout session could not be matched with your workspace.",
             shouldPoll: false,
@@ -2423,6 +2445,7 @@ export class BillingController {
         return respond(
           BillingController.buildConfirmPayload({
             state: "ALREADY_PROCESSED",
+            lifecycleState: "CONFIRMED",
             sessionId,
             message: "Payment confirmation is already complete.",
             shouldPoll: false,
@@ -2445,6 +2468,7 @@ export class BillingController {
         return respond(
           BillingController.buildConfirmPayload({
             state: "FAILED",
+            lifecycleState: "FAILED_TERMINAL",
             sessionId,
             message: "Checkout confirmation cannot continue for this session.",
             shouldPoll: false,
@@ -2472,6 +2496,7 @@ export class BillingController {
         return respond(
           BillingController.buildConfirmPayload({
             state: "PENDING",
+            lifecycleState: "PROCESSING",
             sessionId,
             message: "Payment verification is already in progress.",
             shouldPoll: true,
@@ -2494,6 +2519,7 @@ export class BillingController {
         return respond(
           BillingController.buildConfirmPayload({
             state: "PENDING",
+            lifecycleState: "PROCESSING",
             sessionId,
             message: "Payment is already being verified.",
             shouldPoll: true,
@@ -2561,6 +2587,7 @@ export class BillingController {
       return respond(
         BillingController.buildConfirmPayload({
           state: "PENDING",
+          lifecycleState: "PROCESSING",
           sessionId,
           message: "Payment is being verified. We will activate your plan shortly.",
           shouldPoll: true,
@@ -2580,6 +2607,7 @@ export class BillingController {
       return respond(
         BillingController.buildConfirmPayload({
           state: "FAILED",
+          lifecycleState: "PROCESSING",
           sessionId,
           message: "Checkout confirmation is temporarily unavailable. Please retry.",
           shouldPoll: true,

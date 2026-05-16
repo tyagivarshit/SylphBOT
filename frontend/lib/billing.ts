@@ -15,8 +15,16 @@ const TERMINAL_CONFIRM_FAILURE_CODES = new Set([
   "PAYMENT_INTENT_TERMINAL",
 ]);
 
+export type CheckoutConfirmLifecycleState =
+  | "PENDING"
+  | "PROCESSING"
+  | "CONFIRMED"
+  | "FAILED_TERMINAL";
+
 export type CheckoutConfirmResponse = {
   state: "SUCCESS" | "ALREADY_PROCESSED" | "PENDING" | "FAILED";
+  lifecycleState: CheckoutConfirmLifecycleState;
+  terminal: boolean;
   sessionId: string;
   message: string;
   shouldPoll: boolean;
@@ -40,25 +48,49 @@ const normalizeConfirmResponse = (
     state === "FAILED"
       ? (state as CheckoutConfirmResponse["state"])
       : "FAILED";
+  const lifecycleStateRaw = String(row.lifecycleState || "")
+    .trim()
+    .toUpperCase();
+  const shouldPoll = Boolean(row.shouldPoll);
+  const code = String(row.code || "").trim() || null;
+  const mappedLifecycleState: CheckoutConfirmLifecycleState =
+    lifecycleStateRaw === "PENDING" ||
+    lifecycleStateRaw === "PROCESSING" ||
+    lifecycleStateRaw === "CONFIRMED" ||
+    lifecycleStateRaw === "FAILED_TERMINAL"
+      ? (lifecycleStateRaw as CheckoutConfirmLifecycleState)
+      : normalizedState === "SUCCESS" || normalizedState === "ALREADY_PROCESSED"
+      ? "CONFIRMED"
+      : normalizedState === "FAILED" && !shouldPoll
+      ? "FAILED_TERMINAL"
+      : normalizedState === "PENDING"
+      ? "PROCESSING"
+      : "PROCESSING";
   const retryAfterMs = Number(row.retryAfterMs);
 
   return {
     state: normalizedState,
+    lifecycleState: mappedLifecycleState,
+    terminal:
+      mappedLifecycleState === "FAILED_TERMINAL" ||
+      (normalizedState === "FAILED" &&
+        !shouldPoll &&
+        TERMINAL_CONFIRM_FAILURE_CODES.has(String(code || "").trim().toUpperCase())),
     sessionId: String(row.sessionId || sessionId || "").trim(),
     message:
       String(row.message || "").trim() ||
-      (normalizedState === "PENDING"
-        ? "Payment is being verified."
-        : normalizedState === "FAILED"
+      (mappedLifecycleState === "PROCESSING"
+        ? "Payment is being verified and your subscription is activating."
+        : mappedLifecycleState === "FAILED_TERMINAL"
         ? "Checkout confirmation failed."
         : "Payment confirmed."),
-    shouldPoll: Boolean(row.shouldPoll),
+    shouldPoll,
     retryAfterMs:
       Number.isFinite(retryAfterMs) && retryAfterMs > 0
         ? Math.floor(retryAfterMs)
         : null,
     reason: String(row.reason || "").trim() || null,
-    code: String(row.code || "").trim() || null,
+    code,
   };
 };
 
@@ -87,7 +119,10 @@ export const redirectToCheckout = (
 };
 
 export const confirmCheckout = async (
-  sessionId: string
+  sessionId: string,
+  options?: {
+    signal?: AbortSignal;
+  }
 ): Promise<CheckoutConfirmResponse> => {
   try {
     const response = await apiFetch<Record<string, unknown>>(
@@ -98,6 +133,7 @@ export const confirmCheckout = async (
         method: "GET",
         timeoutMs: CHECKOUT_CONFIRM_TIMEOUT_MS,
         cache: "no-store",
+        signal: options?.signal,
       }
     );
 

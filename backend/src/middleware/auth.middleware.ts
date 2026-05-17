@@ -41,6 +41,7 @@ const AUTH_WORKSPACE_STAGE_TIMEOUT_MS = 600;
 const AUTH_REFRESH_TOKEN_STAGE_TIMEOUT_MS = 900;
 const AUTH_STATS_LOG_INTERVAL_MS = 60_000;
 const SESSION_ANOMALY_RECHECK_MS = 10_000;
+const AUTH_SURFACE_RETRY_AFTER_MS = 220;
 const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 180;
 const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
   "/api/billing/checkout",
@@ -605,6 +606,23 @@ const shouldUseShallowWorkspaceResolution = (req: Request) => {
   );
 };
 
+const isAuthSurfaceBootstrapRequest = (req: Request) => {
+  const surface = String((req.query as Record<string, unknown>)?.surface || "")
+    .trim()
+    .toLowerCase();
+  if (surface !== "auth" || req.method !== "GET") {
+    return false;
+  }
+
+  const path = String(req.path || "").trim().toLowerCase();
+  if (path === "/me" || path.startsWith("/me/")) {
+    return true;
+  }
+
+  const route = String(req.originalUrl || req.url || "").trim().toLowerCase();
+  return route.includes("/user/me") || route.includes("/auth/me");
+};
+
 const enforceSessionAnomalyGuard = async (req: Request, input: {
   userId: string;
   businessId: string | null;
@@ -736,6 +754,20 @@ export const protect = async (
   next: NextFunction
 ) => {
   const startedAt = Date.now();
+  const authSurfaceBootstrapRequest = isAuthSurfaceBootstrapRequest(req);
+  let decodedAccessToken: ReturnType<typeof verifyAccessToken> = null;
+  let accessLookupTransientReason: string | null = null;
+  let accessLookupTransientStage: string | null = null;
+
+  const markAccessLookupTransient = (stage: string, error: unknown) => {
+    if (!isAuthBudgetExhaustedError(error) && !isAuthStageTimeoutError(error)) {
+      return;
+    }
+    accessLookupTransientStage = stage;
+    accessLookupTransientReason =
+      String((error as Error)?.message || "").trim() ||
+      `auth_processing:${stage}`;
+  };
 
   try {
     if (isRequestClosed(req, res)) {
@@ -818,6 +850,7 @@ export const protect = async (
 
     if (accessToken) {
       const decoded = verifyAccessToken(accessToken);
+      decodedAccessToken = decoded;
       const accessTokenKey = hashToken(accessToken);
 
       if (decoded?.id && typeof decoded.tokenVersion === "number") {
@@ -891,6 +924,7 @@ export const protect = async (
             if (!isAuthNonFatalLookupError(error)) {
               throw error;
             }
+            markAccessLookupTransient("access_lookup_wait_request_local", error);
           }
           if (resolvedFromRequestLocalLookup) {
             writeRequestLocalAuthContext(
@@ -1005,6 +1039,7 @@ export const protect = async (
           });
         } catch (error) {
           if (isAuthNonFatalLookupError(error)) {
+            markAccessLookupTransient("access_redis_lookup", error);
             req.logger?.warn(
               {
                 route: req.originalUrl,
@@ -1083,6 +1118,12 @@ export const protect = async (
           bumpAuthStats({
             deniedByBudget: 1,
           });
+          markAccessLookupTransient(
+            "access_db_lookup_budget",
+            new Error(
+              `auth_budget_exhausted:access_db_lookup:${getAuthBudgetMs(req, res)}`
+            )
+          );
           req.logger?.warn(
             {
               route: req.originalUrl,
@@ -1140,6 +1181,7 @@ export const protect = async (
                 if (!isAuthNonFatalLookupError(error)) {
                   throw error;
                 }
+                markAccessLookupTransient("access_db_lookup", error);
                 req.logger?.warn(
                   {
                     route: req.originalUrl,
@@ -1180,6 +1222,7 @@ export const protect = async (
             if (!isAuthNonFatalLookupError(error)) {
               throw error;
             }
+            markAccessLookupTransient("access_lookup_wait", error);
           } finally {
             clearRequestLocalLookupPromise(
               req,
@@ -1228,6 +1271,62 @@ export const protect = async (
           }
         }
       }
+    }
+
+    if (
+      authSurfaceBootstrapRequest &&
+      decodedAccessToken?.id &&
+      typeof decodedAccessToken.tokenVersion === "number" &&
+      accessLookupTransientReason
+    ) {
+      const fallbackBusinessId =
+        String(decodedAccessToken.businessId || "").trim() || null;
+
+      bindAuthenticatedContext(req, {
+        id: decodedAccessToken.id,
+        role: String(decodedAccessToken.role || "").trim() || "AGENT",
+        businessId: fallbackBusinessId,
+      });
+
+      await runSessionAnomalyGuard(req, {
+        userId: decodedAccessToken.id,
+        businessId: fallbackBusinessId,
+      });
+
+      if (isRequestClosed(req, res)) {
+        return;
+      }
+
+      res.setHeader("X-Auth-Processing-State", "PROCESSING");
+      res.setHeader("X-Auth-Session-Ready", "0");
+      res.setHeader("X-Auth-Retry-After-Ms", String(AUTH_SURFACE_RETRY_AFTER_MS));
+      emitPerformanceMetric({
+        name: "auth_processing_state",
+        value: Date.now() - startedAt,
+        businessId: fallbackBusinessId,
+        route: req.originalUrl,
+        metadata: {
+          surface: "auth",
+          state: "PROCESSING",
+          reason: accessLookupTransientReason,
+          stage: accessLookupTransientStage || null,
+          retryAfterMs: AUTH_SURFACE_RETRY_AFTER_MS,
+          terminal: false,
+        },
+      });
+      emitPerformanceMetric({
+        name: "AUTH_MS",
+        value: Date.now() - startedAt,
+        businessId: fallbackBusinessId,
+        route: req.originalUrl,
+        metadata: {
+          source: "access_token_timeout_processing",
+          stage: accessLookupTransientStage || "access_lookup",
+          retryAfterMs: AUTH_SURFACE_RETRY_AFTER_MS,
+        },
+      });
+
+      return next();
     }
 
     if (isRequestClosed(req, res)) {

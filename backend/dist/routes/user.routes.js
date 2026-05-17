@@ -29,6 +29,7 @@ const safeUserSelect = {
 };
 const USER_ME_CACHE_TTL_MS = 10000;
 const USER_ME_AUTH_SURFACE_CACHE_TTL_MS = 3000;
+const USER_ME_AUTH_SURFACE_RETRY_AFTER_MS = 220;
 const currentUserCache = new Map();
 const buildCurrentUserCacheKey = (userId, preferredBusinessId) => `${String(userId || "").trim()}:${String(preferredBusinessId || "").trim()}`;
 const isAuthSurfaceRequest = (req) => {
@@ -288,6 +289,7 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                 if (cachedAuthSurface?.authLifecycle?.processingState) {
                     res.setHeader("X-Auth-Processing-State", cachedAuthSurface.authLifecycle.processingState);
                     res.setHeader("X-Auth-Session-Ready", cachedAuthSurface.authLifecycle.sessionReady ? "1" : "0");
+                    res.setHeader("X-Auth-Retry-After-Ms", String(Math.max(0, Math.floor(cachedAuthSurface.authLifecycle.retryAfterMs || 0))));
                 }
                 (0, performanceMetrics_1.emitPerformanceMetric)({
                     name: "auth_stabilization_ms",
@@ -344,8 +346,11 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                     });
                     const lifecycle = {
                         processingState: bootstrap.state,
+                        lifecycleState: bootstrap.state,
                         sessionReady: bootstrap.state === "READY",
                         retryable: bootstrap.state === "PROCESSING" || bootstrap.state === "RETRYING",
+                        retryAfterMs: bootstrap.state === "READY" ? 0 : USER_ME_AUTH_SURFACE_RETRY_AFTER_MS,
+                        terminal: bootstrap.state === "FAILED_TERMINAL",
                         reason: bootstrap.reason,
                         reusedInFlight: bootstrap.reusedInFlight,
                         stabilizationMs: bootstrap.elapsedMs,
@@ -451,6 +456,7 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
             res.setHeader("Cache-Control", "no-store");
             res.setHeader("X-Auth-Processing-State", user.authLifecycle.processingState);
             res.setHeader("X-Auth-Session-Ready", user.authLifecycle.sessionReady ? "1" : "0");
+            res.setHeader("X-Auth-Retry-After-Ms", String(Math.max(0, Math.floor(user.authLifecycle.retryAfterMs || 0))));
             return res.json(user);
         }
         const userHydration = await (0, boundedTimeout_1.withTimeoutFallback)({

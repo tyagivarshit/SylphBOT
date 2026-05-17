@@ -30,6 +30,7 @@ const safeUserSelect = {
 
 const USER_ME_CACHE_TTL_MS = 10_000;
 const USER_ME_AUTH_SURFACE_CACHE_TTL_MS = 3_000;
+const USER_ME_AUTH_SURFACE_RETRY_AFTER_MS = 220;
 
 const currentUserCache = new Map<
   string,
@@ -153,8 +154,11 @@ type AuthSurfaceLifecycleState =
   | "FAILED_TERMINAL";
 type AuthSurfaceLifecycle = {
   processingState: AuthSurfaceLifecycleState;
+  lifecycleState: AuthSurfaceLifecycleState;
   sessionReady: boolean;
   retryable: boolean;
+  retryAfterMs: number;
+  terminal: boolean;
   reason: string | null;
   reusedInFlight: boolean;
   stabilizationMs: number;
@@ -392,6 +396,12 @@ router.get("/me", protect, async (req: any, res) => {
             "X-Auth-Session-Ready",
             cachedAuthSurface.authLifecycle.sessionReady ? "1" : "0"
           );
+          res.setHeader(
+            "X-Auth-Retry-After-Ms",
+            String(
+              Math.max(0, Math.floor(cachedAuthSurface.authLifecycle.retryAfterMs || 0))
+            )
+          );
         }
         emitPerformanceMetric({
           name: "auth_stabilization_ms",
@@ -456,9 +466,13 @@ router.get("/me", protect, async (req: any, res) => {
 
           const lifecycle: AuthSurfaceLifecycle = {
             processingState: bootstrap.state,
+            lifecycleState: bootstrap.state,
             sessionReady: bootstrap.state === "READY",
             retryable:
               bootstrap.state === "PROCESSING" || bootstrap.state === "RETRYING",
+            retryAfterMs:
+              bootstrap.state === "READY" ? 0 : USER_ME_AUTH_SURFACE_RETRY_AFTER_MS,
+            terminal: bootstrap.state === "FAILED_TERMINAL",
             reason: bootstrap.reason,
             reusedInFlight: bootstrap.reusedInFlight,
             stabilizationMs: bootstrap.elapsedMs,
@@ -580,6 +594,10 @@ router.get("/me", protect, async (req: any, res) => {
       res.setHeader(
         "X-Auth-Session-Ready",
         user.authLifecycle.sessionReady ? "1" : "0"
+      );
+      res.setHeader(
+        "X-Auth-Retry-After-Ms",
+        String(Math.max(0, Math.floor(user.authLifecycle.retryAfterMs || 0)))
       );
       return res.json(user);
     }

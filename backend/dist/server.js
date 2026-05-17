@@ -46,36 +46,181 @@ const sentry_1 = require("./observability/sentry");
 const stripeConfig_service_1 = require("./services/commerce/providers/stripeConfig.service");
 const billingSettlement_service_1 = require("./services/billingSettlement.service");
 const lifecycle_1 = require("./runtime/lifecycle");
+const embedding_service_1 = require("./services/embedding.service");
 const commerceProjection_service_1 = require("./services/commerceProjection.service");
+const startupIsolation_service_1 = require("./runtime/startupIsolation.service");
 let isShuttingDown = false;
+const parsePositiveInt = (raw, fallbackValue) => {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+        return fallbackValue;
+    }
+    return Math.max(1, Math.floor(parsed));
+};
+const STARTUP_EMBEDDING_WARMUP_DELAY_MS = parsePositiveInt(process.env.STARTUP_EMBEDDING_WARMUP_DELAY_MS, 12000);
+const STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS = parsePositiveInt(process.env.STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS, 4000);
+const STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS = parsePositiveInt(process.env.STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS, 8);
+const scheduleBackgroundStartupTask = (name, task, metadata) => {
+    const attempts = 1;
+    (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+        name,
+        status: "scheduled",
+        attempts,
+        metadata,
+    });
+    setImmediate(() => {
+        const startedAt = Date.now();
+        (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+            name,
+            status: "started",
+            attempts,
+            metadata,
+        });
+        void task()
+            .then(() => {
+            (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+                name,
+                status: "completed",
+                attempts,
+                durationMs: Date.now() - startedAt,
+                metadata,
+            });
+        })
+            .catch((error) => {
+            logger_1.default.warn({
+                err: error,
+                task: name,
+            }, "Startup background task failed");
+            (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+                name,
+                status: "failed",
+                attempts,
+                durationMs: Date.now() - startedAt,
+                error,
+                metadata,
+            });
+        });
+    });
+};
+const scheduleDeferredEmbeddingWarmup = () => {
+    let attempts = 0;
+    const runAttempt = (delayMs) => {
+        attempts += 1;
+        (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+            name: "embedding_runtime",
+            status: "scheduled",
+            attempts,
+            metadata: {
+                delayMs,
+            },
+        });
+        const timer = setTimeout(() => {
+            const deferDecision = (0, startupIsolation_service_1.shouldDeferLowPriorityWarmup)();
+            if (deferDecision.defer && attempts < STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS) {
+                (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+                    name: "embedding_runtime",
+                    status: "deferred",
+                    attempts,
+                    metadata: {
+                        reasons: deferDecision.reasons,
+                        pressure: deferDecision.pressure,
+                        priority: deferDecision.prioritySnapshot,
+                    },
+                });
+                runAttempt(STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS);
+                return;
+            }
+            (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+                name: "embedding_runtime",
+                status: "started",
+                attempts,
+                metadata: {
+                    deferred: deferDecision.defer,
+                    reasons: deferDecision.reasons,
+                },
+            });
+            const startedAt = Date.now();
+            void (0, embedding_service_1.warmupEmbeddingRuntime)("startup_background")
+                .then((outcome) => {
+                const durationMs = Number(outcome.durationMs || Date.now() - startedAt);
+                (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+                    name: "embedding_runtime",
+                    status: "completed",
+                    attempts,
+                    durationMs,
+                    metadata: {
+                        deferred: deferDecision.defer,
+                        reasons: deferDecision.reasons,
+                    },
+                });
+                (0, startupIsolation_service_1.markEmbeddingWarmupReady)({
+                    warmupMs: durationMs,
+                    metadata: {
+                        source: "startup_background",
+                        attempts,
+                    },
+                });
+            })
+                .catch((error) => {
+                (0, startupIsolation_service_1.recordStartupBackgroundTask)({
+                    name: "embedding_runtime",
+                    status: "failed",
+                    attempts,
+                    durationMs: Date.now() - startedAt,
+                    error,
+                });
+                if (attempts < STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS) {
+                    runAttempt(STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS);
+                }
+            });
+        }, delayMs);
+        timer.unref?.();
+    };
+    runAttempt(STARTUP_EMBEDDING_WARMUP_DELAY_MS);
+};
+const startPostListenBootstrap = () => {
+    scheduleBackgroundStartupTask("stripe_config_validation", async () => {
+        await (0, stripeConfig_service_1.emitStripeConfigValidation)();
+    });
+    scheduleBackgroundStartupTask("commerce_cold_boot_replay", async () => {
+        const coldBootReplay = await commerceProjection_service_1.commerceProjectionService
+            .replayPendingProviderWebhooks({
+            provider: "STRIPE",
+            businessId: null,
+            limit: 100,
+            includeClaimedOlderThanMinutes: 5,
+        })
+            .catch(() => null);
+        if (coldBootReplay) {
+            logger_1.default.info({ coldBootReplay }, "Commerce cold boot replay completed");
+        }
+    });
+    scheduleBackgroundStartupTask("entitlement_reconcile_replay", async () => {
+        const entitlementReplay = await (0, billingSettlement_service_1.reconcilePendingEntitlementSync)({
+            limit: 100,
+        }).catch(() => null);
+        if (entitlementReplay && entitlementReplay.pending > 0) {
+            logger_1.default.info({
+                entitlementReplay,
+            }, "Commerce entitlement reconcile replay completed");
+        }
+    });
+    scheduleBackgroundStartupTask("worker_bootstrap", async () => {
+        (0, lifecycle_1.initWorkers)({
+            authEmail: true,
+        });
+    });
+    scheduleBackgroundStartupTask("cron_bootstrap", async () => {
+        if (process.env.ENABLE_CRON === "true") {
+            (0, lifecycle_1.initCrons)();
+        }
+    });
+    scheduleDeferredEmbeddingWarmup();
+};
 const startServer = async () => {
     (0, sentry_1.initializeSentry)();
     (0, passport_1.configurePassport)();
-    await (0, stripeConfig_service_1.emitStripeConfigValidation)();
     await (0, lifecycle_1.initQueues)();
-    const coldBootReplay = await commerceProjection_service_1.commerceProjectionService
-        .replayPendingProviderWebhooks({
-        provider: "STRIPE",
-        businessId: null,
-        limit: 100,
-        includeClaimedOlderThanMinutes: 5,
-    })
-        .catch(() => null);
-    const entitlementReplay = await (0, billingSettlement_service_1.reconcilePendingEntitlementSync)({
-        limit: 100,
-    }).catch(() => null);
-    if (coldBootReplay) {
-        logger_1.default.info({ coldBootReplay }, "Commerce cold boot replay completed");
-    }
-    if (entitlementReplay && entitlementReplay.pending > 0) {
-        logger_1.default.info({ entitlementReplay }, "Commerce entitlement reconcile replay completed");
-    }
-    (0, lifecycle_1.initWorkers)({
-        authEmail: true,
-    });
-    if (process.env.ENABLE_CRON === "true") {
-        (0, lifecycle_1.initCrons)();
-    }
     const { default: app } = await Promise.resolve().then(() => __importStar(require("./app")));
     const server = http_1.default.createServer(app);
     (0, socket_server_1.initSocket)(server);
@@ -140,6 +285,8 @@ const startServer = async () => {
     return await new Promise((resolve) => {
         server.listen(env_1.env.PORT, () => {
             logger_1.default.info({ port: env_1.env.PORT }, "Server listening");
+            (0, startupIsolation_service_1.markAppBootReady)();
+            startPostListenBootstrap();
             resolve(server);
         });
     });

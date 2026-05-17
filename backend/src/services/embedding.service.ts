@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { pipeline } from "@xenova/transformers";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import { markAiRuntimeReady } from "../runtime/startupIsolation.service";
 import logger from "../utils/logger";
 
 type CacheEntry = {
@@ -46,6 +47,16 @@ type ResolveVariantEmbeddingsResult = {
   inflightDeduped: number;
   degraded: boolean;
   degradationReasons: string[];
+};
+
+type EmbeddingWarmupState = {
+  status: "idle" | "warming" | "ready" | "failed";
+  initiatedBy: string | null;
+  attempts: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  lastError: string | null;
+  lastDurationMs: number | null;
 };
 
 const parsePositiveInt = (raw: string | undefined, fallbackValue: number) => {
@@ -94,9 +105,6 @@ const EMBEDDING_BATCH_CONCURRENCY = parsePositiveInt(
   process.env.EMBEDDING_BATCH_CONCURRENCY,
   4
 );
-const EMBEDDING_WARMUP_ENABLED =
-  String(process.env.EMBEDDING_WARMUP_ENABLED || "true").trim().toLowerCase() !==
-  "false";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -104,6 +112,15 @@ const openai = new OpenAI({
 
 let extractorPromise: Promise<any> | null = null;
 let modelReady = false;
+const embeddingWarmupState: EmbeddingWarmupState = {
+  status: "idle",
+  initiatedBy: null,
+  attempts: 0,
+  startedAt: null,
+  completedAt: null,
+  lastError: null,
+  lastDurationMs: null,
+};
 
 const finalCache = new Map<string, CacheEntry>();
 const variantCache = new Map<string, CacheEntry>();
@@ -441,13 +458,29 @@ const getModel = async () => {
   if (!extractorPromise) {
     const startedAt = Date.now();
     logger.info("Loading local embedding model");
+    embeddingWarmupState.status = "warming";
+    embeddingWarmupState.startedAt = startedAt;
+    embeddingWarmupState.completedAt = null;
+    embeddingWarmupState.lastDurationMs = null;
+    embeddingWarmupState.lastError = null;
+    embeddingWarmupState.attempts += 1;
 
     extractorPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2")
       .then((model) => {
+        const coldStartMs = Date.now() - startedAt;
         if (!modelReady) {
           modelReady = true;
-          emitEmbeddingMetric("embedding_cold_start_ms", Date.now() - startedAt, {
+          embeddingWarmupState.status = "ready";
+          embeddingWarmupState.completedAt = Date.now();
+          embeddingWarmupState.lastDurationMs = coldStartMs;
+          embeddingWarmupState.lastError = null;
+          emitEmbeddingMetric("embedding_cold_start_ms", coldStartMs, {
             source: "model_init",
+          });
+          markAiRuntimeReady({
+            source: embeddingWarmupState.initiatedBy || "embedding_runtime",
+            mode: MODE,
+            warmupMs: coldStartMs,
           });
         }
         return model;
@@ -455,6 +488,12 @@ const getModel = async () => {
       .catch((error) => {
         extractorPromise = null;
         modelReady = false;
+        embeddingWarmupState.status = "failed";
+        embeddingWarmupState.completedAt = Date.now();
+        embeddingWarmupState.lastDurationMs = Date.now() - startedAt;
+        embeddingWarmupState.lastError = String(
+          (error as { message?: unknown })?.message || error || "embedding_model_init_failed"
+        );
         throw error;
       });
   }
@@ -813,10 +852,69 @@ export const createEmbeddingsBatch = async (texts: string[]): Promise<number[][]
   return results;
 };
 
-if (MODE === "local" && EMBEDDING_WARMUP_ENABLED) {
-  setImmediate(() => {
-    getModel().catch((error) => {
-      logger.warn({ err: error }, "Embedding warmup skipped");
-    });
-  });
-}
+export const warmupEmbeddingRuntime = async (
+  initiatedBy = "manual"
+) => {
+  if (MODE !== "local") {
+    return {
+      mode: MODE,
+      ready: true,
+      skipped: true,
+      durationMs: 0,
+    };
+  }
+
+  embeddingWarmupState.initiatedBy = String(initiatedBy || "manual").trim() || "manual";
+  const startedAt = Date.now();
+
+  try {
+    await getModel();
+    const durationMs = Date.now() - startedAt;
+    if (!embeddingWarmupState.lastDurationMs) {
+      embeddingWarmupState.lastDurationMs = durationMs;
+    }
+    return {
+      mode: MODE,
+      ready: true,
+      skipped: false,
+      durationMs,
+    };
+  } catch (error) {
+    logger.warn({ err: error }, "Embedding warmup skipped");
+    throw error;
+  }
+};
+
+export const getEmbeddingRuntimeState = () => ({
+  mode: MODE,
+  modelReady,
+  warmup: {
+    status: embeddingWarmupState.status,
+    initiatedBy: embeddingWarmupState.initiatedBy,
+    attempts: embeddingWarmupState.attempts,
+    startedAt:
+      embeddingWarmupState.startedAt !== null
+        ? new Date(embeddingWarmupState.startedAt).toISOString()
+        : null,
+    completedAt:
+      embeddingWarmupState.completedAt !== null
+        ? new Date(embeddingWarmupState.completedAt).toISOString()
+        : null,
+    durationMs: embeddingWarmupState.lastDurationMs,
+    lastError: embeddingWarmupState.lastError,
+  },
+  queue: {
+    activeCompute: activeEmbeddingCompute,
+    queued: embeddingQueue.length,
+    maxQueue: EMBEDDING_MAX_QUEUE,
+    maxConcurrentCompute: EMBEDDING_MAX_CONCURRENT_COMPUTE,
+  },
+  cache: {
+    final: finalCache.size,
+    variant: variantCache.size,
+    inflightFinal: finalInflight.size,
+    inflightVariant: variantInflight.size,
+  },
+});
+
+export const isEmbeddingRuntimeReady = () => modelReady;

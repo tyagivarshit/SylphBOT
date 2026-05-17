@@ -58,6 +58,8 @@ const rbac_service_1 = require("./services/rbac.service");
 const AppError_1 = require("./utils/AppError");
 const asyncHandler_1 = require("./utils/asyncHandler");
 const sentry_1 = require("./observability/sentry");
+const embedding_service_1 = require("./services/embedding.service");
+const startupIsolation_service_1 = require("./runtime/startupIsolation.service");
 const requestLifecycle_1 = require("./utils/requestLifecycle");
 const app = (0, express_1.default)();
 const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -388,6 +390,16 @@ app.use((req, res, next) => {
             res,
             reason: "response_finished",
         });
+        const priorityClass = String(res.locals?.requestPriorityClass || "NORMAL")
+            .trim()
+            .toUpperCase() || "NORMAL";
+        (0, startupIsolation_service_1.recordStartupAuthLatency)({
+            route: route || req.originalUrl || req.path || "",
+            method: req.method,
+            statusCode: res.statusCode,
+            latencyMs: Date.now() - startedAt,
+            priorityClass,
+        });
         logRequestComplete();
     });
     res.setTimeout(timeoutMs, () => {
@@ -587,6 +599,10 @@ app.get("/health", (req, res) => {
         status: "ok",
         requestId: req.requestId,
         timestamp: new Date().toISOString(),
+        startup: (0, startupIsolation_service_1.getStartupIsolationSnapshot)(),
+        aiRuntime: {
+            embedding: (0, embedding_service_1.getEmbeddingRuntimeState)(),
+        },
     });
 });
 app.use((req, res) => {

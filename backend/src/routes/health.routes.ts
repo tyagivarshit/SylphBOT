@@ -20,6 +20,8 @@ import {
 } from "../services/reliability/infrastructureResilienceOS.service";
 import { collectReliabilityRuntimeSnapshot } from "../services/reliability/reliabilityRuntime.service";
 import { getSystemHealth } from "../services/systemHealth.service";
+import { getEmbeddingRuntimeState } from "../services/embedding.service";
+import { getStartupIsolationSnapshot } from "../runtime/startupIsolation.service";
 import { asyncHandler } from "../utils/asyncHandler";
 
 const router = Router();
@@ -91,6 +93,10 @@ router.get(
       success: true,
       requestId: req.requestId,
       ...health,
+      startup: getStartupIsolationSnapshot(),
+      aiRuntime: {
+        embedding: getEmbeddingRuntimeState(),
+      },
       reliabilitySnapshot:
         runtime?.snapshots?.map((snapshot: any) => ({
           subsystem: snapshot.subsystem,

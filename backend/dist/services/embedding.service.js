@@ -3,10 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createEmbeddingsBatch = exports.createEmbedding = void 0;
+exports.isEmbeddingRuntimeReady = exports.getEmbeddingRuntimeState = exports.warmupEmbeddingRuntime = exports.createEmbeddingsBatch = exports.createEmbedding = void 0;
 const openai_1 = __importDefault(require("openai"));
 const transformers_1 = require("@xenova/transformers");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
+const startupIsolation_service_1 = require("../runtime/startupIsolation.service");
 const logger_1 = __importDefault(require("../utils/logger"));
 const parsePositiveInt = (raw, fallbackValue) => {
     const parsed = Number(raw);
@@ -26,13 +27,20 @@ const EMBEDDING_COMPUTE_BUDGET_MS = parsePositiveInt(process.env.EMBEDDING_COMPU
 const EMBEDDING_LOCAL_YIELD_EVERY = parsePositiveInt(process.env.EMBEDDING_LOCAL_YIELD_EVERY, 2);
 const EMBEDDING_BATCH_MAX_ITEMS = parsePositiveInt(process.env.EMBEDDING_BATCH_MAX_ITEMS, 64);
 const EMBEDDING_BATCH_CONCURRENCY = parsePositiveInt(process.env.EMBEDDING_BATCH_CONCURRENCY, 4);
-const EMBEDDING_WARMUP_ENABLED = String(process.env.EMBEDDING_WARMUP_ENABLED || "true").trim().toLowerCase() !==
-    "false";
 const openai = new openai_1.default({
     apiKey: process.env.OPENAI_API_KEY,
 });
 let extractorPromise = null;
 let modelReady = false;
+const embeddingWarmupState = {
+    status: "idle",
+    initiatedBy: null,
+    attempts: 0,
+    startedAt: null,
+    completedAt: null,
+    lastError: null,
+    lastDurationMs: null,
+};
 const finalCache = new Map();
 const variantCache = new Map();
 const finalInflight = new Map();
@@ -289,12 +297,28 @@ const getModel = async () => {
     if (!extractorPromise) {
         const startedAt = Date.now();
         logger_1.default.info("Loading local embedding model");
+        embeddingWarmupState.status = "warming";
+        embeddingWarmupState.startedAt = startedAt;
+        embeddingWarmupState.completedAt = null;
+        embeddingWarmupState.lastDurationMs = null;
+        embeddingWarmupState.lastError = null;
+        embeddingWarmupState.attempts += 1;
         extractorPromise = (0, transformers_1.pipeline)("feature-extraction", "Xenova/all-MiniLM-L6-v2")
             .then((model) => {
+            const coldStartMs = Date.now() - startedAt;
             if (!modelReady) {
                 modelReady = true;
-                emitEmbeddingMetric("embedding_cold_start_ms", Date.now() - startedAt, {
+                embeddingWarmupState.status = "ready";
+                embeddingWarmupState.completedAt = Date.now();
+                embeddingWarmupState.lastDurationMs = coldStartMs;
+                embeddingWarmupState.lastError = null;
+                emitEmbeddingMetric("embedding_cold_start_ms", coldStartMs, {
                     source: "model_init",
+                });
+                (0, startupIsolation_service_1.markAiRuntimeReady)({
+                    source: embeddingWarmupState.initiatedBy || "embedding_runtime",
+                    mode: MODE,
+                    warmupMs: coldStartMs,
                 });
             }
             return model;
@@ -302,6 +326,10 @@ const getModel = async () => {
             .catch((error) => {
             extractorPromise = null;
             modelReady = false;
+            embeddingWarmupState.status = "failed";
+            embeddingWarmupState.completedAt = Date.now();
+            embeddingWarmupState.lastDurationMs = Date.now() - startedAt;
+            embeddingWarmupState.lastError = String(error?.message || error || "embedding_model_init_failed");
             throw error;
         });
     }
@@ -597,10 +625,65 @@ const createEmbeddingsBatch = async (texts) => {
     return results;
 };
 exports.createEmbeddingsBatch = createEmbeddingsBatch;
-if (MODE === "local" && EMBEDDING_WARMUP_ENABLED) {
-    setImmediate(() => {
-        getModel().catch((error) => {
-            logger_1.default.warn({ err: error }, "Embedding warmup skipped");
-        });
-    });
-}
+const warmupEmbeddingRuntime = async (initiatedBy = "manual") => {
+    if (MODE !== "local") {
+        return {
+            mode: MODE,
+            ready: true,
+            skipped: true,
+            durationMs: 0,
+        };
+    }
+    embeddingWarmupState.initiatedBy = String(initiatedBy || "manual").trim() || "manual";
+    const startedAt = Date.now();
+    try {
+        await getModel();
+        const durationMs = Date.now() - startedAt;
+        if (!embeddingWarmupState.lastDurationMs) {
+            embeddingWarmupState.lastDurationMs = durationMs;
+        }
+        return {
+            mode: MODE,
+            ready: true,
+            skipped: false,
+            durationMs,
+        };
+    }
+    catch (error) {
+        logger_1.default.warn({ err: error }, "Embedding warmup skipped");
+        throw error;
+    }
+};
+exports.warmupEmbeddingRuntime = warmupEmbeddingRuntime;
+const getEmbeddingRuntimeState = () => ({
+    mode: MODE,
+    modelReady,
+    warmup: {
+        status: embeddingWarmupState.status,
+        initiatedBy: embeddingWarmupState.initiatedBy,
+        attempts: embeddingWarmupState.attempts,
+        startedAt: embeddingWarmupState.startedAt !== null
+            ? new Date(embeddingWarmupState.startedAt).toISOString()
+            : null,
+        completedAt: embeddingWarmupState.completedAt !== null
+            ? new Date(embeddingWarmupState.completedAt).toISOString()
+            : null,
+        durationMs: embeddingWarmupState.lastDurationMs,
+        lastError: embeddingWarmupState.lastError,
+    },
+    queue: {
+        activeCompute: activeEmbeddingCompute,
+        queued: embeddingQueue.length,
+        maxQueue: EMBEDDING_MAX_QUEUE,
+        maxConcurrentCompute: EMBEDDING_MAX_CONCURRENT_COMPUTE,
+    },
+    cache: {
+        final: finalCache.size,
+        variant: variantCache.size,
+        inflightFinal: finalInflight.size,
+        inflightVariant: variantInflight.size,
+    },
+});
+exports.getEmbeddingRuntimeState = getEmbeddingRuntimeState;
+const isEmbeddingRuntimeReady = () => modelReady;
+exports.isEmbeddingRuntimeReady = isEmbeddingRuntimeReady;

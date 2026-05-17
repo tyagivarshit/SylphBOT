@@ -55,6 +55,21 @@ const sumQueued = () =>
   queueByPriority.NORMAL.length +
   queueByPriority.LOW.length;
 
+export const getRequestPriorityRuntimeSnapshot = () => ({
+  active: {
+    critical: activeByPriority.CRITICAL,
+    normal: activeByPriority.NORMAL,
+    low: activeByPriority.LOW,
+    total: sumActive(),
+  },
+  queue: {
+    critical: queueByPriority.CRITICAL.length,
+    normal: queueByPriority.NORMAL.length,
+    low: queueByPriority.LOW.length,
+    total: sumQueued(),
+  },
+});
+
 const classifyRequestPriority = (req: Request): PriorityClass => {
   const path = String(req.path || req.originalUrl || "").trim();
   const method = String(req.method || "GET").trim().toUpperCase();

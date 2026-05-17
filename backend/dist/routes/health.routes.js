@@ -12,6 +12,8 @@ const reliabilityOS_service_1 = require("../services/reliability/reliabilityOS.s
 const infrastructureResilienceOS_service_1 = require("../services/reliability/infrastructureResilienceOS.service");
 const reliabilityRuntime_service_1 = require("../services/reliability/reliabilityRuntime.service");
 const systemHealth_service_1 = require("../services/systemHealth.service");
+const embedding_service_1 = require("../services/embedding.service");
+const startupIsolation_service_1 = require("../runtime/startupIsolation.service");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const router = (0, express_1.Router)();
 const isValidInternalKey = (providedKey, expectedKey) => {
@@ -59,6 +61,10 @@ router.get("/system", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         success: true,
         requestId: req.requestId,
         ...health,
+        startup: (0, startupIsolation_service_1.getStartupIsolationSnapshot)(),
+        aiRuntime: {
+            embedding: (0, embedding_service_1.getEmbeddingRuntimeState)(),
+        },
         reliabilitySnapshot: runtime?.snapshots?.map((snapshot) => ({
             subsystem: snapshot.subsystem,
             healthState: snapshot.healthState,

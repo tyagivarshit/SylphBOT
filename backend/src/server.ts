@@ -15,39 +15,226 @@ import {
   initQueues,
   shutdown,
 } from "./runtime/lifecycle";
+import { warmupEmbeddingRuntime } from "./services/embedding.service";
 import { commerceProjectionService } from "./services/commerceProjection.service";
+import {
+  markAppBootReady,
+  markEmbeddingWarmupReady,
+  recordStartupBackgroundTask,
+  shouldDeferLowPriorityWarmup,
+} from "./runtime/startupIsolation.service";
 
 let isShuttingDown = false;
+
+const parsePositiveInt = (raw: string | undefined, fallbackValue: number) => {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallbackValue;
+  }
+  return Math.max(1, Math.floor(parsed));
+};
+
+const STARTUP_EMBEDDING_WARMUP_DELAY_MS = parsePositiveInt(
+  process.env.STARTUP_EMBEDDING_WARMUP_DELAY_MS,
+  12_000
+);
+const STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS = parsePositiveInt(
+  process.env.STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS,
+  4_000
+);
+const STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS = parsePositiveInt(
+  process.env.STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS,
+  8
+);
+
+const scheduleBackgroundStartupTask = (
+  name: string,
+  task: () => Promise<unknown>,
+  metadata?: Record<string, unknown>
+) => {
+  const attempts = 1;
+  recordStartupBackgroundTask({
+    name,
+    status: "scheduled",
+    attempts,
+    metadata,
+  });
+
+  setImmediate(() => {
+    const startedAt = Date.now();
+    recordStartupBackgroundTask({
+      name,
+      status: "started",
+      attempts,
+      metadata,
+    });
+
+    void task()
+      .then(() => {
+        recordStartupBackgroundTask({
+          name,
+          status: "completed",
+          attempts,
+          durationMs: Date.now() - startedAt,
+          metadata,
+        });
+      })
+      .catch((error) => {
+        logger.warn(
+          {
+            err: error,
+            task: name,
+          },
+          "Startup background task failed"
+        );
+        recordStartupBackgroundTask({
+          name,
+          status: "failed",
+          attempts,
+          durationMs: Date.now() - startedAt,
+          error,
+          metadata,
+        });
+      });
+  });
+};
+
+const scheduleDeferredEmbeddingWarmup = () => {
+  let attempts = 0;
+
+  const runAttempt = (delayMs: number) => {
+    attempts += 1;
+    recordStartupBackgroundTask({
+      name: "embedding_runtime",
+      status: "scheduled",
+      attempts,
+      metadata: {
+        delayMs,
+      },
+    });
+
+    const timer = setTimeout(() => {
+      const deferDecision = shouldDeferLowPriorityWarmup();
+
+      if (deferDecision.defer && attempts < STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS) {
+        recordStartupBackgroundTask({
+          name: "embedding_runtime",
+          status: "deferred",
+          attempts,
+          metadata: {
+            reasons: deferDecision.reasons,
+            pressure: deferDecision.pressure,
+            priority: deferDecision.prioritySnapshot,
+          },
+        });
+        runAttempt(STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS);
+        return;
+      }
+
+      recordStartupBackgroundTask({
+        name: "embedding_runtime",
+        status: "started",
+        attempts,
+        metadata: {
+          deferred: deferDecision.defer,
+          reasons: deferDecision.reasons,
+        },
+      });
+      const startedAt = Date.now();
+
+      void warmupEmbeddingRuntime("startup_background")
+        .then((outcome) => {
+          const durationMs = Number(outcome.durationMs || Date.now() - startedAt);
+          recordStartupBackgroundTask({
+            name: "embedding_runtime",
+            status: "completed",
+            attempts,
+            durationMs,
+            metadata: {
+              deferred: deferDecision.defer,
+              reasons: deferDecision.reasons,
+            },
+          });
+          markEmbeddingWarmupReady({
+            warmupMs: durationMs,
+            metadata: {
+              source: "startup_background",
+              attempts,
+            },
+          });
+        })
+        .catch((error) => {
+          recordStartupBackgroundTask({
+            name: "embedding_runtime",
+            status: "failed",
+            attempts,
+            durationMs: Date.now() - startedAt,
+            error,
+          });
+          if (attempts < STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS) {
+            runAttempt(STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS);
+          }
+        });
+    }, delayMs);
+
+    timer.unref?.();
+  };
+
+  runAttempt(STARTUP_EMBEDDING_WARMUP_DELAY_MS);
+};
+
+const startPostListenBootstrap = () => {
+  scheduleBackgroundStartupTask("stripe_config_validation", async () => {
+    await emitStripeConfigValidation();
+  });
+
+  scheduleBackgroundStartupTask("commerce_cold_boot_replay", async () => {
+    const coldBootReplay = await commerceProjectionService
+      .replayPendingProviderWebhooks({
+        provider: "STRIPE",
+        businessId: null,
+        limit: 100,
+        includeClaimedOlderThanMinutes: 5,
+      })
+      .catch(() => null);
+    if (coldBootReplay) {
+      logger.info({ coldBootReplay }, "Commerce cold boot replay completed");
+    }
+  });
+
+  scheduleBackgroundStartupTask("entitlement_reconcile_replay", async () => {
+    const entitlementReplay = await reconcilePendingEntitlementSync({
+      limit: 100,
+    }).catch(() => null);
+    if (entitlementReplay && entitlementReplay.pending > 0) {
+      logger.info(
+        {
+          entitlementReplay,
+        },
+        "Commerce entitlement reconcile replay completed"
+      );
+    }
+  });
+
+  scheduleBackgroundStartupTask("worker_bootstrap", async () => {
+    initWorkers({
+      authEmail: true,
+    });
+  });
+
+  scheduleBackgroundStartupTask("cron_bootstrap", async () => {
+    if (process.env.ENABLE_CRON === "true") {
+      initCrons();
+    }
+  });
+
+  scheduleDeferredEmbeddingWarmup();
+};
 
 export const startServer = async () => {
   initializeSentry();
   configurePassport();
-  await emitStripeConfigValidation();
   await initQueues();
-  const coldBootReplay = await commerceProjectionService
-    .replayPendingProviderWebhooks({
-      provider: "STRIPE",
-      businessId: null,
-      limit: 100,
-      includeClaimedOlderThanMinutes: 5,
-    })
-    .catch(() => null);
-  const entitlementReplay = await reconcilePendingEntitlementSync({
-    limit: 100,
-  }).catch(() => null);
-  if (coldBootReplay) {
-    logger.info({ coldBootReplay }, "Commerce cold boot replay completed");
-  }
-  if (entitlementReplay && entitlementReplay.pending > 0) {
-    logger.info({ entitlementReplay }, "Commerce entitlement reconcile replay completed");
-  }
-  initWorkers({
-    authEmail: true,
-  });
-
-  if (process.env.ENABLE_CRON === "true") {
-    initCrons();
-  }
 
   const { default: app } = await import("./app");
   const server = http.createServer(app);
@@ -128,6 +315,8 @@ export const startServer = async () => {
   return await new Promise<http.Server>((resolve) => {
     server.listen(env.PORT, () => {
       logger.info({ port: env.PORT }, "Server listening");
+      markAppBootReady();
+      startPostListenBootstrap();
       resolve(server);
     });
   });

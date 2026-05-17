@@ -65,6 +65,11 @@ import { asyncHandler } from "./utils/asyncHandler";
 import {
   captureExceptionWithContext,
 } from "./observability/sentry";
+import { getEmbeddingRuntimeState } from "./services/embedding.service";
+import {
+  getStartupIsolationSnapshot,
+  recordStartupAuthLatency,
+} from "./runtime/startupIsolation.service";
 import {
   getRequestLifecycle,
   initRequestLifecycle,
@@ -468,6 +473,17 @@ app.use((req, res, next) => {
       res,
       reason: "response_finished",
     });
+    const priorityClass =
+      String((res.locals as Record<string, unknown>)?.requestPriorityClass || "NORMAL")
+        .trim()
+        .toUpperCase() || "NORMAL";
+    recordStartupAuthLatency({
+      route: route || req.originalUrl || req.path || "",
+      method: req.method,
+      statusCode: res.statusCode,
+      latencyMs: Date.now() - startedAt,
+      priorityClass,
+    });
     logRequestComplete();
   });
 
@@ -752,6 +768,10 @@ app.get("/health", (req: any, res) => {
     status: "ok",
     requestId: req.requestId,
     timestamp: new Date().toISOString(),
+    startup: getStartupIsolationSnapshot(),
+    aiRuntime: {
+      embedding: getEmbeddingRuntimeState(),
+    },
   });
 });
 

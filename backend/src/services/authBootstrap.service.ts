@@ -30,6 +30,12 @@ type EnsureAuthBootstrapContextResult = {
   backfilledFields: string[];
 };
 
+type AuthBootstrapReadyCacheEntry = {
+  context: EnsureAuthBootstrapContextResult;
+  expiresAt: number;
+  cachedAt: number;
+};
+
 export type AuthBootstrapProcessingState =
   | "READY"
   | "PROCESSING"
@@ -47,12 +53,14 @@ export type AuthBootstrapWaitResult = {
 const AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS = 1_900;
 const AUTH_BOOTSTRAP_BACKGROUND_DELAY_MS = 35;
 const AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS = 1_250;
+const AUTH_BOOTSTRAP_READY_CACHE_TTL_MS = 30_000;
 
 const authBootstrapPrimeInFlight = new Map<string, Promise<void>>();
 const authBootstrapEnsureInFlight = new Map<
   string,
   Promise<EnsureAuthBootstrapContextResult>
 >();
+const authBootstrapReadyCache = new Map<string, AuthBootstrapReadyCacheEntry>();
 
 const normalizeText = (value?: string | null) => {
   const normalized = String(value || "").trim();
@@ -62,6 +70,50 @@ const normalizeText = (value?: string | null) => {
 const normalizeEmail = (value?: string | null) => {
   const normalized = String(value || "").trim().toLowerCase();
   return normalized || null;
+};
+
+const cloneBootstrapContext = (
+  context: EnsureAuthBootstrapContextResult
+): EnsureAuthBootstrapContextResult => ({
+  user: {
+    ...context.user,
+  },
+  identity: {
+    ...context.identity,
+    workspace: context.identity.workspace
+      ? {
+          ...context.identity.workspace,
+        }
+      : null,
+  },
+  backfilledFields: context.backfilledFields.slice(),
+});
+
+const setReadyBootstrapCache = (
+  key: string,
+  context: EnsureAuthBootstrapContextResult
+) => {
+  authBootstrapReadyCache.set(key, {
+    context: cloneBootstrapContext(context),
+    cachedAt: Date.now(),
+    expiresAt: Date.now() + AUTH_BOOTSTRAP_READY_CACHE_TTL_MS,
+  });
+};
+
+const getReadyBootstrapCache = (
+  key: string
+): AuthBootstrapReadyCacheEntry | null => {
+  const cached = authBootstrapReadyCache.get(key);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    authBootstrapReadyCache.delete(key);
+    return null;
+  }
+
+  return cached;
 };
 
 const shouldBackfillField = (current?: string | null, incoming?: string | null) => {
@@ -194,11 +246,17 @@ const ensureWorkspaceBootstrapRows = async (businessId: string) => {
 export const ensureAuthBootstrapContext = async (
   input: EnsureAuthBootstrapContextInput
 ): Promise<EnsureAuthBootstrapContextResult> => {
+  const startedAt = Date.now();
   const userId = String(input.userId || "").trim();
 
   if (!userId) {
     throw new Error("user_id_required");
   }
+
+  const stageStartedAt: Record<string, number> = {
+    userLookup: Date.now(),
+  };
+  const stageDurationsMs: Record<string, number> = {};
 
   const user = await prisma.user.findUnique({
     where: {
@@ -216,6 +274,7 @@ export const ensureAuthBootstrapContext = async (
       deletedAt: true,
     },
   });
+  stageDurationsMs.userLookup = Date.now() - stageStartedAt.userLookup;
 
   if (!user || !user.isActive || user.deletedAt) {
     throw new Error("user_not_active");
@@ -244,12 +303,14 @@ export const ensureAuthBootstrapContext = async (
   }
 
   if (backfilledFields.length > 0) {
+    stageStartedAt.profileBackfill = Date.now();
     await prisma.user.update({
       where: {
         id: user.id,
       },
       data: profileUpdateData,
     });
+    stageDurationsMs.profileBackfill = Date.now() - stageStartedAt.profileBackfill;
 
     console.info("AUTH_PROFILE_BACKFILLED", {
       userId: user.id,
@@ -257,18 +318,22 @@ export const ensureAuthBootstrapContext = async (
     });
   }
 
+  stageStartedAt.identityResolve = Date.now();
   const identity = await resolveUserWorkspaceIdentity({
     userId: user.id,
     preferredBusinessId: input.preferredBusinessId || user.businessId || null,
     persistResolvedBusinessId: true,
     bootstrapWorkspaceIfMissing: true,
   });
+  stageDurationsMs.identityResolve = Date.now() - stageStartedAt.identityResolve;
 
   if (!identity.businessId || !identity.workspace) {
     throw new Error("workspace_bootstrap_failed");
   }
 
+  stageStartedAt.workspaceSeed = Date.now();
   const bootstrapRows = await ensureWorkspaceBootstrapRows(identity.businessId);
+  stageDurationsMs.workspaceSeed = Date.now() - stageStartedAt.workspaceSeed;
 
   console.info("AUTH_WORKSPACE_READY", {
     userId: user.id,
@@ -279,7 +344,7 @@ export const ensureAuthBootstrapContext = async (
     billingSeeded: bootstrapRows.billingSeeded,
   });
 
-  return {
+  const result = {
     user: {
       id: user.id,
       role: user.role,
@@ -292,6 +357,34 @@ export const ensureAuthBootstrapContext = async (
     identity,
     backfilledFields,
   };
+
+  const cacheKey = buildAuthBootstrapKey({
+    userId: user.id,
+    preferredBusinessId: identity.businessId,
+  });
+  setReadyBootstrapCache(cacheKey, result);
+  if (String(input.preferredBusinessId || "").trim() !== String(identity.businessId || "").trim()) {
+    setReadyBootstrapCache(
+      buildAuthBootstrapKey({
+        userId: user.id,
+        preferredBusinessId: input.preferredBusinessId || null,
+      }),
+      result
+    );
+  }
+
+  console.info("AUTH_BOOTSTRAP_WATERFALL", {
+    userId: user.id,
+    businessId: identity.businessId,
+    totalMs: Date.now() - startedAt,
+    stageDurationsMs,
+    backfilledFields,
+    usageSeeded: bootstrapRows.usageSeeded,
+    addonSeeded: bootstrapRows.addonSeeded,
+    billingSeeded: bootstrapRows.billingSeeded,
+  });
+
+  return result;
 };
 
 const withTimeout = async <T>(task: Promise<T>, timeoutMs: number): Promise<T> => {
@@ -366,6 +459,58 @@ const classifyBootstrapState = (
   return "RETRYING";
 };
 
+export const getAuthBootstrapFastLaneSnapshot = (
+  input: EnsureAuthBootstrapContextInput
+) => {
+  const userId = String(input.userId || "").trim();
+  if (!userId) {
+    return {
+      context: null as EnsureAuthBootstrapContextResult | null,
+      cacheHit: false,
+      inFlight: false,
+      cacheAgeMs: null as number | null,
+      cacheKey: null as string | null,
+    };
+  }
+
+  const primaryKey = buildAuthBootstrapKey(input);
+  let cached = getReadyBootstrapCache(primaryKey);
+  let cacheKey: string | null = cached ? primaryKey : null;
+
+  if (!cached) {
+    const prefix = `${userId}:`;
+    for (const [key, entry] of authBootstrapReadyCache.entries()) {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+
+      const validEntry = getReadyBootstrapCache(key);
+      if (!validEntry) {
+        continue;
+      }
+
+      cached = validEntry;
+      cacheKey = key;
+      break;
+    }
+  }
+
+  const prefix = `${userId}:`;
+  const inFlight =
+    authBootstrapEnsureInFlight.has(primaryKey) ||
+    authBootstrapPrimeInFlight.has(primaryKey) ||
+    Array.from(authBootstrapEnsureInFlight.keys()).some((key) => key.startsWith(prefix)) ||
+    Array.from(authBootstrapPrimeInFlight.keys()).some((key) => key.startsWith(prefix));
+
+  return {
+    context: cached ? cloneBootstrapContext(cached.context) : null,
+    cacheHit: Boolean(cached),
+    inFlight,
+    cacheAgeMs: cached ? Math.max(0, Date.now() - cached.cachedAt) : null,
+    cacheKey,
+  };
+};
+
 export const waitForAuthBootstrapContext = async (
   input: EnsureAuthBootstrapContextInput,
   options?: {
@@ -390,6 +535,28 @@ export const waitForAuthBootstrapContext = async (
     250,
     Math.floor(options?.timeoutMs || AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS)
   );
+  const cached = getReadyBootstrapCache(buildAuthBootstrapKey(input));
+  if (cached) {
+    const elapsedMs = Date.now() - startedAt;
+    emitPerformanceMetric({
+      name: "auth_bootstrap_ms",
+      value: elapsedMs,
+      businessId: cached.context.user.businessId || null,
+      route: "auth.bootstrap",
+      metadata: {
+        source: options?.source || "unknown",
+        reusedInFlight: false,
+        cache: "ready_cache",
+      },
+    });
+    return {
+      state: "READY",
+      context: cloneBootstrapContext(cached.context),
+      reason: null,
+      reusedInFlight: false,
+      elapsedMs,
+    };
+  }
   const shared = resolveAuthBootstrapRun(input);
 
   if (shared.reusedInFlight) {

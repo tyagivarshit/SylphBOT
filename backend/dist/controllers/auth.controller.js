@@ -45,7 +45,7 @@ const AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS = 700;
 const LOGIN_REFRESH_TOKEN_TIMEOUT_MS = 1800;
 const LOGIN_BACKGROUND_TASK_TIMEOUT_MS = 1200;
 const LOGIN_LIFECYCLE_LOCK_TTL_MS = 15000;
-const LOGIN_LIFECYCLE_LOCK_WAIT_MS = 1200;
+const LOGIN_LIFECYCLE_LOCK_WAIT_MS = 450;
 const LOGIN_LIFECYCLE_LOCK_POLL_MS = 60;
 const buildLoginLifecycleLockKey = (input) => {
     const stableIdentity = String(input.userId || "").trim() || String(input.email || "").trim().toLowerCase();
@@ -222,6 +222,10 @@ LOGIN
 ====================================== */
 const login = async (req, res, next) => {
     const startedAt = Date.now();
+    const loginWaterfallMs = {};
+    const measureStep = (label, stepStartedAt) => {
+        loginWaterfallMs[label] = Date.now() - stepStartedAt;
+    };
     try {
         (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
             req,
@@ -230,15 +234,24 @@ const login = async (req, res, next) => {
         });
         const ip = getIP(req);
         const userAgent = String(getUA(req));
+        const globalLimitStartedAt = Date.now();
         await checkGlobalLimit(ip);
+        measureStep("globalLimit", globalLimitStartedAt);
         const email = normalizeEmail(String(req.body.email || ""));
         const password = String(req.body.password || "");
+        const userLookupStartedAt = Date.now();
         const user = await prisma_1.default.user.findUnique({ where: { email } });
+        measureStep("userLookup", userLookupStartedAt);
+        const passwordVerifyStartedAt = Date.now();
+        const passwordVerified = user
+            ? await verifyPassword(password, user.password)
+            : false;
+        measureStep("passwordVerify", passwordVerifyStartedAt);
         if (!user ||
             user.deletedAt ||
             !user.isActive ||
             !user.isVerified ||
-            !(await verifyPassword(password, user.password))) {
+            !passwordVerified) {
             void writeAuthAuditLog(req, {
                 action: "auth.login_failed",
                 userId: user?.id || null,
@@ -274,6 +287,13 @@ const login = async (req, res, next) => {
                     reason: "invalid_credentials",
                 },
             });
+            console.info("AUTH_LOGIN_WATERFALL", {
+                status: "invalid_credentials",
+                userId: user?.id || null,
+                businessId: user?.businessId || null,
+                totalMs: Date.now() - startedAt,
+                loginWaterfallMs,
+            });
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
         (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
@@ -295,6 +315,7 @@ const login = async (req, res, next) => {
             ip,
             userAgent,
         });
+        const lockLifecycleStartedAt = Date.now();
         const loginResult = await (0, distributedLock_service_1.withDistributedLock)({
             key: lockKey,
             ttlMs: LOGIN_LIFECYCLE_LOCK_TTL_MS,
@@ -302,9 +323,12 @@ const login = async (req, res, next) => {
             pollMs: LOGIN_LIFECYCLE_LOCK_POLL_MS,
             onUnavailable: async () => null,
             run: async () => {
+                const tokenIssueStartedAt = Date.now();
                 const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
                 const refreshRaw = (0, generateToken_1.generateRefreshToken)(resolvedUser.id, resolvedUser.tokenVersion);
                 const hashedRefreshToken = hashToken(refreshRaw);
+                measureStep("tokenIssue", tokenIssueStartedAt);
+                const refreshPersistStartedAt = Date.now();
                 await withFastTimeout(prisma_1.default.refreshToken.create({
                     data: {
                         token: hashedRefreshToken,
@@ -314,6 +338,7 @@ const login = async (req, res, next) => {
                         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
                     },
                 }), LOGIN_REFRESH_TOKEN_TIMEOUT_MS);
+                measureStep("refreshPersist", refreshPersistStartedAt);
                 (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
                     req,
                     res,
@@ -341,6 +366,7 @@ const login = async (req, res, next) => {
                         completed: false,
                     };
                 }
+                const responseCommitStartedAt = Date.now();
                 setCookies(req, res, accessToken, refreshRaw);
                 res.json({
                     success: true,
@@ -351,6 +377,7 @@ const login = async (req, res, next) => {
                         businessId,
                     },
                 });
+                measureStep("responseCommit", responseCommitStartedAt);
                 (0, performanceMetrics_1.emitPerformanceMetric)({
                     name: "AUTH_MS",
                     value: Date.now() - startedAt,
@@ -414,6 +441,7 @@ const login = async (req, res, next) => {
                 };
             },
         });
+        measureStep("lockLifecycle", lockLifecycleStartedAt);
         if (!loginResult) {
             (0, performanceMetrics_1.emitPerformanceMetric)({
                 name: "auth_duplicate_login_blocked",
@@ -444,6 +472,14 @@ const login = async (req, res, next) => {
                     source: "distributed_lock",
                 },
             });
+            console.info("AUTH_LOGIN_WATERFALL", {
+                status: "lock_unavailable",
+                userId: resolvedUser.id,
+                businessId,
+                requestId: req.requestId || null,
+                totalMs: Date.now() - startedAt,
+                loginWaterfallMs,
+            });
             return res.status(202).json({
                 success: false,
                 processing: true,
@@ -455,6 +491,14 @@ const login = async (req, res, next) => {
         if (!loginResult.completed) {
             return;
         }
+        console.info("AUTH_LOGIN_WATERFALL", {
+            status: "success",
+            userId: resolvedUser.id,
+            businessId,
+            requestId: req.requestId || null,
+            totalMs: Date.now() - startedAt,
+            loginWaterfallMs,
+        });
     }
     catch (err) {
         next(err);

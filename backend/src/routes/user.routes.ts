@@ -8,8 +8,8 @@ import { clearAuthCookies } from "../utils/authCookies";
 import { ensureWorkspaceApiKey } from "../services/apiKey.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import {
+  getAuthBootstrapFastLaneSnapshot,
   primeAuthBootstrapContext,
-  waitForAuthBootstrapContext,
 } from "../services/authBootstrap.service";
 import { requirePermission } from "../middleware/rbac.middleware";
 import { userActionLimiter } from "../middleware/rateLimit.middleware";
@@ -362,20 +362,23 @@ router.get("/me", protect, async (req: any, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const baseUser = await getUserRecord(userId);
-
-    if (!baseUser) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const preferredBusinessId = req.user?.businessId || baseUser.businessId || null;
     const authSurface = isAuthSurfaceRequest(req);
+    const upstreamAuthProcessingState = String(
+      res.getHeader("X-Auth-Processing-State") || ""
+    )
+      .trim()
+      .toUpperCase();
+    const forceProcessingFastLane =
+      authSurface && upstreamAuthProcessingState === "PROCESSING";
+    const scopedCacheKey = authSurface
+      ? "auth_surface"
+      : `${String(req.user?.businessId || "").trim()}:full`;
     const cacheKey = buildCurrentUserCacheKey(
       userId,
-      `${String(preferredBusinessId || "").trim()}:${authSurface ? "auth" : "full"}`
+      scopedCacheKey
     );
     const cached = currentUserCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
+    if (cached && cached.expiresAt > Date.now() && !forceProcessingFastLane) {
       emitPerformanceMetric({
         name: "CACHE_HIT",
         businessId: req.user?.businessId || null,
@@ -432,6 +435,14 @@ router.get("/me", protect, async (req: any, res) => {
       return res.json(cached.value);
     }
 
+    const baseUser = await getUserRecord(userId);
+
+    if (!baseUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const preferredBusinessId = req.user?.businessId || baseUser.businessId || null;
+
     emitPerformanceMetric({
       name: "CACHE_MISS",
       businessId: req.user?.businessId || null,
@@ -447,55 +458,36 @@ router.get("/me", protect, async (req: any, res) => {
         inflightKey,
         businessId: preferredBusinessId || null,
         task: async () => {
+          const fastLaneStartedAt = Date.now();
           const response = buildAuthSurfaceCurrentUser(baseUser, preferredBusinessId);
-          const bootstrap = await waitForAuthBootstrapContext(
-            {
-              userId,
-              preferredBusinessId: response.businessId,
-              profileSeed: {
-                email: response.email,
-                name: response.name,
-                avatar: response.avatar || null,
-              },
+          const bootstrapSnapshot = getAuthBootstrapFastLaneSnapshot({
+            userId,
+            preferredBusinessId: response.businessId,
+            profileSeed: {
+              email: response.email,
+              name: response.name,
+              avatar: response.avatar || null,
             },
-            {
-              timeoutMs: 1_100,
-              source: "user.me.auth_surface",
-            }
-          );
-
-          const lifecycle: AuthSurfaceLifecycle = {
-            processingState: bootstrap.state,
-            lifecycleState: bootstrap.state,
-            sessionReady: bootstrap.state === "READY",
-            retryable:
-              bootstrap.state === "PROCESSING" || bootstrap.state === "RETRYING",
-            retryAfterMs:
-              bootstrap.state === "READY" ? 0 : USER_ME_AUTH_SURFACE_RETRY_AFTER_MS,
-            terminal: bootstrap.state === "FAILED_TERMINAL",
-            reason: bootstrap.reason,
-            reusedInFlight: bootstrap.reusedInFlight,
-            stabilizationMs: bootstrap.elapsedMs,
-            timeoutRecovered: false,
-          };
+          });
 
           let stabilizedUser: AuthSurfaceCurrentUser = response;
 
-          if (bootstrap.context?.user) {
+          if (bootstrapSnapshot.context?.user) {
             const mergedBaseUser: SafeUserRecord = {
               ...baseUser,
-              name: bootstrap.context.user.name || baseUser.name,
-              email: bootstrap.context.user.email || baseUser.email,
-              avatar: bootstrap.context.user.avatar || baseUser.avatar,
-              businessId: bootstrap.context.user.businessId || baseUser.businessId,
+              name: bootstrapSnapshot.context.user.name || baseUser.name,
+              email: bootstrapSnapshot.context.user.email || baseUser.email,
+              avatar: bootstrapSnapshot.context.user.avatar || baseUser.avatar,
+              businessId:
+                bootstrapSnapshot.context.user.businessId || baseUser.businessId,
             };
             stabilizedUser = buildAuthSurfaceCurrentUser(
               mergedBaseUser,
-              bootstrap.context.user.businessId
+              bootstrapSnapshot.context.user.businessId
             );
 
             const workspaceName =
-              bootstrap.context.identity.workspace?.name || null;
+              bootstrapSnapshot.context.identity.workspace?.name || null;
             stabilizedUser = {
               ...stabilizedUser,
               workspace: stabilizedUser.workspace
@@ -505,63 +497,93 @@ router.get("/me", protect, async (req: any, res) => {
                   }
                 : stabilizedUser.workspace,
               business: stabilizedUser.business
-                ? {
-                    ...stabilizedUser.business,
-                    name: workspaceName,
-                  }
-                : stabilizedUser.business,
-            };
-          }
+            ? {
+                ...stabilizedUser.business,
+                name: workspaceName,
+              }
+            : stabilizedUser.business,
+        };
+      }
 
-          if (!lifecycle.sessionReady) {
-            primeAuthBootstrapContext({
-              userId,
-              preferredBusinessId: stabilizedUser.businessId,
-              profileSeed: {
-                email: stabilizedUser.email,
-                name: stabilizedUser.name,
-                avatar: stabilizedUser.avatar || null,
-              },
-            });
-          }
+          const lifecycle: AuthSurfaceLifecycle = forceProcessingFastLane
+            ? {
+                processingState: "PROCESSING",
+                lifecycleState: "PROCESSING",
+                sessionReady: false,
+                retryable: true,
+                retryAfterMs: USER_ME_AUTH_SURFACE_RETRY_AFTER_MS,
+                terminal: false,
+                reason: "auth_context_processing",
+                reusedInFlight: bootstrapSnapshot.inFlight,
+                stabilizationMs: Date.now() - fastLaneStartedAt,
+                timeoutRecovered: false,
+              }
+            : {
+                processingState: "READY",
+                lifecycleState: "READY",
+                sessionReady: true,
+                retryable: false,
+                retryAfterMs: 0,
+                terminal: false,
+                reason: null,
+                reusedInFlight: bootstrapSnapshot.inFlight,
+                stabilizationMs: Date.now() - fastLaneStartedAt,
+                timeoutRecovered: bootstrapSnapshot.inFlight,
+              };
+
+          primeAuthBootstrapContext({
+            userId,
+            preferredBusinessId: stabilizedUser.businessId,
+            profileSeed: {
+              email: stabilizedUser.email,
+              name: stabilizedUser.name,
+              avatar: stabilizedUser.avatar || null,
+            },
+          });
 
           emitPerformanceMetric({
             name: "auth_processing_state",
-            value: bootstrap.elapsedMs,
+            value: lifecycle.stabilizationMs,
             businessId: stabilizedUser.businessId || null,
             route: "user_me",
             metadata: {
               surface: "auth",
               state: lifecycle.processingState,
-              reason: lifecycle.reason,
+              reason: forceProcessingFastLane
+                ? "auth_fast_lane_processing"
+                : "auth_fast_lane_ready",
               reusedInFlight: lifecycle.reusedInFlight,
+              cacheHit: bootstrapSnapshot.cacheHit,
+              cacheAgeMs: bootstrapSnapshot.cacheAgeMs,
+              bootstrapInFlight: bootstrapSnapshot.inFlight,
+              bootstrapCacheKey: bootstrapSnapshot.cacheKey,
             },
           });
 
-          if (lifecycle.processingState === "READY") {
+          if (lifecycle.sessionReady) {
             emitPerformanceMetric({
               name: "auth_session_ready",
-              value: bootstrap.elapsedMs,
+              value: lifecycle.stabilizationMs,
               businessId: stabilizedUser.businessId || null,
               route: "user_me",
               metadata: {
                 surface: "auth",
+                source: "auth_fast_lane",
+                cacheHit: bootstrapSnapshot.cacheHit,
+                bootstrapInFlight: bootstrapSnapshot.inFlight,
               },
             });
           }
 
-          if (lifecycle.processingState === "FAILED_TERMINAL") {
-            emitPerformanceMetric({
-              name: "auth_terminal_failure",
-              value: bootstrap.elapsedMs,
-              businessId: stabilizedUser.businessId || null,
-              route: "user_me",
-              metadata: {
-                surface: "auth",
-                reason: lifecycle.reason,
-              },
-            });
-          }
+          console.info("AUTH_FAST_LANE_RESULT", {
+            userId,
+            businessId: stabilizedUser.businessId || null,
+            forceProcessingFastLane,
+            cacheHit: bootstrapSnapshot.cacheHit,
+            cacheAgeMs: bootstrapSnapshot.cacheAgeMs,
+            bootstrapInFlight: bootstrapSnapshot.inFlight,
+            stabilizationMs: lifecycle.stabilizationMs,
+          });
 
           return {
             ...stabilizedUser,

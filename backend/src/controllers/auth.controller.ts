@@ -78,7 +78,7 @@ const AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS = 700;
 const LOGIN_REFRESH_TOKEN_TIMEOUT_MS = 1800;
 const LOGIN_BACKGROUND_TASK_TIMEOUT_MS = 1200;
 const LOGIN_LIFECYCLE_LOCK_TTL_MS = 15_000;
-const LOGIN_LIFECYCLE_LOCK_WAIT_MS = 1_200;
+const LOGIN_LIFECYCLE_LOCK_WAIT_MS = 450;
 const LOGIN_LIFECYCLE_LOCK_POLL_MS = 60;
 
 const buildLoginLifecycleLockKey = (input: {
@@ -320,6 +320,10 @@ LOGIN
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   const startedAt = Date.now();
+  const loginWaterfallMs: Record<string, number> = {};
+  const measureStep = (label: string, stepStartedAt: number) => {
+    loginWaterfallMs[label] = Date.now() - stepStartedAt;
+  };
   try {
     throwIfRequestLifecycleAborted({
       req,
@@ -328,19 +332,28 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     });
     const ip = getIP(req);
     const userAgent = String(getUA(req));
+    const globalLimitStartedAt = Date.now();
     await checkGlobalLimit(ip);
+    measureStep("globalLimit", globalLimitStartedAt);
 
     const email = normalizeEmail(String(req.body.email || ""));
     const password = String(req.body.password || "");
 
+    const userLookupStartedAt = Date.now();
     const user = await prisma.user.findUnique({ where: { email } });
+    measureStep("userLookup", userLookupStartedAt);
+    const passwordVerifyStartedAt = Date.now();
+    const passwordVerified = user
+      ? await verifyPassword(password, user.password)
+      : false;
+    measureStep("passwordVerify", passwordVerifyStartedAt);
 
     if (
       !user ||
       user.deletedAt ||
       !user.isActive ||
       !user.isVerified ||
-      !(await verifyPassword(password, user.password))
+      !passwordVerified
     ) {
       void writeAuthAuditLog(req, {
         action: "auth.login_failed",
@@ -377,6 +390,13 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           reason: "invalid_credentials",
         },
       });
+      console.info("AUTH_LOGIN_WATERFALL", {
+        status: "invalid_credentials",
+        userId: user?.id || null,
+        businessId: user?.businessId || null,
+        totalMs: Date.now() - startedAt,
+        loginWaterfallMs,
+      });
       throw unauthorized("Invalid credentials");
     }
     throwIfRequestLifecycleAborted({
@@ -400,6 +420,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       userAgent,
     });
 
+    const lockLifecycleStartedAt = Date.now();
     const loginResult = await withDistributedLock({
       key: lockKey,
       ttlMs: LOGIN_LIFECYCLE_LOCK_TTL_MS,
@@ -407,6 +428,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       pollMs: LOGIN_LIFECYCLE_LOCK_POLL_MS,
       onUnavailable: async () => null,
       run: async () => {
+        const tokenIssueStartedAt = Date.now();
         const accessToken = generateAccessToken(
           resolvedUser.id,
           resolvedUser.role,
@@ -419,7 +441,9 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           resolvedUser.tokenVersion
         );
         const hashedRefreshToken = hashToken(refreshRaw);
+        measureStep("tokenIssue", tokenIssueStartedAt);
 
+        const refreshPersistStartedAt = Date.now();
         await withFastTimeout(
           prisma.refreshToken.create({
             data: {
@@ -432,6 +456,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           }),
           LOGIN_REFRESH_TOKEN_TIMEOUT_MS
         );
+        measureStep("refreshPersist", refreshPersistStartedAt);
 
         throwIfRequestLifecycleAborted({
           req,
@@ -463,6 +488,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           };
         }
 
+        const responseCommitStartedAt = Date.now();
         setCookies(req, res, accessToken, refreshRaw);
 
         res.json({
@@ -474,6 +500,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
             businessId,
           },
         });
+        measureStep("responseCommit", responseCommitStartedAt);
 
         emitPerformanceMetric({
           name: "AUTH_MS",
@@ -551,6 +578,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         };
       },
     });
+    measureStep("lockLifecycle", lockLifecycleStartedAt);
 
     if (!loginResult) {
       emitPerformanceMetric({
@@ -582,6 +610,14 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           source: "distributed_lock",
         },
       });
+      console.info("AUTH_LOGIN_WATERFALL", {
+        status: "lock_unavailable",
+        userId: resolvedUser.id,
+        businessId,
+        requestId: req.requestId || null,
+        totalMs: Date.now() - startedAt,
+        loginWaterfallMs,
+      });
       return res.status(202).json({
         success: false,
         processing: true,
@@ -594,6 +630,15 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     if (!loginResult.completed) {
       return;
     }
+
+    console.info("AUTH_LOGIN_WATERFALL", {
+      status: "success",
+      userId: resolvedUser.id,
+      businessId,
+      requestId: req.requestId || null,
+      totalMs: Date.now() - startedAt,
+      loginWaterfallMs,
+    });
 
   } catch (err) {
     next(err);

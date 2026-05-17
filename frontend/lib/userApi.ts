@@ -7,6 +7,7 @@ export {
 
 import { apiFetch } from "@/lib/apiClient";
 import type { ApiResponse } from "@/lib/apiClient";
+import type { AuthRouteContext } from "@/lib/authRouteContext";
 
 export type CurrentUser = {
   id: string;
@@ -99,11 +100,20 @@ export type AuthCurrentUserFetchResult = {
   code: string | null;
 };
 
+type FetchCurrentUserLifecycleOptions = {
+  routeContext?: AuthRouteContext;
+  allowTransientRetry?: boolean;
+  source?: string;
+};
+
 const AUTH_ME_RETRY_DELAY_MS = 180;
 const AUTH_ME_TRANSIENT_RETRY_ATTEMPTS = 1;
 
-let authCurrentUserInFlight: Promise<AuthCurrentUserFetchResult> | null = null;
-let sawAuthProcessingState = false;
+const authCurrentUserInFlightByContext = new Map<
+  AuthRouteContext,
+  Promise<AuthCurrentUserFetchResult>
+>();
+const sawAuthProcessingStateByContext = new Map<AuthRouteContext, boolean>();
 
 const requireSuccess = <T>(data: T | null, message: string) => {
   if (data == null) {
@@ -114,7 +124,9 @@ const requireSuccess = <T>(data: T | null, message: string) => {
 };
 
 export async function fetchCurrentUser(): Promise<CurrentUser | null> {
-  const result = await fetchCurrentUserLifecycle();
+  const result = await fetchCurrentUserLifecycle({
+    routeContext: "AUTHENTICATED_APP_ROUTE",
+  });
   return result.state === "AUTHENTICATED" ? result.user : null;
 }
 
@@ -165,8 +177,12 @@ const recordAuthMetric = (
 };
 
 const classifyAuthCurrentUserResponse = (
-  response: ApiResponse<CurrentUser>
+  response: ApiResponse<CurrentUser>,
+  options?: FetchCurrentUserLifecycleOptions
 ): AuthCurrentUserFetchResult => {
+  const routeContext = options?.routeContext || "AUTHENTICATED_APP_ROUTE";
+  const allowTransientRetry = Boolean(options?.allowTransientRetry);
+
   if (response.success && response.data) {
     const lifecycle = response.data.authLifecycle || null;
     const lifecycleState = mapLifecycleState(
@@ -227,7 +243,34 @@ const classifyAuthCurrentUserResponse = (
     };
   }
 
+  if (
+    routeContext !== "AUTHENTICATED_APP_ROUTE" &&
+    response.unauthorized
+  ) {
+    return {
+      user: null,
+      state: "FAILED_TERMINAL",
+      retryable: false,
+      reason: reason || "unauthenticated_public_route",
+      unauthorized: true,
+      networkError: Boolean(response.networkError),
+      code: response.code || null,
+    };
+  }
+
   if (isTimeoutLike || isProcessingAuthGap) {
+    if (!allowTransientRetry) {
+      return {
+        user: null,
+        state: "FAILED_TERMINAL",
+        retryable: false,
+        reason: reason || "unauthenticated_public_route",
+        unauthorized: Boolean(response.unauthorized),
+        networkError: Boolean(response.networkError),
+        code: response.code || null,
+      };
+    }
+
     return {
       user: null,
       state: isTimeoutLike ? "RETRYING" : "STABILIZING",
@@ -262,18 +305,28 @@ const classifyAuthCurrentUserResponse = (
   };
 };
 
-export async function fetchCurrentUserLifecycle(): Promise<AuthCurrentUserFetchResult> {
-  if (authCurrentUserInFlight) {
+export async function fetchCurrentUserLifecycle(
+  options?: FetchCurrentUserLifecycleOptions
+): Promise<AuthCurrentUserFetchResult> {
+  const routeContext = options?.routeContext || "AUTHENTICATED_APP_ROUTE";
+  const allowTransientRetry =
+    options?.allowTransientRetry ?? routeContext === "AUTHENTICATED_APP_ROUTE";
+  const source = String(options?.source || "unknown").trim() || "unknown";
+
+  const existing = authCurrentUserInFlightByContext.get(routeContext);
+  if (existing) {
     recordAuthMetric("auth_parallel_me_collapsed", {
       source: "frontend_singleflight",
+      routeContext,
     });
     recordAuthMetric("auth_inflight_reused", {
       source: "frontend_singleflight",
+      routeContext,
     });
-    return authCurrentUserInFlight;
+    return existing;
   }
 
-  authCurrentUserInFlight = (async () => {
+  const run = (async () => {
     let attempt = 0;
     let latestResult: AuthCurrentUserFetchResult | null = null;
 
@@ -282,7 +335,11 @@ export async function fetchCurrentUserLifecycle(): Promise<AuthCurrentUserFetchR
         cache: "no-store",
         timeoutMs: 4200,
       });
-      const result = classifyAuthCurrentUserResponse(response);
+      const result = classifyAuthCurrentUserResponse(response, {
+        routeContext,
+        allowTransientRetry,
+        source,
+      });
       latestResult = result;
 
       if (
@@ -302,6 +359,8 @@ export async function fetchCurrentUserLifecycle(): Promise<AuthCurrentUserFetchR
         state: result.state,
         reason: result.reason,
         attempt,
+        routeContext,
+        source,
       });
       await wait(AUTH_ME_RETRY_DELAY_MS + attempt * 100);
     }
@@ -322,6 +381,8 @@ export async function fetchCurrentUserLifecycle(): Promise<AuthCurrentUserFetchR
       state: finalResult.state,
       reason: finalResult.reason,
       retryable: finalResult.retryable,
+      routeContext,
+      source,
     });
 
     if (
@@ -329,35 +390,46 @@ export async function fetchCurrentUserLifecycle(): Promise<AuthCurrentUserFetchR
       finalResult.state === "RETRYING" ||
       finalResult.state === "STABILIZING"
     ) {
-      sawAuthProcessingState = true;
+      sawAuthProcessingStateByContext.set(routeContext, true);
     }
 
     if (finalResult.state === "AUTHENTICATED") {
+      const sawAuthProcessingState =
+        sawAuthProcessingStateByContext.get(routeContext) === true;
       recordAuthMetric("auth_session_ready", {
         userId: finalResult.user?.id || null,
+        routeContext,
+        source,
       });
       if (sawAuthProcessingState) {
         recordAuthMetric("auth_timeout_recovered", {
           userId: finalResult.user?.id || null,
+          routeContext,
+          source,
         });
       }
-      sawAuthProcessingState = false;
+      sawAuthProcessingStateByContext.set(routeContext, false);
     }
 
     if (finalResult.state === "FAILED_TERMINAL") {
-      sawAuthProcessingState = false;
+      sawAuthProcessingStateByContext.set(routeContext, false);
       recordAuthMetric("auth_terminal_failure", {
         reason: finalResult.reason,
         code: finalResult.code,
+        routeContext,
+        source,
       });
     }
 
     return finalResult;
   })().finally(() => {
-    authCurrentUserInFlight = null;
+    if (authCurrentUserInFlightByContext.get(routeContext) === run) {
+      authCurrentUserInFlightByContext.delete(routeContext);
+    }
   });
 
-  return authCurrentUserInFlight;
+  authCurrentUserInFlightByContext.set(routeContext, run);
+  return run;
 }
 
 export async function updateCurrentUser(body: Record<string, unknown>) {

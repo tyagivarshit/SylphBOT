@@ -4,16 +4,22 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   useRef,
   useCallback,
 } from "react";
+import { usePathname } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   fetchCurrentUserLifecycle,
   type AuthCurrentUserFetchResult,
   type CurrentUser,
 } from "@/lib/userApi";
+import {
+  classifyAuthRouteContext,
+  type AuthRouteContext,
+} from "@/lib/authRouteContext";
 
 export type AuthUser = CurrentUser & {
   role?: string;
@@ -41,6 +47,7 @@ type AuthContextType = {
   isAuthenticated: boolean;
   lifecycleState: AuthLifecycleState;
   lifecycleReason: string | null;
+  routeContext: AuthRouteContext;
   beginAuthentication: () => void;
   refreshUser: (options?: RefreshUserOptions) => Promise<AuthUser | null>;
 };
@@ -51,6 +58,7 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   lifecycleState: "anonymous",
   lifecycleReason: null,
+  routeContext: "PUBLIC_AUTH_ROUTE",
   beginAuthentication: () => undefined,
   refreshUser: async () => null,
 });
@@ -70,6 +78,11 @@ export const AuthProvider = ({
 }: {
   children: React.ReactNode;
 }) => {
+  const pathname = usePathname();
+  const routeContext = useMemo(
+    () => classifyAuthRouteContext(pathname),
+    [pathname]
+  );
   const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -161,31 +174,43 @@ export const AuthProvider = ({
     async (options?: RefreshUserOptions) => {
       const mode = options?.mode || "default";
       const source = options?.source || "manual";
+      const canUseTransientRetry =
+        mode === "stabilize" || routeContext === "AUTHENTICATED_APP_ROUTE";
+      const requestRouteContext: AuthRouteContext =
+        mode === "stabilize" ? "AUTHENTICATED_APP_ROUTE" : routeContext;
 
       if (inflightBootstrapRef.current) {
         recordMetric("auth_inflight_reused", 1, {
           mode,
           source,
+          routeContext,
         });
         recordMetric("auth_parallel_me_collapsed", 1, {
           mode,
           source,
+          routeContext,
         });
         return inflightBootstrapRef.current;
       }
 
       const run = (async () => {
         const startedAt = performance.now();
-        const maxAttempts = mode === "stabilize" ? STABILIZATION_ATTEMPTS : DEFAULT_ATTEMPTS;
+        const maxAttempts = canUseTransientRetry
+          ? mode === "stabilize"
+            ? STABILIZATION_ATTEMPTS
+            : DEFAULT_ATTEMPTS
+          : 1;
         const baseDelayMs = mode === "stabilize" ? STABILIZATION_DELAY_MS : DEFAULT_DELAY_MS;
 
         if (mode === "stabilize") {
           markLifecycle("session_stabilizing", "STABILIZING", {
             source,
+            routeContext,
           });
-        } else if (!currentUserRef.current) {
+        } else if (!currentUserRef.current && canUseTransientRetry) {
           markLifecycle("authenticating", "PROCESSING", {
             source,
+            routeContext,
           });
         }
 
@@ -194,7 +219,11 @@ export const AuthProvider = ({
         let recoveredFromTimeout = false;
 
         while (attempt < maxAttempts) {
-          result = await fetchCurrentUserLifecycle();
+          result = await fetchCurrentUserLifecycle({
+            routeContext: requestRouteContext,
+            allowTransientRetry: canUseTransientRetry,
+            source,
+          });
 
           if (result.state === "AUTHENTICATED" && result.user) {
             const nextUser = result.user;
@@ -205,21 +234,25 @@ export const AuthProvider = ({
               source,
               mode,
               attempts: attempt + 1,
+              routeContext,
             });
 
             recordMetric("auth_session_ready", performance.now() - startedAt, {
               source,
               mode,
               attempts: attempt + 1,
+              routeContext,
             });
             recordMetric("auth_bootstrap_ms", performance.now() - startedAt, {
               source,
               mode,
+              routeContext,
             });
             if (mode === "stabilize") {
               recordMetric("auth_stabilization_ms", performance.now() - startedAt, {
                 source,
                 attempts: attempt + 1,
+                routeContext,
               });
             }
 
@@ -227,6 +260,7 @@ export const AuthProvider = ({
               recordMetric("auth_timeout_recovered", performance.now() - startedAt, {
                 source,
                 attempts: attempt + 1,
+                routeContext,
               });
             }
             return nextUser;
@@ -248,6 +282,7 @@ export const AuthProvider = ({
             mode,
             attempt,
             reason: result.reason || null,
+            routeContext,
           });
           await wait(baseDelayMs + attempt * 120);
         }
@@ -258,24 +293,60 @@ export const AuthProvider = ({
             result.state === "RETRYING" ||
             result.state === "STABILIZING")
         ) {
+          if (!canUseTransientRetry) {
+            setUser(null);
+            persistAuthState(null);
+            markLifecycle("anonymous", "UNAUTHENTICATED_PUBLIC_ROUTE", {
+              source,
+              mode,
+              routeContext,
+              reason: result.reason || null,
+            });
+            return null;
+          }
+
+          const hasExistingSession = Boolean(currentUserRef.current);
+          const shouldContinueTransient = hasExistingSession || mode === "stabilize";
+
+          if (!shouldContinueTransient) {
+            setUser(null);
+            persistAuthState(null);
+            markLifecycle("failed_terminal", "FAILED_TERMINAL", {
+              source,
+              mode,
+              routeContext,
+              reason: result.reason || null,
+            });
+            recordMetric("auth_terminal_failure", performance.now() - startedAt, {
+              source,
+              mode,
+              routeContext,
+              reason: result.reason || null,
+              code: result.code || null,
+            });
+            return null;
+          }
+
           markLifecycle(
-            currentUserRef.current ? "retrying" : "session_stabilizing",
+            hasExistingSession ? "retrying" : "session_stabilizing",
             result.state,
             {
               source,
               mode,
+              routeContext,
               reason: result.reason || null,
-              preservedExistingSession: Boolean(currentUserRef.current),
+              preservedExistingSession: hasExistingSession,
             }
           );
 
-          if (currentUserRef.current) {
+          if (hasExistingSession) {
             recordMetric("auth_timeout_recovered", performance.now() - startedAt, {
               source,
               mode,
+              routeContext,
               preservedExistingSession: true,
             });
-          } else if (typeof window !== "undefined") {
+          } else if (mode === "stabilize" && typeof window !== "undefined") {
             window.setTimeout(() => {
               window.dispatchEvent(new Event("auth:refresh"));
             }, 420);
@@ -288,11 +359,13 @@ export const AuthProvider = ({
           persistAuthState(null);
           markLifecycle("failed_terminal", "FAILED_TERMINAL", {
             source,
+            routeContext,
             reason: result?.reason || null,
           });
           recordMetric("auth_terminal_failure", performance.now() - startedAt, {
             source,
             mode,
+            routeContext,
             reason: result?.reason || null,
             code: result?.code || null,
           });
@@ -301,6 +374,7 @@ export const AuthProvider = ({
           persistAuthState(null);
           markLifecycle("anonymous", "FAILED_TERMINAL", {
             source,
+            routeContext,
             reason: result?.reason || null,
           });
         }
@@ -325,7 +399,7 @@ export const AuthProvider = ({
         }
       }
     },
-    [markLifecycle, queryClient, recordMetric]
+    [markLifecycle, queryClient, recordMetric, routeContext]
   );
 
   useEffect(() => {
@@ -364,6 +438,7 @@ export const AuthProvider = ({
         isAuthenticated: !!user,
         lifecycleState,
         lifecycleReason,
+        routeContext,
         beginAuthentication,
         refreshUser: fetchUser,
       }}

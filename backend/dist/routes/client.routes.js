@@ -8,6 +8,7 @@ router.post("/", auth_middleware_1.protect, client_controller_1.createClient);
 router.get("/", auth_middleware_1.protect, client_controller_1.getClients);
 router.get("/oauth/meta", auth_middleware_1.protect, client_controller_1.startMetaOAuth);
 router.post("/oauth/meta", auth_middleware_1.protect, client_controller_1.metaOAuthConnect);
+router.get("/oauth/meta/lifecycle", auth_middleware_1.protect, client_controller_1.getMetaOAuthLifecycle);
 router.get("/:id", auth_middleware_1.protect, client_controller_1.getSingleClient);
 router.put("/:id", auth_middleware_1.protect, client_controller_1.updateClient);
 router.delete("/:id", auth_middleware_1.protect, client_controller_1.deleteClient);

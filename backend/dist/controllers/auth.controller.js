@@ -44,6 +44,14 @@ const LOGIN_SESSION_LEDGER_TIMEOUT_MS = 400;
 const AUTH_ME_FALLBACK_QUERY_TIMEOUT_MS = 700;
 const LOGIN_REFRESH_TOKEN_TIMEOUT_MS = 1800;
 const LOGIN_BACKGROUND_TASK_TIMEOUT_MS = 1200;
+const LOGIN_LIFECYCLE_LOCK_TTL_MS = 15000;
+const LOGIN_LIFECYCLE_LOCK_WAIT_MS = 1200;
+const LOGIN_LIFECYCLE_LOCK_POLL_MS = 60;
+const buildLoginLifecycleLockKey = (input) => {
+    const stableIdentity = String(input.userId || "").trim() || String(input.email || "").trim().toLowerCase();
+    const fingerprint = hashToken(`${stableIdentity}:${String(input.ip || "").trim()}:${String(input.userAgent || "").trim()}`);
+    return `auth:login:lifecycle:${fingerprint.slice(0, 28)}`;
+};
 const withFastTimeout = async (task, timeoutMs) => {
     let timeoutHandle = null;
     try {
@@ -220,7 +228,9 @@ const login = async (req, res, next) => {
             res,
             stage: "auth.login.start",
         });
-        await checkGlobalLimit(getIP(req));
+        const ip = getIP(req);
+        const userAgent = String(getUA(req));
+        await checkGlobalLimit(ip);
         const email = normalizeEmail(String(req.body.email || ""));
         const password = String(req.body.password || "");
         const user = await prisma_1.default.user.findUnique({ where: { email } });
@@ -241,20 +251,29 @@ const login = async (req, res, next) => {
                 businessId: user?.businessId || null,
                 userId: user?.id || null,
                 email,
-                ip: getIP(req),
+                ip,
             });
             void (0, securityGovernanceOS_service_1.recordFraudSignal)({
                 businessId: user?.businessId || null,
                 tenantId: user?.businessId || null,
                 signalType: "credential_stuffing",
                 actorId: user?.id || email,
-                ipFingerprint: hashToken(getIP(req)).slice(0, 20),
+                ipFingerprint: hashToken(ip).slice(0, 20),
                 severity: "MEDIUM",
                 metadata: {
                     email,
                     route: req.originalUrl,
                 },
             }).catch(() => undefined);
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "auth_terminal_failure",
+                value: Date.now() - startedAt,
+                businessId: user?.businessId || null,
+                route: "auth.login",
+                metadata: {
+                    reason: "invalid_credentials",
+                },
+            });
             throw (0, AppError_1.unauthorized)("Invalid credentials");
         }
         (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
@@ -270,91 +289,172 @@ const login = async (req, res, next) => {
             name: user.name,
         };
         const businessId = user.businessId || null;
-        const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
-        const refreshRaw = (0, generateToken_1.generateRefreshToken)(resolvedUser.id, resolvedUser.tokenVersion);
-        const hashedRefreshToken = hashToken(refreshRaw);
-        await withFastTimeout(prisma_1.default.refreshToken.create({
-            data: {
-                token: hashedRefreshToken,
-                userId: resolvedUser.id,
-                userAgent: getUA(req),
-                ip: getIP(req),
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-            },
-        }), LOGIN_REFRESH_TOKEN_TIMEOUT_MS);
-        (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
-            req,
-            res,
-            stage: "auth.login.session_persisted",
-        });
-        (0, auth_middleware_1.primeAuthContextCacheForToken)({
-            accessToken,
+        const lockKey = buildLoginLifecycleLockKey({
             userId: resolvedUser.id,
-            role: resolvedUser.role,
-            tokenVersion: resolvedUser.tokenVersion,
-            email: resolvedUser.email,
-            businessId,
+            email,
+            ip,
+            userAgent,
         });
-        void writeAuthAuditLog(req, {
-            action: "auth.login",
-            userId: resolvedUser.id,
-            businessId,
-            metadata: {
-                email: resolvedUser.email,
-                role: resolvedUser.role,
+        const loginResult = await (0, distributedLock_service_1.withDistributedLock)({
+            key: lockKey,
+            ttlMs: LOGIN_LIFECYCLE_LOCK_TTL_MS,
+            waitMs: LOGIN_LIFECYCLE_LOCK_WAIT_MS,
+            pollMs: LOGIN_LIFECYCLE_LOCK_POLL_MS,
+            onUnavailable: async () => null,
+            run: async () => {
+                const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
+                const refreshRaw = (0, generateToken_1.generateRefreshToken)(resolvedUser.id, resolvedUser.tokenVersion);
+                const hashedRefreshToken = hashToken(refreshRaw);
+                await withFastTimeout(prisma_1.default.refreshToken.create({
+                    data: {
+                        token: hashedRefreshToken,
+                        userId: resolvedUser.id,
+                        userAgent,
+                        ip,
+                        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                    },
+                }), LOGIN_REFRESH_TOKEN_TIMEOUT_MS);
+                (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
+                    req,
+                    res,
+                    stage: "auth.login.session_persisted",
+                });
+                (0, auth_middleware_1.primeAuthContextCacheForToken)({
+                    accessToken,
+                    userId: resolvedUser.id,
+                    role: resolvedUser.role,
+                    tokenVersion: resolvedUser.tokenVersion,
+                    email: resolvedUser.email,
+                    businessId,
+                });
+                void writeAuthAuditLog(req, {
+                    action: "auth.login",
+                    userId: resolvedUser.id,
+                    businessId,
+                    metadata: {
+                        email: resolvedUser.email,
+                        role: resolvedUser.role,
+                    },
+                });
+                if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || res.headersSent || res.writableEnded) {
+                    return {
+                        completed: false,
+                    };
+                }
+                setCookies(req, res, accessToken, refreshRaw);
+                res.json({
+                    success: true,
+                    user: {
+                        id: resolvedUser.id,
+                        email: resolvedUser.email,
+                        name: resolvedUser.name,
+                        businessId,
+                    },
+                });
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "AUTH_MS",
+                    value: Date.now() - startedAt,
+                    businessId,
+                    route: "auth.login",
+                    metadata: {
+                        source: "password",
+                    },
+                });
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "auth_bootstrap_ms",
+                    value: Date.now() - startedAt,
+                    businessId,
+                    route: "auth.login",
+                    metadata: {
+                        stage: "response_committed",
+                        source: "password",
+                    },
+                });
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "auth_session_ready",
+                    value: Date.now() - startedAt,
+                    businessId,
+                    route: "auth.login",
+                    metadata: {
+                        stage: "session_persisted",
+                        source: "password",
+                    },
+                });
+                runDetachedAuthTask("auth.login.prune_refresh_tokens", async () => {
+                    await withFastTimeout(pruneRefreshTokens(resolvedUser.id, 4), LOGIN_BACKGROUND_TASK_TIMEOUT_MS);
+                });
+                runDetachedAuthTask("auth.login.session_ledger", async () => {
+                    await withFastTimeout((0, securityGovernanceOS_service_1.issueSessionLedger)({
+                        businessId,
+                        tenantId: businessId,
+                        userId: resolvedUser.id,
+                        sessionKey: hashedRefreshToken,
+                        ip,
+                        userAgent,
+                        deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+                        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                        metadata: {
+                            source: "auth.login",
+                        },
+                    }), Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS));
+                });
+                (0, authBootstrap_service_1.primeAuthBootstrapContext)({
+                    userId: resolvedUser.id,
+                    preferredBusinessId: businessId,
+                    profileSeed: {
+                        email: resolvedUser.email,
+                        name: resolvedUser.name,
+                        avatar: user.avatar || null,
+                    },
+                }, {
+                    shouldRun: () => !(0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }),
+                });
+                return {
+                    completed: true,
+                };
             },
         });
-        if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }) || res.headersSent || res.writableEnded) {
+        if (!loginResult) {
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "auth_duplicate_login_blocked",
+                value: Date.now() - startedAt,
+                businessId,
+                route: "auth.login",
+                metadata: {
+                    reason: "inflight_lock_unavailable",
+                    lockKey,
+                },
+            });
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "auth_processing_state",
+                value: Date.now() - startedAt,
+                businessId,
+                route: "auth.login",
+                metadata: {
+                    state: "PROCESSING",
+                    reason: "login_inflight",
+                },
+            });
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "auth_inflight_reused",
+                value: Date.now() - startedAt,
+                businessId,
+                route: "auth.login",
+                metadata: {
+                    source: "distributed_lock",
+                },
+            });
+            return res.status(202).json({
+                success: false,
+                processing: true,
+                retryable: true,
+                code: "AUTH_LOGIN_PROCESSING",
+                message: "Login is still processing. Please wait a moment and retry.",
+            });
+        }
+        if (!loginResult.completed) {
             return;
         }
-        setCookies(req, res, accessToken, refreshRaw);
-        res.json({
-            success: true,
-            user: {
-                id: resolvedUser.id,
-                email: resolvedUser.email,
-                name: resolvedUser.name,
-                businessId,
-            },
-        });
-        (0, performanceMetrics_1.emitPerformanceMetric)({
-            name: "AUTH_MS",
-            value: Date.now() - startedAt,
-            businessId,
-            route: "auth.login",
-            metadata: {
-                source: "password",
-            },
-        });
-        runDetachedAuthTask("auth.login.prune_refresh_tokens", async () => {
-            await withFastTimeout(pruneRefreshTokens(resolvedUser.id, 4), LOGIN_BACKGROUND_TASK_TIMEOUT_MS);
-        });
-        runDetachedAuthTask("auth.login.session_ledger", async () => {
-            await withFastTimeout((0, securityGovernanceOS_service_1.issueSessionLedger)({
-                businessId,
-                tenantId: businessId,
-                userId: resolvedUser.id,
-                sessionKey: hashedRefreshToken,
-                ip: getIP(req),
-                userAgent: String(getUA(req)),
-                deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                metadata: {
-                    source: "auth.login",
-                },
-            }), Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS));
-        });
-        (0, authBootstrap_service_1.primeAuthBootstrapContext)({
-            userId: resolvedUser.id,
-            preferredBusinessId: businessId,
-            profileSeed: {
-                email: resolvedUser.email,
-                name: resolvedUser.name,
-                avatar: user.avatar || null,
-            },
-        }, {
-            shouldRun: () => !(0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }),
-        });
     }
     catch (err) {
         next(err);

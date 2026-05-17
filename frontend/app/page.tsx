@@ -6,17 +6,20 @@ import { useAuth } from "@/context/AuthContext";
 
 export default function HomePage() {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, loading, lifecycleState } = useAuth();
 
   useEffect(() => {
     if (loading) return;
 
     if (user) {
       router.replace("/dashboard");
-    } else {
+    } else if (
+      lifecycleState === "failed_terminal" ||
+      lifecycleState === "anonymous"
+    ) {
       router.replace("/auth/login");
     }
-  }, [user, loading, router]);
+  }, [lifecycleState, user, loading, router]);
 
   return null;
 }

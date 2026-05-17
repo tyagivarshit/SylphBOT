@@ -15,6 +15,8 @@ type CurrentUserResponse = {
 
 let currentUserCache: User | null = null;
 let fetchingPromise: Promise<ApiResponse<CurrentUserResponse>> | null = null;
+let loginPromise: Promise<ApiResponse<{ user: User }>> | null = null;
+let loginPromiseKey: string | null = null;
 const AUTH_RETRY_DELAY_MS = 120;
 
 export function clearUserCache() {
@@ -112,21 +114,46 @@ export async function loginUser(
   email: string,
   password: string
 ): Promise<ApiResponse<{ user: User }>> {
-  const response = await authRequest<{ user: User }>("/login", {
+  const normalizedEmail = email.trim().toLowerCase();
+  const requestKey = `${normalizedEmail}:${password}`;
+
+  if (loginPromise && loginPromiseKey === requestKey) {
+    if (typeof window !== "undefined") {
+      console.info("auth_duplicate_login_blocked", {
+        reason: "inflight_reused",
+        email: normalizedEmail,
+        at: new Date().toISOString(),
+      });
+    }
+    return loginPromise;
+  }
+
+  loginPromiseKey = requestKey;
+  const request = authRequest<{ user: User }>("/login", {
     method: "POST",
     timeoutMs: 15000,
     body: JSON.stringify({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       password,
     }),
+  }).finally(() => {
+    if (loginPromiseKey === requestKey) {
+      loginPromiseKey = null;
+    }
+    if (loginPromise === request) {
+      loginPromise = null;
+    }
   });
 
+  loginPromise = request;
+  const response = await request;
   clearUserCache();
-
-  if (typeof window !== "undefined" && response.success) {
-    window.dispatchEvent(new Event("auth:refresh"));
+  if (response.code === "AUTH_LOGIN_PROCESSING") {
+    return {
+      ...response,
+      success: false,
+    };
   }
-
   return response;
 }
 

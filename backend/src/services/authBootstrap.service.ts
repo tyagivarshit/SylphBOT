@@ -1,4 +1,5 @@
 import prisma from "../config/prisma";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { buildLedgerKey } from "./commerce/shared";
 import { resolveUserWorkspaceIdentity } from "./tenant.service";
 import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
@@ -15,10 +16,43 @@ type EnsureAuthBootstrapContextInput = {
   profileSeed?: ProfileSeed | null;
 };
 
+type EnsureAuthBootstrapContextResult = {
+  user: {
+    id: string;
+    role: string;
+    tokenVersion: number;
+    email: string;
+    name: string;
+    avatar: string | null;
+    businessId: string;
+  };
+  identity: Awaited<ReturnType<typeof resolveUserWorkspaceIdentity>>;
+  backfilledFields: string[];
+};
+
+export type AuthBootstrapProcessingState =
+  | "READY"
+  | "PROCESSING"
+  | "RETRYING"
+  | "FAILED_TERMINAL";
+
+export type AuthBootstrapWaitResult = {
+  state: AuthBootstrapProcessingState;
+  context: EnsureAuthBootstrapContextResult | null;
+  reason: string | null;
+  reusedInFlight: boolean;
+  elapsedMs: number;
+};
+
 const AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS = 1_900;
 const AUTH_BOOTSTRAP_BACKGROUND_DELAY_MS = 35;
+const AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS = 1_250;
 
 const authBootstrapPrimeInFlight = new Map<string, Promise<void>>();
+const authBootstrapEnsureInFlight = new Map<
+  string,
+  Promise<EnsureAuthBootstrapContextResult>
+>();
 
 const normalizeText = (value?: string | null) => {
   const normalized = String(value || "").trim();
@@ -36,6 +70,12 @@ const shouldBackfillField = (current?: string | null, incoming?: string | null) 
   }
 
   return normalizeText(current) !== normalizeText(incoming);
+};
+
+const buildAuthBootstrapKey = (input: EnsureAuthBootstrapContextInput) => {
+  const userId = String(input.userId || "").trim();
+  const businessId = String(input.preferredBusinessId || "").trim() || "none";
+  return `${userId}:${businessId}`;
 };
 
 const ensureWorkspaceBootstrapRows = async (businessId: string) => {
@@ -153,7 +193,7 @@ const ensureWorkspaceBootstrapRows = async (businessId: string) => {
 
 export const ensureAuthBootstrapContext = async (
   input: EnsureAuthBootstrapContextInput
-) => {
+): Promise<EnsureAuthBootstrapContextResult> => {
   const userId = String(input.userId || "").trim();
 
   if (!userId) {
@@ -273,6 +313,160 @@ const withTimeout = async <T>(task: Promise<T>, timeoutMs: number): Promise<T> =
   }
 };
 
+const resolveAuthBootstrapRun = (
+  input: EnsureAuthBootstrapContextInput
+) => {
+  const key = buildAuthBootstrapKey(input);
+  const existing = authBootstrapEnsureInFlight.get(key);
+
+  if (existing) {
+    return {
+      key,
+      promise: existing,
+      reusedInFlight: true,
+    };
+  }
+
+  const run = ensureAuthBootstrapContext(input).finally(() => {
+    authBootstrapEnsureInFlight.delete(key);
+  });
+  authBootstrapEnsureInFlight.set(key, run);
+
+  return {
+    key,
+    promise: run,
+    reusedInFlight: false,
+  };
+};
+
+const TERMINAL_BOOTSTRAP_ERRORS = new Set([
+  "user_id_required",
+  "user_not_active",
+  "workspace_bootstrap_failed",
+]);
+
+const toBootstrapReason = (error: unknown) =>
+  String((error as Error)?.message || "auth_bootstrap_failed");
+
+const classifyBootstrapState = (
+  reason: string
+): AuthBootstrapProcessingState => {
+  if (TERMINAL_BOOTSTRAP_ERRORS.has(reason)) {
+    return "FAILED_TERMINAL";
+  }
+
+  if (
+    reason.includes("timeout") ||
+    reason.startsWith("request_aborted:") ||
+    reason.includes("distributed_lock_acquire_timeout")
+  ) {
+    return "PROCESSING";
+  }
+
+  return "RETRYING";
+};
+
+export const waitForAuthBootstrapContext = async (
+  input: EnsureAuthBootstrapContextInput,
+  options?: {
+    timeoutMs?: number;
+    source?: string;
+  }
+): Promise<AuthBootstrapWaitResult> => {
+  const userId = String(input.userId || "").trim();
+
+  if (!userId) {
+    return {
+      state: "FAILED_TERMINAL",
+      context: null,
+      reason: "user_id_required",
+      reusedInFlight: false,
+      elapsedMs: 0,
+    };
+  }
+
+  const startedAt = Date.now();
+  const timeoutMs = Math.max(
+    250,
+    Math.floor(options?.timeoutMs || AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS)
+  );
+  const shared = resolveAuthBootstrapRun(input);
+
+  if (shared.reusedInFlight) {
+    emitPerformanceMetric({
+      name: "auth_inflight_reused",
+      value: 1,
+      businessId: String(input.preferredBusinessId || "").trim() || null,
+      route: "auth.bootstrap",
+      metadata: {
+        source: options?.source || "unknown",
+      },
+    });
+  }
+
+  try {
+    const context = await withTimeout(shared.promise, timeoutMs);
+    const elapsedMs = Date.now() - startedAt;
+
+    emitPerformanceMetric({
+      name: "auth_bootstrap_ms",
+      value: elapsedMs,
+      businessId: context.user.businessId || null,
+      route: "auth.bootstrap",
+      metadata: {
+        source: options?.source || "unknown",
+        reusedInFlight: shared.reusedInFlight,
+      },
+    });
+
+    return {
+      state: "READY",
+      context,
+      reason: null,
+      reusedInFlight: shared.reusedInFlight,
+      elapsedMs,
+    };
+  } catch (error) {
+    const reason = toBootstrapReason(error);
+    const state = classifyBootstrapState(reason);
+    const elapsedMs = Date.now() - startedAt;
+
+    emitPerformanceMetric({
+      name: "auth_processing_state",
+      value: elapsedMs,
+      businessId: String(input.preferredBusinessId || "").trim() || null,
+      route: "auth.bootstrap",
+      metadata: {
+        source: options?.source || "unknown",
+        state,
+        reason,
+        reusedInFlight: shared.reusedInFlight,
+      },
+    });
+
+    if (state === "FAILED_TERMINAL") {
+      emitPerformanceMetric({
+        name: "auth_terminal_failure",
+        value: 1,
+        businessId: String(input.preferredBusinessId || "").trim() || null,
+        route: "auth.bootstrap",
+        metadata: {
+          source: options?.source || "unknown",
+          reason,
+        },
+      });
+    }
+
+    return {
+      state,
+      context: null,
+      reason,
+      reusedInFlight: shared.reusedInFlight,
+      elapsedMs,
+    };
+  }
+};
+
 export const primeAuthBootstrapContext = (
   input: EnsureAuthBootstrapContextInput,
   options?: {
@@ -293,10 +487,7 @@ export const primeAuthBootstrapContext = (
     500,
     Math.floor(options?.timeoutMs || AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS)
   );
-  const primeKey = [
-    userId,
-    String(input.preferredBusinessId || "").trim() || "none",
-  ].join(":");
+  const primeKey = buildAuthBootstrapKey(input);
 
   if (authBootstrapPrimeInFlight.has(primeKey)) {
     return;
@@ -309,12 +500,14 @@ export const primeAuthBootstrapContext = (
         return;
       }
 
-      void withTimeout(ensureAuthBootstrapContext(input), timeoutMs)
+      const shared = resolveAuthBootstrapRun(input);
+
+      void withTimeout(shared.promise, timeoutMs)
         .catch((error) => {
           console.warn("AUTH_BOOTSTRAP_DEFERRED_FAILED", {
             userId: input.userId,
             preferredBusinessId: input.preferredBusinessId || null,
-            reason: String((error as Error)?.message || "auth_bootstrap_failed"),
+            reason: toBootstrapReason(error),
           });
         })
         .finally(() => {

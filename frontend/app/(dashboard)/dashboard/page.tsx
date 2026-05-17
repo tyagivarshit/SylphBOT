@@ -49,7 +49,7 @@ const EMPTY_CONVERSATION_STATS: ConversationStats = {
 };
 
 export default function DashboardPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, lifecycleState } = useAuth();
   const { openUpgrade } = useUpgrade();
   const router = useRouter();
 
@@ -61,10 +61,14 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (
+      !loading &&
+      !user &&
+      (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
+    ) {
       router.replace("/auth/login");
     }
-  }, [loading, router, user]);
+  }, [lifecycleState, loading, router, user]);
 
   const loadDashboard = useCallback(async () => {
     if (!user) {
@@ -80,7 +84,10 @@ export default function DashboardPage() {
 
       const statsResult = await getDashboardStats();
 
-      if (statsResult.unauthorized) {
+      if (
+        statsResult.unauthorized &&
+        (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
+      ) {
         router.replace("/auth/login");
         return;
       }
@@ -111,7 +118,7 @@ export default function DashboardPage() {
     } finally {
       setPageLoading(false);
     }
-  }, [router, user]);
+  }, [lifecycleState, router, user]);
 
   useEffect(() => {
     void loadDashboard();

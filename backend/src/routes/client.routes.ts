@@ -6,6 +6,7 @@ import {
   updateClient,
   deleteClient,
   metaOAuthConnect,
+  getMetaOAuthLifecycle,
   updateAITraining,
   startMetaOAuth,
 } from "../controllers/client.controller";
@@ -18,6 +19,7 @@ router.get("/", protect, getClients);
 
 router.get("/oauth/meta", protect, startMetaOAuth);
 router.post("/oauth/meta", protect, metaOAuthConnect);
+router.get("/oauth/meta/lifecycle", protect, getMetaOAuthLifecycle);
 
 router.get("/:id", protect, getSingleClient);
 router.put("/:id", protect, updateClient);

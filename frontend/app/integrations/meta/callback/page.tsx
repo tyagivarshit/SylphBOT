@@ -64,6 +64,85 @@ type FailurePayload = {
   availablePhoneNumbers?: WhatsAppPhoneOption[];
 };
 
+type LifecycleStatus = "PROCESSING" | "NEEDS_ACTION" | "FAILED" | "COMPLETED";
+
+type LifecyclePayload = {
+  operationId?: string | null;
+  replayToken?: string | null;
+  platform?: string | null;
+  mode?: string | null;
+  status?: LifecycleStatus | string | null;
+  stage?: string | null;
+  statusDetail?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  resolutionHint?: string | null;
+  actionable?: ActionableFailure | null;
+  requiresPairSelection?: boolean;
+  requiresPhoneSelection?: boolean;
+  validPairs?: PairOption[];
+  availablePhoneNumbers?: WhatsAppPhoneOption[];
+  clients?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown> | null;
+};
+
+const normalizeLifecycleStatus = (value: unknown): LifecycleStatus => {
+  const normalized = readString(value).toUpperCase();
+  if (normalized === "COMPLETED") {
+    return "COMPLETED";
+  }
+  if (normalized === "NEEDS_ACTION") {
+    return "NEEDS_ACTION";
+  }
+  if (normalized === "FAILED") {
+    return "FAILED";
+  }
+  return "PROCESSING";
+};
+
+const toLifecyclePayload = (value: unknown): LifecyclePayload | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return value as LifecyclePayload;
+};
+
+const lifecycleStageLabel = (stage?: string | null) => {
+  const normalized = readString(stage).toUpperCase();
+  if (!normalized) {
+    return "Preparing onboarding lifecycle";
+  }
+  if (normalized === "OAUTH_AUTHENTICATED") {
+    return "OAuth authenticated";
+  }
+  if (normalized === "META_ACCOUNT_CONNECTED") {
+    return "Meta account connected";
+  }
+  if (normalized === "PAIR_SELECTION") {
+    return "Pair selection required";
+  }
+  if (normalized === "PHONE_SELECTION") {
+    return "Phone selection required";
+  }
+  if (normalized === "TOKEN_PERSISTENCE") {
+    return "Persisting integration token";
+  }
+  if (normalized === "WEBHOOK_ACTIVATION") {
+    return "Activating webhook";
+  }
+  if (normalized === "CONNECTION_VERIFICATION") {
+    return "Verifying connection";
+  }
+  if (normalized === "FINAL_ONBOARDING") {
+    return "Final onboarding in progress";
+  }
+  if (normalized === "COMPLETED") {
+    return "Completed";
+  }
+  return normalized.replaceAll("_", " ").toLowerCase();
+};
+
 const buildSettingsRedirect = (params: Record<string, string>) => {
   const url = new URL(buildAppUrl("/settings"));
 
@@ -176,12 +255,76 @@ const readFailurePayload = (input: unknown): FailurePayload => {
   };
 };
 
+const failureFromLifecycle = (
+  lifecycleInput: LifecyclePayload,
+  fallbackPlatform: "instagram" | "whatsapp"
+): FailurePayload => {
+  const lifecycle = lifecycleInput || {};
+  const metadata =
+    lifecycle.metadata && typeof lifecycle.metadata === "object"
+      ? (lifecycle.metadata as Record<string, unknown>)
+      : {};
+  const platformValue = readString(
+    lifecycle.platform || metadata.platform || fallbackPlatform
+  ).toLowerCase();
+  const platform: "instagram" | "whatsapp" =
+    platformValue === "whatsapp" ? "whatsapp" : "instagram";
+  const actionableCandidate =
+    lifecycle.actionable ||
+    (metadata.actionable &&
+    typeof metadata.actionable === "object"
+      ? (metadata.actionable as ActionableFailure)
+      : null);
+  const reason =
+    readString(lifecycle.errorMessage || lifecycle.statusDetail) ||
+    "Meta connect requires attention.";
+  const code = readString(lifecycle.errorCode || metadata.code || "UNKNOWN");
+  const fallback = buildFallbackFailure(
+    reason,
+    readString(lifecycle.stage || "IG_CONNECT_FAILED"),
+    code || "UNKNOWN",
+    platform
+  );
+  const validPairs = Array.isArray(lifecycle.validPairs)
+    ? lifecycle.validPairs
+    : Array.isArray(metadata.validPairs)
+      ? (metadata.validPairs as PairOption[])
+      : [];
+  const availablePhoneNumbers = Array.isArray(lifecycle.availablePhoneNumbers)
+    ? lifecycle.availablePhoneNumbers
+    : Array.isArray(metadata.availablePhoneNumbers)
+      ? (metadata.availablePhoneNumbers as WhatsAppPhoneOption[])
+      : [];
+
+  return {
+    platform,
+    stage: readString(lifecycle.stage || "IG_CONNECT_FAILED"),
+    reason,
+    code: code || "UNKNOWN",
+    actionable: actionableCandidate || fallback.actionable,
+    connectDoctor:
+      lifecycleInput.metadata &&
+      typeof lifecycleInput.metadata === "object" &&
+      (lifecycleInput.metadata as Record<string, unknown>).connectDoctor
+        ? ((lifecycleInput.metadata as Record<string, unknown>)
+            .connectDoctor as ConnectDoctorReport)
+        : null,
+    requiresPairSelection:
+      Boolean(lifecycle.requiresPairSelection) || validPairs.length > 0,
+    validPairs,
+    requiresPhoneSelection:
+      Boolean(lifecycle.requiresPhoneSelection) || availablePhoneNumbers.length > 0,
+    availablePhoneNumbers,
+  };
+};
+
 function MetaCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const connectStartedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<FailurePayload | null>(null);
+  const [lifecycle, setLifecycle] = useState<LifecyclePayload | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [selectedPairKey, setSelectedPairKey] = useState<string>("");
   const [selectedPhoneNumberId, setSelectedPhoneNumberId] = useState<string>("");
@@ -192,6 +335,7 @@ function MetaCallbackContent() {
     }
 
     connectStartedRef.current = true;
+    let cancelled = false;
 
     const code = searchParams.get("code") || "";
     const state = searchParams.get("state") || "";
@@ -206,8 +350,83 @@ function MetaCallbackContent() {
     const failureStage = readString(searchParams.get("stage") || "IG_CALLBACK_RECEIVED");
     const callbackMode = readString(searchParams.get("mode") || "connect");
 
+    const applyFailure = (nextFailure: FailurePayload) => {
+      setFailure(nextFailure);
+      setSelectedPairKey(
+        nextFailure.validPairs?.length
+          ? `${nextFailure.validPairs[0].facebookPageId}:${nextFailure.validPairs[0].instagramProfessionalAccountId}`
+          : ""
+      );
+      setSelectedPhoneNumberId(
+        nextFailure.availablePhoneNumbers?.length
+          ? nextFailure.availablePhoneNumbers[0].phoneNumberId
+          : ""
+      );
+      setLoading(false);
+    };
+
+    const pollLifecycle = async (operationId?: string | null) => {
+      const maxAttempts = 120;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (cancelled) {
+          return false;
+        }
+
+        const query = new URLSearchParams({
+          platform: platform.toUpperCase(),
+        });
+        if (state) {
+          query.set("state", state);
+        }
+        if (operationId) {
+          query.set("operationId", operationId);
+        }
+
+        const lifecycleResponse = await apiFetch<LifecyclePayload>(
+          `/api/clients/oauth/meta/lifecycle?${query.toString()}`,
+          {
+            method: "GET",
+            timeoutMs: 12000,
+          }
+        );
+
+        const snapshot = lifecycleResponse.success
+          ? toLifecyclePayload(lifecycleResponse.data)
+          : null;
+
+        if (snapshot) {
+          setLifecycle(snapshot);
+          const lifecycleStatus = normalizeLifecycleStatus(snapshot.status);
+
+          if (lifecycleStatus === "COMPLETED") {
+            await fetchClientConnectionStatus().catch(() => null);
+            router.replace(
+              buildSettingsRedirect({
+                integration: "success",
+                platform,
+                mode: callbackMode,
+              }) as Route
+            );
+            return true;
+          }
+
+          if (lifecycleStatus === "FAILED" || lifecycleStatus === "NEEDS_ACTION") {
+            applyFailure(failureFromLifecycle(snapshot, platform));
+            return true;
+          }
+        }
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1500);
+        });
+      }
+
+      return false;
+    };
+
     if (providerError || providerReason) {
-      setFailure(
+      applyFailure(
         buildProviderDeniedFailure({
           platform,
           stage: failureStage,
@@ -219,12 +438,11 @@ function MetaCallbackContent() {
           errorCode: "MISSING_PERMISSION",
         })
       );
-      setLoading(false);
       return;
     }
 
     if (!code || !state) {
-      setFailure(
+      applyFailure(
         buildFallbackFailure(
           "OAuth callback payload is missing required parameters.",
           failureStage || "IG_CALLBACK_RECEIVED",
@@ -232,7 +450,6 @@ function MetaCallbackContent() {
           platform
         )
       );
-      setLoading(false);
       return;
     }
 
@@ -251,21 +468,70 @@ function MetaCallbackContent() {
         const payload = response?.data;
         const status = Number(response?.status || 500);
 
+        if (status === 408 || status === 504) {
+          setLifecycle({
+            status: "PROCESSING",
+            stage: "FINAL_ONBOARDING",
+            statusDetail: "Request timed out. Reconciling lifecycle state...",
+          });
+          const recovered = await pollLifecycle(null);
+          if (!recovered && !cancelled) {
+            applyFailure(
+              buildFallbackFailure(
+                "Meta connect is still processing. Retry in a moment.",
+                "FINAL_ONBOARDING",
+                "ONBOARDING_PROCESSING",
+                platform
+              )
+            );
+          }
+          return;
+        }
+
         if (status < 200 || status >= 300 || payload?.success === false) {
           const resolvedFailure = readFailurePayload(payload);
-          setFailure(resolvedFailure);
-          setSelectedPairKey(
-            resolvedFailure.validPairs?.length
-              ? `${resolvedFailure.validPairs[0].facebookPageId}:${resolvedFailure.validPairs[0].instagramProfessionalAccountId}`
-              : ""
-          );
-          setSelectedPhoneNumberId(
-            resolvedFailure.availablePhoneNumbers?.length
-              ? resolvedFailure.availablePhoneNumbers[0].phoneNumberId
-              : ""
-          );
-          setLoading(false);
+          applyFailure(resolvedFailure);
           return;
+        }
+
+        const payloadLifecycleCandidate =
+          payload && typeof payload === "object"
+            ? toLifecyclePayload(
+                (payload as Record<string, unknown>).lifecycle ||
+                  (payload as Record<string, unknown>).data
+              )
+            : null;
+        const payloadLifecycle =
+          payloadLifecycleCandidate &&
+          (readString(payloadLifecycleCandidate.status) ||
+            readString(payloadLifecycleCandidate.stage) ||
+            readString(payloadLifecycleCandidate.operationId))
+            ? payloadLifecycleCandidate
+            : null;
+
+        if (payloadLifecycle) {
+          setLifecycle(payloadLifecycle);
+          const lifecycleStatus = normalizeLifecycleStatus(payloadLifecycle.status);
+
+          if (lifecycleStatus === "FAILED" || lifecycleStatus === "NEEDS_ACTION") {
+            applyFailure(failureFromLifecycle(payloadLifecycle, platform));
+            return;
+          }
+
+          if (lifecycleStatus !== "COMPLETED") {
+            const recovered = await pollLifecycle(payloadLifecycle.operationId || null);
+            if (!recovered && !cancelled) {
+              applyFailure(
+                buildFallbackFailure(
+                  "Meta connect is still processing. Retry in a moment.",
+                  readString(payloadLifecycle.stage || "FINAL_ONBOARDING"),
+                  "ONBOARDING_PROCESSING",
+                  platform
+                )
+              );
+            }
+            return;
+          }
         }
 
         await fetchClientConnectionStatus().catch(() => null);
@@ -281,19 +547,29 @@ function MetaCallbackContent() {
           }) as Route
         );
       } catch {
-        setFailure(
-          buildFallbackFailure(
-            "Network failure while finalizing Meta connect.",
-            "IG_CONNECT_FAILED",
-            "NETWORK_FAILURE",
-            platform
-          )
-        );
-        setLoading(false);
+        setLifecycle({
+          status: "PROCESSING",
+          stage: "FINAL_ONBOARDING",
+          statusDetail: "Network timeout. Reconciling lifecycle state...",
+        });
+        const recovered = await pollLifecycle(null);
+        if (!recovered && !cancelled) {
+          applyFailure(
+            buildFallbackFailure(
+              "Network failure while finalizing Meta connect.",
+              "IG_CONNECT_FAILED",
+              "NETWORK_FAILURE",
+              platform
+            )
+          );
+        }
       }
     };
 
     void connect();
+    return () => {
+      cancelled = true;
+    };
   }, [router, searchParams]);
 
   const doctorDiagnostics = useMemo(() => {
@@ -435,17 +711,29 @@ function MetaCallbackContent() {
   };
 
   if (loading) {
+    const lifecycleStatus = normalizeLifecycleStatus(lifecycle?.status);
+    const stageLabel = lifecycleStageLabel(lifecycle?.stage);
+    const statusDetail = readString(lifecycle?.statusDetail);
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-700">
-        Finalizing integration connection...
+      <div className="flex h-screen items-center justify-center bg-slate-50 px-6 text-sm text-slate-700">
+        <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <p className="font-medium text-slate-900">Finalizing Meta connection...</p>
+          <p className="mt-1 text-xs text-slate-600">
+            Stage: {stageLabel} ({lifecycleStatus})
+          </p>
+          {statusDetail ? (
+            <p className="mt-1 text-xs text-slate-500">{statusDetail}</p>
+          ) : null}
+        </div>
       </div>
     );
   }
 
   if (!failure) {
+    const stageLabel = lifecycleStageLabel(lifecycle?.stage);
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-700">
-        Finalizing integration connection...
+        Finalizing integration connection... {stageLabel}
       </div>
     );
   }

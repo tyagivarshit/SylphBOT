@@ -3905,15 +3905,29 @@ export const recordDataAccessAudit = async (input: {
   metadata?: JsonRecord | null;
 }) => {
   const timestamp = now();
+  const metadata = toRecord(input.metadata);
+  const metadataDigest = stableHash(metadata).slice(0, 16);
   const auditSeed = {
     at: timestamp.toISOString(),
     action: input.action,
     actorId: input.actorId || null,
     resourceType: input.resourceType,
     resourceId: input.resourceId || null,
+    purpose: input.purpose || null,
     result: input.result,
+    metadataDigest,
   };
   const auditKey = `data_audit:${stableHash(auditSeed).slice(0, 24)}`;
+  const existingInMemory = getStore().dataAccessAuditLedger.get(auditKey);
+  if (existingInMemory) {
+    existingInMemory.metadata = {
+      ...toRecord(existingInMemory.metadata),
+      ...metadata,
+      replayCount: Number(toRecord(existingInMemory.metadata).replayCount || 0) + 1,
+    };
+    return existingInMemory;
+  }
+
   const tenantId = normalizeTenantId({
     tenantId: input.tenantId,
     businessId: input.businessId || null,
@@ -3936,13 +3950,31 @@ export const recordDataAccessAudit = async (input: {
     result: String(input.result || "UNKNOWN").trim().toUpperCase(),
     chainPrevHash: chain.previousHash,
     chainHash: chain.chainHash,
-    metadata: toRecord(input.metadata),
+    metadata,
     createdAt: timestamp,
   };
 
   getStore().dataAccessAuditLedger.set(auditKey, row);
   bumpAuthority("DataAccessAuditLedger");
-  await withDbMirror(() => db.dataAccessAuditLedger.create({ data: row }));
+  await mirrorCanonicalUpsert({
+    upsert: () =>
+      db.dataAccessAuditLedger.upsert({
+        where: {
+          auditKey,
+        },
+        update: {
+          ...toCanonicalUpdateData(row),
+          metadata: row.metadata,
+        },
+        create: row,
+      }),
+    find: () =>
+      db.dataAccessAuditLedger.findUnique({
+        where: {
+          auditKey,
+        },
+      }),
+  });
   return row;
 };
 

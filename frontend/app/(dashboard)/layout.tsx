@@ -181,17 +181,21 @@ export default function DashboardLayout({
 }: {
   children: ReactNode;
 }) {
-  const { user, loading } = useAuth();
+  const { user, loading, lifecycleState } = useAuth();
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
   const [upgradeState, setUpgradeState] = useState<OpenUpgradeOptions | null>(null);
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (
+      !loading &&
+      !user &&
+      (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
+    ) {
       router.replace("/auth/login");
     }
-  }, [loading, router, user]);
+  }, [lifecycleState, loading, router, user]);
 
   useEffect(() => {
     const handleEsc = (event: KeyboardEvent) => {
@@ -232,7 +236,11 @@ export default function DashboardLayout({
   }
 
   if (!user) {
-    return <AuthStateCard message="Redirecting to secure sign-in..." />;
+    const message =
+      lifecycleState === "session_stabilizing" || lifecycleState === "retrying"
+        ? "Stabilizing your secure session..."
+        : "Redirecting to secure sign-in...";
+    return <AuthStateCard message={message} />;
   }
 
   return (

@@ -6,6 +6,7 @@ export {
 } from "@/lib/url";
 
 import { apiFetch } from "@/lib/apiClient";
+import type { ApiResponse } from "@/lib/apiClient";
 
 export type CurrentUser = {
   id: string;
@@ -41,6 +42,21 @@ export type CurrentUser = {
     };
     totalConnected?: number;
   } | null;
+  authLifecycle?: {
+    processingState?:
+      | "READY"
+      | "PROCESSING"
+      | "RETRYING"
+      | "FAILED_TERMINAL"
+      | "STABILIZING"
+      | string;
+    sessionReady?: boolean;
+    retryable?: boolean;
+    reason?: string | null;
+    reusedInFlight?: boolean;
+    stabilizationMs?: number;
+    timeoutRecovered?: boolean;
+  } | null;
 };
 
 export type SearchResult = {
@@ -66,6 +82,29 @@ export type ClientConnectionStatus = {
   };
 };
 
+export type AuthCurrentUserFetchState =
+  | "AUTHENTICATED"
+  | "PROCESSING"
+  | "STABILIZING"
+  | "RETRYING"
+  | "FAILED_TERMINAL";
+
+export type AuthCurrentUserFetchResult = {
+  user: CurrentUser | null;
+  state: AuthCurrentUserFetchState;
+  retryable: boolean;
+  reason: string | null;
+  unauthorized: boolean;
+  networkError: boolean;
+  code: string | null;
+};
+
+const AUTH_ME_RETRY_DELAY_MS = 180;
+const AUTH_ME_TRANSIENT_RETRY_ATTEMPTS = 1;
+
+let authCurrentUserInFlight: Promise<AuthCurrentUserFetchResult> | null = null;
+let sawAuthProcessingState = false;
+
 const requireSuccess = <T>(data: T | null, message: string) => {
   if (data == null) {
     throw new Error(message);
@@ -75,12 +114,250 @@ const requireSuccess = <T>(data: T | null, message: string) => {
 };
 
 export async function fetchCurrentUser(): Promise<CurrentUser | null> {
-  const response = await apiFetch<CurrentUser>("/api/user/me", {
-    cache: "no-store",
-    timeoutMs: 9000,
+  const result = await fetchCurrentUserLifecycle();
+  return result.state === "AUTHENTICATED" ? result.user : null;
+}
+
+const normalizeReason = (value: unknown) => String(value || "").trim();
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
   });
 
-  return response.success ? response.data : null;
+const mapLifecycleState = (
+  value: unknown,
+  sessionReady: boolean
+): AuthCurrentUserFetchState => {
+  const normalized = String(value || "").trim().toUpperCase();
+
+  if (normalized === "FAILED_TERMINAL") {
+    return "FAILED_TERMINAL";
+  }
+  if (normalized === "RETRYING") {
+    return "RETRYING";
+  }
+  if (normalized === "STABILIZING") {
+    return "STABILIZING";
+  }
+  if (normalized === "PROCESSING") {
+    return "PROCESSING";
+  }
+  if (normalized === "READY" || sessionReady) {
+    return "AUTHENTICATED";
+  }
+
+  return sessionReady ? "AUTHENTICATED" : "PROCESSING";
+};
+
+const recordAuthMetric = (
+  name: string,
+  metadata?: Record<string, unknown>
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  console.info(name, {
+    metadata: metadata || {},
+    recordedAt: new Date().toISOString(),
+  });
+};
+
+const classifyAuthCurrentUserResponse = (
+  response: ApiResponse<CurrentUser>
+): AuthCurrentUserFetchResult => {
+  if (response.success && response.data) {
+    const lifecycle = response.data.authLifecycle || null;
+    const lifecycleState = mapLifecycleState(
+      lifecycle?.processingState,
+      Boolean(lifecycle?.sessionReady)
+    );
+    const reason = normalizeReason(lifecycle?.reason);
+
+    if (lifecycleState !== "AUTHENTICATED") {
+      return {
+        user: response.data,
+        state: lifecycleState,
+        retryable:
+          lifecycle?.retryable !== undefined
+            ? Boolean(lifecycle.retryable)
+            : lifecycleState !== "FAILED_TERMINAL",
+        reason: reason || "session_stabilizing",
+        unauthorized: false,
+        networkError: false,
+        code: response.code || null,
+      };
+    }
+
+    return {
+      user: response.data,
+      state: "AUTHENTICATED",
+      retryable: false,
+      reason: reason || null,
+      unauthorized: false,
+      networkError: false,
+      code: response.code || null,
+    };
+  }
+
+  const reason = normalizeReason(response.message);
+  const normalizedReason = reason.toLowerCase();
+  const isTimeoutLike =
+    response.networkError ||
+    normalizedReason.includes("timeout") ||
+    normalizedReason.includes("timed out");
+  const isProcessingAuthGap =
+    normalizedReason.includes("session verification timed out") ||
+    normalizedReason.includes("missing session") ||
+    normalizedReason.includes("not authenticated");
+  const isTerminalAuthFailure =
+    normalizedReason.includes("invalid refresh token") ||
+    normalizedReason.includes("session expired");
+
+  if (isTerminalAuthFailure) {
+    return {
+      user: null,
+      state: "FAILED_TERMINAL",
+      retryable: false,
+      reason: reason || "session_invalid",
+      unauthorized: Boolean(response.unauthorized),
+      networkError: Boolean(response.networkError),
+      code: response.code || null,
+    };
+  }
+
+  if (isTimeoutLike || isProcessingAuthGap) {
+    return {
+      user: null,
+      state: isTimeoutLike ? "RETRYING" : "STABILIZING",
+      retryable: true,
+      reason: reason || "session_stabilizing",
+      unauthorized: Boolean(response.unauthorized),
+      networkError: Boolean(response.networkError),
+      code: response.code || null,
+    };
+  }
+
+  if (response.unauthorized) {
+    return {
+      user: null,
+      state: "FAILED_TERMINAL",
+      retryable: false,
+      reason: reason || "unauthorized",
+      unauthorized: true,
+      networkError: Boolean(response.networkError),
+      code: response.code || null,
+    };
+  }
+
+  return {
+    user: null,
+    state: "FAILED_TERMINAL",
+    retryable: false,
+    reason: reason || "auth_fetch_failed",
+    unauthorized: Boolean(response.unauthorized),
+    networkError: Boolean(response.networkError),
+    code: response.code || null,
+  };
+};
+
+export async function fetchCurrentUserLifecycle(): Promise<AuthCurrentUserFetchResult> {
+  if (authCurrentUserInFlight) {
+    recordAuthMetric("auth_parallel_me_collapsed", {
+      source: "frontend_singleflight",
+    });
+    recordAuthMetric("auth_inflight_reused", {
+      source: "frontend_singleflight",
+    });
+    return authCurrentUserInFlight;
+  }
+
+  authCurrentUserInFlight = (async () => {
+    let attempt = 0;
+    let latestResult: AuthCurrentUserFetchResult | null = null;
+
+    while (attempt <= AUTH_ME_TRANSIENT_RETRY_ATTEMPTS) {
+      const response = await apiFetch<CurrentUser>("/api/user/me?surface=auth", {
+        cache: "no-store",
+        timeoutMs: 4200,
+      });
+      const result = classifyAuthCurrentUserResponse(response);
+      latestResult = result;
+
+      if (
+        result.state === "AUTHENTICATED" ||
+        result.state === "FAILED_TERMINAL" ||
+        !result.retryable
+      ) {
+        break;
+      }
+
+      if (attempt >= AUTH_ME_TRANSIENT_RETRY_ATTEMPTS) {
+        break;
+      }
+
+      attempt += 1;
+      recordAuthMetric("auth_processing_state", {
+        state: result.state,
+        reason: result.reason,
+        attempt,
+      });
+      await wait(AUTH_ME_RETRY_DELAY_MS + attempt * 100);
+    }
+
+    const finalResult =
+      latestResult ||
+      ({
+        user: null,
+        state: "FAILED_TERMINAL",
+        retryable: false,
+        reason: "auth_fetch_empty",
+        unauthorized: false,
+        networkError: false,
+        code: null,
+      } satisfies AuthCurrentUserFetchResult);
+
+    recordAuthMetric("auth_processing_state", {
+      state: finalResult.state,
+      reason: finalResult.reason,
+      retryable: finalResult.retryable,
+    });
+
+    if (
+      finalResult.state === "PROCESSING" ||
+      finalResult.state === "RETRYING" ||
+      finalResult.state === "STABILIZING"
+    ) {
+      sawAuthProcessingState = true;
+    }
+
+    if (finalResult.state === "AUTHENTICATED") {
+      recordAuthMetric("auth_session_ready", {
+        userId: finalResult.user?.id || null,
+      });
+      if (sawAuthProcessingState) {
+        recordAuthMetric("auth_timeout_recovered", {
+          userId: finalResult.user?.id || null,
+        });
+      }
+      sawAuthProcessingState = false;
+    }
+
+    if (finalResult.state === "FAILED_TERMINAL") {
+      sawAuthProcessingState = false;
+      recordAuthMetric("auth_terminal_failure", {
+        reason: finalResult.reason,
+        code: finalResult.code,
+      });
+    }
+
+    return finalResult;
+  })().finally(() => {
+    authCurrentUserInFlight = null;
+  });
+
+  return authCurrentUserInFlight;
 }
 
 export async function updateCurrentUser(body: Record<string, unknown>) {

@@ -21,7 +21,13 @@ export default function LoginClient({
   initialAuthError,
 }: LoginClientProps) {
   const router = useRouter();
-  const { user, loading: authLoading, refreshUser } = useAuth();
+  const {
+    user,
+    loading: authLoading,
+    lifecycleState,
+    beginAuthentication,
+    refreshUser,
+  } = useAuth();
 
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
@@ -30,6 +36,7 @@ export default function LoginClient({
 
   const mounted = useRef(true);
   const handledMessageRef = useRef<string | null>(null);
+  const loginSubmitInFlightRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -79,14 +86,9 @@ export default function LoginClient({
   const validateEmail = (value: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-  const wait = (ms: number) =>
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, ms);
-    });
-
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (loading) return;
+    if (loading || loginSubmitInFlightRef.current) return;
 
     const cleanEmail = email.trim().toLowerCase();
 
@@ -101,21 +103,34 @@ export default function LoginClient({
     }
 
     try {
+      loginSubmitInFlightRef.current = true;
       setLoading("email");
+      beginAuthentication();
 
       const res = await loginUser(cleanEmail, password);
+
+      if (res.code === "AUTH_LOGIN_PROCESSING") {
+        const processingUser = await refreshUser({
+          mode: "stabilize",
+          source: "duplicate_login_processing",
+        });
+        if (processingUser) {
+          toast.success("Login successful");
+          router.replace("/dashboard");
+          return;
+        }
+      }
 
       if (!res.success) {
         throw new Error(res.message || "Login failed");
       }
 
-      let refreshedUser = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        refreshedUser = await refreshUser();
-        if (refreshedUser) {
-          break;
-        }
-        await wait(200 + attempt * 150);
+      const refreshedUser = await refreshUser({
+        mode: "stabilize",
+        source: "password_login",
+      });
+      if (!refreshedUser) {
+        throw new Error("Session stabilization failed. Please try again.");
       }
 
       toast.success("Login successful");
@@ -123,6 +138,7 @@ export default function LoginClient({
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {
+      loginSubmitInFlightRef.current = false;
       if (mounted.current) {
         setLoading(null);
       }
@@ -248,6 +264,10 @@ export default function LoginClient({
         >
           {loading === "email"
             ? "Signing you in..."
+            : lifecycleState === "session_stabilizing"
+            ? "Stabilizing session..."
+            : lifecycleState === "retrying"
+            ? "Retrying session..."
             : authLoading
             ? "Checking session..."
             : "Sign in to workspace"}

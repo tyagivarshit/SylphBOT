@@ -11,6 +11,7 @@ import { startConnectionHealthCron } from "../cron/connectionHealth.cron";
 import { startMetaTokenRefreshCron } from "../cron/metaTokenRefresh.cron";
 import { startUsageResetCron } from "../cron/resetUsage.cron";
 import { startTrialExpiryCron } from "../cron/trial.cron";
+import { startIntegrationProjectionRecoveryCron } from "../cron/integrationProjectionRecovery.cron";
 import { closeAIQueue, initAIQueues } from "../queues/ai.queue";
 import {
   closeAuthEmailQueue,
@@ -263,6 +264,7 @@ export const initCrons = () => {
     startAutonomousSchedulerCron(),
     startTrialExpiryCron(),
     startMetaTokenRefreshCron(),
+    startIntegrationProjectionRecoveryCron(),
     startUsageResetCron(),
     startConnectionHealthCron(),
     startCleanupCron(),

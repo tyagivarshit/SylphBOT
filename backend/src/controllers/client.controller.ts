@@ -40,11 +40,35 @@ import {
   enqueueMetaOAuthContinuation,
   type MetaOAuthContinuationJobPayload,
 } from "../queues/metaOAuthContinuation.queue";
+import { scheduleDeferredIntegrationProjectionReconcile } from "../services/integrationProjectionRecovery.service";
 
 const META_OAUTH_CONNECT_TIMEOUT_MS = 45_000;
 const META_GRAPH_TIMEOUT_MS = 12_000;
 const META_GRAPH_FAST_LANE_TIMEOUT_MS = 2_200;
 const META_OAUTH_CALLBACK_SYNC_BUDGET_MS = 1_200;
+
+const emitCallbackRuntimeIsolationPreserved = (input: {
+  businessId: string;
+  platform: "INSTAGRAM" | "WHATSAPP";
+  mode: "connect" | "reconnect";
+  result: "accepted" | "degraded" | "queue_failed";
+  operationId?: string | null;
+  metadata?: Record<string, unknown>;
+}) => {
+  emitPerformanceMetric({
+    name: "callback_runtime_isolation_preserved",
+    value: 1,
+    businessId: input.businessId,
+    route: "clients_oauth_meta_callback",
+    metadata: {
+      platform: input.platform,
+      mode: input.mode,
+      result: input.result,
+      operationId: normalizeOptionalString(input.operationId),
+      ...(input.metadata || {}),
+    },
+  });
+};
 
 /*
 ---------------------------------------------------
@@ -1390,13 +1414,45 @@ const runMetaOnboardingLifecycleFinalization = async (input: {
       eventualSuccess: input.requestAborted || input.requestTimedOut,
     });
 
-    void enqueueIntegrationOnboardingProjectionReconcile({
+    const projectionEnqueue = await enqueueIntegrationOnboardingProjectionReconcile({
       type: "ONBOARDING_RECONCILE",
       businessId: input.businessId,
       tenantId: input.businessId,
       reason: "meta_oauth_lifecycle_completed",
       source: "meta_oauth_finalization",
-    }).catch(() => undefined);
+    }).catch((error) => {
+      return {
+        enqueued: false,
+        deferred: true,
+        duplicate: false,
+        queueUnavailable: true,
+        jobId: "",
+        reason: String((error as Error)?.message || "projection_enqueue_failed"),
+      };
+    });
+
+    if (!projectionEnqueue.enqueued) {
+      const deferred = await scheduleDeferredIntegrationProjectionReconcile({
+        businessId: input.businessId,
+        tenantId: input.businessId,
+        reason: "meta_oauth_lifecycle_completed",
+        source: "meta_oauth_finalization",
+        queueError:
+          normalizeOptionalString(projectionEnqueue.reason) ||
+          "projection_enqueue_failed",
+      }).catch(() => null);
+
+      emitPerformanceMetric({
+        name: "reconcile_inline_prevented",
+        value: 1,
+        businessId: input.businessId,
+        route: "clients_oauth_meta_callback",
+        metadata: {
+          reason: "projection_enqueue_unavailable",
+          recoveryKey: deferred?.recoveryKey || null,
+        },
+      });
+    }
   } catch (error) {
     const reason =
       String((error as { message?: unknown })?.message || "").trim() ||
@@ -2031,6 +2087,16 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
               operationId: lifecycleContext.attemptKey,
             },
           });
+          emitCallbackRuntimeIsolationPreserved({
+            businessId,
+            platform: targetPlatform,
+            mode: oauthState.mode,
+            result: "accepted",
+            operationId: lifecycleContext.attemptKey,
+            metadata: {
+              source: "token_exchange_deferred",
+            },
+          });
 
           return res.status(202).json({
             success: true,
@@ -2187,6 +2253,16 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             callbackFastLane: true,
           },
         });
+        emitCallbackRuntimeIsolationPreserved({
+          businessId,
+          platform: targetPlatform,
+          mode: oauthState.mode,
+          result: "queue_failed",
+          operationId: lifecycleContext.attemptKey,
+          metadata: {
+            reason: normalizeOptionalString((error as Error)?.message) || "queue_unavailable",
+          },
+        });
         return res.status(503).json({
           success: false,
           data: {
@@ -2240,6 +2316,16 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           budgetBreached: fastLaneDurationMs > META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
           operationId: lifecycleContext.attemptKey,
           replayToken: lifecycleContext.replayToken,
+        },
+      });
+      emitCallbackRuntimeIsolationPreserved({
+        businessId,
+        platform: targetPlatform,
+        mode: oauthState.mode,
+        result: "accepted",
+        operationId: lifecycleContext.attemptKey,
+        metadata: {
+          source: "callback_fast_lane",
         },
       });
 

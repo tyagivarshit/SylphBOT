@@ -126,7 +126,8 @@ const isProjectionProcessingState = (state?: string | null) => {
     normalized === "PROCESSING" ||
     normalized === "VERIFYING" ||
     normalized === "RECONCILING" ||
-    normalized === "PROVIDER_DELAYED"
+    normalized === "PROVIDER_DELAYED" ||
+    normalized === "STALE_VERIFIED"
   );
 };
 
@@ -208,6 +209,17 @@ export default function OnboardingFlow() {
   const projectionState =
     onboarding.integrationProjection?.processingState || "READY";
   const projectionStatusCopy = getProjectionStatusCopy(projectionState);
+  const projectionRuntime = onboarding.integrationProjection?.degradedRuntime;
+  const projectionDeferred = Boolean(projectionRuntime?.deferred);
+  const projectionQueueUnavailable = Boolean(projectionRuntime?.queueUnavailable);
+  const projectionRetryAttempt =
+    typeof projectionRuntime?.retryAttempt === "number"
+      ? projectionRuntime.retryAttempt
+      : null;
+  const projectionRecoveryDepth =
+    typeof projectionRuntime?.recoveryQueueDepth === "number"
+      ? projectionRuntime.recoveryQueueDepth
+      : null;
 
   return (
     <div className="space-y-4">
@@ -232,6 +244,15 @@ export default function OnboardingFlow() {
             <div className="mb-3 inline-flex rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
               {projectionStatusCopy}
             </div>
+          ) : null}
+          {projectionDeferred || projectionQueueUnavailable ? (
+            <p className="mb-3 text-xs font-medium text-amber-700">
+              Showing last verified integration state while background recovery retries
+              {projectionRetryAttempt ? ` (attempt ${projectionRetryAttempt})` : ""}
+              {projectionRecoveryDepth !== null
+                ? `, queue depth ${projectionRecoveryDepth}`
+                : ""}.
+            </p>
           ) : null}
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>

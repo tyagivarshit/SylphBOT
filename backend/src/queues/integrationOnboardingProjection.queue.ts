@@ -1,11 +1,11 @@
 import crypto from "crypto";
 import { Queue } from "bullmq";
 import { getQueueRedisConnection } from "../config/redis";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   buildQueueJobOptions,
   createResilientQueue,
 } from "./queue.defaults";
-import { runIntegrationOnboardingProjectionReconcile } from "../services/integrationOnboardingProjection.service";
 
 export const INTEGRATION_ONBOARDING_PROJECTION_QUEUE_NAME =
   "integration-onboarding-projection";
@@ -16,6 +16,15 @@ export type IntegrationOnboardingProjectionJobPayload = {
   tenantId?: string | null;
   reason?: string | null;
   source?: string | null;
+};
+
+export type IntegrationOnboardingProjectionEnqueueResult = {
+  enqueued: boolean;
+  deferred: boolean;
+  duplicate: boolean;
+  queueUnavailable: boolean;
+  jobId: string;
+  reason: string | null;
 };
 
 const globalForIntegrationOnboardingProjectionQueue =
@@ -65,44 +74,93 @@ export const initIntegrationOnboardingProjectionQueue = () => {
 export const getIntegrationOnboardingProjectionQueue = () =>
   initIntegrationOnboardingProjectionQueue();
 
-const fallbackLocalReconcile = (
-  payload: IntegrationOnboardingProjectionJobPayload
-) => {
-  setTimeout(() => {
-    void runIntegrationOnboardingProjectionReconcile({
-      businessId: payload.businessId,
-      tenantId: payload.tenantId || payload.businessId,
-      reason: payload.reason || "projection_queue_fallback",
-      source: "queue_fallback",
-    }).catch(() => undefined);
-  }, 35);
+const isDuplicateJobError = (error: unknown) =>
+  String((error as Error)?.message || "")
+    .toLowerCase()
+    .includes("jobid");
+
+const isQueueUnavailableError = (error: unknown) => {
+  const message = String((error as Error)?.message || "")
+    .trim()
+    .toLowerCase();
+  return (
+    message.includes("queue_unavailable:") ||
+    message.includes("redis_circuit_open")
+  );
 };
 
 export const enqueueIntegrationOnboardingProjectionReconcile = async (
   payload: IntegrationOnboardingProjectionJobPayload
-) => {
+) : Promise<IntegrationOnboardingProjectionEnqueueResult> => {
+  const jobId = createJobId(payload);
   try {
     const job = await getIntegrationOnboardingProjectionQueue().add(
       "onboarding-reconcile",
       payload,
       {
-        jobId: createJobId(payload),
+        jobId,
+        priority: 2,
       }
     );
 
-    if (job) {
-      return job;
-    }
+    return {
+      enqueued: Boolean(job),
+      deferred: false,
+      duplicate: false,
+      queueUnavailable: false,
+      jobId,
+      reason: null,
+    };
   } catch (error) {
+    if (isDuplicateJobError(error)) {
+      return {
+        enqueued: true,
+        deferred: false,
+        duplicate: true,
+        queueUnavailable: false,
+        jobId,
+        reason: "duplicate_jobid",
+      };
+    }
+
+    if (isQueueUnavailableError(error)) {
+      const reason =
+        String((error as Error)?.message || "queue_unavailable").trim() ||
+        "queue_unavailable";
+      console.warn("INTEGRATION_ONBOARDING_PROJECTION_QUEUE_ADD_FAILED", {
+        reason,
+        businessId: payload.businessId,
+        tenantId: payload.tenantId || payload.businessId,
+      });
+      emitPerformanceMetric({
+        name: "queue_unavailable_degraded_served",
+        value: 1,
+        businessId: payload.businessId,
+        route: "integration_onboarding_projection_queue",
+        metadata: {
+          tenantId: payload.tenantId || payload.businessId,
+          reason,
+          source: payload.source || "unknown",
+        },
+      });
+
+      return {
+        enqueued: false,
+        deferred: true,
+        duplicate: false,
+        queueUnavailable: true,
+        jobId,
+        reason,
+      };
+    }
+
     console.warn("INTEGRATION_ONBOARDING_PROJECTION_QUEUE_ADD_FAILED", {
       reason: String((error as Error)?.message || "queue_add_failed"),
       businessId: payload.businessId,
       tenantId: payload.tenantId || payload.businessId,
     });
+    throw error;
   }
-
-  fallbackLocalReconcile(payload);
-  return null;
 };
 
 export const closeIntegrationOnboardingProjectionQueue = async () => {

@@ -2,7 +2,11 @@ import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
 import { fetchInstagramUsername } from "../services/instagramProfile.service";
-import { withTimeoutFallback } from "../utils/boundedTimeout";
+import {
+  TimeoutExceededError,
+  withTimeout,
+  withTimeoutFallback,
+} from "../utils/boundedTimeout";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   applyPackagingOverride,
@@ -20,8 +24,6 @@ import {
   recoverProviderWebhook,
   refreshIntegrationToken,
   runMetaConnectDoctor,
-  runMetaTokenLifecycleSweep,
-  reconcileMetaColdBoot,
   seedMetaReviewerMode,
   generateMetaAppReviewPack,
   rollbackMarketplaceArtifact,
@@ -51,8 +53,13 @@ import {
   readIntegrationOnboardingFastLaneSnapshot,
 } from "../services/integrationOnboardingProjection.service";
 import { enqueueIntegrationOnboardingProjectionReconcile } from "../queues/integrationOnboardingProjection.queue";
+import {
+  getIntegrationProjectionRecoveryQueueDepth,
+  scheduleDeferredIntegrationProjectionReconcile,
+} from "../services/integrationProjectionRecovery.service";
 
 const INTEGRATION_API_TIMEOUT_MS = 1800;
+const RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS = 300;
 
 const normalizeOptionalString = (value?: unknown) => {
   const normalized = String(value || "").trim();
@@ -185,27 +192,121 @@ export const getOnboarding = async (req: any, res: any) => {
     });
 
     let reconcileScheduled = false;
+    let reconcileDeferred = false;
+    let queueUnavailable = false;
+    let queueDegradedReason: string | null = null;
+    let recoveryKey: string | null = null;
+    let recoveryRetryAttempt: number | null = null;
+    let projectionRecoveryQueueDepth: number | null = null;
     if (fastLane.recommendReconcile) {
       const intent = noteIntegrationOnboardingReconcileIntent({
         businessId,
         tenantId,
       });
       if (intent.shouldQueue) {
-        reconcileScheduled = true;
-        void enqueueIntegrationOnboardingProjectionReconcile({
-          type: "ONBOARDING_RECONCILE",
-          businessId,
-          tenantId,
-          reason: fastLane.reconcileReason,
-          source: "api_fast_lane",
-        }).catch((error) => {
-          console.warn("INTEGRATIONS_ONBOARDING_RECONCILE_ENQUEUE_FAILED", {
-            businessId,
-            tenantId: tenantId || businessId,
-            reason: String((error as Error)?.message || "enqueue_failed"),
+        try {
+          const enqueueResult = await withTimeout({
+            label: "integrations_onboarding_reconcile_enqueue",
+            timeoutMs: RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS,
+            task: enqueueIntegrationOnboardingProjectionReconcile({
+              type: "ONBOARDING_RECONCILE",
+              businessId,
+              tenantId,
+              reason: fastLane.reconcileReason,
+              source: "api_fast_lane",
+            }),
           });
-        });
+          if (enqueueResult.enqueued) {
+            reconcileScheduled = true;
+          } else {
+            queueUnavailable = enqueueResult.queueUnavailable;
+            queueDegradedReason =
+              normalizeOptionalString(enqueueResult.reason) ||
+              "queue_unavailable";
+          }
+        } catch (error) {
+          queueUnavailable = true;
+          queueDegradedReason = error instanceof TimeoutExceededError
+            ? `enqueue_timeout_${RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS}ms`
+            : normalizeOptionalString((error as Error)?.message) || "enqueue_failed";
+        }
+
+        if (!reconcileScheduled) {
+          const deferred = await scheduleDeferredIntegrationProjectionReconcile({
+            businessId,
+            tenantId,
+            reason: fastLane.reconcileReason,
+            source: "api_fast_lane",
+            queueError: queueDegradedReason || "queue_unavailable",
+          }).catch(() => null);
+          reconcileDeferred = true;
+          recoveryKey = deferred?.recoveryKey || null;
+          recoveryRetryAttempt = deferred?.retryAttempt ?? null;
+          projectionRecoveryQueueDepth = deferred?.queueDepth ?? null;
+          if (projectionRecoveryQueueDepth === null) {
+            projectionRecoveryQueueDepth =
+              await getIntegrationProjectionRecoveryQueueDepth().catch(() => null);
+          }
+          emitPerformanceMetric({
+            name: "reconcile_inline_prevented",
+            value: 1,
+            businessId,
+            route: "integrations_onboarding_projection",
+            metadata: {
+              tenantId: tenantId || businessId,
+              reason: fastLane.reconcileReason,
+              queueReason: queueDegradedReason || "queue_unavailable",
+              recoveryKey,
+            },
+          });
+          emitPerformanceMetric({
+            name: "queue_unavailable_degraded_served",
+            value: 1,
+            businessId,
+            route: "integrations_onboarding_projection",
+            metadata: {
+              tenantId: tenantId || businessId,
+              reason: queueDegradedReason || "queue_unavailable",
+              recoveryKey,
+              retryAttempt: recoveryRetryAttempt,
+            },
+          });
+        }
       }
+    }
+
+    const snapshotWithRuntime = {
+      ...fastLane.snapshot,
+      integrationProjection: {
+        ...(fastLane.snapshot.integrationProjection || {}),
+        degradedRuntime: {
+          deferred: reconcileDeferred,
+          queueUnavailable,
+          recoveryKey,
+          retryAttempt: recoveryRetryAttempt,
+          recoveryQueueDepth: projectionRecoveryQueueDepth,
+          reason:
+            queueDegradedReason ||
+            fastLane.snapshot.integrationProjection?.staleReason ||
+            null,
+          lastQueueError: queueDegradedReason,
+        },
+      },
+    };
+
+    if (fastLane.degraded || reconcileDeferred) {
+      emitPerformanceMetric({
+        name: "degraded_projection_state_count",
+        value: 1,
+        businessId,
+        route: "integrations_onboarding_projection",
+        metadata: {
+          stale: fastLane.stale,
+          processingState: fastLane.processingState,
+          reconcileDeferred,
+          queueUnavailable,
+        },
+      });
     }
 
     emitPerformanceMetric({
@@ -221,14 +322,18 @@ export const getOnboarding = async (req: any, res: any) => {
         state: fastLane.processingState,
         degraded: fastLane.degraded,
         reconcileScheduled,
+        reconcileDeferred,
+        queueUnavailable,
+        recoveryKey,
+        projectionRecoveryQueueDepth,
       },
     });
 
     return res.json({
       success: true,
-      data: fastLane.snapshot,
+      data: snapshotWithRuntime,
       meta: {
-        degraded: fastLane.degraded,
+        degraded: fastLane.degraded || reconcileDeferred,
         cache: fastLane.cache,
         stale: fastLane.stale,
         staleAgeMs: fastLane.staleAgeMs,
@@ -236,6 +341,12 @@ export const getOnboarding = async (req: any, res: any) => {
         verificationState: fastLane.verificationState,
         reconcileInFlight: fastLane.reconcileInFlight,
         reconcileScheduled,
+        reconcileDeferred,
+        queueUnavailable,
+        recoveryKey,
+        recoveryRetryAttempt,
+        projectionRecoveryQueueDepth,
+        queueDegradedReason,
         lastSuccessfulReconcileAt: fastLane.lastSuccessfulReconcileAt,
         lastReconcileError: fastLane.lastReconcileError,
       },
@@ -308,6 +419,15 @@ export const getOnboarding = async (req: any, res: any) => {
         reconcileInFlight: false,
         lastSuccessfulReconcileAt: null,
         refreshedAt,
+        degradedRuntime: {
+          deferred: false,
+          queueUnavailable: false,
+          recoveryKey: null,
+          retryAttempt: null,
+          recoveryQueueDepth: null,
+          reason: "fast_lane_failed",
+          lastQueueError: null,
+        },
       },
     };
     emitPerformanceMetric({
@@ -318,6 +438,15 @@ export const getOnboarding = async (req: any, res: any) => {
       metadata: {
         degraded: true,
         reason: String((err as Error)?.message || "fast_lane_failed"),
+      },
+    });
+    emitPerformanceMetric({
+      name: "degraded_projection_state_count",
+      value: 1,
+      businessId,
+      route: "integrations_onboarding_projection",
+      metadata: {
+        reason: "fast_lane_failed",
       },
     });
     return res.json({
@@ -332,6 +461,12 @@ export const getOnboarding = async (req: any, res: any) => {
         verificationState: "UNVERIFIED",
         reconcileInFlight: false,
         reconcileScheduled: false,
+        reconcileDeferred: false,
+        queueUnavailable: false,
+        recoveryKey: null,
+        recoveryRetryAttempt: null,
+        projectionRecoveryQueueDepth: null,
+        queueDegradedReason: "fast_lane_failed",
         lastSuccessfulReconcileAt: null,
         lastReconcileError: String((err as Error)?.message || "fast_lane_failed"),
       },
@@ -881,16 +1016,65 @@ export const runMetaTokenLifecycle = async (req: any, res: any) => {
         message: "Unauthorized",
       });
     }
-    const report = await runMetaTokenLifecycleSweep({
+
+    const enqueueResult = await withTimeout({
+      label: "integrations_token_sweep_enqueue",
+      timeoutMs: RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS,
+      task: enqueueIntegrationOnboardingProjectionReconcile({
+        type: "ONBOARDING_RECONCILE",
+        businessId: context.businessId,
+        tenantId: context.tenantId,
+        reason: "manual_token_lifecycle_sweep",
+        source: "connect_hub_token_sweep",
+      }),
+    }).catch(() => ({
+      enqueued: false,
+      deferred: true,
+      duplicate: false,
+      queueUnavailable: true,
+      jobId: "",
+      reason: "enqueue_failed",
+    }));
+
+    if (enqueueResult.enqueued) {
+      return res.status(202).json({
+        success: true,
+        data: {
+          status: "QUEUED",
+          operation: "META_TOKEN_LIFECYCLE_SWEEP",
+          queueJobId: enqueueResult.jobId,
+        },
+      });
+    }
+
+    const deferred = await scheduleDeferredIntegrationProjectionReconcile({
       businessId: context.businessId,
       tenantId: context.tenantId,
-      provider: normalizeOptionalString(req.body?.provider) || "ALL",
-      environment: normalizeOptionalString(req.body?.environment) || "LIVE",
-      autoRefresh: req.body?.autoRefresh !== false,
+      reason: "manual_token_lifecycle_sweep",
+      source: "connect_hub_token_sweep",
+      queueError: normalizeOptionalString(enqueueResult.reason) || "queue_unavailable",
+    }).catch(() => null);
+
+    emitPerformanceMetric({
+      name: "reconcile_inline_prevented",
+      value: 1,
+      businessId: context.businessId,
+      route: "integrations_connect_hub_token_sweep",
+      metadata: {
+        reason: "queue_unavailable",
+        recoveryKey: deferred?.recoveryKey || null,
+      },
     });
-    return res.json({
+
+    return res.status(202).json({
       success: true,
-      data: report,
+      data: {
+        status: "DEFERRED",
+        operation: "META_TOKEN_LIFECYCLE_SWEEP",
+        recoveryKey: deferred?.recoveryKey || null,
+        retryAttempt: deferred?.retryAttempt ?? null,
+        recoveryQueueDepth: deferred?.queueDepth ?? null,
+      },
     });
   } catch (error) {
     return res.status(400).json({
@@ -910,15 +1094,65 @@ export const runMetaColdBootReconcile = async (req: any, res: any) => {
         message: "Unauthorized",
       });
     }
-    const result = await reconcileMetaColdBoot({
+
+    const enqueueResult = await withTimeout({
+      label: "integrations_cold_boot_reconcile_enqueue",
+      timeoutMs: RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS,
+      task: enqueueIntegrationOnboardingProjectionReconcile({
+        type: "ONBOARDING_RECONCILE",
+        businessId: context.businessId,
+        tenantId: context.tenantId,
+        reason: "manual_cold_boot_reconcile",
+        source: "connect_hub_cold_boot",
+      }),
+    }).catch(() => ({
+      enqueued: false,
+      deferred: true,
+      duplicate: false,
+      queueUnavailable: true,
+      jobId: "",
+      reason: "enqueue_failed",
+    }));
+
+    if (enqueueResult.enqueued) {
+      return res.status(202).json({
+        success: true,
+        data: {
+          status: "QUEUED",
+          operation: "META_COLD_BOOT_RECONCILE",
+          queueJobId: enqueueResult.jobId,
+        },
+      });
+    }
+
+    const deferred = await scheduleDeferredIntegrationProjectionReconcile({
       businessId: context.businessId,
       tenantId: context.tenantId,
-      provider: normalizeOptionalString(req.body?.provider) || "ALL",
-      environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+      reason: "manual_cold_boot_reconcile",
+      source: "connect_hub_cold_boot",
+      queueError: normalizeOptionalString(enqueueResult.reason) || "queue_unavailable",
+    }).catch(() => null);
+
+    emitPerformanceMetric({
+      name: "reconcile_inline_prevented",
+      value: 1,
+      businessId: context.businessId,
+      route: "integrations_connect_hub_cold_boot",
+      metadata: {
+        reason: "queue_unavailable",
+        recoveryKey: deferred?.recoveryKey || null,
+      },
     });
-    return res.json({
+
+    return res.status(202).json({
       success: true,
-      data: result,
+      data: {
+        status: "DEFERRED",
+        operation: "META_COLD_BOOT_RECONCILE",
+        recoveryKey: deferred?.recoveryKey || null,
+        retryAttempt: deferred?.retryAttempt ?? null,
+        recoveryQueueDepth: deferred?.queueDepth ?? null,
+      },
     });
   } catch (error) {
     return res.status(400).json({

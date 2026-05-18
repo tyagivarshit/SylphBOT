@@ -1,12 +1,14 @@
 import redis from "../config/redis";
 import { TRIAL_DAYS } from "../config/pricing.config";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import { getIntegrationOnboardingProjectionQueue } from "../queues/integrationOnboardingProjection.queue";
 import { getOnboardingSnapshot } from "./onboarding.service";
 import {
   getConnectHubProjection,
   reconcileMetaColdBoot,
   runMetaTokenLifecycleSweep,
 } from "./saasPackagingConnectHubOS.service";
+import { TimeoutExceededError, withTimeout } from "../utils/boundedTimeout";
 
 type BaseOnboardingSnapshot = Awaited<ReturnType<typeof getOnboardingSnapshot>>;
 type ConnectHubProjection = Awaited<ReturnType<typeof getConnectHubProjection>>;
@@ -89,6 +91,15 @@ type IntegrationProjectionEnvelope = {
   reconcileInFlight: boolean;
   lastSuccessfulReconcileAt: string | null;
   refreshedAt: string;
+  degradedRuntime?: {
+    deferred: boolean;
+    queueUnavailable: boolean;
+    recoveryKey: string | null;
+    retryAttempt: number | null;
+    recoveryQueueDepth: number | null;
+    reason: string | null;
+    lastQueueError: string | null;
+  } | null;
 };
 
 export type IntegrationOnboardingProjectionSnapshot = BaseOnboardingSnapshot & {
@@ -140,10 +151,38 @@ const ONBOARDING_PROJECTION_QUEUE_COOLDOWN_MS = 1_500;
 const ONBOARDING_PROJECTION_REDIS_TTL_SECONDS = Math.ceil(
   (ONBOARDING_PROJECTION_HARD_EXPIRY_MS + 120_000) / 1000
 );
+const INTEGRATION_RECONCILE_RUNTIME_BUDGET_MS = Math.max(
+  1_000,
+  Number(process.env.INTEGRATION_RECONCILE_RUNTIME_BUDGET_MS || 6_500)
+);
+const INTEGRATION_RECONCILE_PROVIDER_BUDGET_MS = Math.max(
+  800,
+  Number(process.env.INTEGRATION_RECONCILE_PROVIDER_BUDGET_MS || 4_500)
+);
+const INTEGRATION_RECONCILE_QUEUE_DEPTH_LIMIT = Math.max(
+  1,
+  Number(process.env.INTEGRATION_RECONCILE_QUEUE_DEPTH_LIMIT || 120)
+);
+const INTEGRATION_RECONCILE_QUEUE_DEPTH_TIMEOUT_MS = Math.max(
+  120,
+  Number(process.env.INTEGRATION_RECONCILE_QUEUE_DEPTH_TIMEOUT_MS || 450)
+);
 
 const projectionMemoryCache = new Map<string, ProjectionCacheEntry>();
 const projectionReconcileInFlight = new Map<string, Promise<ProjectionCacheEntry>>();
 const projectionReconcileTracker = new Map<string, ReconcileTracker>();
+
+class ReconcileCircuitBreakerError extends Error {
+  readonly reason: string;
+  readonly metadata: Record<string, unknown>;
+
+  constructor(reason: string, metadata?: Record<string, unknown>) {
+    super(`reconcile_circuit_breaker:${reason}`);
+    this.name = "ReconcileCircuitBreakerError";
+    this.reason = reason;
+    this.metadata = metadata || {};
+  }
+}
 
 const normalizeIdentifier = (value: unknown) => String(value || "").trim();
 
@@ -691,6 +730,16 @@ const emitFastLaneMetrics = (input: {
       source: input.source,
     },
   });
+  emitPerformanceMetric({
+    name: "stale_projection_age_ms",
+    value: input.staleAgeMs,
+    businessId: input.businessId,
+    route: "integrations_onboarding_fast_lane",
+    metadata: {
+      stale: input.stale,
+      source: input.source,
+    },
+  });
   if (input.stale) {
     emitPerformanceMetric({
       name: "stale_projection_served",
@@ -700,6 +749,26 @@ const emitFastLaneMetrics = (input: {
       metadata: {
         source: input.source,
         staleAgeMs: input.staleAgeMs,
+      },
+    });
+    emitPerformanceMetric({
+      name: "projection_stale_served_count",
+      value: 1,
+      businessId: input.businessId,
+      route: "integrations_onboarding_fast_lane",
+      metadata: {
+        source: input.source,
+        staleAgeMs: input.staleAgeMs,
+      },
+    });
+    emitPerformanceMetric({
+      name: "degraded_projection_state_count",
+      value: 1,
+      businessId: input.businessId,
+      route: "integrations_onboarding_fast_lane",
+      metadata: {
+        source: input.source,
+        state: input.processingState,
       },
     });
   }
@@ -868,6 +937,19 @@ export const noteIntegrationOnboardingReconcileIntent = (input: {
   };
 };
 
+const readProjectionQueueDepth = async () => {
+  try {
+    const queueDepth = await withTimeout({
+      label: "integration_projection_queue_depth",
+      timeoutMs: INTEGRATION_RECONCILE_QUEUE_DEPTH_TIMEOUT_MS,
+      task: getIntegrationOnboardingProjectionQueue().count() as Promise<number>,
+    });
+    return Number.isFinite(Number(queueDepth)) ? Math.max(0, Number(queueDepth)) : null;
+  } catch {
+    return null;
+  }
+};
+
 const runProviderReconcilePass = async (input: {
   businessId: string;
   tenantId: string;
@@ -973,20 +1055,71 @@ export const runIntegrationOnboardingProjectionReconcile = async (input: {
       },
     });
 
-    const reconcilePass = await runProviderReconcilePass({
-      businessId: key.businessId,
-      tenantId: key.tenantId,
-      reason,
-    });
+    const queueDepth = await readProjectionQueueDepth();
+    if (queueDepth !== null) {
+      emitPerformanceMetric({
+        name: "projection_recovery_queue_depth",
+        value: queueDepth,
+        businessId: key.businessId,
+        route: "integrations_onboarding_reconcile",
+        metadata: {
+          reason,
+          source: normalizeIdentifier(input.source) || "unknown",
+        },
+      });
+    }
+    if (
+      queueDepth !== null &&
+      queueDepth >= INTEGRATION_RECONCILE_QUEUE_DEPTH_LIMIT
+    ) {
+      throw new ReconcileCircuitBreakerError("worker_pressure_high", {
+        queueDepth,
+        queueDepthLimit: INTEGRATION_RECONCILE_QUEUE_DEPTH_LIMIT,
+      });
+    }
 
-    const projectionStartedAtMs = Date.now();
-    const [onboardingSnapshot, connectHubProjection] = await Promise.all([
-      getOnboardingSnapshot(key.businessId),
-      getConnectHubProjection({
+    const reconcilePass = await withTimeout({
+      label: "integrations_onboarding_reconcile_budget",
+      timeoutMs: INTEGRATION_RECONCILE_RUNTIME_BUDGET_MS,
+      task: runProviderReconcilePass({
         businessId: key.businessId,
         tenantId: key.tenantId,
+        reason,
       }),
-    ]);
+    }).catch((error) => {
+      if (error instanceof TimeoutExceededError) {
+        throw new ReconcileCircuitBreakerError("runtime_budget_exceeded", {
+          budgetMs: INTEGRATION_RECONCILE_RUNTIME_BUDGET_MS,
+        });
+      }
+      throw error;
+    });
+    if (reconcilePass.durationMs > INTEGRATION_RECONCILE_PROVIDER_BUDGET_MS) {
+      throw new ReconcileCircuitBreakerError("provider_latency_high", {
+        providerDurationMs: reconcilePass.durationMs,
+        providerBudgetMs: INTEGRATION_RECONCILE_PROVIDER_BUDGET_MS,
+      });
+    }
+
+    const projectionStartedAtMs = Date.now();
+    const [onboardingSnapshot, connectHubProjection] = await withTimeout({
+      label: "integrations_onboarding_projection_budget",
+      timeoutMs: INTEGRATION_RECONCILE_RUNTIME_BUDGET_MS,
+      task: Promise.all([
+        getOnboardingSnapshot(key.businessId),
+        getConnectHubProjection({
+          businessId: key.businessId,
+          tenantId: key.tenantId,
+        }),
+      ]),
+    }).catch((error) => {
+      if (error instanceof TimeoutExceededError) {
+        throw new ReconcileCircuitBreakerError("projection_budget_exceeded", {
+          budgetMs: INTEGRATION_RECONCILE_RUNTIME_BUDGET_MS,
+        });
+      }
+      throw error;
+    });
     const projectionDurationMs = Date.now() - projectionStartedAtMs;
     emitPerformanceMetric({
       name: "integration_projection_ms",
@@ -1055,14 +1188,42 @@ export const runIntegrationOnboardingProjectionReconcile = async (input: {
       tracker.lastFinishedAtMs = Date.now();
       tracker.lastDurationMs = Date.now() - startedAtMs;
       tracker.lastError = String((error as Error)?.message || "reconcile_failed");
+      const source = normalizeIdentifier(input.source) || "unknown";
+      if (error instanceof ReconcileCircuitBreakerError) {
+        emitPerformanceMetric({
+          name: "reconcile_circuit_breaker_triggered",
+          value: 1,
+          businessId: key.businessId,
+          route: "integrations_onboarding_reconcile",
+          metadata: {
+            reason,
+            source,
+            breakerReason: error.reason,
+            ...error.metadata,
+          },
+        });
+      } else {
+        emitPerformanceMetric({
+          name: "provider_reconcile_failures",
+          value: 1,
+          businessId: key.businessId,
+          route: "integrations_onboarding_reconcile",
+          metadata: {
+            reason,
+            source,
+            error: tracker.lastError,
+          },
+        });
+      }
       emitPerformanceMetric({
-        name: "provider_reconcile_failures",
+        name: "deferred_reconcile_retry_count",
         value: 1,
         businessId: key.businessId,
         route: "integrations_onboarding_reconcile",
         metadata: {
           reason,
-          source: normalizeIdentifier(input.source) || "unknown",
+          source,
+          circuitBreaker: error instanceof ReconcileCircuitBreakerError,
           error: tracker.lastError,
         },
       });

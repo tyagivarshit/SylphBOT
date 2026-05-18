@@ -14,7 +14,9 @@ const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingCo
 const developerPlatformExtensibilityOS_service_1 = require("../services/developerPlatformExtensibilityOS.service");
 const integrationOnboardingProjection_service_1 = require("../services/integrationOnboardingProjection.service");
 const integrationOnboardingProjection_queue_1 = require("../queues/integrationOnboardingProjection.queue");
+const integrationProjectionRecovery_service_1 = require("../services/integrationProjectionRecovery.service");
 const INTEGRATION_API_TIMEOUT_MS = 1800;
+const RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS = 300;
 const normalizeOptionalString = (value) => {
     const normalized = String(value || "").trim();
     return normalized || null;
@@ -109,27 +111,119 @@ const getOnboarding = async (req, res) => {
             tenantId,
         });
         let reconcileScheduled = false;
+        let reconcileDeferred = false;
+        let queueUnavailable = false;
+        let queueDegradedReason = null;
+        let recoveryKey = null;
+        let recoveryRetryAttempt = null;
+        let projectionRecoveryQueueDepth = null;
         if (fastLane.recommendReconcile) {
             const intent = (0, integrationOnboardingProjection_service_1.noteIntegrationOnboardingReconcileIntent)({
                 businessId,
                 tenantId,
             });
             if (intent.shouldQueue) {
-                reconcileScheduled = true;
-                void (0, integrationOnboardingProjection_queue_1.enqueueIntegrationOnboardingProjectionReconcile)({
-                    type: "ONBOARDING_RECONCILE",
-                    businessId,
-                    tenantId,
-                    reason: fastLane.reconcileReason,
-                    source: "api_fast_lane",
-                }).catch((error) => {
-                    console.warn("INTEGRATIONS_ONBOARDING_RECONCILE_ENQUEUE_FAILED", {
-                        businessId,
-                        tenantId: tenantId || businessId,
-                        reason: String(error?.message || "enqueue_failed"),
+                try {
+                    const enqueueResult = await (0, boundedTimeout_1.withTimeout)({
+                        label: "integrations_onboarding_reconcile_enqueue",
+                        timeoutMs: RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS,
+                        task: (0, integrationOnboardingProjection_queue_1.enqueueIntegrationOnboardingProjectionReconcile)({
+                            type: "ONBOARDING_RECONCILE",
+                            businessId,
+                            tenantId,
+                            reason: fastLane.reconcileReason,
+                            source: "api_fast_lane",
+                        }),
                     });
-                });
+                    if (enqueueResult.enqueued) {
+                        reconcileScheduled = true;
+                    }
+                    else {
+                        queueUnavailable = enqueueResult.queueUnavailable;
+                        queueDegradedReason =
+                            normalizeOptionalString(enqueueResult.reason) ||
+                                "queue_unavailable";
+                    }
+                }
+                catch (error) {
+                    queueUnavailable = true;
+                    queueDegradedReason = error instanceof boundedTimeout_1.TimeoutExceededError
+                        ? `enqueue_timeout_${RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS}ms`
+                        : normalizeOptionalString(error?.message) || "enqueue_failed";
+                }
+                if (!reconcileScheduled) {
+                    const deferred = await (0, integrationProjectionRecovery_service_1.scheduleDeferredIntegrationProjectionReconcile)({
+                        businessId,
+                        tenantId,
+                        reason: fastLane.reconcileReason,
+                        source: "api_fast_lane",
+                        queueError: queueDegradedReason || "queue_unavailable",
+                    }).catch(() => null);
+                    reconcileDeferred = true;
+                    recoveryKey = deferred?.recoveryKey || null;
+                    recoveryRetryAttempt = deferred?.retryAttempt ?? null;
+                    projectionRecoveryQueueDepth = deferred?.queueDepth ?? null;
+                    if (projectionRecoveryQueueDepth === null) {
+                        projectionRecoveryQueueDepth =
+                            await (0, integrationProjectionRecovery_service_1.getIntegrationProjectionRecoveryQueueDepth)().catch(() => null);
+                    }
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "reconcile_inline_prevented",
+                        value: 1,
+                        businessId,
+                        route: "integrations_onboarding_projection",
+                        metadata: {
+                            tenantId: tenantId || businessId,
+                            reason: fastLane.reconcileReason,
+                            queueReason: queueDegradedReason || "queue_unavailable",
+                            recoveryKey,
+                        },
+                    });
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "queue_unavailable_degraded_served",
+                        value: 1,
+                        businessId,
+                        route: "integrations_onboarding_projection",
+                        metadata: {
+                            tenantId: tenantId || businessId,
+                            reason: queueDegradedReason || "queue_unavailable",
+                            recoveryKey,
+                            retryAttempt: recoveryRetryAttempt,
+                        },
+                    });
+                }
             }
+        }
+        const snapshotWithRuntime = {
+            ...fastLane.snapshot,
+            integrationProjection: {
+                ...(fastLane.snapshot.integrationProjection || {}),
+                degradedRuntime: {
+                    deferred: reconcileDeferred,
+                    queueUnavailable,
+                    recoveryKey,
+                    retryAttempt: recoveryRetryAttempt,
+                    recoveryQueueDepth: projectionRecoveryQueueDepth,
+                    reason: queueDegradedReason ||
+                        fastLane.snapshot.integrationProjection?.staleReason ||
+                        null,
+                    lastQueueError: queueDegradedReason,
+                },
+            },
+        };
+        if (fastLane.degraded || reconcileDeferred) {
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "degraded_projection_state_count",
+                value: 1,
+                businessId,
+                route: "integrations_onboarding_projection",
+                metadata: {
+                    stale: fastLane.stale,
+                    processingState: fastLane.processingState,
+                    reconcileDeferred,
+                    queueUnavailable,
+                },
+            });
         }
         (0, performanceMetrics_1.emitPerformanceMetric)({
             name: "integration_projection_ms",
@@ -144,13 +238,17 @@ const getOnboarding = async (req, res) => {
                 state: fastLane.processingState,
                 degraded: fastLane.degraded,
                 reconcileScheduled,
+                reconcileDeferred,
+                queueUnavailable,
+                recoveryKey,
+                projectionRecoveryQueueDepth,
             },
         });
         return res.json({
             success: true,
-            data: fastLane.snapshot,
+            data: snapshotWithRuntime,
             meta: {
-                degraded: fastLane.degraded,
+                degraded: fastLane.degraded || reconcileDeferred,
                 cache: fastLane.cache,
                 stale: fastLane.stale,
                 staleAgeMs: fastLane.staleAgeMs,
@@ -158,6 +256,12 @@ const getOnboarding = async (req, res) => {
                 verificationState: fastLane.verificationState,
                 reconcileInFlight: fastLane.reconcileInFlight,
                 reconcileScheduled,
+                reconcileDeferred,
+                queueUnavailable,
+                recoveryKey,
+                recoveryRetryAttempt,
+                projectionRecoveryQueueDepth,
+                queueDegradedReason,
                 lastSuccessfulReconcileAt: fastLane.lastSuccessfulReconcileAt,
                 lastReconcileError: fastLane.lastReconcileError,
             },
@@ -231,6 +335,15 @@ const getOnboarding = async (req, res) => {
                 reconcileInFlight: false,
                 lastSuccessfulReconcileAt: null,
                 refreshedAt,
+                degradedRuntime: {
+                    deferred: false,
+                    queueUnavailable: false,
+                    recoveryKey: null,
+                    retryAttempt: null,
+                    recoveryQueueDepth: null,
+                    reason: "fast_lane_failed",
+                    lastQueueError: null,
+                },
             },
         };
         (0, performanceMetrics_1.emitPerformanceMetric)({
@@ -241,6 +354,15 @@ const getOnboarding = async (req, res) => {
             metadata: {
                 degraded: true,
                 reason: String(err?.message || "fast_lane_failed"),
+            },
+        });
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "degraded_projection_state_count",
+            value: 1,
+            businessId,
+            route: "integrations_onboarding_projection",
+            metadata: {
+                reason: "fast_lane_failed",
             },
         });
         return res.json({
@@ -255,6 +377,12 @@ const getOnboarding = async (req, res) => {
                 verificationState: "UNVERIFIED",
                 reconcileInFlight: false,
                 reconcileScheduled: false,
+                reconcileDeferred: false,
+                queueUnavailable: false,
+                recoveryKey: null,
+                recoveryRetryAttempt: null,
+                projectionRecoveryQueueDepth: null,
+                queueDegradedReason: "fast_lane_failed",
                 lastSuccessfulReconcileAt: null,
                 lastReconcileError: String(err?.message || "fast_lane_failed"),
             },
@@ -764,16 +892,60 @@ const runMetaTokenLifecycle = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const report = await (0, saasPackagingConnectHubOS_service_1.runMetaTokenLifecycleSweep)({
+        const enqueueResult = await (0, boundedTimeout_1.withTimeout)({
+            label: "integrations_token_sweep_enqueue",
+            timeoutMs: RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS,
+            task: (0, integrationOnboardingProjection_queue_1.enqueueIntegrationOnboardingProjectionReconcile)({
+                type: "ONBOARDING_RECONCILE",
+                businessId: context.businessId,
+                tenantId: context.tenantId,
+                reason: "manual_token_lifecycle_sweep",
+                source: "connect_hub_token_sweep",
+            }),
+        }).catch(() => ({
+            enqueued: false,
+            deferred: true,
+            duplicate: false,
+            queueUnavailable: true,
+            jobId: "",
+            reason: "enqueue_failed",
+        }));
+        if (enqueueResult.enqueued) {
+            return res.status(202).json({
+                success: true,
+                data: {
+                    status: "QUEUED",
+                    operation: "META_TOKEN_LIFECYCLE_SWEEP",
+                    queueJobId: enqueueResult.jobId,
+                },
+            });
+        }
+        const deferred = await (0, integrationProjectionRecovery_service_1.scheduleDeferredIntegrationProjectionReconcile)({
             businessId: context.businessId,
             tenantId: context.tenantId,
-            provider: normalizeOptionalString(req.body?.provider) || "ALL",
-            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
-            autoRefresh: req.body?.autoRefresh !== false,
+            reason: "manual_token_lifecycle_sweep",
+            source: "connect_hub_token_sweep",
+            queueError: normalizeOptionalString(enqueueResult.reason) || "queue_unavailable",
+        }).catch(() => null);
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "reconcile_inline_prevented",
+            value: 1,
+            businessId: context.businessId,
+            route: "integrations_connect_hub_token_sweep",
+            metadata: {
+                reason: "queue_unavailable",
+                recoveryKey: deferred?.recoveryKey || null,
+            },
         });
-        return res.json({
+        return res.status(202).json({
             success: true,
-            data: report,
+            data: {
+                status: "DEFERRED",
+                operation: "META_TOKEN_LIFECYCLE_SWEEP",
+                recoveryKey: deferred?.recoveryKey || null,
+                retryAttempt: deferred?.retryAttempt ?? null,
+                recoveryQueueDepth: deferred?.queueDepth ?? null,
+            },
         });
     }
     catch (error) {
@@ -794,15 +966,60 @@ const runMetaColdBootReconcile = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const result = await (0, saasPackagingConnectHubOS_service_1.reconcileMetaColdBoot)({
+        const enqueueResult = await (0, boundedTimeout_1.withTimeout)({
+            label: "integrations_cold_boot_reconcile_enqueue",
+            timeoutMs: RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS,
+            task: (0, integrationOnboardingProjection_queue_1.enqueueIntegrationOnboardingProjectionReconcile)({
+                type: "ONBOARDING_RECONCILE",
+                businessId: context.businessId,
+                tenantId: context.tenantId,
+                reason: "manual_cold_boot_reconcile",
+                source: "connect_hub_cold_boot",
+            }),
+        }).catch(() => ({
+            enqueued: false,
+            deferred: true,
+            duplicate: false,
+            queueUnavailable: true,
+            jobId: "",
+            reason: "enqueue_failed",
+        }));
+        if (enqueueResult.enqueued) {
+            return res.status(202).json({
+                success: true,
+                data: {
+                    status: "QUEUED",
+                    operation: "META_COLD_BOOT_RECONCILE",
+                    queueJobId: enqueueResult.jobId,
+                },
+            });
+        }
+        const deferred = await (0, integrationProjectionRecovery_service_1.scheduleDeferredIntegrationProjectionReconcile)({
             businessId: context.businessId,
             tenantId: context.tenantId,
-            provider: normalizeOptionalString(req.body?.provider) || "ALL",
-            environment: normalizeOptionalString(req.body?.environment) || "LIVE",
+            reason: "manual_cold_boot_reconcile",
+            source: "connect_hub_cold_boot",
+            queueError: normalizeOptionalString(enqueueResult.reason) || "queue_unavailable",
+        }).catch(() => null);
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "reconcile_inline_prevented",
+            value: 1,
+            businessId: context.businessId,
+            route: "integrations_connect_hub_cold_boot",
+            metadata: {
+                reason: "queue_unavailable",
+                recoveryKey: deferred?.recoveryKey || null,
+            },
         });
-        return res.json({
+        return res.status(202).json({
             success: true,
-            data: result,
+            data: {
+                status: "DEFERRED",
+                operation: "META_COLD_BOOT_RECONCILE",
+                recoveryKey: deferred?.recoveryKey || null,
+                retryAttempt: deferred?.retryAttempt ?? null,
+                recoveryQueueDepth: deferred?.queueDepth ?? null,
+            },
         });
     }
     catch (error) {

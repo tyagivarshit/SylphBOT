@@ -66,8 +66,18 @@ export type OnboardingSnapshot = {
     verificationState?: "VERIFIED" | "VERIFYING" | "UNVERIFIED" | "DEGRADED" | string;
     stale?: boolean;
     staleAgeMs?: number;
+    staleReason?: string | null;
     reconcileInFlight?: boolean;
     lastSuccessfulReconcileAt?: string | null;
+    degradedRuntime?: {
+      deferred?: boolean;
+      queueUnavailable?: boolean;
+      recoveryKey?: string | null;
+      retryAttempt?: number | null;
+      recoveryQueueDepth?: number | null;
+      reason?: string | null;
+      lastQueueError?: string | null;
+    } | null;
     providerStateSummary?: {
       total: number;
       active: number;

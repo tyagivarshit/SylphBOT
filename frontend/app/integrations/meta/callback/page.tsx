@@ -411,6 +411,13 @@ function MetaCallbackContent() {
           integrationProjection?: {
             processingState?: string | null;
             verificationState?: string | null;
+            stale?: boolean;
+            degradedRuntime?: {
+              deferred?: boolean;
+              queueUnavailable?: boolean;
+              reason?: string | null;
+              retryAttempt?: number | null;
+            } | null;
           } | null;
         }>("/api/integrations/onboarding", {
           method: "GET",
@@ -433,9 +440,15 @@ function MetaCallbackContent() {
             return current;
           }
 
+          const degradedRuntime =
+            projectionResponse.data.integrationProjection?.degradedRuntime || null;
+          const deferredLabel =
+            degradedRuntime?.deferred || degradedRuntime?.queueUnavailable
+              ? ` (deferred recovery${degradedRuntime.retryAttempt ? ` #${degradedRuntime.retryAttempt}` : ""})`
+              : "";
           const detail = `Projection: ${projectionState
             .replaceAll("_", " ")
-            .toLowerCase()}`;
+            .toLowerCase()}${deferredLabel}`;
           if (readString(current.statusDetail) === detail) {
             return current;
           }

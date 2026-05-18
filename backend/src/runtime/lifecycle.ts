@@ -146,6 +146,7 @@ export type WorkerLifecycleOptions = {
 
 const globalForLifecycle = globalThis as typeof globalThis & {
   __sylphCronTasks?: CronTask[];
+  __sylphCriticalRecoveryCron?: CronTask;
   __sylphQueuesInitialized?: boolean;
   __sylphQueueInitPromise?: Promise<void>;
 };
@@ -255,16 +256,28 @@ export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
   }
 };
 
+export const initCriticalRecoveryCron = () => {
+  if (globalForLifecycle.__sylphCriticalRecoveryCron) {
+    return globalForLifecycle.__sylphCriticalRecoveryCron;
+  }
+
+  const task = startIntegrationProjectionRecoveryCron();
+  globalForLifecycle.__sylphCriticalRecoveryCron = task;
+  return task;
+};
+
 export const initCrons = () => {
   if (globalForLifecycle.__sylphCronTasks) {
     return globalForLifecycle.__sylphCronTasks;
   }
 
+  const recoveryCron = initCriticalRecoveryCron();
+
   globalForLifecycle.__sylphCronTasks = [
+    recoveryCron,
     startAutonomousSchedulerCron(),
     startTrialExpiryCron(),
     startMetaTokenRefreshCron(),
-    startIntegrationProjectionRecoveryCron(),
     startUsageResetCron(),
     startConnectionHealthCron(),
     startCleanupCron(),
@@ -281,11 +294,20 @@ export const initCrons = () => {
 };
 
 export const shutdownCrons = () => {
-  for (const task of globalForLifecycle.__sylphCronTasks || []) {
+  const activeTasks = globalForLifecycle.__sylphCronTasks || [];
+
+  for (const task of activeTasks) {
     task.stop?.();
     task.destroy?.();
   }
 
+  const criticalRecovery = globalForLifecycle.__sylphCriticalRecoveryCron;
+  if (criticalRecovery && !activeTasks.includes(criticalRecovery)) {
+    criticalRecovery.stop?.();
+    criticalRecovery.destroy?.();
+  }
+
+  globalForLifecycle.__sylphCriticalRecoveryCron = undefined;
   globalForLifecycle.__sylphCronTasks = undefined;
 };
 

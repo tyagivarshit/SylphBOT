@@ -70,6 +70,28 @@ const emitCallbackRuntimeIsolationPreserved = (input: {
   });
 };
 
+const emitOnboardingTraceEvent = (input: {
+  businessId: string;
+  tenantId?: string | null;
+  eventType: string;
+  message: string;
+  severity?: "info" | "error";
+  metadata?: Record<string, unknown>;
+}) => {
+  void recordObservabilityEvent({
+    businessId: input.businessId,
+    tenantId: input.tenantId || input.businessId,
+    eventType: input.eventType,
+    message: input.message,
+    severity: input.severity || "info",
+    context: {
+      component: "clients_oauth_meta_callback",
+      phase: "onboarding",
+    },
+    metadata: input.metadata || null,
+  }).catch(() => undefined);
+};
+
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
@@ -1413,6 +1435,23 @@ const runMetaOnboardingLifecycleFinalization = async (input: {
       timeoutRecovered: input.requestTimedOut,
       eventualSuccess: input.requestAborted || input.requestTimedOut,
     });
+    emitOnboardingTraceEvent({
+      businessId: input.businessId,
+      eventType: "active_transition_reached",
+      message: "active_transition_reached:meta_oauth_lifecycle_completed",
+      metadata: {
+        operationId: input.lifecycleContext.attemptKey,
+        replayToken: input.lifecycleContext.replayToken,
+        requestTimedOut: input.requestTimedOut,
+        requestAborted: input.requestAborted,
+        connectedClients: input.connectedClients.map((client) => ({
+          id: client.id,
+          platform: client.platform,
+          pageId: client.pageId || null,
+          phoneNumberId: client.phoneNumberId || null,
+        })),
+      },
+    });
 
     const projectionEnqueue = await enqueueIntegrationOnboardingProjectionReconcile({
       type: "ONBOARDING_RECONCILE",
@@ -2040,7 +2079,21 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             queuedAtIso: new Date().toISOString(),
             source: "callback_fast_lane_transient",
           };
-          await enqueueMetaOAuthContinuation(enqueuePayload);
+          const enqueueResult = await enqueueMetaOAuthContinuation(enqueuePayload);
+          emitOnboardingTraceEvent({
+            businessId,
+            eventType: "callback_handoff_success",
+            message: "callback_handoff_success:meta_oauth_continuation_queued",
+            metadata: {
+              operationId: lifecycleContext.attemptKey,
+              replayToken: lifecycleContext.replayToken,
+              platform: targetPlatform,
+              mode: oauthState.mode,
+              source: "callback_fast_lane_transient",
+              queueJobId: enqueueResult.jobId,
+              duplicate: enqueueResult.duplicate,
+            },
+          });
           emitPerformanceMetric({
             name: "onboarding_enqueue_ms",
             value: Date.now() - enqueueStartedAtMs,
@@ -2239,7 +2292,21 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       };
 
       try {
-        await enqueueMetaOAuthContinuation(enqueuePayload);
+        const enqueueResult = await enqueueMetaOAuthContinuation(enqueuePayload);
+        emitOnboardingTraceEvent({
+          businessId,
+          eventType: "callback_handoff_success",
+          message: "callback_handoff_success:meta_oauth_continuation_queued",
+          metadata: {
+            operationId: lifecycleContext.attemptKey,
+            replayToken: lifecycleContext.replayToken,
+            platform: targetPlatform,
+            mode: oauthState.mode,
+            source: "callback_fast_lane",
+            queueJobId: enqueueResult.jobId,
+            duplicate: enqueueResult.duplicate,
+          },
+        });
       } catch (error) {
         await markMetaOAuthLifecycleFailure({
           context: lifecycleContext,
@@ -2251,6 +2318,21 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           resolutionHint: "RETRY",
           metadata: {
             callbackFastLane: true,
+          },
+        });
+        emitOnboardingTraceEvent({
+          businessId,
+          eventType: "callback_handoff_failed",
+          message: "callback_handoff_failed:meta_continuation_enqueue_failed",
+          severity: "error",
+          metadata: {
+            operationId: lifecycleContext.attemptKey,
+            replayToken: lifecycleContext.replayToken,
+            platform: targetPlatform,
+            mode: oauthState.mode,
+            source: "callback_fast_lane",
+            reason:
+              normalizeOptionalString((error as Error)?.message) || "queue_unavailable",
           },
         });
         emitCallbackRuntimeIsolationPreserved({
@@ -2418,8 +2500,30 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       logWaCheckpoint("[WA STEP 7] phone numbers fetched", {
         phoneNumberCount: availablePhoneNumbers.length,
       });
+      emitOnboardingTraceEvent({
+        businessId,
+        eventType: "phone_resolution_result",
+        message: "phone_resolution_result:phone_candidates_discovered",
+        metadata: {
+          operationId: lifecycleContext?.attemptKey || null,
+          replayToken: lifecycleContext?.replayToken || null,
+          candidateCount: availablePhoneNumbers.length,
+          selectedPhoneNumberId: selectedPhoneNumberId || null,
+        },
+      });
 
       if (!availablePhoneNumbers.length) {
+        emitOnboardingTraceEvent({
+          businessId,
+          eventType: "phone_resolution_result",
+          message: "phone_resolution_result:no_phone_candidates",
+          severity: "error",
+          metadata: {
+            operationId: lifecycleContext?.attemptKey || null,
+            replayToken: lifecycleContext?.replayToken || null,
+            selectedPhoneNumberId: selectedPhoneNumberId || null,
+          },
+        });
         if (lifecycleContext) {
           await markMetaOAuthLifecycleFailure({
             context: lifecycleContext,
@@ -3235,6 +3339,17 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       }
 
       if (!selectedPhoneNumberId) {
+        emitOnboardingTraceEvent({
+          businessId,
+          eventType: "phone_resolution_result",
+          message: "phone_resolution_result:selection_required",
+          severity: "error",
+          metadata: {
+            operationId: lifecycleContext?.attemptKey || null,
+            replayToken: lifecycleContext?.replayToken || null,
+            candidateCount: availablePhoneNumbers.length,
+          },
+        });
         logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
           selectionRequired: true,
           selectedPhoneNumberId: null,
@@ -3280,6 +3395,18 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       );
 
       if (!selectedPhone) {
+        emitOnboardingTraceEvent({
+          businessId,
+          eventType: "phone_resolution_result",
+          message: "phone_resolution_result:selection_invalid",
+          severity: "error",
+          metadata: {
+            operationId: lifecycleContext?.attemptKey || null,
+            replayToken: lifecycleContext?.replayToken || null,
+            selectedPhoneNumberId: selectedPhoneNumberId || null,
+            candidateCount: availablePhoneNumbers.length,
+          },
+        });
         logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
           selectionRequired: true,
           selectedPhoneNumberId: selectedPhoneNumberId || null,
@@ -3323,6 +3450,18 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       }
 
       const resolvedPhoneNumberId = selectedPhone.phoneNumberId;
+      emitOnboardingTraceEvent({
+        businessId,
+        eventType: "phone_resolution_result",
+        message: "phone_resolution_result:selected_phone_resolved",
+        metadata: {
+          operationId: lifecycleContext?.attemptKey || null,
+          replayToken: lifecycleContext?.replayToken || null,
+          selectedPhoneNumberId: resolvedPhoneNumberId,
+          businessManagerId: selectedPhone.businessManagerId || null,
+          wabaId: selectedPhone.wabaId || null,
+        },
+      });
       logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
         selectionRequired: false,
         selectedPhoneNumberId: resolvedPhoneNumberId,
@@ -3386,6 +3525,24 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       logWaCheckpoint("[WA STEP 10] webhook/provider registration complete", {
         integrationStatus: connectResult.integration?.status || null,
         attemptStatus: connectResult.attempt?.status || null,
+      });
+      emitOnboardingTraceEvent({
+        businessId,
+        eventType: "webhook_activation_result",
+        message:
+          connectResult.integration?.status === "CONNECTED"
+            ? "webhook_activation_result:connected"
+            : "webhook_activation_result:failed",
+        severity: connectResult.integration?.status === "CONNECTED" ? "info" : "error",
+        metadata: {
+          operationId: lifecycleContext?.attemptKey || null,
+          replayToken: lifecycleContext?.replayToken || null,
+          selectedPhoneNumberId: resolvedPhoneNumberId,
+          integrationStatus: connectResult.integration?.status || null,
+          attemptStatus: connectResult.attempt?.status || null,
+          attemptErrorCode: connectResult.attempt?.errorCode || null,
+          attemptErrorMessage: connectResult.attempt?.errorMessage || null,
+        },
       });
 
       if (connectResult.integration?.status !== "CONNECTED") {

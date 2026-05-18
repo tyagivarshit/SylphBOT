@@ -592,10 +592,19 @@ function MetaCallbackContent() {
 
         const payloadLifecycleCandidate =
           payload && typeof payload === "object"
-            ? toLifecyclePayload(
-                (payload as Record<string, unknown>).lifecycle ||
-                  (payload as Record<string, unknown>).data
-              )
+            ? (() => {
+                const root = payload as Record<string, unknown>;
+                const data =
+                  root.data && typeof root.data === "object"
+                    ? (root.data as Record<string, unknown>)
+                    : null;
+                return toLifecyclePayload(
+                  root.lifecycle ||
+                    (data && data.lifecycle && typeof data.lifecycle === "object"
+                      ? data.lifecycle
+                      : root.data)
+                );
+              })()
             : null;
         const payloadLifecycle =
           payloadLifecycleCandidate &&

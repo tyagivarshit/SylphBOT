@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import prisma from "../config/prisma";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import { recordObservabilityEvent } from "./reliability/reliabilityOS.service";
 import {
   enqueueIntegrationOnboardingProjectionReconcile,
   type IntegrationOnboardingProjectionJobPayload,
@@ -178,6 +179,25 @@ export const scheduleDeferredIntegrationProjectionReconcile = async (input: {
       retryAttempt,
     },
   });
+  void recordObservabilityEvent({
+    businessId,
+    tenantId,
+    eventType: "onboarding_replay_started",
+    message: "onboarding_replay_started:deferred_projection_reconcile",
+    severity: "info",
+    context: {
+      component: "integrations_onboarding_recovery",
+      phase: "deferred_schedule",
+    },
+    metadata: {
+      recoveryKey: identity.recoveryKey,
+      reason,
+      source,
+      retryAttempt,
+      queueError,
+      queueDepth,
+    },
+  }).catch(() => undefined);
 
   return {
     recoveryKey: identity.recoveryKey,
@@ -206,6 +226,24 @@ export const replayDeferredIntegrationProjectionReconciles = async (input?: {
   let replayed = 0;
   let deferred = 0;
   let failed = 0;
+
+  if (pendingRows.length > 0) {
+    void recordObservabilityEvent({
+      businessId: null,
+      tenantId: null,
+      eventType: "onboarding_replay_started",
+      message: `onboarding_replay_started:pending=${pendingRows.length}`,
+      severity: "info",
+      context: {
+        component: "integrations_onboarding_recovery",
+        phase: "replay_batch",
+      },
+      metadata: {
+        pending: pendingRows.length,
+        limit,
+      },
+    }).catch(() => undefined);
+  }
 
   for (const row of pendingRows) {
     const actions = Array.isArray(row.actions) ? row.actions : [];
@@ -259,6 +297,23 @@ export const replayDeferredIntegrationProjectionReconciles = async (input?: {
 
       if (enqueueResult.enqueued) {
         replayed += 1;
+        void recordObservabilityEvent({
+          businessId,
+          tenantId,
+          eventType: "onboarding_replay_completed",
+          message: "onboarding_replay_completed:projection_reconcile_enqueued",
+          severity: "info",
+          context: {
+            component: "integrations_onboarding_recovery",
+            phase: "replay",
+          },
+          metadata: {
+            recoveryKey: row.recoveryKey,
+            retryAttempt,
+            jobId: enqueueResult.jobId,
+            queueUnavailable: false,
+          },
+        }).catch(() => undefined);
         await prisma.infrastructureRecoveryLedger.update({
           where: {
             recoveryKey: row.recoveryKey,
@@ -278,6 +333,23 @@ export const replayDeferredIntegrationProjectionReconciles = async (input?: {
         });
       } else {
         deferred += 1;
+        void recordObservabilityEvent({
+          businessId,
+          tenantId,
+          eventType: "onboarding_replay_failed",
+          message: "onboarding_replay_failed:queue_unavailable",
+          severity: "error",
+          context: {
+            component: "integrations_onboarding_recovery",
+            phase: "replay",
+          },
+          metadata: {
+            recoveryKey: row.recoveryKey,
+            retryAttempt,
+            queueUnavailable: true,
+            reason: enqueueResult.reason || "queue_unavailable",
+          },
+        }).catch(() => undefined);
         await prisma.infrastructureRecoveryLedger.update({
           where: {
             recoveryKey: row.recoveryKey,
@@ -297,6 +369,23 @@ export const replayDeferredIntegrationProjectionReconciles = async (input?: {
       }
     } catch (error) {
       failed += 1;
+      void recordObservabilityEvent({
+        businessId,
+        tenantId,
+        eventType: "onboarding_replay_failed",
+        message: "onboarding_replay_failed:exception",
+        severity: "error",
+        context: {
+          component: "integrations_onboarding_recovery",
+          phase: "replay",
+        },
+        metadata: {
+          recoveryKey: row.recoveryKey,
+          retryAttempt,
+          reason:
+            normalizeIdentifier((error as Error)?.message) || "recovery_replay_failed",
+        },
+      }).catch(() => undefined);
       await prisma.infrastructureRecoveryLedger.update({
         where: {
           recoveryKey: row.recoveryKey,

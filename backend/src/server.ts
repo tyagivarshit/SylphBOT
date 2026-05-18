@@ -11,6 +11,7 @@ import { emitStripeConfigValidation } from "./services/commerce/providers/stripe
 import { reconcilePendingEntitlementSync } from "./services/billingSettlement.service";
 import {
   initCrons,
+  initCriticalRecoveryCron,
   initWorkers,
   initQueues,
   shutdown,
@@ -225,6 +226,7 @@ const startPostListenBootstrap = () => {
   });
 
   scheduleBackgroundStartupTask("cron_bootstrap", async () => {
+    initCriticalRecoveryCron();
     if (process.env.ENABLE_CRON === "true") {
       initCrons();
     }

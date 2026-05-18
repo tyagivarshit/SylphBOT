@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Queue } from "bullmq";
 import { getQueueRedisConnection } from "../config/redis";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import { recordObservabilityEvent } from "../services/reliability/reliabilityOS.service";
 import {
   buildQueueJobOptions,
   createResilientQueue,
@@ -143,6 +144,23 @@ export const enqueueIntegrationOnboardingProjectionReconcile = async (
           source: payload.source || "unknown",
         },
       });
+      void recordObservabilityEvent({
+        businessId: payload.businessId,
+        tenantId: payload.tenantId || payload.businessId,
+        eventType: "projection_enqueue_failed",
+        message: `projection_enqueue_failed:${reason}`,
+        severity: "error",
+        context: {
+          component: "integration_onboarding_projection_queue",
+          phase: "write",
+        },
+        metadata: {
+          queueName: INTEGRATION_ONBOARDING_PROJECTION_QUEUE_NAME,
+          reason,
+          source: payload.source || "unknown",
+          deferred: true,
+        },
+      }).catch(() => undefined);
 
       return {
         enqueued: false,

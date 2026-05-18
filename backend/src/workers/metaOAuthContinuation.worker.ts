@@ -2,6 +2,7 @@ import { Job, Worker } from "bullmq";
 import { getWorkerRedisConnection } from "../config/redis";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { withRedisWorkerFailSafe } from "../queues/queue.defaults";
+import { recordObservabilityEvent } from "../services/reliability/reliabilityOS.service";
 import {
   META_OAUTH_CONTINUATION_QUEUE_NAME,
   type MetaOAuthContinuationJobPayload,
@@ -46,6 +47,24 @@ const processMetaOAuthContinuationJob = async (
       resumeCount,
     },
   });
+  void recordObservabilityEvent({
+    businessId: job.data.businessId,
+    tenantId: job.data.businessId,
+    eventType: "worker_consumption_detected",
+    message: "worker_consumption_detected:meta_oauth_continuation",
+    severity: "info",
+    context: {
+      component: "meta_oauth_continuation_worker",
+      phase: "consume",
+    },
+    metadata: {
+      operationId: job.data.operationId,
+      replayToken: job.data.replayToken,
+      queueName: META_OAUTH_CONTINUATION_QUEUE_NAME,
+      attemptsMade: job.attemptsMade,
+      source: job.data.source || "queue_worker",
+    },
+  }).catch(() => undefined);
 
   await runMetaOAuthContinuationFromQueueJob({
     ...job.data,

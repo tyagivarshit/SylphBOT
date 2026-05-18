@@ -6,6 +6,7 @@ import {
   INTEGRATION_ONBOARDING_PROJECTION_QUEUE_NAME,
   type IntegrationOnboardingProjectionJobPayload,
 } from "../queues/integrationOnboardingProjection.queue";
+import { recordObservabilityEvent } from "../services/reliability/reliabilityOS.service";
 import { runIntegrationOnboardingProjectionReconcile } from "../services/integrationOnboardingProjection.service";
 
 const shouldRunWorker =
@@ -28,6 +29,25 @@ const processProjectionJob = async (
   if (job.data.type !== "ONBOARDING_RECONCILE") {
     throw new Error(`unsupported_projection_job:${String((job.data as any)?.type || "unknown")}`);
   }
+
+  void recordObservabilityEvent({
+    businessId: job.data.businessId,
+    tenantId: job.data.tenantId || job.data.businessId,
+    eventType: "worker_consumption_detected",
+    message: "worker_consumption_detected:integration_onboarding_projection",
+    severity: "info",
+    context: {
+      component: "integration_onboarding_projection_worker",
+      phase: "consume",
+    },
+    metadata: {
+      queueName: INTEGRATION_ONBOARDING_PROJECTION_QUEUE_NAME,
+      jobId: job.id || null,
+      attemptsMade: job.attemptsMade,
+      reason: job.data.reason || "projection_worker_refresh",
+      source: job.data.source || "projection_worker",
+    },
+  }).catch(() => undefined);
 
   await runIntegrationOnboardingProjectionReconcile({
     businessId: job.data.businessId,

@@ -213,6 +213,7 @@ const startPostListenBootstrap = () => {
         });
     });
     scheduleBackgroundStartupTask("cron_bootstrap", async () => {
+        (0, lifecycle_1.initCriticalRecoveryCron)();
         if (process.env.ENABLE_CRON === "true") {
             (0, lifecycle_1.initCrons)();
         }

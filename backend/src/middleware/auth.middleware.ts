@@ -25,6 +25,7 @@ import {
   isRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
 import { TimeoutExceededError, withTimeout } from "../utils/boundedTimeout";
+import { getStartupIsolationSnapshot } from "../runtime/startupIsolation.service";
 
 const AUTH_CONTEXT_CACHE_TTL_MS = 15_000;
 const AUTH_REDIS_CACHE_PREFIX = "auth:context:v1:";
@@ -40,6 +41,16 @@ const AUTH_USER_STAGE_TIMEOUT_MS = 900;
 const AUTH_WORKSPACE_STAGE_TIMEOUT_MS = 600;
 const AUTH_REFRESH_TOKEN_STAGE_TIMEOUT_MS = 900;
 const AUTH_STALE_VALID_WINDOW_MS = 60_000;
+const AUTH_STALE_SOFT_EXPIRATION_MS = 25_000;
+const AUTH_RECENT_VERIFICATION_GRACE_MS = 12_000;
+const AUTH_SHARED_LOOKUP_MIN_TIMEOUT_MS = 480;
+const AUTH_SHARED_LOOKUP_MAX_TIMEOUT_MS = 3_200;
+const AUTH_SHARED_LOOKUP_ADAPTIVE_MAX_MULTIPLIER = 3.2;
+const AUTH_SHARED_LOOKUP_ADAPTIVE_MIN_MULTIPLIER = 1;
+const AUTH_DB_FALLBACK_RETRY_ATTEMPTS = 2;
+const AUTH_DEADLOCK_RETRY_ATTEMPTS = 2;
+const AUTH_DEADLOCK_RETRY_BASE_DELAY_MS = 45;
+const AUTH_DEADLOCK_RETRY_MAX_JITTER_MS = 70;
 const AUTH_STATS_LOG_INTERVAL_MS = 60_000;
 const SESSION_ANOMALY_RECHECK_MS = 10_000;
 const AUTH_SURFACE_RETRY_AFTER_MS = 220;
@@ -53,6 +64,10 @@ const AUTH_CRITICAL_DEGRADED_ROUTE_PREFIXES = [
   "/api/dashboard",
   "/api/billing",
   "/api/clients/oauth/meta/lifecycle",
+  "/api/clients/oauth/meta",
+  "/api/oauth/meta",
+  "/api/oauth/meta/callback",
+  "/api/user/api-key",
 ];
 const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
   "/api/billing/checkout",
@@ -70,6 +85,29 @@ type CachedAuthContext = {
   businessId: string | null;
   tokenVersion: number;
   expiresAt: number;
+};
+
+type SharedAuthLookupStage =
+  | "access_user_lookup"
+  | "access_business_lookup"
+  | "refresh_token_lookup"
+  | "refresh_user_lookup"
+  | "refresh_business_lookup";
+
+type SharedLookupBudgetProfile = {
+  stage: SharedAuthLookupStage;
+  timeoutMs: number;
+  requestBudgetMs: number;
+  multiplier: number;
+  startupWindowActive: boolean;
+  eventLoopLagMs: number;
+  cpuPressurePercent: number;
+  criticalQueueDepth: number;
+  activeCritical: number;
+  degradedAuthAllowed: boolean;
+  cacheAvailability: "warm" | "cold";
+  routeCritical: boolean;
+  reasons: string[];
 };
 
 type RequestLocalAuthState = {
@@ -93,6 +131,14 @@ const staleAuthContextByUser = new Map<
   string,
   {
     context: CachedAuthContext;
+    expiresAt: number;
+  }
+>();
+const recentVerifiedAuthContextByToken = new Map<
+  string,
+  {
+    context: CachedAuthContext;
+    verifiedAt: number;
     expiresAt: number;
   }
 >();
@@ -145,6 +191,102 @@ const readStaleAuthContext = (userId: string, tokenVersion: number) => {
   };
 };
 
+const asNumber = (value: unknown, fallbackValue = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallbackValue;
+  }
+  return parsed;
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, Math.max(0, Math.floor(ms)));
+  });
+
+const randomJitterMs = (maxJitterMs: number) =>
+  Math.floor(Math.random() * Math.max(1, Math.floor(maxJitterMs)));
+
+const markRecentlyVerifiedAuthContext = (
+  tokenKey: string,
+  context: CachedAuthContext
+) => {
+  if (!tokenKey || !context?.userId) {
+    return;
+  }
+
+  recentVerifiedAuthContextByToken.set(tokenKey, {
+    context: {
+      ...context,
+    },
+    verifiedAt: Date.now(),
+    expiresAt: Date.now() + AUTH_RECENT_VERIFICATION_GRACE_MS,
+  });
+};
+
+const readRecentlyVerifiedAuthContext = (input: {
+  tokenKey: string;
+  userId: string;
+  tokenVersion: number;
+}) => {
+  const cached = recentVerifiedAuthContextByToken.get(input.tokenKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    recentVerifiedAuthContextByToken.delete(input.tokenKey);
+    return null;
+  }
+
+  const context = cached.context;
+  if (
+    context.userId !== input.userId ||
+    context.tokenVersion !== input.tokenVersion
+  ) {
+    return null;
+  }
+
+  return {
+    ...context,
+  };
+};
+
+const readSoftStaleAuthContext = (input: {
+  userId: string;
+  tokenVersion: number;
+}) => {
+  const stale = readStaleAuthContext(input.userId, input.tokenVersion);
+  if (!stale) {
+    return null;
+  }
+
+  if (stale.expiresAt + AUTH_STALE_SOFT_EXPIRATION_MS <= Date.now()) {
+    return null;
+  }
+
+  return stale;
+};
+
+const isDeadlockLikePrismaError = (error: unknown) => {
+  const code = String((error as { code?: unknown })?.code || "")
+    .trim()
+    .toUpperCase();
+  const message = String((error as Error)?.message || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    code === "P2034" ||
+    message.includes("deadlock") ||
+    message.includes("write conflict") ||
+    message.includes("tenantisolationledger.upsert")
+  );
+};
+
 const getAuthBudgetMs = (req: Request, res?: Response) =>
   Math.max(
     1,
@@ -159,6 +301,101 @@ const getAuthBudgetMs = (req: Request, res?: Response) =>
       ) - 120
     )
   );
+
+const computeSharedLookupBudgetProfile = (input: {
+  req: Request;
+  res?: Response | null;
+  stage: SharedAuthLookupStage;
+  maxTimeoutMs: number;
+  degradedAuthAllowed: boolean;
+  routeCritical: boolean;
+  cacheAvailability: "warm" | "cold";
+}) => {
+  const startupSnapshot = getStartupIsolationSnapshot();
+  const requestBudgetMs = getAuthBudgetMs(input.req, input.res || undefined);
+  const startupWindowActive = Boolean(startupSnapshot?.startupWindowActive);
+  const eventLoopLagMs = Math.max(
+    0,
+    asNumber(startupSnapshot?.pressure?.eventLoopLagMs, 0)
+  );
+  const cpuPressurePercent = Math.max(
+    0,
+    asNumber(startupSnapshot?.pressure?.cpuPressurePercent, 0)
+  );
+  const criticalQueueDepth = Math.max(
+    0,
+    Math.floor(asNumber(startupSnapshot?.requestPriority?.queue?.critical, 0))
+  );
+  const activeCritical = Math.max(
+    0,
+    Math.floor(asNumber(startupSnapshot?.requestPriority?.active?.critical, 0))
+  );
+  const reasons: string[] = [];
+  let multiplier = 1;
+
+  if (startupWindowActive) {
+    multiplier += 0.2;
+    reasons.push("startup_window_active");
+  }
+  if (eventLoopLagMs >= 45) {
+    multiplier += 0.2;
+    reasons.push("event_loop_lag_elevated");
+  }
+  if (eventLoopLagMs >= 90) {
+    multiplier += 0.2;
+    reasons.push("event_loop_lag_high");
+  }
+  if (cpuPressurePercent >= 65) {
+    multiplier += 0.2;
+    reasons.push("cpu_pressure_elevated");
+  }
+  if (cpuPressurePercent >= 85) {
+    multiplier += 0.2;
+    reasons.push("cpu_pressure_high");
+  }
+  if (criticalQueueDepth > 0 || activeCritical > 0) {
+    multiplier += 0.2;
+    reasons.push("critical_queue_contention");
+  }
+  if (input.degradedAuthAllowed || input.routeCritical) {
+    multiplier += 0.25;
+    reasons.push("stabilization_priority_route");
+  }
+  if (input.cacheAvailability === "cold") {
+    multiplier += 0.2;
+    reasons.push("auth_cache_cold");
+  }
+
+  multiplier = clamp(
+    Number(multiplier.toFixed(2)),
+    AUTH_SHARED_LOOKUP_ADAPTIVE_MIN_MULTIPLIER,
+    AUTH_SHARED_LOOKUP_ADAPTIVE_MAX_MULTIPLIER
+  );
+  const timeoutMs = clamp(
+    Math.round(Math.max(1, input.maxTimeoutMs) * multiplier),
+    AUTH_SHARED_LOOKUP_MIN_TIMEOUT_MS,
+    Math.min(
+      AUTH_SHARED_LOOKUP_MAX_TIMEOUT_MS,
+      Math.max(AUTH_SHARED_LOOKUP_MIN_TIMEOUT_MS, requestBudgetMs)
+    )
+  );
+
+  return {
+    stage: input.stage,
+    timeoutMs,
+    requestBudgetMs,
+    multiplier,
+    startupWindowActive,
+    eventLoopLagMs,
+    cpuPressurePercent,
+    criticalQueueDepth,
+    activeCritical,
+    degradedAuthAllowed: input.degradedAuthAllowed,
+    cacheAvailability: input.cacheAvailability,
+    routeCritical: input.routeCritical,
+    reasons,
+  } satisfies SharedLookupBudgetProfile;
+};
 
 const isRequestClosed = (req: Request, res?: Response | null) =>
   isRequestLifecycleAborted({
@@ -405,15 +642,168 @@ const runAuthStage = async <T>(input: {
 };
 
 const runSharedAuthStage = async <T>(input: {
-  stage: string;
+  req: Request;
+  res?: Response | null;
+  stage: SharedAuthLookupStage;
   maxTimeoutMs: number;
   task: () => Promise<T>;
-}) =>
-  withTimeout({
-    label: `auth_shared_${input.stage}`,
-    timeoutMs: Math.max(1, Math.floor(input.maxTimeoutMs)),
-    task: input.task(),
-  });
+  businessId?: string | null;
+  degradedAuthAllowed: boolean;
+  routeCritical: boolean;
+  cacheAvailability: "warm" | "cold";
+  retryAttempts?: number;
+}) => {
+  const retryAttempts = Math.max(
+    0,
+    Math.floor(
+      input.retryAttempts ??
+        Math.max(AUTH_DB_FALLBACK_RETRY_ATTEMPTS, AUTH_DEADLOCK_RETRY_ATTEMPTS)
+    )
+  );
+  let attempt = 0;
+
+  while (attempt <= retryAttempts) {
+    const budgetProfile = computeSharedLookupBudgetProfile({
+      req: input.req,
+      res: input.res || null,
+      stage: input.stage,
+      maxTimeoutMs: input.maxTimeoutMs,
+      degradedAuthAllowed: input.degradedAuthAllowed,
+      routeCritical: input.routeCritical,
+      cacheAvailability: input.cacheAvailability,
+    });
+    const lookupStartedAt = Date.now();
+
+    emitPerformanceMetric({
+      name: "auth_shared_lookup_budget_profile",
+      value: budgetProfile.timeoutMs,
+      businessId: input.businessId || null,
+      route: input.req.originalUrl,
+      metadata: {
+        stage: input.stage,
+        requestBudgetMs: budgetProfile.requestBudgetMs,
+        multiplier: budgetProfile.multiplier,
+        startupWindowActive: budgetProfile.startupWindowActive,
+        eventLoopLagMs: budgetProfile.eventLoopLagMs,
+        cpuPressurePercent: budgetProfile.cpuPressurePercent,
+        criticalQueueDepth: budgetProfile.criticalQueueDepth,
+        activeCritical: budgetProfile.activeCritical,
+        degradedAuthAllowed: budgetProfile.degradedAuthAllowed,
+        routeCritical: budgetProfile.routeCritical,
+        cacheAvailability: budgetProfile.cacheAvailability,
+        reasons: budgetProfile.reasons,
+        attempt: attempt + 1,
+      },
+    });
+
+    try {
+      const value = await withTimeout({
+        label: `auth_shared_${input.stage}`,
+        timeoutMs: budgetProfile.timeoutMs,
+        task: input.task(),
+      });
+      const elapsedMs = Date.now() - lookupStartedAt;
+      emitPerformanceMetric({
+        name: "auth_shared_lookup_ms",
+        value: elapsedMs,
+        businessId: input.businessId || null,
+        route: input.req.originalUrl,
+        metadata: {
+          stage: input.stage,
+          attempt: attempt + 1,
+          timeoutMs: budgetProfile.timeoutMs,
+          outcome: "ok",
+        },
+      });
+      if (attempt > 0) {
+        emitPerformanceMetric({
+          name: "auth_verification_stabilized",
+          value: elapsedMs,
+          businessId: input.businessId || null,
+          route: input.req.originalUrl,
+          metadata: {
+            stage: input.stage,
+            retries: attempt,
+            timeoutMs: budgetProfile.timeoutMs,
+          },
+        });
+      }
+      return value;
+    } catch (error) {
+      const elapsedMs = Date.now() - lookupStartedAt;
+      const deadlockLike = isDeadlockLikePrismaError(error);
+      const timeoutLike = isAuthStageTimeoutError(error);
+
+      emitPerformanceMetric({
+        name: "auth_shared_lookup_ms",
+        value: elapsedMs,
+        businessId: input.businessId || null,
+        route: input.req.originalUrl,
+        metadata: {
+          stage: input.stage,
+          attempt: attempt + 1,
+          timeoutMs: budgetProfile.timeoutMs,
+          outcome: deadlockLike ? "deadlock" : timeoutLike ? "timeout" : "failed",
+          errorCode: String((error as { code?: unknown })?.code || "").trim() || null,
+          error: String((error as Error)?.message || "").trim() || null,
+        },
+      });
+
+      if (timeoutLike) {
+        emitPerformanceMetric({
+          name: "auth_transient_lookup_timeout",
+          value: elapsedMs,
+          businessId: input.businessId || null,
+          route: input.req.originalUrl,
+          metadata: {
+            stage: input.stage,
+            timeoutMs: budgetProfile.timeoutMs,
+            attempt: attempt + 1,
+          },
+        });
+      }
+
+      const retryable = deadlockLike || timeoutLike;
+      if (!retryable || attempt >= retryAttempts) {
+        throw error;
+      }
+
+      const retryDelayMs =
+        AUTH_DEADLOCK_RETRY_BASE_DELAY_MS * (attempt + 1) +
+        randomJitterMs(AUTH_DEADLOCK_RETRY_MAX_JITTER_MS);
+
+      if (deadlockLike) {
+        emitPerformanceMetric({
+          name: "auth_deadlock_retry_count",
+          value: attempt + 1,
+          businessId: input.businessId || null,
+          route: input.req.originalUrl,
+          metadata: {
+            stage: input.stage,
+            retryDelayMs,
+            errorCode: String((error as { code?: unknown })?.code || "").trim() || null,
+          },
+        });
+      }
+      emitPerformanceMetric({
+        name: "auth_db_fallback_retry_ms",
+        value: retryDelayMs,
+        businessId: input.businessId || null,
+        route: input.req.originalUrl,
+        metadata: {
+          stage: input.stage,
+          reason: deadlockLike ? "deadlock" : "timeout",
+          attempt: attempt + 1,
+        },
+      });
+
+      await sleep(retryDelayMs);
+      attempt += 1;
+    }
+  }
+
+  throw new Error(`auth_shared_lookup_failed:${input.stage}`);
+};
 
 const bumpAuthStats = (
   update: Partial<Omit<typeof authStats, "total">> & { resolved?: number }
@@ -490,6 +880,7 @@ const readMemoryAuthContext = (
   }
 
   writeStaleAuthContext(cachedContext);
+  markRecentlyVerifiedAuthContext(tokenKey, cachedContext);
   return cachedContext;
 };
 
@@ -532,6 +923,7 @@ const readRedisAuthContext = async (
 
     authContextCache.set(tokenKey, parsed);
     writeStaleAuthContext(parsed);
+    markRecentlyVerifiedAuthContext(tokenKey, parsed);
     return parsed;
   } catch {
     await redis.del(getAuthRedisCacheKey(tokenKey)).catch(() => undefined);
@@ -545,6 +937,7 @@ const writeAuthContextCache = async (
 ) => {
   authContextCache.set(tokenKey, context);
   writeStaleAuthContext(context);
+  markRecentlyVerifiedAuthContext(tokenKey, context);
   await redis
     .set(
       getAuthRedisCacheKey(tokenKey),
@@ -584,6 +977,7 @@ export const primeAuthContextCacheForToken = (input: {
 
   authContextCache.set(tokenKey, context);
   writeStaleAuthContext(context);
+  markRecentlyVerifiedAuthContext(tokenKey, context);
   void writeAuthContextCache(tokenKey, context);
 };
 
@@ -678,6 +1072,30 @@ const isCriticalAuthDegradedRoute = (req: Request) => {
 
   return AUTH_CRITICAL_DEGRADED_ROUTE_PREFIXES.some(
     (prefix) => route.startsWith(prefix) || path.startsWith(prefix)
+  );
+};
+
+const isAuthStabilizationCriticalRoute = (req: Request) => {
+  const normalized = String(req.originalUrl || req.path || req.url || "")
+    .trim()
+    .toLowerCase();
+  const path = String(req.path || "").trim().toLowerCase();
+  const oauthBootstrapRoute =
+    normalized.startsWith("/api/clients/oauth/meta") ||
+    normalized.startsWith("/api/oauth/meta") ||
+    normalized.startsWith("/api/oauth/meta/callback");
+
+  return (
+    oauthBootstrapRoute ||
+    normalized.startsWith("/api/auth") ||
+    normalized.startsWith("/api/user/me") ||
+    normalized.startsWith("/api/user/workspace") ||
+    normalized.startsWith("/api/user/api-key") ||
+    normalized.startsWith("/api/integrations/onboarding") ||
+    normalized.startsWith("/api/clients/status") ||
+    normalized.startsWith("/api/client/status") ||
+    path.startsWith("/me") ||
+    isCriticalAuthDegradedRoute(req)
   );
 };
 
@@ -897,6 +1315,17 @@ const serveDegradedAuthenticatedState = async (input: {
         stage: input.stage,
       },
     });
+    emitPerformanceMetric({
+      name: "auth_stale_context_reused",
+      value: 1,
+      businessId: input.businessId,
+      route: input.req.originalUrl,
+      metadata: {
+        source: input.source,
+        stage: input.stage,
+        reason: input.reason,
+      },
+    });
   }
 
   bumpAuthStats({
@@ -944,6 +1373,30 @@ const serveDegradedAuthenticatedState = async (input: {
     },
   });
   emitPerformanceMetric({
+    name: "auth_verification_stabilized",
+    value: Date.now() - input.startedAt,
+    businessId: input.businessId,
+    route: input.req.originalUrl,
+    metadata: {
+      source: input.source,
+      stage: input.stage,
+      reason: input.reason,
+      staleContextUsed: input.staleContextUsed,
+    },
+  });
+  emitPerformanceMetric({
+    name: "auth_cache_recovery_rate",
+    value: 1,
+    businessId: input.businessId,
+    route: input.req.originalUrl,
+    metadata: {
+      source: input.source,
+      stage: input.stage,
+      reason: input.reason,
+      staleContextUsed: input.staleContextUsed,
+    },
+  });
+  emitPerformanceMetric({
     name: "AUTH_MS",
     value: Date.now() - input.startedAt,
     businessId: input.businessId,
@@ -964,6 +1417,7 @@ export const protect = async (
 ) => {
   const startedAt = Date.now();
   const degradedAuthAllowed = shouldServeDegradedAuth(req);
+  const routeCritical = isAuthStabilizationCriticalRoute(req);
   let decodedAccessToken: ReturnType<typeof verifyAccessToken> = null;
   let accessLookupTransientReason: string | null = null;
   let accessLookupTransientStage: string | null = null;
@@ -976,6 +1430,114 @@ export const protect = async (
     accessLookupTransientReason =
       String((error as Error)?.message || "").trim() ||
       `auth_processing:${stage}`;
+  };
+
+  const bindStabilizedAccessContext = async (input: {
+    tokenKey: string;
+    context: CachedAuthContext;
+    source:
+      | "grace_window"
+      | "stale_soft"
+      | "stale_degraded"
+      | "request_local"
+      | "shared_lookup";
+    stage: string;
+    reason: string;
+    staleContextUsed: boolean;
+  }) => {
+    writeRequestLocalAuthContext(
+      req,
+      input.tokenKey,
+      input.context.tokenVersion,
+      input.context
+    );
+    markRecentlyVerifiedAuthContext(input.tokenKey, input.context);
+    bindAuthenticatedContext(req, {
+      id: input.context.userId,
+      role: input.context.role,
+      email: input.context.email,
+      businessId: input.context.businessId,
+    });
+
+    await runSessionAnomalyGuard(req, {
+      userId: input.context.userId,
+      businessId: input.context.businessId,
+    });
+
+    bumpAuthStats({
+      resolved: 1,
+      staleValidServed: input.staleContextUsed ? 1 : 0,
+    });
+    emitPerformanceMetric({
+      name: "auth_verification_stabilized",
+      value: Date.now() - startedAt,
+      businessId: input.context.businessId,
+      route: req.originalUrl,
+      metadata: {
+        source: input.source,
+        stage: input.stage,
+        reason: input.reason,
+      },
+    });
+    emitPerformanceMetric({
+      name: "auth_cache_recovery_rate",
+      value: 1,
+      businessId: input.context.businessId,
+      route: req.originalUrl,
+      metadata: {
+        source: input.source,
+        stage: input.stage,
+        reason: input.reason,
+      },
+    });
+    if (input.source === "grace_window") {
+      emitPerformanceMetric({
+        name: "auth_grace_window_hits",
+        value: 1,
+        businessId: input.context.businessId,
+        route: req.originalUrl,
+        metadata: {
+          stage: input.stage,
+          reason: input.reason,
+        },
+      });
+    }
+    if (input.staleContextUsed) {
+      emitPerformanceMetric({
+        name: "auth_stale_context_reused",
+        value: 1,
+        businessId: input.context.businessId,
+        route: req.originalUrl,
+        metadata: {
+          source: input.source,
+          stage: input.stage,
+          reason: input.reason,
+        },
+      });
+      emitPerformanceMetric({
+        name: "stale_valid_auth_served",
+        value: 1,
+        businessId: input.context.businessId,
+        route: req.originalUrl,
+        metadata: {
+          source: input.source,
+          stage: input.stage,
+          reason: input.reason,
+        },
+      });
+    }
+
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      businessId: input.context.businessId,
+      route: req.originalUrl,
+      metadata: {
+        source: `access_token_${input.source}`,
+        stage: input.stage,
+        reason: input.reason,
+      },
+    });
   };
 
   try {
@@ -1063,6 +1625,19 @@ export const protect = async (
       const accessTokenKey = hashToken(accessToken);
 
       if (decoded?.id && typeof decoded.tokenVersion === "number") {
+        const cacheAvailability =
+          authContextCache.has(accessTokenKey) ||
+          Boolean(readRecentlyVerifiedAuthContext({
+            tokenKey: accessTokenKey,
+            userId: decoded.id,
+            tokenVersion: decoded.tokenVersion,
+          })) ||
+          Boolean(readSoftStaleAuthContext({
+            userId: decoded.id,
+            tokenVersion: decoded.tokenVersion,
+          }))
+            ? "warm"
+            : "cold";
         const requestLocalContext = readRequestLocalAuthContext(
           req,
           accessTokenKey,
@@ -1075,6 +1650,7 @@ export const protect = async (
             email: requestLocalContext.email,
             businessId: requestLocalContext.businessId,
           });
+          markRecentlyVerifiedAuthContext(accessTokenKey, requestLocalContext);
 
           await runSessionAnomalyGuard(req, {
             userId: requestLocalContext.userId,
@@ -1109,6 +1685,26 @@ export const protect = async (
           return next();
         }
 
+        const graceContext = readRecentlyVerifiedAuthContext({
+          tokenKey: accessTokenKey,
+          userId: decoded.id,
+          tokenVersion: decoded.tokenVersion,
+        });
+        if (graceContext) {
+          await bindStabilizedAccessContext({
+            tokenKey: accessTokenKey,
+            context: graceContext,
+            source: "grace_window",
+            stage: "access_grace_window",
+            reason: "recent_session_verification",
+            staleContextUsed: false,
+          });
+          if (isRequestClosed(req, res)) {
+            return;
+          }
+          return next();
+        }
+
         const localAccessLookupKey = `${accessTokenKey}:${decoded.tokenVersion}`;
         const requestLocalLookup = readRequestLocalLookupPromise(
           req,
@@ -1125,7 +1721,7 @@ export const protect = async (
               req,
               res,
               stage: "access_lookup_wait",
-              maxTimeoutMs: AUTH_USER_STAGE_TIMEOUT_MS,
+              maxTimeoutMs: AUTH_SHARED_LOOKUP_MAX_TIMEOUT_MS,
               minBudgetMs: 120,
               task: () => requestLocalLookup,
             });
@@ -1348,8 +1944,14 @@ export const protect = async (
             existingLookup ||
             (async () => {
               const user = await runSharedAuthStage({
+                req,
+                res,
                 stage: "access_user_lookup",
                 maxTimeoutMs: AUTH_USER_STAGE_TIMEOUT_MS,
+                businessId: decoded.businessId || null,
+                degradedAuthAllowed,
+                routeCritical,
+                cacheAvailability,
                 task: () => getUserWithBusiness(decoded.id),
               });
 
@@ -1363,8 +1965,14 @@ export const protect = async (
               }
 
               const businessId = await runSharedAuthStage({
+                req,
+                res,
                 stage: "access_business_lookup",
                 maxTimeoutMs: AUTH_WORKSPACE_STAGE_TIMEOUT_MS,
+                businessId: user?.businessId || decoded.businessId || null,
+                degradedAuthAllowed,
+                routeCritical,
+                cacheAvailability,
                 task: () =>
                   resolveBusinessId({
                     userId: user.id,
@@ -1423,7 +2031,7 @@ export const protect = async (
               req,
               res,
               stage: "access_lookup_wait",
-              maxTimeoutMs: AUTH_USER_STAGE_TIMEOUT_MS,
+              maxTimeoutMs: AUTH_SHARED_LOOKUP_MAX_TIMEOUT_MS,
               minBudgetMs: 120,
               task: () => lookupPromise,
             });
@@ -1479,6 +2087,47 @@ export const protect = async (
             return next();
           }
         }
+
+        if (accessLookupTransientReason) {
+          const graceWindowContext = readRecentlyVerifiedAuthContext({
+            tokenKey: accessTokenKey,
+            userId: decoded.id,
+            tokenVersion: decoded.tokenVersion,
+          });
+          if (graceWindowContext) {
+            await bindStabilizedAccessContext({
+              tokenKey: accessTokenKey,
+              context: graceWindowContext,
+              source: "grace_window",
+              stage: accessLookupTransientStage || "access_lookup",
+              reason: accessLookupTransientReason,
+              staleContextUsed: false,
+            });
+            if (isRequestClosed(req, res)) {
+              return;
+            }
+            return next();
+          }
+
+          const softStaleContext = readSoftStaleAuthContext({
+            userId: decoded.id,
+            tokenVersion: decoded.tokenVersion,
+          });
+          if (softStaleContext && (degradedAuthAllowed || routeCritical)) {
+            await bindStabilizedAccessContext({
+              tokenKey: accessTokenKey,
+              context: softStaleContext,
+              source: "stale_soft",
+              stage: accessLookupTransientStage || "access_lookup",
+              reason: accessLookupTransientReason,
+              staleContextUsed: true,
+            });
+            if (isRequestClosed(req, res)) {
+              return;
+            }
+            return next();
+          }
+        }
       }
     }
 
@@ -1488,10 +2137,10 @@ export const protect = async (
       typeof decodedAccessToken.tokenVersion === "number" &&
       accessLookupTransientReason
     ) {
-      const staleContext = readStaleAuthContext(
-        decodedAccessToken.id,
-        decodedAccessToken.tokenVersion
-      );
+      const staleContext = readSoftStaleAuthContext({
+        userId: decodedAccessToken.id,
+        tokenVersion: decodedAccessToken.tokenVersion,
+      });
       const fallbackBusinessId =
         String(staleContext?.businessId || decodedAccessToken.businessId || "").trim() ||
         null;
@@ -1547,7 +2196,10 @@ export const protect = async (
         deniedByBudget: 1,
       });
       if (degradedAuthAllowed) {
-        const staleContext = readStaleAuthContext(decoded.id, decoded.tokenVersion);
+        const staleContext = readSoftStaleAuthContext({
+          userId: decoded.id,
+          tokenVersion: decoded.tokenVersion,
+        });
         if (staleContext) {
           await serveDegradedAuthenticatedState({
             req,
@@ -1583,8 +2235,14 @@ export const protect = async (
       sharedRefreshLookup ||
       (async () => {
         const dbToken = await runSharedAuthStage({
+          req,
+          res,
           stage: "refresh_token_lookup",
           maxTimeoutMs: AUTH_REFRESH_TOKEN_STAGE_TIMEOUT_MS,
+          businessId: null,
+          degradedAuthAllowed,
+          routeCritical,
+          cacheAvailability: "cold",
           task: () =>
             prisma.refreshToken.findUnique({
               where: {
@@ -1607,8 +2265,14 @@ export const protect = async (
         }
 
         const user = await runSharedAuthStage({
+          req,
+          res,
           stage: "refresh_user_lookup",
           maxTimeoutMs: AUTH_USER_STAGE_TIMEOUT_MS,
+          businessId: null,
+          degradedAuthAllowed,
+          routeCritical,
+          cacheAvailability: "cold",
           task: () => getUserWithBusiness(decoded.id),
         });
 
@@ -1622,8 +2286,14 @@ export const protect = async (
         }
 
         const businessId = await runSharedAuthStage({
+          req,
+          res,
           stage: "refresh_business_lookup",
           maxTimeoutMs: AUTH_WORKSPACE_STAGE_TIMEOUT_MS,
+          businessId: user?.businessId || null,
+          degradedAuthAllowed,
+          routeCritical,
+          cacheAvailability: "cold",
           task: () =>
             resolveBusinessId({
               userId: user.id,
@@ -1661,7 +2331,7 @@ export const protect = async (
         req,
         res,
         stage: "refresh_lookup_wait",
-        maxTimeoutMs: AUTH_REFRESH_TOKEN_STAGE_TIMEOUT_MS,
+        maxTimeoutMs: AUTH_SHARED_LOOKUP_MAX_TIMEOUT_MS,
         minBudgetMs: AUTH_DB_MIN_BUDGET_MS,
         task: () => refreshLookupPromise,
       });
@@ -1671,7 +2341,10 @@ export const protect = async (
         isAuthStageTimeoutError(error)
       ) {
         if (degradedAuthAllowed) {
-          const staleContext = readStaleAuthContext(decoded.id, decoded.tokenVersion);
+          const staleContext = readSoftStaleAuthContext({
+            userId: decoded.id,
+            tokenVersion: decoded.tokenVersion,
+          });
           if (staleContext) {
             await serveDegradedAuthenticatedState({
               req,

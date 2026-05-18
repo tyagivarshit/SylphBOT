@@ -283,6 +283,24 @@ async function coreRequest<T>(
     const payload = response.data;
 
     if (response.status === 401) {
+      const message = getPayloadMessage(payload) || "Unauthorized";
+      const normalizedMessage = message.toLowerCase();
+      const transientAuthStabilizing =
+        normalizedMessage.includes("session verification timed out") ||
+        normalizedMessage.includes("auth_processing") ||
+        normalizedMessage.includes("stabilizing");
+      if (transientAuthStabilizing) {
+        return {
+          success: false,
+          data: null,
+          unauthorized: false,
+          limited: false,
+          upgradeRequired: false,
+          message,
+          code: getPayloadCode(payload) || "AUTH_SESSION_STABILIZING",
+        };
+      }
+
       if (!retry && method === "GET") {
         return coreRequest<T>(path, options, true);
       }
@@ -293,7 +311,7 @@ async function coreRequest<T>(
         unauthorized: true,
         limited: false,
         upgradeRequired: false,
-        message: getPayloadMessage(payload) || "Unauthorized",
+        message,
         code: getPayloadCode(payload),
       };
     }

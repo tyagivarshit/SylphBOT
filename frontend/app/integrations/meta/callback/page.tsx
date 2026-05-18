@@ -439,9 +439,9 @@ function MetaCallbackContent() {
           if (!current) {
             return current;
           }
-
+          const projectionData = projectionResponse?.data;
           const degradedRuntime =
-            projectionResponse.data.integrationProjection?.degradedRuntime || null;
+            projectionData?.integrationProjection?.degradedRuntime || null;
           const deferredLabel =
             degradedRuntime?.deferred || degradedRuntime?.queueUnavailable
               ? ` (deferred recovery${degradedRuntime.retryAttempt ? ` #${degradedRuntime.retryAttempt}` : ""})`

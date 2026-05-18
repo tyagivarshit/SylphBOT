@@ -72,6 +72,13 @@ type LifecyclePayload = {
   platform?: string | null;
   mode?: string | null;
   status?: LifecycleStatus | string | null;
+  connectionState?:
+    | "PROCESSING"
+    | "CONNECTED_PENDING"
+    | "ACTION_REQUIRED"
+    | "READY_MINIMAL"
+    | string
+    | null;
   stage?: string | null;
   statusDetail?: string | null;
   errorCode?: string | null;
@@ -141,6 +148,38 @@ const lifecycleStageLabel = (stage?: string | null) => {
     return "Completed";
   }
   return normalized.replaceAll("_", " ").toLowerCase();
+};
+
+const resolveOnboardingPhase = (lifecycle?: LifecyclePayload | null) => {
+  const status = normalizeLifecycleStatus(lifecycle?.status);
+  const connectionState = readString(lifecycle?.connectionState).toUpperCase();
+  const stage = readString(lifecycle?.stage).toUpperCase();
+
+  if (status === "COMPLETED" || connectionState === "READY_MINIMAL") {
+    return "ACTIVE";
+  }
+
+  if (
+    status === "NEEDS_ACTION" ||
+    status === "FAILED" ||
+    connectionState === "ACTION_REQUIRED"
+  ) {
+    return "ACTION_REQUIRED";
+  }
+
+  if (stage === "OAUTH_AUTHENTICATED") {
+    return "CONNECTING";
+  }
+
+  if (stage === "META_ACCOUNT_CONNECTED" || connectionState === "CONNECTED_PENDING") {
+    return "VERIFYING";
+  }
+
+  if (stage === "WEBHOOK_ACTIVATION") {
+    return "ACTIVATING";
+  }
+
+  return "PROCESSING";
 };
 
 const buildSettingsRedirect = (params: Record<string, string>) => {
@@ -367,6 +406,46 @@ function MetaCallbackContent() {
 
     const pollLifecycle = async (operationId?: string | null) => {
       const maxAttempts = 120;
+      const pollOnboardingProjection = async () => {
+        const projectionResponse = await apiFetch<{
+          integrationProjection?: {
+            processingState?: string | null;
+            verificationState?: string | null;
+          } | null;
+        }>("/api/integrations/onboarding", {
+          method: "GET",
+          timeoutMs: 7000,
+        });
+
+        if (!projectionResponse.success || !projectionResponse.data) {
+          return;
+        }
+
+        const projectionState = readString(
+          projectionResponse.data.integrationProjection?.processingState
+        );
+        if (!projectionState) {
+          return;
+        }
+
+        setLifecycle((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const detail = `Projection: ${projectionState
+            .replaceAll("_", " ")
+            .toLowerCase()}`;
+          if (readString(current.statusDetail) === detail) {
+            return current;
+          }
+
+          return {
+            ...current,
+            statusDetail: detail,
+          };
+        });
+      };
 
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (cancelled) {
@@ -417,6 +496,10 @@ function MetaCallbackContent() {
           }
         }
 
+        if (attempt === 0 || attempt % 4 === 0) {
+          await pollOnboardingProjection().catch(() => undefined);
+        }
+
         await new Promise((resolve) => {
           setTimeout(resolve, 1500);
         });
@@ -462,7 +545,7 @@ function MetaCallbackContent() {
             code,
             state,
           },
-          timeout: 45000,
+          timeout: 9000,
           validateStatus: () => true,
         });
         const payload = response?.data;
@@ -712,6 +795,7 @@ function MetaCallbackContent() {
 
   if (loading) {
     const lifecycleStatus = normalizeLifecycleStatus(lifecycle?.status);
+    const phase = resolveOnboardingPhase(lifecycle);
     const stageLabel = lifecycleStageLabel(lifecycle?.stage);
     const statusDetail = readString(lifecycle?.statusDetail);
     return (
@@ -719,7 +803,7 @@ function MetaCallbackContent() {
         <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
           <p className="font-medium text-slate-900">Finalizing Meta connection...</p>
           <p className="mt-1 text-xs text-slate-600">
-            Stage: {stageLabel} ({lifecycleStatus})
+            Phase: {phase} | Stage: {stageLabel} ({lifecycleStatus})
           </p>
           {statusDetail ? (
             <p className="mt-1 text-xs text-slate-500">{statusDetail}</p>
@@ -730,10 +814,11 @@ function MetaCallbackContent() {
   }
 
   if (!failure) {
+    const phase = resolveOnboardingPhase(lifecycle);
     const stageLabel = lifecycleStageLabel(lifecycle?.stage);
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-700">
-        Finalizing integration connection... {stageLabel}
+        {phase}... {stageLabel}
       </div>
     );
   }

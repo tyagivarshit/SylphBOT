@@ -199,9 +199,14 @@ const corsOptions = {
     maxAge: 86400,
 };
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+const OAUTH_FAST_LANE_TIMEOUT_MS = 6000;
 const WEBHOOK_REQUEST_TIMEOUT_MS = 8000;
 const BILLING_REQUEST_TIMEOUT_MS = 12000;
 const CHECKOUT_REQUEST_TIMEOUT_MS = 14000;
+const OAUTH_FAST_LANE_TIMEOUT_PATH_PREFIXES = [
+    "/api/oauth/meta/callback",
+    "/api/clients/oauth/meta",
+];
 const WEBHOOK_TIMEOUT_PATH_PREFIXES = [
     "/api/webhooks/commerce",
     "/api/webhook/whatsapp",
@@ -217,6 +222,9 @@ const CHECKOUT_TIMEOUT_PATH_PREFIXES = [
 ];
 const BILLING_TIMEOUT_PATH_PREFIXES = ["/api/billing"];
 const resolveRequestTimeoutMs = (path) => {
+    if (OAUTH_FAST_LANE_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+        return OAUTH_FAST_LANE_TIMEOUT_MS;
+    }
     if (WEBHOOK_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
         return WEBHOOK_REQUEST_TIMEOUT_MS;
     }

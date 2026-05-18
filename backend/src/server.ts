@@ -220,6 +220,7 @@ const startPostListenBootstrap = () => {
     initWorkers({
       authEmail: true,
       integrationOnboardingProjection: true,
+      metaOAuthContinuation: true,
     });
   });
 

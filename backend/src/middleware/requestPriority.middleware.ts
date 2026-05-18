@@ -78,6 +78,8 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
     path === "/api/booking/canonical/request";
   const conversationPath = path.startsWith("/api/conversations");
   const authCriticalBootstrapPath =
+    path.startsWith("/api/oauth/meta/callback") ||
+    path.startsWith("/api/oauth/meta") ||
     path.startsWith("/api/integrations/onboarding") ||
     path.startsWith("/api/client/status") ||
     path.startsWith("/api/clients/status") ||

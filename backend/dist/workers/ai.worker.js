@@ -35,6 +35,7 @@ const startWorkerRuntime = async () => {
             humanReminder: true,
             webhookIntake: true,
             integrationOnboardingProjection: true,
+            metaOAuthContinuation: true,
         });
     }
     catch (error) {

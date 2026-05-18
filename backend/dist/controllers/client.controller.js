@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startMetaOAuth = exports.getSingleClient = exports.deleteClient = exports.updateClient = exports.getClients = exports.updateAITraining = exports.getClientStatus = exports.getMetaOAuthLifecycle = exports.metaOAuthConnect = exports.createClient = void 0;
+exports.startMetaOAuth = exports.getSingleClient = exports.deleteClient = exports.updateClient = exports.getClients = exports.updateAITraining = exports.getClientStatus = exports.getMetaOAuthLifecycle = exports.runMetaOAuthContinuationFromQueueJob = exports.metaOAuthConnect = exports.createClient = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const env_1 = require("../config/env");
 const encrypt_1 = require("../utils/encrypt");
@@ -17,10 +17,15 @@ const subscriptionAuthority_service_1 = require("../services/subscriptionAuthori
 const metaOAuthState_1 = require("../utils/metaOAuthState");
 const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
 const reliabilityOS_service_1 = require("../services/reliability/reliabilityOS.service");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
 const metaOAuthLifecycle_service_1 = require("../services/metaOAuthLifecycle.service");
+const integrationOnboardingProjection_queue_1 = require("../queues/integrationOnboardingProjection.queue");
+const metaOAuthContinuation_queue_1 = require("../queues/metaOAuthContinuation.queue");
 const META_OAUTH_CONNECT_TIMEOUT_MS = 45000;
 const META_GRAPH_TIMEOUT_MS = 12000;
+const META_GRAPH_FAST_LANE_TIMEOUT_MS = 2200;
+const META_OAUTH_CALLBACK_SYNC_BUDGET_MS = 1200;
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
@@ -43,6 +48,44 @@ const getAxiosErrorMessage = (error) => error?.response?.data?.error?.message ||
     error?.response?.data?.message ||
     error?.message ||
     "Unknown error";
+const isMetaProviderTransientError = (error) => {
+    const status = Number(error?.response?.status || 0);
+    if (status >= 500 || status === 429) {
+        return true;
+    }
+    const code = String(error?.code || "")
+        .trim()
+        .toUpperCase();
+    if (code === "ECONNABORTED" ||
+        code === "ETIMEDOUT" ||
+        code === "ECONNRESET" ||
+        code === "EAI_AGAIN") {
+        return true;
+    }
+    const reason = String(getAxiosErrorMessage(error) || "")
+        .trim()
+        .toLowerCase();
+    return (reason.includes("timeout") ||
+        reason.includes("temporar") ||
+        reason.includes("rate limit"));
+};
+const resolveMetaProviderIdentityMinimal = async (input) => {
+    const startedAtMs = Date.now();
+    const res = await axios_1.default.get("https://graph.facebook.com/v19.0/me", {
+        params: {
+            fields: "id,name",
+            access_token: input.token,
+        },
+        timeout: input.timeoutMs,
+    });
+    return {
+        identity: {
+            id: normalizeOptionalString(res.data?.id),
+            name: normalizeOptionalString(res.data?.name),
+        },
+        durationMs: Date.now() - startedAtMs,
+    };
+};
 const createClientControllerError = (message, code) => {
     const error = new Error(message);
     error.code = code;
@@ -885,58 +928,71 @@ const queueOnboardingDemoForClient = async (businessId, client) => {
         console.error("Onboarding demo trigger failed:", error);
     }
 };
-const finalizeMetaOnboardingLifecycle = (input) => {
+const runMetaOnboardingLifecycleFinalization = async (input) => {
     const startedAtMs = Date.now();
-    setImmediate(() => {
-        void (async () => {
-            try {
-                await Promise.all(input.connectedClients.map((client) => queueOnboardingDemoForClient(input.businessId, {
-                    id: client.id,
-                    platform: client.platform,
-                    isActive: client.isActive ?? true,
-                })));
-                const healthRows = await Promise.all(input.connectedClients.map(async (client) => {
-                    const healthy = await (0, connectionHealth_service_1.checkConnectionHealth)(client).catch(() => Boolean(client?.isActive));
-                    return {
-                        platform: client.platform,
-                        healthy,
-                        connected: Boolean(client.isActive),
-                        clientId: client.id,
-                        pageId: client.pageId || null,
-                        phoneNumberId: client.phoneNumberId || null,
-                    };
-                }));
-                await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleCompleted)({
-                    context: input.lifecycleContext,
-                    detail: "Meta onboarding lifecycle completed",
-                    metadata: {
-                        clients: healthRows,
-                        requestTimedOut: input.requestTimedOut,
-                        requestAborted: input.requestAborted,
-                        completedAt: new Date().toISOString(),
-                    },
-                    reconcileMs: Date.now() - startedAtMs,
-                    timeoutRecovered: input.requestTimedOut,
-                    eventualSuccess: input.requestAborted || input.requestTimedOut,
-                });
-            }
-            catch (error) {
-                const reason = String(error?.message || "")
-                    .trim() || "Meta onboarding finalization failed";
-                await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
-                    context: input.lifecycleContext,
-                    stage: "FINAL_ONBOARDING",
-                    code: "META_FINAL_ONBOARDING_FAILED",
-                    reason,
-                    resolutionHint: "RETRY",
-                    metadata: {
-                        requestTimedOut: input.requestTimedOut,
-                        requestAborted: input.requestAborted,
-                    },
-                });
-            }
-        })();
-    });
+    try {
+        await Promise.all(input.connectedClients.map((client) => queueOnboardingDemoForClient(input.businessId, {
+            id: client.id,
+            platform: client.platform,
+            isActive: client.isActive ?? true,
+        })));
+        const healthRows = await Promise.all(input.connectedClients.map(async (client) => {
+            const healthy = await (0, connectionHealth_service_1.checkConnectionHealth)(client).catch(() => Boolean(client?.isActive));
+            return {
+                platform: client.platform,
+                healthy,
+                connected: Boolean(client.isActive),
+                clientId: client.id,
+                pageId: client.pageId || null,
+                phoneNumberId: client.phoneNumberId || null,
+            };
+        }));
+        await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleCompleted)({
+            context: input.lifecycleContext,
+            detail: "Meta onboarding lifecycle completed",
+            metadata: {
+                clients: healthRows,
+                requestTimedOut: input.requestTimedOut,
+                requestAborted: input.requestAborted,
+                completedAt: new Date().toISOString(),
+            },
+            reconcileMs: Date.now() - startedAtMs,
+            timeoutRecovered: input.requestTimedOut,
+            eventualSuccess: input.requestAborted || input.requestTimedOut,
+        });
+        void (0, integrationOnboardingProjection_queue_1.enqueueIntegrationOnboardingProjectionReconcile)({
+            type: "ONBOARDING_RECONCILE",
+            businessId: input.businessId,
+            tenantId: input.businessId,
+            reason: "meta_oauth_lifecycle_completed",
+            source: "meta_oauth_finalization",
+        }).catch(() => undefined);
+    }
+    catch (error) {
+        const reason = String(error?.message || "").trim() ||
+            "Meta onboarding finalization failed";
+        await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
+            context: input.lifecycleContext,
+            stage: "FINAL_ONBOARDING",
+            code: "META_FINAL_ONBOARDING_FAILED",
+            reason,
+            resolutionHint: "RETRY",
+            metadata: {
+                requestTimedOut: input.requestTimedOut,
+                requestAborted: input.requestAborted,
+            },
+        });
+        throw error;
+    }
+};
+const finalizeMetaOnboardingLifecycle = (input, options) => {
+    if (options?.deferred !== false) {
+        setImmediate(() => {
+            void runMetaOnboardingLifecycleFinalization(input).catch(() => undefined);
+        });
+        return;
+    }
+    return runMetaOnboardingLifecycleFinalization(input);
 };
 /*
 ---------------------------------------------------
@@ -1084,6 +1140,8 @@ META OAUTH CONNECT (INSTAGRAM)
 ---------------------------------------------------
 */
 const metaOAuthConnect = async (req, res) => {
+    const callbackStartedAtMs = Date.now();
+    const internalContinuation = req.__metaContinuationInternal === true;
     let instagramTraceId = buildInstagramTraceId(null);
     let instagramBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
     let lifecycleContext = null;
@@ -1120,7 +1178,15 @@ const metaOAuthConnect = async (req, res) => {
         res.setTimeout(META_OAUTH_CONNECT_TIMEOUT_MS);
         const userId = req.user?.id;
         const requestBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
-        const { code, state, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, phoneNumberId, facebookPageId, instagramProfessionalAccountId, } = req.body || {};
+        const { code: rawCode, state: rawState, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, phoneNumberId, facebookPageId, instagramProfessionalAccountId, } = req.body || {};
+        const code = normalizeOptionalString(rawCode);
+        const state = String(rawState || "").trim();
+        const internalResolvedTokens = req.__metaResolvedTokens &&
+            typeof req.__metaResolvedTokens === "object"
+            ? req.__metaResolvedTokens
+            : null;
+        const providedShortToken = normalizeOptionalString(internalResolvedTokens?.shortToken);
+        const providedLongToken = normalizeOptionalString(internalResolvedTokens?.longToken);
         const oauthState = (0, metaOAuthState_1.verifyMetaOAuthState)(state);
         waDiagEnabled = oauthState?.platform === "WHATSAPP";
         if (waDiagEnabled) {
@@ -1144,7 +1210,8 @@ const metaOAuthConnect = async (req, res) => {
         const failInstagramConnect = (options) => {
             throw new MetaOAuthFlowError(options);
         };
-        if (!userId || !requestBusinessId || !code || !oauthState) {
+        const hasOAuthCredential = Boolean(code || providedShortToken || providedLongToken);
+        if (!userId || !requestBusinessId || !hasOAuthCredential || !oauthState) {
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
                     context: lifecycleContext,
@@ -1280,6 +1347,12 @@ const metaOAuthConnect = async (req, res) => {
                 message: "Meta OAuth is not configured on this server",
             });
         }
+        const selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
+            normalizeOptionalString(oauthState.preferredPhoneNumberId);
+        const requestedFacebookPageId = normalizeOptionalString(facebookPageId) ||
+            normalizeOptionalString(oauthState.preferredFacebookPageId);
+        const requestedInstagramProfessionalAccountId = normalizeOptionalString(instagramProfessionalAccountId) ||
+            normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
         const redirectUri = `${metaRuntime.backendUrl}/api/oauth/meta/callback`;
         if (targetPlatform === "INSTAGRAM") {
             await recordInstagramConnectStage({
@@ -1303,33 +1376,141 @@ const metaOAuthConnect = async (req, res) => {
                 },
             });
         }
-        let shortTokenRes;
-        try {
-            shortTokenRes = await axios_1.default.get("https://graph.facebook.com/v19.0/oauth/access_token", {
-                params: {
-                    client_id: metaRuntime.appId,
-                    client_secret: metaRuntime.appSecret,
-                    redirect_uri: redirectUri,
-                    code,
-                },
-                timeout: META_GRAPH_TIMEOUT_MS,
-            });
-        }
-        catch (error) {
-            if (targetPlatform === "INSTAGRAM") {
-                failInstagramConnect({
-                    stage: "IG_CODE_EXCHANGED",
-                    reason: getAxiosErrorMessage(error),
-                    code: "IG_CODE_EXCHANGE_FAILED",
-                    statusCode: Number(error?.response?.status || 400),
-                    metadata: {
-                        providerError: error?.response?.data || null,
+        let shortToken = providedShortToken;
+        if (!shortToken) {
+            let shortTokenRes;
+            try {
+                shortTokenRes = await axios_1.default.get("https://graph.facebook.com/v19.0/oauth/access_token", {
+                    params: {
+                        client_id: metaRuntime.appId,
+                        client_secret: metaRuntime.appSecret,
+                        redirect_uri: redirectUri,
+                        code,
                     },
+                    timeout: internalContinuation
+                        ? META_GRAPH_TIMEOUT_MS
+                        : META_GRAPH_FAST_LANE_TIMEOUT_MS,
                 });
             }
-            throw error;
+            catch (error) {
+                if (!internalContinuation &&
+                    lifecycleContext &&
+                    code &&
+                    isMetaProviderTransientError(error)) {
+                    await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
+                        context: lifecycleContext,
+                        stage: "OAUTH_AUTHENTICATED",
+                        detail: "Provider token exchange deferred to async continuation",
+                        metadata: {
+                            deferredWork: true,
+                            deferredReason: getAxiosErrorMessage(error),
+                        },
+                    });
+                    const enqueueStartedAtMs = Date.now();
+                    const enqueuePayload = {
+                        type: "META_OAUTH_CONTINUATION",
+                        operationId: lifecycleContext.attemptKey,
+                        replayToken: lifecycleContext.replayToken,
+                        businessId,
+                        userId,
+                        platform: targetPlatform,
+                        mode: oauthState.mode,
+                        state,
+                        code,
+                        shortTokenEncrypted: null,
+                        longTokenEncrypted: null,
+                        aiTone: normalizeOptionalString(aiTone),
+                        businessInfo: normalizeOptionalString(businessInfo),
+                        pricingInfo: normalizeOptionalString(pricingInfo),
+                        faqKnowledge: normalizeOptionalString(faqKnowledge),
+                        salesInstructions: normalizeOptionalString(salesInstructions),
+                        phoneNumberId: selectedPhoneNumberId,
+                        facebookPageId: requestedFacebookPageId,
+                        instagramProfessionalAccountId: requestedInstagramProfessionalAccountId,
+                        traceId: instagramTraceId,
+                        queuedAtIso: new Date().toISOString(),
+                        source: "callback_fast_lane_transient",
+                    };
+                    await (0, metaOAuthContinuation_queue_1.enqueueMetaOAuthContinuation)(enqueuePayload);
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "onboarding_enqueue_ms",
+                        value: Date.now() - enqueueStartedAtMs,
+                        businessId,
+                        route: "clients_oauth_meta_callback",
+                        metadata: {
+                            platform: targetPlatform,
+                            mode: oauthState.mode,
+                            operationId: lifecycleContext.attemptKey,
+                            replayToken: lifecycleContext.replayToken,
+                        },
+                    });
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "callback_timeout_prevented",
+                        value: 1,
+                        businessId,
+                        route: "clients_oauth_meta_callback",
+                        metadata: {
+                            reason: "provider_transient_during_token_exchange",
+                            operationId: lifecycleContext.attemptKey,
+                            replayToken: lifecycleContext.replayToken,
+                        },
+                    });
+                    const fastLaneDurationMs = Date.now() - callbackStartedAtMs;
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "oauth_callback_fast_lane_ms",
+                        value: fastLaneDurationMs,
+                        businessId,
+                        route: "clients_oauth_meta_callback",
+                        metadata: {
+                            platform: targetPlatform,
+                            mode: oauthState.mode,
+                            source: "token_exchange_deferred",
+                        },
+                    });
+                    (0, performanceMetrics_1.emitPerformanceMetric)({
+                        name: "callback_sync_budget_ms",
+                        value: META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
+                        businessId,
+                        route: "clients_oauth_meta_callback",
+                        metadata: {
+                            actualMs: fastLaneDurationMs,
+                            budgetBreached: fastLaneDurationMs > META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
+                            operationId: lifecycleContext.attemptKey,
+                        },
+                    });
+                    return res.status(202).json({
+                        success: true,
+                        data: {
+                            platform: targetPlatform,
+                            mode: oauthState.mode,
+                            workspaceId: oauthState.workspaceId,
+                            connectionState: "PROCESSING",
+                            lifecycle: {
+                                operationId: lifecycleContext.attemptKey,
+                                replayToken: lifecycleContext.replayToken,
+                                status: "PROCESSING",
+                                stage: "OAUTH_AUTHENTICATED",
+                                statusDetail: "Provider delay detected. Continuation queued and processing asynchronously.",
+                            },
+                        },
+                        message: `${targetPlatform} connect processing`,
+                    });
+                }
+                if (targetPlatform === "INSTAGRAM") {
+                    failInstagramConnect({
+                        stage: "IG_CODE_EXCHANGED",
+                        reason: getAxiosErrorMessage(error),
+                        code: "IG_CODE_EXCHANGE_FAILED",
+                        statusCode: Number(error?.response?.status || 400),
+                        metadata: {
+                            providerError: error?.response?.data || null,
+                        },
+                    });
+                }
+                throw error;
+            }
+            shortToken = normalizeOptionalString(shortTokenRes.data?.access_token);
         }
-        const shortToken = normalizeOptionalString(shortTokenRes.data?.access_token);
         if (!shortToken) {
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
@@ -1365,12 +1546,153 @@ const metaOAuthConnect = async (req, res) => {
                 status: "COMPLETED",
             });
         }
-        const selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
-            normalizeOptionalString(oauthState.preferredPhoneNumberId);
-        const requestedFacebookPageId = normalizeOptionalString(facebookPageId) ||
-            normalizeOptionalString(oauthState.preferredFacebookPageId);
-        const requestedInstagramProfessionalAccountId = normalizeOptionalString(instagramProfessionalAccountId) ||
-            normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
+        if (!internalContinuation && lifecycleContext) {
+            let providerIdentity = null;
+            let providerIdentityResolutionMs = 0;
+            let providerIdentityDeferred = false;
+            try {
+                const identityResolved = await resolveMetaProviderIdentityMinimal({
+                    token: shortToken,
+                    timeoutMs: META_GRAPH_FAST_LANE_TIMEOUT_MS,
+                });
+                providerIdentity = identityResolved.identity;
+                providerIdentityResolutionMs = identityResolved.durationMs;
+            }
+            catch {
+                providerIdentityDeferred = true;
+            }
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "provider_identity_resolution_ms",
+                value: providerIdentityResolutionMs,
+                businessId,
+                route: "clients_oauth_meta_callback",
+                metadata: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    deferred: providerIdentityDeferred,
+                },
+            });
+            await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
+                context: lifecycleContext,
+                stage: "META_ACCOUNT_CONNECTED",
+                detail: "OAuth token resolved and async continuation queued",
+                metadata: {
+                    providerIdentity,
+                    providerIdentityDeferred,
+                    callbackFastLane: true,
+                },
+            });
+            const enqueueStartedAtMs = Date.now();
+            const enqueuePayload = {
+                type: "META_OAUTH_CONTINUATION",
+                operationId: lifecycleContext.attemptKey,
+                replayToken: lifecycleContext.replayToken,
+                businessId,
+                userId,
+                platform: targetPlatform,
+                mode: oauthState.mode,
+                state,
+                code: code || null,
+                shortTokenEncrypted: (0, encrypt_1.encrypt)(shortToken),
+                longTokenEncrypted: providedLongToken ? (0, encrypt_1.encrypt)(providedLongToken) : null,
+                aiTone: normalizeOptionalString(aiTone),
+                businessInfo: normalizeOptionalString(businessInfo),
+                pricingInfo: normalizeOptionalString(pricingInfo),
+                faqKnowledge: normalizeOptionalString(faqKnowledge),
+                salesInstructions: normalizeOptionalString(salesInstructions),
+                phoneNumberId: selectedPhoneNumberId,
+                facebookPageId: requestedFacebookPageId,
+                instagramProfessionalAccountId: requestedInstagramProfessionalAccountId,
+                traceId: instagramTraceId,
+                queuedAtIso: new Date().toISOString(),
+                source: "callback_fast_lane",
+            };
+            try {
+                await (0, metaOAuthContinuation_queue_1.enqueueMetaOAuthContinuation)(enqueuePayload);
+            }
+            catch (error) {
+                await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
+                    context: lifecycleContext,
+                    stage: "FINAL_ONBOARDING",
+                    code: "META_CONTINUATION_ENQUEUE_FAILED",
+                    reason: normalizeOptionalString(error?.message) ||
+                        "Unable to queue onboarding continuation",
+                    resolutionHint: "RETRY",
+                    metadata: {
+                        callbackFastLane: true,
+                    },
+                });
+                return res.status(503).json({
+                    success: false,
+                    data: {
+                        platform: targetPlatform,
+                        stage: "FINAL_ONBOARDING",
+                        reason: "Unable to queue onboarding continuation",
+                        code: "META_CONTINUATION_ENQUEUE_FAILED",
+                        actionable: buildActionableFailurePayload({
+                            code: "RATE_LIMITED",
+                            reason: "Unable to queue onboarding continuation right now.",
+                            retryAfterSeconds: 15,
+                        }),
+                    },
+                    message: "Meta connect queue unavailable. Please retry.",
+                });
+            }
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "onboarding_enqueue_ms",
+                value: Date.now() - enqueueStartedAtMs,
+                businessId,
+                route: "clients_oauth_meta_callback",
+                metadata: {
+                    platform: targetPlatform,
+                    mode: oauthState.mode,
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                },
+            });
+            const fastLaneDurationMs = Date.now() - callbackStartedAtMs;
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "oauth_callback_fast_lane_ms",
+                value: fastLaneDurationMs,
+                businessId,
+                route: "clients_oauth_meta_callback",
+                metadata: {
+                    platform: targetPlatform,
+                    mode: oauthState.mode,
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                },
+            });
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "callback_sync_budget_ms",
+                value: META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
+                businessId,
+                route: "clients_oauth_meta_callback",
+                metadata: {
+                    actualMs: fastLaneDurationMs,
+                    budgetBreached: fastLaneDurationMs > META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                },
+            });
+            return res.status(202).json({
+                success: true,
+                data: {
+                    platform: targetPlatform,
+                    mode: oauthState.mode,
+                    workspaceId: oauthState.workspaceId,
+                    connectionState: "CONNECTED_PENDING",
+                    lifecycle: {
+                        operationId: lifecycleContext.attemptKey,
+                        replayToken: lifecycleContext.replayToken,
+                        status: "PROCESSING",
+                        stage: "META_ACCOUNT_CONNECTED",
+                        statusDetail: "Connection queued. Verifying assets, webhook, and reconciliation asynchronously.",
+                    },
+                },
+                message: `${targetPlatform} connect processing`,
+            });
+        }
         const discoveryPermissions = await fetchMetaGrantedPermissions(shortToken);
         if (targetPlatform === "WHATSAPP" && !selectedPhoneNumberId) {
             if (lifecycleContext) {
@@ -1596,33 +1918,36 @@ const metaOAuthConnect = async (req, res) => {
                 code: "PAIR_SELECTION_REQUIRED",
             });
         }
-        let longTokenRes;
-        try {
-            longTokenRes = await axios_1.default.get("https://graph.facebook.com/v19.0/oauth/access_token", {
-                params: {
-                    grant_type: "fb_exchange_token",
-                    client_id: metaRuntime.appId,
-                    client_secret: metaRuntime.appSecret,
-                    fb_exchange_token: shortToken,
-                },
-                timeout: META_GRAPH_TIMEOUT_MS,
-            });
-        }
-        catch (error) {
-            if (targetPlatform === "INSTAGRAM") {
-                failInstagramConnect({
-                    stage: "IG_LONG_TOKEN_EXCHANGED",
-                    reason: getAxiosErrorMessage(error),
-                    code: "IG_LONG_TOKEN_EXCHANGE_FAILED",
-                    statusCode: Number(error?.response?.status || 400),
-                    metadata: {
-                        providerError: error?.response?.data || null,
+        let longToken = providedLongToken;
+        if (!longToken) {
+            let longTokenRes;
+            try {
+                longTokenRes = await axios_1.default.get("https://graph.facebook.com/v19.0/oauth/access_token", {
+                    params: {
+                        grant_type: "fb_exchange_token",
+                        client_id: metaRuntime.appId,
+                        client_secret: metaRuntime.appSecret,
+                        fb_exchange_token: shortToken,
                     },
+                    timeout: META_GRAPH_TIMEOUT_MS,
                 });
             }
-            throw error;
+            catch (error) {
+                if (targetPlatform === "INSTAGRAM") {
+                    failInstagramConnect({
+                        stage: "IG_LONG_TOKEN_EXCHANGED",
+                        reason: getAxiosErrorMessage(error),
+                        code: "IG_LONG_TOKEN_EXCHANGE_FAILED",
+                        statusCode: Number(error?.response?.status || 400),
+                        metadata: {
+                            providerError: error?.response?.data || null,
+                        },
+                    });
+                }
+                throw error;
+            }
+            longToken = normalizeOptionalString(longTokenRes.data?.access_token);
         }
-        const longToken = normalizeOptionalString(longTokenRes.data?.access_token);
         if (!longToken) {
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
@@ -2371,13 +2696,26 @@ const metaOAuthConnect = async (req, res) => {
         }
         lifecycleRequestAborted = isRequestDetached();
         if (lifecycleContext) {
-            finalizeMetaOnboardingLifecycle({
-                businessId,
-                lifecycleContext,
-                connectedClients,
-                requestTimedOut: lifecycleRequestTimedOut,
-                requestAborted: lifecycleRequestAborted,
-            });
+            if (internalContinuation) {
+                await finalizeMetaOnboardingLifecycle({
+                    businessId,
+                    lifecycleContext,
+                    connectedClients,
+                    requestTimedOut: lifecycleRequestTimedOut,
+                    requestAborted: lifecycleRequestAborted,
+                }, {
+                    deferred: false,
+                });
+            }
+            else {
+                finalizeMetaOnboardingLifecycle({
+                    businessId,
+                    lifecycleContext,
+                    connectedClients,
+                    requestTimedOut: lifecycleRequestTimedOut,
+                    requestAborted: lifecycleRequestAborted,
+                });
+            }
         }
         if (lifecycleRequestAborted) {
             return;
@@ -2522,6 +2860,9 @@ const metaOAuthConnect = async (req, res) => {
                 resolutionHint: "RETRY",
             });
         }
+        if (internalContinuation) {
+            throw error;
+        }
         if (lifecycleRequestAborted) {
             return;
         }
@@ -2555,6 +2896,84 @@ const metaOAuthConnect = async (req, res) => {
     }
 };
 exports.metaOAuthConnect = metaOAuthConnect;
+const createMetaOAuthContinuationMockResponse = () => {
+    const response = {
+        statusCode: 200,
+        headersSent: false,
+        writableEnded: false,
+        locals: {},
+        body: null,
+        setTimeout: () => response,
+        status: (code) => {
+            response.statusCode = code;
+            return response;
+        },
+        json: (body) => {
+            response.body = body;
+            response.headersSent = true;
+            response.writableEnded = true;
+            return response;
+        },
+        send: (body) => {
+            response.body = body;
+            response.headersSent = true;
+            response.writableEnded = true;
+            return response;
+        },
+    };
+    return response;
+};
+const runMetaOAuthContinuationFromQueueJob = async (input) => {
+    const shortToken = normalizeOptionalString(input.shortTokenEncrypted) &&
+        input.shortTokenEncrypted
+        ? (0, encrypt_1.decrypt)(input.shortTokenEncrypted)
+        : null;
+    const longToken = normalizeOptionalString(input.longTokenEncrypted) &&
+        input.longTokenEncrypted
+        ? (0, encrypt_1.decrypt)(input.longTokenEncrypted)
+        : null;
+    const req = {
+        method: "POST",
+        path: "/api/clients/oauth/meta",
+        originalUrl: "/api/clients/oauth/meta",
+        body: {
+            code: input.code || undefined,
+            state: input.state,
+            aiTone: input.aiTone || undefined,
+            businessInfo: input.businessInfo || undefined,
+            pricingInfo: input.pricingInfo || undefined,
+            faqKnowledge: input.faqKnowledge || undefined,
+            salesInstructions: input.salesInstructions || undefined,
+            phoneNumberId: input.phoneNumberId || undefined,
+            facebookPageId: input.facebookPageId || undefined,
+            instagramProfessionalAccountId: input.instagramProfessionalAccountId || undefined,
+        },
+        user: {
+            id: input.userId,
+            role: "OWNER",
+            businessId: input.businessId,
+        },
+        tenant: {
+            businessId: input.businessId,
+        },
+        headers: {},
+        query: {},
+        cookies: {},
+        aborted: false,
+    };
+    const res = createMetaOAuthContinuationMockResponse();
+    req.__metaContinuationInternal = true;
+    req.__metaResolvedTokens = {
+        shortToken,
+        longToken,
+    };
+    await (0, exports.metaOAuthConnect)(req, res);
+    return {
+        statusCode: res.statusCode,
+        body: res.body,
+    };
+};
+exports.runMetaOAuthContinuationFromQueueJob = runMetaOAuthContinuationFromQueueJob;
 const getMetaOAuthLifecycle = async (req, res) => {
     try {
         const userId = req.user?.id;
@@ -2623,6 +3042,7 @@ const getMetaOAuthLifecycle = async (req, res) => {
                     replayToken,
                     platform: provider,
                     status: "PROCESSING",
+                    connectionState: "PROCESSING",
                     stage: "OAUTH_AUTHENTICATED",
                     processing: true,
                 },
@@ -2651,10 +3071,18 @@ const getMetaOAuthLifecycle = async (req, res) => {
         const availablePhoneNumbers = Array.isArray(metadata.availablePhoneNumbers)
             ? metadata.availablePhoneNumbers
             : [];
+        const connectionState = lifecycle.status === "COMPLETED"
+            ? "READY_MINIMAL"
+            : lifecycle.status === "NEEDS_ACTION" || lifecycle.status === "FAILED"
+                ? "ACTION_REQUIRED"
+                : lifecycle.stage === "META_ACCOUNT_CONNECTED"
+                    ? "CONNECTED_PENDING"
+                    : "PROCESSING";
         return res.json({
             success: true,
             data: {
                 ...lifecycle,
+                connectionState,
                 processing: lifecycle.status === "PROCESSING",
                 requiresPairSelection: lifecycle.status === "NEEDS_ACTION" &&
                     (lifecycle.stage === "PAIR_SELECTION" || validPairs.length > 0),

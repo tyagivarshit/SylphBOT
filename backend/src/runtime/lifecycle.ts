@@ -49,6 +49,10 @@ import {
   initIntegrationOnboardingProjectionQueue,
 } from "../queues/integrationOnboardingProjection.queue";
 import {
+  closeMetaOAuthContinuationQueue,
+  initMetaOAuthContinuationQueue,
+} from "../queues/metaOAuthContinuation.queue";
+import {
   closeCRMRefreshQueue,
   initCRMRefreshQueue,
 } from "../services/crm/refreshQueue.service";
@@ -101,6 +105,10 @@ import {
   initIntegrationOnboardingProjectionWorker,
 } from "../workers/integrationOnboardingProjection.worker";
 import {
+  closeMetaOAuthContinuationWorker,
+  initMetaOAuthContinuationWorker,
+} from "../workers/metaOAuthContinuation.worker";
+import {
   startCRMRefreshWorker,
   stopCRMRefreshWorker,
 } from "../workers/crmRefresh.worker";
@@ -132,6 +140,7 @@ export type WorkerLifecycleOptions = {
   humanReminder?: boolean;
   webhookIntake?: boolean;
   integrationOnboardingProjection?: boolean;
+  metaOAuthContinuation?: boolean;
 };
 
 const globalForLifecycle = globalThis as typeof globalThis & {
@@ -177,6 +186,7 @@ export const initQueues = async () => {
     initHumanReminderQueue();
     initWebhookIntakeQueues();
     initIntegrationOnboardingProjectionQueue();
+    initMetaOAuthContinuationQueue();
     globalForLifecycle.__sylphQueuesInitialized = true;
   })();
 
@@ -238,6 +248,10 @@ export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
   if (options.integrationOnboardingProjection) {
     initIntegrationOnboardingProjectionWorker();
   }
+
+  if (options.metaOAuthContinuation) {
+    initMetaOAuthContinuationWorker();
+  }
 };
 
 export const initCrons = () => {
@@ -288,6 +302,7 @@ export const shutdown = async () => {
     closeHumanReminderWorker(),
     closeWebhookIntakeWorkers(),
     closeIntegrationOnboardingProjectionWorker(),
+    closeMetaOAuthContinuationWorker(),
     stopRevenueBrainEventWorker(),
     stopCRMRefreshWorker(),
     closeCRMRefreshQueue(),
@@ -301,6 +316,7 @@ export const shutdown = async () => {
     closeHumanReminderQueue(),
     closeWebhookIntakeQueues(),
     closeIntegrationOnboardingProjectionQueue(),
+    closeMetaOAuthContinuationQueue(),
     prisma.$disconnect(),
     closeRedisConnection(),
   ]);

@@ -209,6 +209,7 @@ const startPostListenBootstrap = () => {
         (0, lifecycle_1.initWorkers)({
             authEmail: true,
             integrationOnboardingProjection: true,
+            metaOAuthContinuation: true,
         });
     });
     scheduleBackgroundStartupTask("cron_bootstrap", async () => {

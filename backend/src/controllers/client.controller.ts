@@ -1479,6 +1479,7 @@ const runMetaOnboardingLifecycleFinalization = async (input: {
         queueError:
           normalizeOptionalString(projectionEnqueue.reason) ||
           "projection_enqueue_failed",
+        includeQueueDepth: false,
       }).catch(() => null);
 
       emitPerformanceMetric({

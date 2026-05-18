@@ -1031,6 +1031,7 @@ const runMetaOnboardingLifecycleFinalization = async (input) => {
                 source: "meta_oauth_finalization",
                 queueError: normalizeOptionalString(projectionEnqueue.reason) ||
                     "projection_enqueue_failed",
+                includeQueueDepth: false,
             }).catch(() => null);
             (0, performanceMetrics_1.emitPerformanceMetric)({
                 name: "reconcile_inline_prevented",

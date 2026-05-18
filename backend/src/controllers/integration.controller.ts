@@ -54,12 +54,14 @@ import {
 } from "../services/integrationOnboardingProjection.service";
 import { enqueueIntegrationOnboardingProjectionReconcile } from "../queues/integrationOnboardingProjection.queue";
 import {
-  getIntegrationProjectionRecoveryQueueDepth,
   scheduleDeferredIntegrationProjectionReconcile,
 } from "../services/integrationProjectionRecovery.service";
 
 const INTEGRATION_API_TIMEOUT_MS = 1800;
-const RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS = 300;
+const RECONCILE_ENQUEUE_RUNTIME_BUDGET_MS = Math.max(
+  80,
+  Number(process.env.INTEGRATION_RECONCILE_ENQUEUE_BUDGET_MS || 150)
+);
 
 const normalizeOptionalString = (value?: unknown) => {
   const normalized = String(value || "").trim();
@@ -238,15 +240,12 @@ export const getOnboarding = async (req: any, res: any) => {
             reason: fastLane.reconcileReason,
             source: "api_fast_lane",
             queueError: queueDegradedReason || "queue_unavailable",
+            includeQueueDepth: false,
           }).catch(() => null);
           reconcileDeferred = true;
           recoveryKey = deferred?.recoveryKey || null;
           recoveryRetryAttempt = deferred?.retryAttempt ?? null;
           projectionRecoveryQueueDepth = deferred?.queueDepth ?? null;
-          if (projectionRecoveryQueueDepth === null) {
-            projectionRecoveryQueueDepth =
-              await getIntegrationProjectionRecoveryQueueDepth().catch(() => null);
-          }
           emitPerformanceMetric({
             name: "reconcile_inline_prevented",
             value: 1,

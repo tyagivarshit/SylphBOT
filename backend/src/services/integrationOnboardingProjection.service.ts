@@ -1,4 +1,4 @@
-import redis from "../config/redis";
+import redis, { isRedisWritable } from "../config/redis";
 import { TRIAL_DAYS } from "../config/pricing.config";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { getIntegrationOnboardingProjectionQueue } from "../queues/integrationOnboardingProjection.queue";
@@ -147,9 +147,17 @@ export type IntegrationOnboardingFastLaneResult = {
 const ONBOARDING_PROJECTION_CACHE_PREFIX = "integrations:onboarding_projection:v1:";
 const ONBOARDING_PROJECTION_FRESH_TTL_MS = 20_000;
 const ONBOARDING_PROJECTION_HARD_EXPIRY_MS = 20 * 60_000;
+const ONBOARDING_PROJECTION_STALE_RETENTION_MS = Math.max(
+  ONBOARDING_PROJECTION_HARD_EXPIRY_MS,
+  Number(process.env.INTEGRATION_PROJECTION_STALE_RETENTION_MS || 86_400_000)
+);
 const ONBOARDING_PROJECTION_QUEUE_COOLDOWN_MS = 1_500;
 const ONBOARDING_PROJECTION_REDIS_TTL_SECONDS = Math.ceil(
   (ONBOARDING_PROJECTION_HARD_EXPIRY_MS + 120_000) / 1000
+);
+const INTEGRATION_PROJECTION_REDIS_READ_FASTPATH_MS = Math.max(
+  60,
+  Number(process.env.INTEGRATION_PROJECTION_REDIS_READ_FASTPATH_MS || 120)
 );
 const INTEGRATION_RECONCILE_RUNTIME_BUDGET_MS = Math.max(
   1_000,
@@ -169,6 +177,7 @@ const INTEGRATION_RECONCILE_QUEUE_DEPTH_TIMEOUT_MS = Math.max(
 );
 
 const projectionMemoryCache = new Map<string, ProjectionCacheEntry>();
+const projectionStaleFallbackCache = new Map<string, ProjectionCacheEntry>();
 const projectionReconcileInFlight = new Map<string, Promise<ProjectionCacheEntry>>();
 const projectionReconcileTracker = new Map<string, ReconcileTracker>();
 
@@ -574,7 +583,9 @@ const cloneEntry = (entry: ProjectionCacheEntry): ProjectionCacheEntry => ({
 });
 
 const setMemoryEntry = (entry: ProjectionCacheEntry) => {
-  projectionMemoryCache.set(entry.cacheKey, cloneEntry(entry));
+  const cloned = cloneEntry(entry);
+  projectionMemoryCache.set(entry.cacheKey, cloned);
+  projectionStaleFallbackCache.set(entry.cacheKey, cloneEntry(cloned));
 };
 
 const getMemoryEntry = (cacheKey: string) => {
@@ -585,6 +596,20 @@ const getMemoryEntry = (cacheKey: string) => {
 
   if (cached.expiresAtMs <= Date.now()) {
     projectionMemoryCache.delete(cacheKey);
+    return null;
+  }
+
+  return cloneEntry(cached);
+};
+
+const getStaleFallbackEntry = (cacheKey: string) => {
+  const cached = projectionStaleFallbackCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (Date.now() - cached.refreshedAtMs > ONBOARDING_PROJECTION_STALE_RETENTION_MS) {
+    projectionStaleFallbackCache.delete(cacheKey);
     return null;
   }
 
@@ -647,7 +672,20 @@ const withEnvelopeState = (input: {
 };
 
 const getRedisEntry = async (cacheKey: string): Promise<ProjectionCacheEntry | null> => {
-  const raw = await redis.get(buildRedisProjectionKey(cacheKey));
+  if (!isRedisWritable()) {
+    return null;
+  }
+
+  const raw = await withTimeout({
+    label: "integration_projection_redis_read_fastpath",
+    timeoutMs: INTEGRATION_PROJECTION_REDIS_READ_FASTPATH_MS,
+    task: redis.get(buildRedisProjectionKey(cacheKey)),
+  }).catch((error) => {
+    if (error instanceof TimeoutExceededError) {
+      return null;
+    }
+    return null;
+  });
   if (!raw) {
     return null;
   }
@@ -787,6 +825,7 @@ export const readIntegrationOnboardingFastLaneSnapshot = async (input: {
     entry: ProjectionCacheEntry | null;
     source: "memory_cache" | "redis_cache" | "fallback";
     snapshot: IntegrationOnboardingProjectionSnapshot;
+    fastServedFromStaleSnapshot?: boolean;
   }): IntegrationOnboardingFastLaneResult => {
     const staleAgeMs = params.entry ? Math.max(0, now - params.entry.staleAtMs) : 0;
     const stale = params.entry ? now > params.entry.staleAtMs : true;
@@ -844,6 +883,36 @@ export const readIntegrationOnboardingFastLaneSnapshot = async (input: {
       });
     }
 
+    if (result.degraded) {
+      emitPerformanceMetric({
+        name: "degraded_projection_fastpath_ms",
+        value: Date.now() - startedAtMs,
+        businessId: key.businessId,
+        route: "integrations_onboarding_fast_lane",
+        metadata: {
+          source: params.source,
+          cacheHit: result.cacheHit,
+          stale: result.stale,
+          staleAgeMs: result.staleAgeMs,
+          reason: degradeReason || "degraded_fastpath",
+        },
+      });
+    }
+
+    if (params.fastServedFromStaleSnapshot) {
+      emitPerformanceMetric({
+        name: "stale_projection_fast_served",
+        value: 1,
+        businessId: key.businessId,
+        route: "integrations_onboarding_fast_lane",
+        metadata: {
+          source: params.source,
+          staleAgeMs: result.staleAgeMs,
+          reason: "stale_snapshot_fastpath",
+        },
+      });
+    }
+
     return result;
   };
 
@@ -883,6 +952,26 @@ export const readIntegrationOnboardingFastLaneSnapshot = async (input: {
       entry: redisEntry,
       source: "redis_cache",
       snapshot,
+    });
+  }
+
+  const staleFallbackEntry = getStaleFallbackEntry(key.cacheKey);
+  if (staleFallbackEntry) {
+    const stale = true;
+    const staleAgeMs = Math.max(0, now - staleFallbackEntry.staleAtMs);
+    const snapshot = markEntryStaleState({
+      entry: staleFallbackEntry,
+      stale,
+      staleAgeMs,
+      staleReason: "stale_snapshot_fastpath",
+      reconcileInFlight: tracker.inFlight,
+      tracker,
+    });
+    return buildResult({
+      entry: staleFallbackEntry,
+      source: "fallback",
+      snapshot,
+      fastServedFromStaleSnapshot: true,
     });
   }
 

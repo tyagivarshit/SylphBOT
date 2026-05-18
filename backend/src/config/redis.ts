@@ -10,11 +10,32 @@ import {
 import logger from "../utils/logger";
 
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = Math.max(
+  3,
+  Number(process.env.REDIS_MAX_RECONNECT_ATTEMPTS || 8)
+);
 const REDIS_READY_POLL_MS = 50;
+const REDIS_RECONNECT_JITTER_MS = Math.max(
+  10,
+  Number(process.env.REDIS_RECONNECT_JITTER_MS || 180)
+);
 
 type ManagedRedisClient = Redis & {
   [MANUAL_CLOSE_SYMBOL]?: boolean;
+};
+
+type RedisReconnectStats = {
+  attempts: number;
+  lastAttemptAtMs: number;
+  lastDelayMs: number;
+  byConnection: Record<
+    string,
+    {
+      attempts: number;
+      lastAttemptAtMs: number;
+      lastDelayMs: number;
+    }
+  >;
 };
 
 const globalForRedis = globalThis as typeof globalThis & {
@@ -23,6 +44,7 @@ const globalForRedis = globalThis as typeof globalThis & {
   __sylphRedisProxy?: ManagedRedisClient;
   __sylphRedisProxyClient?: ManagedRedisClient;
   __sylphBullConnections?: Set<ManagedRedisClient>;
+  __sylphRedisReconnectStats?: RedisReconnectStats;
 };
 
 const isRetryableRedisError = (error: unknown) => {
@@ -31,6 +53,52 @@ const isRetryableRedisError = (error: unknown) => {
   return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly|Connection is in closed state/i.test(
     message
   );
+};
+
+const getRedisReconnectStats = () => {
+  if (!globalForRedis.__sylphRedisReconnectStats) {
+    globalForRedis.__sylphRedisReconnectStats = {
+      attempts: 0,
+      lastAttemptAtMs: 0,
+      lastDelayMs: 0,
+      byConnection: {},
+    };
+  }
+  return globalForRedis.__sylphRedisReconnectStats;
+};
+
+const noteRedisReconnectAttempt = (
+  connectionName: string,
+  attempt: number,
+  delayMs: number
+) => {
+  const stats = getRedisReconnectStats();
+  const now = Date.now();
+  const key = String(connectionName || "unknown");
+  const previous = stats.byConnection[key];
+  stats.attempts += 1;
+  stats.lastAttemptAtMs = now;
+  stats.lastDelayMs = Math.max(0, Math.floor(delayMs));
+  stats.byConnection[key] = {
+    attempts: Math.max(previous?.attempts || 0, Math.max(0, Math.floor(attempt))),
+    lastAttemptAtMs: now,
+    lastDelayMs: stats.lastDelayMs,
+  };
+};
+
+const noteRedisConnectionReady = (connectionName: string) => {
+  const stats = getRedisReconnectStats();
+  const key = String(connectionName || "unknown");
+  const previous = stats.byConnection[key];
+  if (!previous) {
+    return;
+  }
+
+  stats.byConnection[key] = {
+    attempts: 0,
+    lastAttemptAtMs: previous.lastAttemptAtMs,
+    lastDelayMs: previous.lastDelayMs,
+  };
 };
 
 const buildRedisOptions = (connectionName: string): RedisOptions => {
@@ -64,10 +132,17 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
         return null;
       }
 
-      return Math.min(
+      const exponentialDelay = Math.min(
         env.REDIS_RETRY_DELAY_MS * 2 ** Math.max(attempts - 1, 0),
         env.REDIS_MAX_RETRY_DELAY_MS
       );
+      const jitterMs = Math.floor(Math.random() * REDIS_RECONNECT_JITTER_MS);
+      const delayMs = Math.min(
+        env.REDIS_MAX_RETRY_DELAY_MS,
+        exponentialDelay + jitterMs
+      );
+      noteRedisReconnectAttempt(connectionName, attempts, delayMs);
+      return delayMs;
     },
     reconnectOnError(error) {
       return isRetryableRedisError(error) ? 1 : false;
@@ -78,12 +153,16 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
 
 const attachRedisListeners = (client: ManagedRedisClient, label: string) => {
   client.on("connect", () => {
-    markRedisHealthy();
     logger.info({ label }, "Redis client connected");
   });
 
   client.on("ready", () => {
+    noteRedisConnectionReady(label);
     markRedisHealthy();
+  });
+
+  client.on("reconnecting", (delay: number) => {
+    noteRedisReconnectAttempt(label, 0, Number(delay) || 0);
   });
 
   client.on("error", (error) => {
@@ -453,6 +532,7 @@ export const closeRedisConnection = async () => {
   globalForRedis.__sylphRedisProxy = undefined;
   globalForRedis.__sylphRedisProxyClient = undefined;
   globalForRedis.__sylphBullConnections = undefined;
+  globalForRedis.__sylphRedisReconnectStats = undefined;
 };
 
 const redis = new Proxy({} as ManagedRedisClient, {
@@ -467,6 +547,16 @@ export const __redisRuntimeTestInternals = {
   isAlreadyConnectedError,
   isRedisClientWritable,
   waitForClientReady,
+};
+
+export const getRedisReconnectSnapshot = () => {
+  const stats = getRedisReconnectStats();
+  return {
+    attempts: stats.attempts,
+    lastAttemptAtMs: stats.lastAttemptAtMs,
+    lastDelayMs: stats.lastDelayMs,
+    byConnection: { ...stats.byConnection },
+  };
 };
 
 export default redis;

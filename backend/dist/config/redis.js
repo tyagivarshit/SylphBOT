@@ -3,18 +3,57 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.__redisRuntimeTestInternals = exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getSharedRedisConnection = exports.waitForRedisReady = exports.isRedisWritable = exports.isQueueRedisWritable = exports.isSharedRedisWritable = exports.initRedis = void 0;
+exports.getRedisReconnectSnapshot = exports.__redisRuntimeTestInternals = exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getSharedRedisConnection = exports.waitForRedisReady = exports.isRedisWritable = exports.isQueueRedisWritable = exports.isSharedRedisWritable = exports.initRedis = void 0;
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
 const redisSafety_1 = require("../redis/redisSafety");
 const logger_1 = __importDefault(require("../utils/logger"));
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = Math.max(3, Number(process.env.REDIS_MAX_RECONNECT_ATTEMPTS || 8));
 const REDIS_READY_POLL_MS = 50;
+const REDIS_RECONNECT_JITTER_MS = Math.max(10, Number(process.env.REDIS_RECONNECT_JITTER_MS || 180));
 const globalForRedis = globalThis;
 const isRetryableRedisError = (error) => {
     const message = String(error?.message || error || "");
     return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly|Connection is in closed state/i.test(message);
+};
+const getRedisReconnectStats = () => {
+    if (!globalForRedis.__sylphRedisReconnectStats) {
+        globalForRedis.__sylphRedisReconnectStats = {
+            attempts: 0,
+            lastAttemptAtMs: 0,
+            lastDelayMs: 0,
+            byConnection: {},
+        };
+    }
+    return globalForRedis.__sylphRedisReconnectStats;
+};
+const noteRedisReconnectAttempt = (connectionName, attempt, delayMs) => {
+    const stats = getRedisReconnectStats();
+    const now = Date.now();
+    const key = String(connectionName || "unknown");
+    const previous = stats.byConnection[key];
+    stats.attempts += 1;
+    stats.lastAttemptAtMs = now;
+    stats.lastDelayMs = Math.max(0, Math.floor(delayMs));
+    stats.byConnection[key] = {
+        attempts: Math.max(previous?.attempts || 0, Math.max(0, Math.floor(attempt))),
+        lastAttemptAtMs: now,
+        lastDelayMs: stats.lastDelayMs,
+    };
+};
+const noteRedisConnectionReady = (connectionName) => {
+    const stats = getRedisReconnectStats();
+    const key = String(connectionName || "unknown");
+    const previous = stats.byConnection[key];
+    if (!previous) {
+        return;
+    }
+    stats.byConnection[key] = {
+        attempts: 0,
+        lastAttemptAtMs: previous.lastAttemptAtMs,
+        lastDelayMs: previous.lastDelayMs,
+    };
 };
 const buildRedisOptions = (connectionName) => {
     const isTlsRedisUrl = env_1.env.REDIS_URL.startsWith("rediss://");
@@ -40,7 +79,11 @@ const buildRedisOptions = (connectionName) => {
             if (attempts > MAX_RECONNECT_ATTEMPTS) {
                 return null;
             }
-            return Math.min(env_1.env.REDIS_RETRY_DELAY_MS * 2 ** Math.max(attempts - 1, 0), env_1.env.REDIS_MAX_RETRY_DELAY_MS);
+            const exponentialDelay = Math.min(env_1.env.REDIS_RETRY_DELAY_MS * 2 ** Math.max(attempts - 1, 0), env_1.env.REDIS_MAX_RETRY_DELAY_MS);
+            const jitterMs = Math.floor(Math.random() * REDIS_RECONNECT_JITTER_MS);
+            const delayMs = Math.min(env_1.env.REDIS_MAX_RETRY_DELAY_MS, exponentialDelay + jitterMs);
+            noteRedisReconnectAttempt(connectionName, attempts, delayMs);
+            return delayMs;
         },
         reconnectOnError(error) {
             return isRetryableRedisError(error) ? 1 : false;
@@ -50,11 +93,14 @@ const buildRedisOptions = (connectionName) => {
 };
 const attachRedisListeners = (client, label) => {
     client.on("connect", () => {
-        (0, redisSafety_1.markRedisHealthy)();
         logger_1.default.info({ label }, "Redis client connected");
     });
     client.on("ready", () => {
+        noteRedisConnectionReady(label);
         (0, redisSafety_1.markRedisHealthy)();
+    });
+    client.on("reconnecting", (delay) => {
+        noteRedisReconnectAttempt(label, 0, Number(delay) || 0);
     });
     client.on("error", (error) => {
         logger_1.default.error({ err: error, label }, "Redis client error");
@@ -317,6 +363,7 @@ const closeRedisConnection = async () => {
     globalForRedis.__sylphRedisProxy = undefined;
     globalForRedis.__sylphRedisProxyClient = undefined;
     globalForRedis.__sylphBullConnections = undefined;
+    globalForRedis.__sylphRedisReconnectStats = undefined;
 };
 exports.closeRedisConnection = closeRedisConnection;
 const redis = new Proxy({}, {
@@ -331,4 +378,14 @@ exports.__redisRuntimeTestInternals = {
     isRedisClientWritable,
     waitForClientReady,
 };
+const getRedisReconnectSnapshot = () => {
+    const stats = getRedisReconnectStats();
+    return {
+        attempts: stats.attempts,
+        lastAttemptAtMs: stats.lastAttemptAtMs,
+        lastDelayMs: stats.lastDelayMs,
+        byConnection: { ...stats.byConnection },
+    };
+};
+exports.getRedisReconnectSnapshot = getRedisReconnectSnapshot;
 exports.default = redis;

@@ -13,10 +13,12 @@ import {
   resolveGoogleOAuthRedirectOrigin,
   verifyGoogleOAuthState,
 } from "../utils/googleOAuthState";
-import { ensureAuthBootstrapContext } from "../services/authBootstrap.service";
+import {
+  ensureAuthReadyMinimalContext,
+  primeAuthBootstrapContext,
+} from "../services/authBootstrap.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
-  getRequestRemainingMs,
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
@@ -143,12 +145,7 @@ export const googleCallback = async (req: Request, res: Response) => {
       );
     }
 
-    const bootstrapBudgetMs = getRequestRemainingMs({ req, res }, 0);
-    if (bootstrapBudgetMs <= 1200) {
-      return res.redirect(buildAuthErrorUrl(redirectOrigin, "session_expired"));
-    }
-
-    const bootstrap = await ensureAuthBootstrapContext({
+    const bootstrap = await ensureAuthReadyMinimalContext({
       userId: user.id,
       preferredBusinessId: user.businessId || null,
       profileSeed: {
@@ -176,7 +173,7 @@ export const googleCallback = async (req: Request, res: Response) => {
     );
     const refreshToken = hashToken(refreshRaw);
 
-    await pruneRefreshTokens(bootstrap.user.id, 4);
+    void pruneRefreshTokens(bootstrap.user.id, 4);
 
     await prisma.refreshToken.create({
       data: {
@@ -194,6 +191,20 @@ export const googleCallback = async (req: Request, res: Response) => {
     });
 
     setAuthCookies(res, req, accessToken, refreshRaw);
+    primeAuthBootstrapContext(
+      {
+        userId: bootstrap.user.id,
+        preferredBusinessId: bootstrap.identity.businessId,
+        profileSeed: {
+          email: bootstrap.user.email,
+          name: bootstrap.user.name,
+          avatar: bootstrap.user.avatar || null,
+        },
+      },
+      {
+        shouldRun: () => !isRequestLifecycleAborted({ req, res }),
+      }
+    );
 
     console.info("AUTH_GOOGLE_CALLBACK_OK", {
       userId: bootstrap.user.id,

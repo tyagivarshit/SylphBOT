@@ -306,7 +306,10 @@ export const AuthProvider = ({
           }
 
           const hasExistingSession = Boolean(currentUserRef.current);
-          const shouldContinueTransient = hasExistingSession || mode === "stabilize";
+          const shouldContinueTransient =
+            hasExistingSession ||
+            mode === "stabilize" ||
+            routeContext === "AUTHENTICATED_APP_ROUTE";
 
           if (!shouldContinueTransient) {
             setUser(null);
@@ -346,7 +349,10 @@ export const AuthProvider = ({
               routeContext,
               preservedExistingSession: true,
             });
-          } else if (mode === "stabilize" && typeof window !== "undefined") {
+          } else if (
+            typeof window !== "undefined" &&
+            (mode === "stabilize" || routeContext === "AUTHENTICATED_APP_ROUTE")
+          ) {
             window.setTimeout(() => {
               window.dispatchEvent(new Event("auth:refresh"));
             }, 420);

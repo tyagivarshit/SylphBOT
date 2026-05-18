@@ -39,10 +39,21 @@ const AUTH_REDIS_STAGE_TIMEOUT_MS = 240;
 const AUTH_USER_STAGE_TIMEOUT_MS = 900;
 const AUTH_WORKSPACE_STAGE_TIMEOUT_MS = 600;
 const AUTH_REFRESH_TOKEN_STAGE_TIMEOUT_MS = 900;
+const AUTH_STALE_VALID_WINDOW_MS = 60_000;
 const AUTH_STATS_LOG_INTERVAL_MS = 60_000;
 const SESSION_ANOMALY_RECHECK_MS = 10_000;
 const AUTH_SURFACE_RETRY_AFTER_MS = 220;
 const SESSION_ANOMALY_GUARD_TIMEOUT_MS = 180;
+const AUTH_CRITICAL_DEGRADED_ROUTE_PREFIXES = [
+  "/api/user/me",
+  "/api/auth/me",
+  "/api/integrations/onboarding",
+  "/api/client/status",
+  "/api/clients/status",
+  "/api/dashboard",
+  "/api/billing",
+  "/api/clients/oauth/meta/lifecycle",
+];
 const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
   "/api/billing/checkout",
   "/api/security",
@@ -78,6 +89,13 @@ type AuthRequest = Request & {
 const authContextCache = new Map<string, CachedAuthContext>();
 const authContextInFlight = new Map<string, Promise<CachedAuthContext | null>>();
 const refreshAuthInFlight = new Map<string, Promise<CachedAuthContext | null>>();
+const staleAuthContextByUser = new Map<
+  string,
+  {
+    context: CachedAuthContext;
+    expiresAt: number;
+  }
+>();
 const sessionAnomalyCheckedAt = new Map<string, number>();
 const authStats = {
   total: 0,
@@ -86,6 +104,8 @@ const authStats = {
   dbFallback: 0,
   coalescedWait: 0,
   deniedByBudget: 0,
+  staleValidServed: 0,
+  degradedServed: 0,
 };
 let authStatsLastLoggedAt = Date.now();
 
@@ -94,6 +114,36 @@ const hashToken = (token: string) =>
 
 const getAuthRedisCacheKey = (tokenKey: string) =>
   `${AUTH_REDIS_CACHE_PREFIX}${tokenKey}`;
+
+const buildStaleAuthUserKey = (userId: string, tokenVersion: number) =>
+  `${String(userId || "").trim()}:${Number(tokenVersion || 0)}`;
+
+const writeStaleAuthContext = (context: CachedAuthContext) => {
+  const key = buildStaleAuthUserKey(context.userId, context.tokenVersion);
+  staleAuthContextByUser.set(key, {
+    context: {
+      ...context,
+    },
+    expiresAt: Date.now() + AUTH_STALE_VALID_WINDOW_MS,
+  });
+};
+
+const readStaleAuthContext = (userId: string, tokenVersion: number) => {
+  const key = buildStaleAuthUserKey(userId, tokenVersion);
+  const cached = staleAuthContextByUser.get(key);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    staleAuthContextByUser.delete(key);
+    return null;
+  }
+
+  return {
+    ...cached.context,
+  };
+};
 
 const getAuthBudgetMs = (req: Request, res?: Response) =>
   Math.max(
@@ -374,6 +424,8 @@ const bumpAuthStats = (
   authStats.dbFallback += Number(update.dbFallback || 0);
   authStats.coalescedWait += Number(update.coalescedWait || 0);
   authStats.deniedByBudget += Number(update.deniedByBudget || 0);
+  authStats.staleValidServed += Number(update.staleValidServed || 0);
+  authStats.degradedServed += Number(update.degradedServed || 0);
 
   if (Date.now() - authStatsLastLoggedAt < AUTH_STATS_LOG_INTERVAL_MS) {
     return;
@@ -388,7 +440,26 @@ const bumpAuthStats = (
     dbFallbackRatio: Number((authStats.dbFallback / total).toFixed(3)),
     coalescedWaitRatio: Number((authStats.coalescedWait / total).toFixed(3)),
     deniedByBudgetRatio: Number((authStats.deniedByBudget / total).toFixed(3)),
+    staleValidServedRatio: Number((authStats.staleValidServed / total).toFixed(3)),
+    degradedServedRatio: Number((authStats.degradedServed / total).toFixed(3)),
     inflightAuthLookups: authContextInFlight.size,
+  });
+
+  emitPerformanceMetric({
+    name: "auth_cache_hit_ratio",
+    value: Number(
+      (((authStats.memoryHit + authStats.redisHit) / total) * 100).toFixed(2)
+    ),
+    route: "auth.middleware",
+    metadata: {
+      total,
+      memoryHit: authStats.memoryHit,
+      redisHit: authStats.redisHit,
+      dbFallback: authStats.dbFallback,
+      coalescedWait: authStats.coalescedWait,
+      staleValidServed: authStats.staleValidServed,
+      degradedServed: authStats.degradedServed,
+    },
   });
 
   authStats.total = 0;
@@ -397,6 +468,8 @@ const bumpAuthStats = (
   authStats.dbFallback = 0;
   authStats.coalescedWait = 0;
   authStats.deniedByBudget = 0;
+  authStats.staleValidServed = 0;
+  authStats.degradedServed = 0;
 };
 
 const readMemoryAuthContext = (
@@ -416,6 +489,7 @@ const readMemoryAuthContext = (
     return null;
   }
 
+  writeStaleAuthContext(cachedContext);
   return cachedContext;
 };
 
@@ -457,6 +531,7 @@ const readRedisAuthContext = async (
     }
 
     authContextCache.set(tokenKey, parsed);
+    writeStaleAuthContext(parsed);
     return parsed;
   } catch {
     await redis.del(getAuthRedisCacheKey(tokenKey)).catch(() => undefined);
@@ -469,6 +544,7 @@ const writeAuthContextCache = async (
   context: CachedAuthContext
 ) => {
   authContextCache.set(tokenKey, context);
+  writeStaleAuthContext(context);
   await redis
     .set(
       getAuthRedisCacheKey(tokenKey),
@@ -507,6 +583,7 @@ export const primeAuthContextCacheForToken = (input: {
   }
 
   authContextCache.set(tokenKey, context);
+  writeStaleAuthContext(context);
   void writeAuthContextCache(tokenKey, context);
 };
 
@@ -593,6 +670,17 @@ const resolveBusinessId = async (input: {
   return identity.businessId;
 };
 
+const isCriticalAuthDegradedRoute = (req: Request) => {
+  const route = String(req.originalUrl || req.url || "")
+    .trim()
+    .toLowerCase();
+  const path = String(req.path || "").trim().toLowerCase();
+
+  return AUTH_CRITICAL_DEGRADED_ROUTE_PREFIXES.some(
+    (prefix) => route.startsWith(prefix) || path.startsWith(prefix)
+  );
+};
+
 const shouldUseShallowWorkspaceResolution = (req: Request) => {
   const path = String(req.path || req.originalUrl || req.url || "").trim();
   const surface = String((req.query as Record<string, unknown>)?.surface || "")
@@ -601,6 +689,7 @@ const shouldUseShallowWorkspaceResolution = (req: Request) => {
 
   return (
     surface === "auth" ||
+    isCriticalAuthDegradedRoute(req) ||
     path.startsWith("/api/user/me") ||
     path.startsWith("/api/auth/me")
   );
@@ -621,6 +710,20 @@ const isAuthSurfaceBootstrapRequest = (req: Request) => {
 
   const route = String(req.originalUrl || req.url || "").trim().toLowerCase();
   return route.includes("/user/me") || route.includes("/auth/me");
+};
+
+const shouldServeDegradedAuth = (req: Request) =>
+  isAuthSurfaceBootstrapRequest(req) || isCriticalAuthDegradedRoute(req);
+
+const markDegradedAuthHeaders = (res?: Response | null) => {
+  if (!res || res.headersSent || res.writableEnded) {
+    return;
+  }
+
+  res.setHeader("X-Auth-Processing-State", "PROCESSING");
+  res.setHeader("X-Auth-Session-Ready", "0");
+  res.setHeader("X-Auth-Retry-After-Ms", String(AUTH_SURFACE_RETRY_AFTER_MS));
+  res.setHeader("X-Auth-Degraded", "1");
 };
 
 const enforceSessionAnomalyGuard = async (req: Request, input: {
@@ -748,13 +851,119 @@ const runSessionAnomalyGuard = async (
   void runGuard();
 };
 
+const serveDegradedAuthenticatedState = async (input: {
+  req: Request;
+  res: Response;
+  startedAt: number;
+  userId: string;
+  role: string;
+  businessId: string | null;
+  email?: string;
+  reason: string;
+  stage: string;
+  source: "access_token" | "refresh_token";
+  staleContextUsed: boolean;
+}) => {
+  bindAuthenticatedContext(input.req, {
+    id: input.userId,
+    role: input.role,
+    email: input.email,
+    businessId: input.businessId,
+  });
+
+  await runSessionAnomalyGuard(input.req, {
+    userId: input.userId,
+    businessId: input.businessId,
+  });
+
+  if (isRequestClosed(input.req, input.res)) {
+    return;
+  }
+
+  markDegradedAuthHeaders(input.res);
+
+  if (input.staleContextUsed) {
+    bumpAuthStats({
+      resolved: 1,
+      staleValidServed: 1,
+    });
+    emitPerformanceMetric({
+      name: "stale_valid_auth_served",
+      value: 1,
+      businessId: input.businessId,
+      route: input.req.originalUrl,
+      metadata: {
+        source: input.source,
+        stage: input.stage,
+      },
+    });
+  }
+
+  bumpAuthStats({
+    resolved: 1,
+    degradedServed: 1,
+  });
+
+  emitPerformanceMetric({
+    name: "auth_degraded_state_count",
+    value: 1,
+    businessId: input.businessId,
+    route: input.req.originalUrl,
+    metadata: {
+      source: input.source,
+      stage: input.stage,
+      reason: input.reason,
+      staleContextUsed: input.staleContextUsed,
+    },
+  });
+  emitPerformanceMetric({
+    name: "false_unauthorized_prevented",
+    value: 1,
+    businessId: input.businessId,
+    route: input.req.originalUrl,
+    metadata: {
+      source: input.source,
+      stage: input.stage,
+      reason: input.reason,
+      staleContextUsed: input.staleContextUsed,
+    },
+  });
+  emitPerformanceMetric({
+    name: "auth_processing_state",
+    value: Date.now() - input.startedAt,
+    businessId: input.businessId,
+    route: input.req.originalUrl,
+    metadata: {
+      surface: isAuthSurfaceBootstrapRequest(input.req) ? "auth" : "critical",
+      state: "PROCESSING",
+      reason: input.reason,
+      stage: input.stage,
+      retryAfterMs: AUTH_SURFACE_RETRY_AFTER_MS,
+      terminal: false,
+      source: input.source,
+    },
+  });
+  emitPerformanceMetric({
+    name: "AUTH_MS",
+    value: Date.now() - input.startedAt,
+    businessId: input.businessId,
+    route: input.req.originalUrl,
+    metadata: {
+      source: `${input.source}_degraded`,
+      stage: input.stage,
+      staleContextUsed: input.staleContextUsed,
+      retryAfterMs: AUTH_SURFACE_RETRY_AFTER_MS,
+    },
+  });
+};
+
 export const protect = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   const startedAt = Date.now();
-  const authSurfaceBootstrapRequest = isAuthSurfaceBootstrapRequest(req);
+  const degradedAuthAllowed = shouldServeDegradedAuth(req);
   let decodedAccessToken: ReturnType<typeof verifyAccessToken> = null;
   let accessLookupTransientReason: string | null = null;
   let accessLookupTransientStage: string | null = null;
@@ -1274,57 +1483,37 @@ export const protect = async (
     }
 
     if (
-      authSurfaceBootstrapRequest &&
+      degradedAuthAllowed &&
       decodedAccessToken?.id &&
       typeof decodedAccessToken.tokenVersion === "number" &&
       accessLookupTransientReason
     ) {
+      const staleContext = readStaleAuthContext(
+        decodedAccessToken.id,
+        decodedAccessToken.tokenVersion
+      );
       const fallbackBusinessId =
-        String(decodedAccessToken.businessId || "").trim() || null;
+        String(staleContext?.businessId || decodedAccessToken.businessId || "").trim() ||
+        null;
 
-      bindAuthenticatedContext(req, {
-        id: decodedAccessToken.id,
-        role: String(decodedAccessToken.role || "").trim() || "AGENT",
-        businessId: fallbackBusinessId,
-      });
-
-      await runSessionAnomalyGuard(req, {
+      await serveDegradedAuthenticatedState({
+        req,
+        res,
+        startedAt,
         userId: decodedAccessToken.id,
+        role:
+          String(staleContext?.role || decodedAccessToken.role || "").trim() || "AGENT",
+        email: staleContext?.email,
         businessId: fallbackBusinessId,
+        reason: accessLookupTransientReason,
+        stage: accessLookupTransientStage || "access_lookup",
+        source: "access_token",
+        staleContextUsed: Boolean(staleContext),
       });
 
       if (isRequestClosed(req, res)) {
         return;
       }
-
-      res.setHeader("X-Auth-Processing-State", "PROCESSING");
-      res.setHeader("X-Auth-Session-Ready", "0");
-      res.setHeader("X-Auth-Retry-After-Ms", String(AUTH_SURFACE_RETRY_AFTER_MS));
-      emitPerformanceMetric({
-        name: "auth_processing_state",
-        value: Date.now() - startedAt,
-        businessId: fallbackBusinessId,
-        route: req.originalUrl,
-        metadata: {
-          surface: "auth",
-          state: "PROCESSING",
-          reason: accessLookupTransientReason,
-          stage: accessLookupTransientStage || null,
-          retryAfterMs: AUTH_SURFACE_RETRY_AFTER_MS,
-          terminal: false,
-        },
-      });
-      emitPerformanceMetric({
-        name: "AUTH_MS",
-        value: Date.now() - startedAt,
-        businessId: fallbackBusinessId,
-        route: req.originalUrl,
-        metadata: {
-          source: "access_token_timeout_processing",
-          stage: accessLookupTransientStage || "access_lookup",
-          retryAfterMs: AUTH_SURFACE_RETRY_AFTER_MS,
-        },
-      });
 
       return next();
     }
@@ -1357,6 +1546,30 @@ export const protect = async (
       bumpAuthStats({
         deniedByBudget: 1,
       });
+      if (degradedAuthAllowed) {
+        const staleContext = readStaleAuthContext(decoded.id, decoded.tokenVersion);
+        if (staleContext) {
+          await serveDegradedAuthenticatedState({
+            req,
+            res,
+            startedAt,
+            userId: staleContext.userId,
+            role: staleContext.role,
+            email: staleContext.email,
+            businessId: staleContext.businessId,
+            reason: "refresh_lookup_budget_exhausted",
+            stage: "refresh_lookup_budget",
+            source: "refresh_token",
+            staleContextUsed: true,
+          });
+
+          if (isRequestClosed(req, res)) {
+            return;
+          }
+
+          return next();
+        }
+      }
       throw unauthorized("Session verification timed out. Please retry.");
     }
 
@@ -1457,6 +1670,32 @@ export const protect = async (
         isAuthBudgetExhaustedError(error) ||
         isAuthStageTimeoutError(error)
       ) {
+        if (degradedAuthAllowed) {
+          const staleContext = readStaleAuthContext(decoded.id, decoded.tokenVersion);
+          if (staleContext) {
+            await serveDegradedAuthenticatedState({
+              req,
+              res,
+              startedAt,
+              userId: staleContext.userId,
+              role: staleContext.role,
+              email: staleContext.email,
+              businessId: staleContext.businessId,
+              reason:
+                String((error as Error)?.message || "").trim() ||
+                "refresh_lookup_timeout",
+              stage: "refresh_lookup_wait",
+              source: "refresh_token",
+              staleContextUsed: true,
+            });
+
+            if (isRequestClosed(req, res)) {
+              return;
+            }
+
+            return next();
+          }
+        }
         throw unauthorized("Session verification timed out. Please retry.");
       }
       throw error;

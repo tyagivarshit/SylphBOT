@@ -130,6 +130,35 @@ const buildAuthBootstrapKey = (input: EnsureAuthBootstrapContextInput) => {
   return `${userId}:${businessId}`;
 };
 
+const writeReadyBootstrapCache = (
+  input: EnsureAuthBootstrapContextInput,
+  context: EnsureAuthBootstrapContextResult
+) => {
+  const resolvedBusinessId = String(context.identity.businessId || "").trim() || null;
+  if (!resolvedBusinessId) {
+    return;
+  }
+
+  const resolvedKey = buildAuthBootstrapKey({
+    userId: context.user.id,
+    preferredBusinessId: resolvedBusinessId,
+  });
+  setReadyBootstrapCache(resolvedKey, context);
+
+  if (
+    String(input.preferredBusinessId || "").trim() !==
+    String(resolvedBusinessId || "").trim()
+  ) {
+    setReadyBootstrapCache(
+      buildAuthBootstrapKey({
+        userId: context.user.id,
+        preferredBusinessId: input.preferredBusinessId || null,
+      }),
+      context
+    );
+  }
+};
+
 const ensureWorkspaceBootstrapRows = async (businessId: string) => {
   const normalizedBusinessId = String(businessId || "").trim();
 
@@ -243,7 +272,7 @@ const ensureWorkspaceBootstrapRows = async (businessId: string) => {
   };
 };
 
-export const ensureAuthBootstrapContext = async (
+export const ensureAuthReadyMinimalContext = async (
   input: EnsureAuthBootstrapContextInput
 ): Promise<EnsureAuthBootstrapContextResult> => {
   const startedAt = Date.now();
@@ -331,19 +360,6 @@ export const ensureAuthBootstrapContext = async (
     throw new Error("workspace_bootstrap_failed");
   }
 
-  stageStartedAt.workspaceSeed = Date.now();
-  const bootstrapRows = await ensureWorkspaceBootstrapRows(identity.businessId);
-  stageDurationsMs.workspaceSeed = Date.now() - stageStartedAt.workspaceSeed;
-
-  console.info("AUTH_WORKSPACE_READY", {
-    userId: user.id,
-    businessId: identity.businessId,
-    source: identity.source,
-    usageSeeded: bootstrapRows.usageSeeded,
-    addonSeeded: bootstrapRows.addonSeeded,
-    billingSeeded: bootstrapRows.billingSeeded,
-  });
-
   const result = {
     user: {
       id: user.id,
@@ -358,33 +374,82 @@ export const ensureAuthBootstrapContext = async (
     backfilledFields,
   };
 
-  const cacheKey = buildAuthBootstrapKey({
-    userId: user.id,
-    preferredBusinessId: identity.businessId,
-  });
-  setReadyBootstrapCache(cacheKey, result);
-  if (String(input.preferredBusinessId || "").trim() !== String(identity.businessId || "").trim()) {
-    setReadyBootstrapCache(
-      buildAuthBootstrapKey({
-        userId: user.id,
-        preferredBusinessId: input.preferredBusinessId || null,
-      }),
-      result
-    );
-  }
+  writeReadyBootstrapCache(input, result);
 
-  console.info("AUTH_BOOTSTRAP_WATERFALL", {
+  emitPerformanceMetric({
+    name: "ready_minimal_ms",
+    value: Date.now() - startedAt,
+    businessId: identity.businessId,
+    route: "auth.bootstrap",
+    metadata: {
+      source: "ready_minimal",
+      backfilledFields,
+      identitySource: identity.source,
+    },
+  });
+
+  console.info("AUTH_READY_MINIMAL", {
     userId: user.id,
     businessId: identity.businessId,
     totalMs: Date.now() - startedAt,
     stageDurationsMs,
     backfilledFields,
+    identitySource: identity.source,
+  });
+
+  return result;
+};
+
+export const ensureAuthBootstrapContext = async (
+  input: EnsureAuthBootstrapContextInput
+): Promise<EnsureAuthBootstrapContextResult> => {
+  const startedAt = Date.now();
+  const stageDurationsMs: Record<string, number> = {};
+
+  const readyMinimalStartedAt = Date.now();
+  const readyMinimal = await ensureAuthReadyMinimalContext(input);
+  stageDurationsMs.readyMinimal = Date.now() - readyMinimalStartedAt;
+
+  const workspaceSeedStartedAt = Date.now();
+  const bootstrapRows = await ensureWorkspaceBootstrapRows(
+    readyMinimal.identity.businessId
+  );
+  stageDurationsMs.workspaceSeed = Date.now() - workspaceSeedStartedAt;
+
+  emitPerformanceMetric({
+    name: "workspace_seed_deferred_ms",
+    value: stageDurationsMs.workspaceSeed,
+    businessId: readyMinimal.identity.businessId,
+    route: "auth.bootstrap",
+    metadata: {
+      source: "deferred_workspace_seed",
+      usageSeeded: bootstrapRows.usageSeeded,
+      addonSeeded: bootstrapRows.addonSeeded,
+      billingSeeded: bootstrapRows.billingSeeded,
+    },
+  });
+
+  console.info("AUTH_WORKSPACE_READY", {
+    userId: readyMinimal.user.id,
+    businessId: readyMinimal.identity.businessId,
+    source: readyMinimal.identity.source,
     usageSeeded: bootstrapRows.usageSeeded,
     addonSeeded: bootstrapRows.addonSeeded,
     billingSeeded: bootstrapRows.billingSeeded,
   });
 
-  return result;
+  console.info("AUTH_BOOTSTRAP_WATERFALL", {
+    userId: readyMinimal.user.id,
+    businessId: readyMinimal.identity.businessId,
+    totalMs: Date.now() - startedAt,
+    stageDurationsMs,
+    backfilledFields: readyMinimal.backfilledFields,
+    usageSeeded: bootstrapRows.usageSeeded,
+    addonSeeded: bootstrapRows.addonSeeded,
+    billingSeeded: bootstrapRows.billingSeeded,
+  });
+
+  return readyMinimal;
 };
 
 const withTimeout = async <T>(task: Promise<T>, timeoutMs: number): Promise<T> => {
@@ -667,6 +732,7 @@ export const primeAuthBootstrapContext = (
         return;
       }
 
+      const backgroundStartedAt = Date.now();
       const shared = resolveAuthBootstrapRun(input);
 
       void withTimeout(shared.promise, timeoutMs)
@@ -675,6 +741,18 @@ export const primeAuthBootstrapContext = (
             userId: input.userId,
             preferredBusinessId: input.preferredBusinessId || null,
             reason: toBootstrapReason(error),
+          });
+        })
+        .finally(() => {
+          emitPerformanceMetric({
+            name: "auth_bootstrap_background_ms",
+            value: Date.now() - backgroundStartedAt,
+            businessId: String(input.preferredBusinessId || "").trim() || null,
+            route: "auth.bootstrap",
+            metadata: {
+              source: "deferred_prime",
+              reusedInFlight: shared.reusedInFlight,
+            },
           });
         })
         .finally(() => {

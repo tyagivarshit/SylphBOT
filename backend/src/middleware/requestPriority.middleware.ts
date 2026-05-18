@@ -77,6 +77,13 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
     path.startsWith("/api/booking/canonical/") ||
     path === "/api/booking/canonical/request";
   const conversationPath = path.startsWith("/api/conversations");
+  const authCriticalBootstrapPath =
+    path.startsWith("/api/integrations/onboarding") ||
+    path.startsWith("/api/client/status") ||
+    path.startsWith("/api/clients/status") ||
+    path.startsWith("/api/clients/oauth/meta") ||
+    path.startsWith("/api/dashboard/stats") ||
+    path.startsWith("/api/dashboard/leads");
   const criticalBookingLifecyclePath =
     bookingCanonicalPath &&
     (path.includes("/hold") ||
@@ -98,6 +105,7 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
     path.startsWith("/api/billing/upgrade") ||
     path.startsWith("/api/commerce") ||
     path.startsWith("/api/security") ||
+    authCriticalBootstrapPath ||
     conversationPath ||
     criticalBookingLifecyclePath ||
     (bookingCanonicalPath && method === "POST")
@@ -117,8 +125,7 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
     path.startsWith("/api/availability") ||
     path.startsWith("/api/analytics") ||
     path.startsWith("/api/dashboard") ||
-    path.startsWith("/api/autonomous") ||
-    path.startsWith("/api/integrations/onboarding")
+    path.startsWith("/api/autonomous")
   ) {
     return "LOW";
   }

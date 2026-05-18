@@ -122,9 +122,6 @@ const handleGoogleCallback = async (req, res, next) => {
             res,
             stage: "google_callback.auth_start",
         });
-        if ((0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0) <= 1500) {
-            return res.redirect(buildAuthErrorUrl(redirectOrigin, "session_expired"));
-        }
         user = await authenticateGoogleUser(req, res, next);
     }
     catch (err) {

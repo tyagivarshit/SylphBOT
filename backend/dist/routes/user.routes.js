@@ -304,7 +304,8 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                         state: cachedAuthSurface?.authLifecycle?.processingState || "READY",
                     },
                 });
-                if (cachedAuthSurface?.authLifecycle?.processingState === "READY") {
+                if (cachedAuthSurface?.authLifecycle?.processingState === "READY" ||
+                    cachedAuthSurface?.authLifecycle?.processingState === "READY_MINIMAL") {
                     (0, performanceMetrics_1.emitPerformanceMetric)({
                         name: "auth_session_ready",
                         value: Date.now() - startedAt,
@@ -390,13 +391,13 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                             timeoutRecovered: false,
                         }
                         : {
-                            processingState: "READY",
-                            lifecycleState: "READY",
+                            processingState: "READY_MINIMAL",
+                            lifecycleState: "READY_MINIMAL",
                             sessionReady: true,
                             retryable: false,
                             retryAfterMs: 0,
                             terminal: false,
-                            reason: null,
+                            reason: "ready_minimal",
                             reusedInFlight: bootstrapSnapshot.inFlight,
                             stabilizationMs: Date.now() - fastLaneStartedAt,
                             timeoutRecovered: bootstrapSnapshot.inFlight,
@@ -420,7 +421,7 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                             state: lifecycle.processingState,
                             reason: forceProcessingFastLane
                                 ? "auth_fast_lane_processing"
-                                : "auth_fast_lane_ready",
+                                : "auth_fast_lane_ready_minimal",
                             reusedInFlight: lifecycle.reusedInFlight,
                             cacheHit: bootstrapSnapshot.cacheHit,
                             cacheAgeMs: bootstrapSnapshot.cacheAgeMs,
@@ -429,6 +430,28 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
                         },
                     });
                     if (lifecycle.sessionReady) {
+                        (0, performanceMetrics_1.emitPerformanceMetric)({
+                            name: "auth_fast_lane_ms",
+                            value: lifecycle.stabilizationMs,
+                            businessId: stabilizedUser.businessId || null,
+                            route: "user_me",
+                            metadata: {
+                                surface: "auth",
+                                source: "ready_minimal",
+                                cacheHit: bootstrapSnapshot.cacheHit,
+                                bootstrapInFlight: bootstrapSnapshot.inFlight,
+                            },
+                        });
+                        (0, performanceMetrics_1.emitPerformanceMetric)({
+                            name: "ready_minimal_ms",
+                            value: lifecycle.stabilizationMs,
+                            businessId: stabilizedUser.businessId || null,
+                            route: "user_me",
+                            metadata: {
+                                surface: "auth",
+                                source: "user_me_fast_lane",
+                            },
+                        });
                         (0, performanceMetrics_1.emitPerformanceMetric)({
                             name: "auth_session_ready",
                             value: lifecycle.stabilizationMs,

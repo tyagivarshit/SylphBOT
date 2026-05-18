@@ -46,6 +46,7 @@ export type CurrentUser = {
   authLifecycle?: {
     processingState?:
       | "READY"
+      | "READY_MINIMAL"
       | "PROCESSING"
       | "RETRYING"
       | "FAILED_TERMINAL"
@@ -155,7 +156,7 @@ const mapLifecycleState = (
   if (normalized === "PROCESSING") {
     return "PROCESSING";
   }
-  if (normalized === "READY" || sessionReady) {
+  if (normalized === "READY" || normalized === "READY_MINIMAL" || sessionReady) {
     return "AUTHENTICATED";
   }
 
@@ -491,9 +492,15 @@ export async function fetchWorkspaceApiKey() {
 }
 
 export async function fetchClientConnectionStatus(): Promise<ClientConnectionStatus> {
-  const response = await apiFetch<ClientConnectionStatus>("/api/client/status", {
+  let response = await apiFetch<ClientConnectionStatus>("/api/clients/status", {
     cache: "no-store",
   });
+
+  if (!response.success && !response.unauthorized) {
+    response = await apiFetch<ClientConnectionStatus>("/api/client/status", {
+      cache: "no-store",
+    });
+  }
 
   if (!response.success) {
     throw new Error(response.message || "Failed to load connection status");

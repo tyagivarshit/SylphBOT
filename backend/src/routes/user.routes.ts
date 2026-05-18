@@ -148,6 +148,7 @@ const buildAuthSurfaceCurrentUser = (
 
 type AuthSurfaceCurrentUser = ReturnType<typeof buildAuthSurfaceCurrentUser>;
 type AuthSurfaceLifecycleState =
+  | "READY_MINIMAL"
   | "READY"
   | "PROCESSING"
   | "RETRYING"
@@ -418,7 +419,10 @@ router.get("/me", protect, async (req: any, res) => {
             state: cachedAuthSurface?.authLifecycle?.processingState || "READY",
           },
         });
-        if (cachedAuthSurface?.authLifecycle?.processingState === "READY") {
+        if (
+          cachedAuthSurface?.authLifecycle?.processingState === "READY" ||
+          cachedAuthSurface?.authLifecycle?.processingState === "READY_MINIMAL"
+        ) {
           emitPerformanceMetric({
             name: "auth_session_ready",
             value: Date.now() - startedAt,
@@ -519,13 +523,13 @@ router.get("/me", protect, async (req: any, res) => {
                 timeoutRecovered: false,
               }
             : {
-                processingState: "READY",
-                lifecycleState: "READY",
+                processingState: "READY_MINIMAL",
+                lifecycleState: "READY_MINIMAL",
                 sessionReady: true,
                 retryable: false,
                 retryAfterMs: 0,
                 terminal: false,
-                reason: null,
+                reason: "ready_minimal",
                 reusedInFlight: bootstrapSnapshot.inFlight,
                 stabilizationMs: Date.now() - fastLaneStartedAt,
                 timeoutRecovered: bootstrapSnapshot.inFlight,
@@ -551,7 +555,7 @@ router.get("/me", protect, async (req: any, res) => {
               state: lifecycle.processingState,
               reason: forceProcessingFastLane
                 ? "auth_fast_lane_processing"
-                : "auth_fast_lane_ready",
+                : "auth_fast_lane_ready_minimal",
               reusedInFlight: lifecycle.reusedInFlight,
               cacheHit: bootstrapSnapshot.cacheHit,
               cacheAgeMs: bootstrapSnapshot.cacheAgeMs,
@@ -561,6 +565,28 @@ router.get("/me", protect, async (req: any, res) => {
           });
 
           if (lifecycle.sessionReady) {
+            emitPerformanceMetric({
+              name: "auth_fast_lane_ms",
+              value: lifecycle.stabilizationMs,
+              businessId: stabilizedUser.businessId || null,
+              route: "user_me",
+              metadata: {
+                surface: "auth",
+                source: "ready_minimal",
+                cacheHit: bootstrapSnapshot.cacheHit,
+                bootstrapInFlight: bootstrapSnapshot.inFlight,
+              },
+            });
+            emitPerformanceMetric({
+              name: "ready_minimal_ms",
+              value: lifecycle.stabilizationMs,
+              businessId: stabilizedUser.businessId || null,
+              route: "user_me",
+              metadata: {
+                surface: "auth",
+                source: "user_me_fast_lane",
+              },
+            });
             emitPerformanceMetric({
               name: "auth_session_ready",
               value: lifecycle.stabilizationMs,

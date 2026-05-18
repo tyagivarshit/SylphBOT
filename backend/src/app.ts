@@ -741,6 +741,7 @@ app.use(
 );
 
 app.get("/api/client/status", protect, getClientStatus);
+app.get("/api/clients/status", protect, getClientStatus);
 app.use("/api/clients", protect, clientRoutes);
 app.use("/api/instagram", protect, instagramRoutes);
 app.use("/api/knowledge", protect, knowledgeRoutes);

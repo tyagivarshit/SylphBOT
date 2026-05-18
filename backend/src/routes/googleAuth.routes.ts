@@ -13,7 +13,6 @@ import {
   verifyGoogleOAuthState,
 } from "../utils/googleOAuthState";
 import {
-  getRequestRemainingMs,
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
@@ -191,9 +190,6 @@ const handleGoogleCallback = async (
       res,
       stage: "google_callback.auth_start",
     });
-    if (getRequestRemainingMs({ req, res }, 0) <= 1500) {
-      return res.redirect(buildAuthErrorUrl(redirectOrigin, "session_expired"));
-    }
     user = await authenticateGoogleUser(req, res, next);
   } catch (err: any) {
     await releaseGoogleOAuthState(state.nonce);

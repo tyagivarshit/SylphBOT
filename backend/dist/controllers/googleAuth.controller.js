@@ -97,11 +97,7 @@ const googleCallback = async (req, res) => {
         if (!user || !user.id || !user.isActive) {
             return res.redirect(buildAuthErrorUrl(redirectOrigin, user?.id ? "account_inactive" : "oauth_failed"));
         }
-        const bootstrapBudgetMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, 0);
-        if (bootstrapBudgetMs <= 1200) {
-            return res.redirect(buildAuthErrorUrl(redirectOrigin, "session_expired"));
-        }
-        const bootstrap = await (0, authBootstrap_service_1.ensureAuthBootstrapContext)({
+        const bootstrap = await (0, authBootstrap_service_1.ensureAuthReadyMinimalContext)({
             userId: user.id,
             preferredBusinessId: user.businessId || null,
             profileSeed: {
@@ -118,7 +114,7 @@ const googleCallback = async (req, res) => {
         const accessToken = (0, generateToken_1.generateAccessToken)(bootstrap.user.id, bootstrap.user.role, bootstrap.identity.businessId, bootstrap.user.tokenVersion);
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(bootstrap.user.id, bootstrap.user.tokenVersion);
         const refreshToken = hashToken(refreshRaw);
-        await pruneRefreshTokens(bootstrap.user.id, 4);
+        void pruneRefreshTokens(bootstrap.user.id, 4);
         await prisma_1.default.refreshToken.create({
             data: {
                 token: refreshToken,
@@ -134,6 +130,17 @@ const googleCallback = async (req, res) => {
             stage: "google_callback.session_persisted",
         });
         (0, authCookies_1.setAuthCookies)(res, req, accessToken, refreshRaw);
+        (0, authBootstrap_service_1.primeAuthBootstrapContext)({
+            userId: bootstrap.user.id,
+            preferredBusinessId: bootstrap.identity.businessId,
+            profileSeed: {
+                email: bootstrap.user.email,
+                name: bootstrap.user.name,
+                avatar: bootstrap.user.avatar || null,
+            },
+        }, {
+            shouldRun: () => !(0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res }),
+        });
         console.info("AUTH_GOOGLE_CALLBACK_OK", {
             userId: bootstrap.user.id,
             businessId: bootstrap.identity.businessId,

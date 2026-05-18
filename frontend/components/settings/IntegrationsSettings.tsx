@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
@@ -44,6 +44,7 @@ export default function IntegrationsSettings() {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionState>(unknownConnections);
   const [statusUnavailable, setStatusUnavailable] = useState(false);
+  const hasResolvedConnectionStateRef = useRef(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["integrations"],
@@ -70,10 +71,13 @@ export default function IntegrationsSettings() {
           healthy: Boolean(whatsappStatus?.healthy),
         },
       });
+      hasResolvedConnectionStateRef.current = true;
       setStatusUnavailable(false);
     } catch (error) {
       console.error("Connection status error", error);
-      setConnections(unknownConnections);
+      if (!hasResolvedConnectionStateRef.current) {
+        setConnections(unknownConnections);
+      }
       setStatusUnavailable(true);
     }
   }, []);

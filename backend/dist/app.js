@@ -577,6 +577,7 @@ app.use("/api/comment-triggers", auth_middleware_1.protect, subscription_middlew
 app.use("/api/comment-automation/triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
 app.use("/api/triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
 app.get("/api/client/status", auth_middleware_1.protect, client_controller_1.getClientStatus);
+app.get("/api/clients/status", auth_middleware_1.protect, client_controller_1.getClientStatus);
 app.use("/api/clients", auth_middleware_1.protect, client_routes_1.default);
 app.use("/api/instagram", auth_middleware_1.protect, instagram_routes_1.default);
 app.use("/api/knowledge", auth_middleware_1.protect, knowledge_routes_1.default);

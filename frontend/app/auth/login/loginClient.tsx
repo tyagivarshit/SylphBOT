@@ -16,6 +16,14 @@ type LoginClientProps = {
   initialAuthError: string;
 };
 
+const LOGIN_STABILIZATION_ATTEMPTS = 6;
+const LOGIN_STABILIZATION_BASE_DELAY_MS = 260;
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
 export default function LoginClient({
   initialEmail,
   initialAuthError,
@@ -86,6 +94,25 @@ export default function LoginClient({
   const validateEmail = (value: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+  const finalizeLoginStabilization = async (source: string) => {
+    for (let attempt = 0; attempt < LOGIN_STABILIZATION_ATTEMPTS; attempt += 1) {
+      const stabilizedUser = await refreshUser({
+        mode: "stabilize",
+        source: `${source}_attempt_${attempt + 1}`,
+      });
+
+      if (stabilizedUser) {
+        return stabilizedUser;
+      }
+
+      if (attempt < LOGIN_STABILIZATION_ATTEMPTS - 1) {
+        await wait(LOGIN_STABILIZATION_BASE_DELAY_MS + attempt * 180);
+      }
+    }
+
+    return null;
+  };
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (loading || loginSubmitInFlightRef.current) return;
@@ -109,28 +136,36 @@ export default function LoginClient({
 
       const res = await loginUser(cleanEmail, password);
 
-      if (res.code === "AUTH_LOGIN_PROCESSING") {
-        const processingUser = await refreshUser({
-          mode: "stabilize",
-          source: "duplicate_login_processing",
-        });
+      if (res.code === "AUTH_LOGIN_PROCESSING" || !res.success) {
+        const processingUser = await finalizeLoginStabilization(
+          "duplicate_login_processing"
+        );
         if (processingUser) {
           toast.success("Login successful");
           router.replace("/dashboard");
           return;
         }
-      }
-
-      if (!res.success) {
+        if (res.code === "AUTH_LOGIN_PROCESSING") {
+          toast(
+            "Sign-in is still stabilizing. We will keep retrying automatically."
+          );
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("auth:refresh"));
+          }
+          return;
+        }
         throw new Error(res.message || "Login failed");
       }
 
-      const refreshedUser = await refreshUser({
-        mode: "stabilize",
-        source: "password_login",
-      });
+      const refreshedUser = await finalizeLoginStabilization("password_login");
       if (!refreshedUser) {
-        throw new Error("Session stabilization failed. Please try again.");
+        toast(
+          "Sign-in is still stabilizing. We will keep retrying automatically."
+        );
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("auth:refresh"));
+        }
+        return;
       }
 
       toast.success("Login successful");

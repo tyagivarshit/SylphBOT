@@ -109,7 +109,8 @@ type FetchCurrentUserLifecycleOptions = {
 
 const AUTH_ME_RETRY_DELAY_MS = 180;
 const AUTH_ME_TRANSIENT_RETRY_ATTEMPTS = 0;
-const AUTH_ME_PROBE_COOLDOWN_MS = 320;
+const AUTH_ME_PROBE_COOLDOWN_MS = 560;
+const AUTH_ME_LOGIN_PROBE_COOLDOWN_MS = 900;
 
 const authCurrentUserInFlightByContext = new Map<
   AuthRouteContext,
@@ -189,6 +190,11 @@ const classifyAuthCurrentUserResponse = (
 ): AuthCurrentUserFetchResult => {
   const routeContext = options?.routeContext || "AUTHENTICATED_APP_ROUTE";
   const allowTransientRetry = Boolean(options?.allowTransientRetry);
+  const source = String(options?.source || "unknown").trim().toLowerCase();
+  const loginStabilizationSource =
+    source.includes("login") ||
+    source.includes("stabilize") ||
+    source.includes("authenticating");
 
   if (response.success && response.data) {
     const lifecycle = response.data.authLifecycle || null;
@@ -290,6 +296,29 @@ const classifyAuthCurrentUserResponse = (
   }
 
   if (response.unauthorized) {
+    const sawRecentProcessingState =
+      sawAuthProcessingStateByContext.get(routeContext) === true;
+    const isTransientUnauthorizedDuringAuthStabilization =
+      allowTransientRetry &&
+      routeContext === "AUTHENTICATED_APP_ROUTE" &&
+      (loginStabilizationSource || sawRecentProcessingState) &&
+      !isTerminalAuthFailure &&
+      (normalizedReason === "unauthorized" ||
+        normalizedReason.includes("missing session") ||
+        normalizedReason.includes("session verification timed out"));
+
+    if (isTransientUnauthorizedDuringAuthStabilization) {
+      return {
+        user: null,
+        state: "STABILIZING",
+        retryable: true,
+        reason: reason || "session_stabilizing",
+        unauthorized: true,
+        networkError: Boolean(response.networkError),
+        code: response.code || null,
+      };
+    }
+
     return {
       user: null,
       state: "FAILED_TERMINAL",
@@ -319,6 +348,11 @@ export async function fetchCurrentUserLifecycle(
   const allowTransientRetry =
     options?.allowTransientRetry ?? routeContext === "AUTHENTICATED_APP_ROUTE";
   const source = String(options?.source || "unknown").trim() || "unknown";
+  const sourceNormalized = source.toLowerCase();
+  const probeCooldownMs =
+    sourceNormalized.includes("login") || sourceNormalized.includes("stabilize")
+      ? Math.max(AUTH_ME_LOGIN_PROBE_COOLDOWN_MS, AUTH_ME_PROBE_COOLDOWN_MS)
+      : AUTH_ME_PROBE_COOLDOWN_MS;
 
   const existing = authCurrentUserInFlightByContext.get(routeContext);
   if (existing) {
@@ -348,13 +382,13 @@ export async function fetchCurrentUserLifecycle(
   if (
     isTransientLastResult &&
     probeDeltaMs >= 0 &&
-    probeDeltaMs < AUTH_ME_PROBE_COOLDOWN_MS
+    probeDeltaMs < probeCooldownMs
   ) {
     recordAuthMetric("auth_duplicate_probe_count", {
       routeContext,
       source,
       probeDeltaMs,
-      cooldownMs: AUTH_ME_PROBE_COOLDOWN_MS,
+      cooldownMs: probeCooldownMs,
       lastState: lastResult.state,
     });
     return lastResult;

@@ -63,12 +63,12 @@ const AuthContext = createContext<AuthContextType>({
   refreshUser: async () => null,
 });
 
-const STABILIZATION_ATTEMPTS = 5;
+const STABILIZATION_ATTEMPTS = 4;
 const DEFAULT_ATTEMPTS = 2;
-const STABILIZATION_DELAY_MS = 150;
-const DEFAULT_DELAY_MS = 90;
-const AUTH_REFRESH_DEBOUNCE_MS = 420;
-const AUTH_STABILIZE_EVENT_COOLDOWN_MS = 850;
+const STABILIZATION_DELAY_MS = 240;
+const DEFAULT_DELAY_MS = 120;
+const AUTH_REFRESH_DEBOUNCE_MS = 640;
+const AUTH_STABILIZE_EVENT_COOLDOWN_MS = 1400;
 const PUBLIC_ROUTE_DEFERRED_PROBE_DELAY_MS = 640;
 
 const wait = (ms: number) =>
@@ -550,7 +550,8 @@ export const AuthProvider = ({
       void fetchUser({
         mode:
           lifecycleState === "session_stabilizing" ||
-          lifecycleState === "retrying"
+          lifecycleState === "retrying" ||
+          lifecycleState === "authenticating"
             ? "stabilize"
             : "default",
         source: "event_refresh",

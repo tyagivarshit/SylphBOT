@@ -42,6 +42,8 @@ import {
   throwIfRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
 import { primeAuthContextCacheForToken } from "../middleware/auth.middleware";
+import { TimeoutExceededError, withTimeout } from "../utils/boundedTimeout";
+import { getStartupIsolationSnapshot } from "../runtime/startupIsolation.service";
 
 /* ======================================
 UTILS
@@ -92,7 +94,60 @@ const LOGIN_BACKGROUND_TASK_TIMEOUT_MS = 1200;
 const LOGIN_LIFECYCLE_LOCK_TTL_MS = 15_000;
 const LOGIN_LIFECYCLE_LOCK_WAIT_MS = 450;
 const LOGIN_LIFECYCLE_LOCK_POLL_MS = 60;
-const LOGIN_PASSWORD_VERIFY_BUDGET_MS = 400;
+const LOGIN_PASSWORD_VERIFY_BASE_BUDGET_MS = 900;
+const LOGIN_DB_PERSISTENCE_BASE_BUDGET_MS = 1800;
+const LOGIN_LIFECYCLE_LOCK_BASE_BUDGET_MS = LOGIN_LIFECYCLE_LOCK_WAIT_MS;
+const LOGIN_TOKEN_ISSUE_BASE_BUDGET_MS = 220;
+const LOGIN_RESPONSE_COMMIT_BASE_BUDGET_MS = 320;
+const LOGIN_ADAPTIVE_BUDGET_MAX_MULTIPLIER = 2.4;
+const LOGIN_ADAPTIVE_BUDGET_MIN_MULTIPLIER = 1;
+const LOGIN_PROCESSING_RETRY_AFTER_BASE_MS = 280;
+const LOGIN_PROCESSING_RETRY_AFTER_MAX_MS = 1000;
+
+type LoginBudgetStage =
+  | "password_verify_budget"
+  | "db_persistence_budget"
+  | "lifecycle_lock_budget"
+  | "token_issue_budget"
+  | "response_commit_budget";
+
+type AdaptiveLoginBudgets = {
+  stageBudgets: Record<LoginBudgetStage, number>;
+  multiplier: number;
+  pressureReasons: string[];
+  startupWindowActive: boolean;
+  startupPressure: {
+    eventLoopLagMs: number;
+    cpuPressurePercent: number;
+  };
+  requestQueue: {
+    activeCritical: number;
+    queuedCritical: number;
+  };
+  requestRemainingMs: number;
+  degradedRuntime: boolean;
+  processingRetryAfterMs: number;
+};
+
+type LoginProcessingReason =
+  | "login_inflight"
+  | "request_budget_low"
+  | "db_persistence_timeout"
+  | "lifecycle_lock_timeout";
+
+class LoginStageTimeoutError extends Error {
+  readonly stage: LoginBudgetStage;
+  readonly budgetMs: number;
+  readonly elapsedMs: number;
+
+  constructor(stage: LoginBudgetStage, budgetMs: number, elapsedMs: number) {
+    super(`auth_stage_timeout:${stage}:${budgetMs}:${elapsedMs}`);
+    this.name = "LoginStageTimeoutError";
+    this.stage = stage;
+    this.budgetMs = budgetMs;
+    this.elapsedMs = elapsedMs;
+  }
+}
 
 const buildLoginLifecycleLockKey = (input: {
   userId?: string | null;
@@ -108,9 +163,21 @@ const buildLoginLifecycleLockKey = (input: {
   return `auth:login:lifecycle:${fingerprint.slice(0, 28)}`;
 };
 
-const withFastTimeout = async <T>(
+const asNumber = (value: unknown, fallbackValue = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallbackValue;
+  }
+  return parsed;
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const withShortTimeout = async <T>(
   task: Promise<T>,
-  timeoutMs: number
+  timeoutMs: number,
+  timeoutMessage: string
 ): Promise<T> => {
   let timeoutHandle: NodeJS.Timeout | null = null;
 
@@ -119,7 +186,7 @@ const withFastTimeout = async <T>(
       task,
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => {
-          reject(new Error("auth_operation_timeout"));
+          reject(new Error(timeoutMessage));
         }, timeoutMs);
       }),
     ]);
@@ -128,6 +195,194 @@ const withFastTimeout = async <T>(
       clearTimeout(timeoutHandle);
     }
   }
+};
+
+const computeAdaptiveLoginBudgets = (input: {
+  req: Request;
+  res: Response;
+  passwordHashCost: number | null;
+  startupContentionMs: number;
+}) => {
+  const startupSnapshot = getStartupIsolationSnapshot();
+  const startupWindowActive = Boolean(startupSnapshot?.startupWindowActive);
+  const startupPressure = {
+    eventLoopLagMs: Math.max(0, asNumber(startupSnapshot?.pressure?.eventLoopLagMs, 0)),
+    cpuPressurePercent: Math.max(
+      0,
+      asNumber(startupSnapshot?.pressure?.cpuPressurePercent, 0)
+    ),
+  };
+  const requestQueue = {
+    activeCritical: Math.max(
+      0,
+      Math.floor(asNumber(startupSnapshot?.requestPriority?.active?.critical, 0))
+    ),
+    queuedCritical: Math.max(
+      0,
+      Math.floor(asNumber(startupSnapshot?.requestPriority?.queue?.critical, 0))
+    ),
+  };
+  const requestRemainingMs = getRequestRemainingMs(
+    {
+      req: input.req,
+      res: input.res,
+    },
+    10_000
+  );
+  const pressureReasons: string[] = [];
+  let multiplier = 1;
+
+  if (startupWindowActive) {
+    multiplier += 0.2;
+    pressureReasons.push("startup_window_active");
+  }
+  if (input.startupContentionMs >= 150) {
+    multiplier += 0.15;
+    pressureReasons.push("request_priority_queue_delay");
+  }
+  if (startupPressure.eventLoopLagMs >= 45) {
+    multiplier += 0.2;
+    pressureReasons.push("event_loop_lag_elevated");
+  }
+  if (startupPressure.eventLoopLagMs >= 90) {
+    multiplier += 0.2;
+    pressureReasons.push("event_loop_lag_high");
+  }
+  if (startupPressure.cpuPressurePercent >= 65) {
+    multiplier += 0.2;
+    pressureReasons.push("cpu_pressure_elevated");
+  }
+  if (startupPressure.cpuPressurePercent >= 85) {
+    multiplier += 0.2;
+    pressureReasons.push("cpu_pressure_high");
+  }
+  if (requestQueue.activeCritical > 0 || requestQueue.queuedCritical > 0) {
+    multiplier += 0.15;
+    pressureReasons.push("critical_queue_contention");
+  }
+  if ((input.passwordHashCost || 0) >= 12) {
+    multiplier += 0.3;
+    pressureReasons.push("bcrypt_cost_high");
+  }
+
+  multiplier = clamp(
+    Number(multiplier.toFixed(2)),
+    LOGIN_ADAPTIVE_BUDGET_MIN_MULTIPLIER,
+    LOGIN_ADAPTIVE_BUDGET_MAX_MULTIPLIER
+  );
+  const basePasswordBudgetMs =
+    LOGIN_PASSWORD_VERIFY_BASE_BUDGET_MS +
+    Math.max(0, ((input.passwordHashCost || 10) - 10) * 220);
+  const stageBudgets: Record<LoginBudgetStage, number> = {
+    password_verify_budget: Math.max(
+      450,
+      Math.round(basePasswordBudgetMs * multiplier)
+    ),
+    db_persistence_budget: Math.max(
+      600,
+      Math.round(LOGIN_DB_PERSISTENCE_BASE_BUDGET_MS * multiplier)
+    ),
+    lifecycle_lock_budget: Math.max(
+      250,
+      Math.round(LOGIN_LIFECYCLE_LOCK_BASE_BUDGET_MS * multiplier)
+    ),
+    token_issue_budget: Math.max(
+      120,
+      Math.round(LOGIN_TOKEN_ISSUE_BASE_BUDGET_MS * multiplier)
+    ),
+    response_commit_budget: Math.max(
+      140,
+      Math.round(LOGIN_RESPONSE_COMMIT_BASE_BUDGET_MS * multiplier)
+    ),
+  };
+  const degradedRuntime =
+    startupWindowActive ||
+    startupPressure.eventLoopLagMs >= 45 ||
+    startupPressure.cpuPressurePercent >= 65 ||
+    requestQueue.queuedCritical > 0 ||
+    input.startupContentionMs >= 150;
+  const processingRetryAfterMs = clamp(
+    Math.round(LOGIN_PROCESSING_RETRY_AFTER_BASE_MS * multiplier),
+    LOGIN_PROCESSING_RETRY_AFTER_BASE_MS,
+    LOGIN_PROCESSING_RETRY_AFTER_MAX_MS
+  );
+
+  return {
+    stageBudgets,
+    multiplier,
+    pressureReasons,
+    startupWindowActive,
+    startupPressure,
+    requestQueue,
+    requestRemainingMs,
+    degradedRuntime,
+    processingRetryAfterMs,
+  } satisfies AdaptiveLoginBudgets;
+};
+
+const emitLoginBudgetTelemetry = (input: {
+  businessId: string | null;
+  stage: LoginBudgetStage;
+  elapsedMs: number;
+  budgetMs: number;
+  policy: "soft" | "hard";
+  outcome: "ok" | "budget_exceeded" | "timeout";
+  metadata?: Record<string, unknown>;
+}) => {
+  emitPerformanceMetric({
+    name: "auth_processing_state",
+    value: Math.max(0, Math.round(input.elapsedMs)),
+    businessId: input.businessId,
+    route: "auth.login",
+    metadata: {
+      stage: input.stage,
+      policy: input.policy,
+      budgetMs: input.budgetMs,
+      elapsedMs: input.elapsedMs,
+      withinBudget: input.elapsedMs <= input.budgetMs,
+      outcome: input.outcome,
+      ...(input.metadata || {}),
+    },
+  });
+};
+
+const sendLoginProcessing = (input: {
+  res: Response;
+  startedAt: number;
+  businessId: string | null;
+  code: LoginProcessingReason;
+  message: string;
+  retryAfterMs: number;
+  metadata?: Record<string, unknown>;
+}) =>
+  input.res.status(202).json({
+    success: false,
+    processing: true,
+    retryable: true,
+    code: "AUTH_LOGIN_PROCESSING",
+    processingCode: input.code,
+    retryAfterMs: input.retryAfterMs,
+    message: input.message,
+    authLifecycle: {
+      processingState: "PROCESSING",
+      lifecycleState: "PROCESSING",
+      sessionReady: false,
+      retryable: true,
+      retryAfterMs: input.retryAfterMs,
+      terminal: false,
+      reason: input.code,
+    },
+    metadata: {
+      elapsedMs: Date.now() - input.startedAt,
+      ...(input.metadata || {}),
+    },
+  });
+
+const withFastTimeout = async <T>(
+  task: Promise<T>,
+  timeoutMs: number
+): Promise<T> => {
+  return withShortTimeout(task, timeoutMs, "fast_operation_timeout");
 };
 
 const runDetachedAuthTask = (
@@ -362,6 +617,19 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       : false;
     const passwordVerifyMs = Date.now() - passwordVerifyStartedAt;
     loginWaterfallMs.passwordVerify = passwordVerifyMs;
+    const startupContentionMs = Math.max(
+      0,
+      Number((res.locals as Record<string, unknown>)?.requestQueueWaitMs || 0)
+    );
+    const adaptiveBudgets = computeAdaptiveLoginBudgets({
+      req,
+      res,
+      passwordHashCost,
+      startupContentionMs,
+    });
+    const passwordVerifyBudgetMs = adaptiveBudgets.stageBudgets.password_verify_budget;
+    const passwordVerifyWithinBudget = passwordVerifyMs <= passwordVerifyBudgetMs;
+
     emitPerformanceMetric({
       name: "password_verify_ms",
       value: passwordVerifyMs,
@@ -370,7 +638,25 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       metadata: {
         source: "password_login",
         hashCost: passwordHashCost,
-        withinBudget: passwordVerifyMs <= LOGIN_PASSWORD_VERIFY_BUDGET_MS,
+        budgetMs: passwordVerifyBudgetMs,
+        withinBudget: passwordVerifyWithinBudget,
+        timeoutEnforced: false,
+        multiplier: adaptiveBudgets.multiplier,
+        degradedRuntime: adaptiveBudgets.degradedRuntime,
+        startupWindowActive: adaptiveBudgets.startupWindowActive,
+      },
+    });
+    emitLoginBudgetTelemetry({
+      businessId: user?.businessId || null,
+      stage: "password_verify_budget",
+      elapsedMs: passwordVerifyMs,
+      budgetMs: passwordVerifyBudgetMs,
+      policy: "soft",
+      outcome: passwordVerifyWithinBudget ? "ok" : "budget_exceeded",
+      metadata: {
+        hashCost: passwordHashCost,
+        multiplier: adaptiveBudgets.multiplier,
+        degradedRuntime: adaptiveBudgets.degradedRuntime,
       },
     });
 
@@ -439,10 +725,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       res,
       stage: "auth.login.verified",
     });
-    const startupContentionMs = Math.max(
-      0,
-      Number((res.locals as Record<string, unknown>)?.requestQueueWaitMs || 0)
-    );
+    const stageBudgets = adaptiveBudgets.stageBudgets;
     emitPerformanceMetric({
       name: "auth_startup_contention_ms",
       value: startupContentionMs,
@@ -455,6 +738,33 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           .trim()
           .toUpperCase(),
         source: "request_priority_queue",
+        multiplier: adaptiveBudgets.multiplier,
+        pressureReasons: adaptiveBudgets.pressureReasons.join(",") || null,
+        requestRemainingMs: adaptiveBudgets.requestRemainingMs,
+        startupWindowActive: adaptiveBudgets.startupWindowActive,
+        eventLoopLagMs: adaptiveBudgets.startupPressure.eventLoopLagMs,
+        cpuPressurePercent: adaptiveBudgets.startupPressure.cpuPressurePercent,
+        activeCritical: adaptiveBudgets.requestQueue.activeCritical,
+        queuedCritical: adaptiveBudgets.requestQueue.queuedCritical,
+      },
+    });
+    emitPerformanceMetric({
+      name: "auth_processing_state",
+      value: Date.now() - startedAt,
+      businessId: user.businessId || null,
+      route: "auth.login",
+      metadata: {
+        state: "PROCESSING",
+        stage: "adaptive_budget_profile",
+        policy: "mixed",
+        pressureMultiplier: adaptiveBudgets.multiplier,
+        pressureReasons: adaptiveBudgets.pressureReasons,
+        budgets: stageBudgets,
+        startupWindowActive: adaptiveBudgets.startupWindowActive,
+        startupPressure: adaptiveBudgets.startupPressure,
+        requestQueue: adaptiveBudgets.requestQueue,
+        degradedRuntime: adaptiveBudgets.degradedRuntime,
+        requestRemainingMs: adaptiveBudgets.requestRemainingMs,
       },
     });
 
@@ -487,67 +797,224 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         };
 
     const lockLifecycleStartedAt = Date.now();
-    const loginResult = await withDistributedLock<LoginLifecycleResult | null>({
-      key: lockKey,
-      ttlMs: LOGIN_LIFECYCLE_LOCK_TTL_MS,
-      waitMs: LOGIN_LIFECYCLE_LOCK_WAIT_MS,
-      pollMs: LOGIN_LIFECYCLE_LOCK_POLL_MS,
-      onUnavailable: async () => null,
-      run: async () => {
-        const lockHoldStartedAt = Date.now();
-        const tokenIssueStartedAt = Date.now();
-        const accessToken = generateAccessToken(
-          resolvedUser.id,
-          resolvedUser.role,
-          businessId,
-          resolvedUser.tokenVersion
-        );
-
-        const refreshRaw = generateRefreshToken(
-          resolvedUser.id,
-          resolvedUser.tokenVersion
-        );
-        const hashedRefreshToken = hashToken(refreshRaw);
-        measureStep("tokenIssue", tokenIssueStartedAt);
-
-        const refreshPersistStartedAt = Date.now();
-        await withFastTimeout(
-          prisma.refreshToken.create({
-            data: {
-              token: hashedRefreshToken,
-              userId: resolvedUser.id,
-              userAgent,
-              ip,
-              expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    let loginResult: LoginLifecycleResult | null = null;
+    try {
+      loginResult = await withDistributedLock<LoginLifecycleResult | null>({
+        key: lockKey,
+        ttlMs: LOGIN_LIFECYCLE_LOCK_TTL_MS,
+        waitMs: Math.max(
+          LOGIN_LIFECYCLE_LOCK_WAIT_MS,
+          stageBudgets.lifecycle_lock_budget
+        ),
+        pollMs: LOGIN_LIFECYCLE_LOCK_POLL_MS,
+        onUnavailable: async () => null,
+        run: async () => {
+          const lockHoldStartedAt = Date.now();
+          const tokenIssueStartedAt = Date.now();
+          const accessToken = generateAccessToken(
+            resolvedUser.id,
+            resolvedUser.role,
+            businessId,
+            resolvedUser.tokenVersion
+          );
+          const refreshRaw = generateRefreshToken(
+            resolvedUser.id,
+            resolvedUser.tokenVersion
+          );
+          const hashedRefreshToken = hashToken(refreshRaw);
+          const tokenIssueMs = Date.now() - tokenIssueStartedAt;
+          measureStep("tokenIssue", tokenIssueStartedAt);
+          emitLoginBudgetTelemetry({
+            businessId,
+            stage: "token_issue_budget",
+            elapsedMs: tokenIssueMs,
+            budgetMs: stageBudgets.token_issue_budget,
+            policy: "soft",
+            outcome:
+              tokenIssueMs <= stageBudgets.token_issue_budget
+                ? "ok"
+                : "budget_exceeded",
+            metadata: {
+              source: "token_generation",
             },
-          }),
-          LOGIN_REFRESH_TOKEN_TIMEOUT_MS
-        );
-        measureStep("refreshPersist", refreshPersistStartedAt);
+          });
 
-        throwIfRequestLifecycleAborted({
-          req,
-          res,
-          stage: "auth.login.session_persisted",
-        });
+          const refreshPersistStartedAt = Date.now();
+          try {
+            await withTimeout({
+              label: "auth_login_db_persistence",
+              timeoutMs: Math.max(
+                LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
+                stageBudgets.db_persistence_budget
+              ),
+              task: prisma.refreshToken.create({
+                data: {
+                  token: hashedRefreshToken,
+                  userId: resolvedUser.id,
+                  userAgent,
+                  ip,
+                  expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                },
+              }),
+            });
+          } catch (error) {
+            const elapsedMs = Date.now() - refreshPersistStartedAt;
+            if (
+              error instanceof TimeoutExceededError ||
+              String((error as Error)?.message || "").includes(
+                "timeout_exceeded:auth_login_db_persistence"
+              )
+            ) {
+              emitPerformanceMetric({
+                name: "TIMEOUT_PREVENTED",
+                value: elapsedMs,
+                businessId,
+                route: "auth.login",
+                metadata: {
+                  stage: "db_persistence_budget",
+                  reason: "db_persistence_timeout",
+                  budgetMs: Math.max(
+                    LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
+                    stageBudgets.db_persistence_budget
+                  ),
+                },
+              });
+              emitLoginBudgetTelemetry({
+                businessId,
+                stage: "db_persistence_budget",
+                elapsedMs,
+                budgetMs: Math.max(
+                  LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
+                  stageBudgets.db_persistence_budget
+                ),
+                policy: "hard",
+                outcome: "timeout",
+                metadata: {
+                  reason: "db_persistence_timeout",
+                },
+              });
+              throw new LoginStageTimeoutError(
+                "db_persistence_budget",
+                Math.max(
+                  LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
+                  stageBudgets.db_persistence_budget
+                ),
+                elapsedMs
+              );
+            }
+            throw error;
+          }
+          const refreshPersistMs = Date.now() - refreshPersistStartedAt;
+          measureStep("refreshPersist", refreshPersistStartedAt);
+          emitLoginBudgetTelemetry({
+            businessId,
+            stage: "db_persistence_budget",
+            elapsedMs: refreshPersistMs,
+            budgetMs: Math.max(
+              LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
+              stageBudgets.db_persistence_budget
+            ),
+            policy: "hard",
+            outcome:
+              refreshPersistMs <=
+              Math.max(
+                LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
+                stageBudgets.db_persistence_budget
+              )
+                ? "ok"
+                : "budget_exceeded",
+          });
 
-        if (isRequestLifecycleAborted({ req, res }) || res.headersSent || res.writableEnded) {
+          throwIfRequestLifecycleAborted({
+            req,
+            res,
+            stage: "auth.login.session_persisted",
+          });
+
+          if (
+            isRequestLifecycleAborted({ req, res }) ||
+            res.headersSent ||
+            res.writableEnded
+          ) {
+            return {
+              completed: false,
+              lockHoldMs: Date.now() - lockHoldStartedAt,
+            };
+          }
+
           return {
-            completed: false,
+            completed: true,
+            accessToken,
+            refreshRaw,
+            hashedRefreshToken,
             lockHoldMs: Date.now() - lockHoldStartedAt,
           };
-        }
-
-        return {
-          completed: true,
-          accessToken,
-          refreshRaw,
-          hashedRefreshToken,
-          lockHoldMs: Date.now() - lockHoldStartedAt,
-        };
+        },
+      });
+    } catch (error) {
+      if (error instanceof LoginStageTimeoutError) {
+        emitPerformanceMetric({
+          name: "auth_processing_state",
+          value: error.elapsedMs,
+          businessId,
+          route: "auth.login",
+          metadata: {
+            state: "PROCESSING",
+            reason: "db_persistence_timeout",
+            stage: error.stage,
+            budgetMs: error.budgetMs,
+            retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
+            terminal: false,
+          },
+        });
+        emitPerformanceMetric({
+          name: "auth_login_total_ms",
+          value: Date.now() - startedAt,
+          businessId,
+          route: "auth.login",
+          metadata: {
+            outcome: "processing",
+            reason: "db_persistence_timeout",
+            stage: error.stage,
+            budgetMs: error.budgetMs,
+          },
+        });
+        return sendLoginProcessing({
+          res,
+          startedAt,
+          businessId,
+          code: "db_persistence_timeout",
+          retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
+          message:
+            "Login is stabilizing under runtime pressure. Please wait a moment and retry.",
+          metadata: {
+            stage: error.stage,
+            budgetMs: error.budgetMs,
+          },
+        });
+      }
+      throw error;
+    }
+    measureStep("lockLifecycle", lockLifecycleStartedAt);
+    const lockLifecycleMs = Date.now() - lockLifecycleStartedAt;
+    emitLoginBudgetTelemetry({
+      businessId,
+      stage: "lifecycle_lock_budget",
+      elapsedMs: lockLifecycleMs,
+      budgetMs: Math.max(
+        LOGIN_LIFECYCLE_LOCK_WAIT_MS,
+        stageBudgets.lifecycle_lock_budget
+      ),
+      policy: "hard",
+      outcome:
+        lockLifecycleMs <=
+        Math.max(LOGIN_LIFECYCLE_LOCK_WAIT_MS, stageBudgets.lifecycle_lock_budget)
+          ? "ok"
+          : "budget_exceeded",
+      metadata: {
+        lockKey,
       },
     });
-    measureStep("lockLifecycle", lockLifecycleStartedAt);
     if (loginResult?.lockHoldMs !== undefined) {
       emitPerformanceMetric({
         name: "auth_lock_hold_ms",
@@ -579,6 +1046,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         metadata: {
           state: "PROCESSING",
           reason: "login_inflight",
+          retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
+          terminal: false,
         },
       });
       emitPerformanceMetric({
@@ -605,14 +1074,17 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         route: "auth.login",
         metadata: {
           outcome: "processing",
+          reason: "login_inflight",
         },
       });
-      return res.status(202).json({
-        success: false,
-        processing: true,
-        retryable: true,
-        code: "AUTH_LOGIN_PROCESSING",
-        message: "Login is still processing. Please wait a moment and retry.",
+      return sendLoginProcessing({
+        res,
+        startedAt,
+        businessId,
+        code: "login_inflight",
+        retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
+        message:
+          "Login is still processing. Please wait a moment and retry.",
       });
     }
 
@@ -660,6 +1132,17 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       },
     });
     measureStep("responseCommit", responseCommitStartedAt);
+    emitLoginBudgetTelemetry({
+      businessId,
+      stage: "response_commit_budget",
+      elapsedMs: Date.now() - responseCommitStartedAt,
+      budgetMs: stageBudgets.response_commit_budget,
+      policy: "soft",
+      outcome:
+        Date.now() - responseCommitStartedAt <= stageBudgets.response_commit_budget
+          ? "ok"
+          : "budget_exceeded",
+    });
 
     emitPerformanceMetric({
       name: "AUTH_MS",
@@ -751,6 +1234,38 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     });
 
   } catch (err) {
+    if (
+      err instanceof TimeoutExceededError &&
+      String(err.message || "").includes("auth_login")
+    ) {
+      const businessId = null;
+      emitPerformanceMetric({
+        name: "auth_login_total_ms",
+        value: Date.now() - startedAt,
+        businessId,
+        route: "auth.login",
+        metadata: {
+          outcome: "processing",
+          reason: "lifecycle_lock_timeout",
+          error: err.message,
+        },
+      });
+      if (!res.headersSent && !res.writableEnded) {
+        return sendLoginProcessing({
+          res,
+          startedAt,
+          businessId,
+          code: "lifecycle_lock_timeout",
+          retryAfterMs: LOGIN_PROCESSING_RETRY_AFTER_BASE_MS,
+          message:
+            "Login is still stabilizing. Please wait a moment and retry.",
+          metadata: {
+            error: err.message,
+          },
+        });
+      }
+      return;
+    }
     next(err);
   }
 };

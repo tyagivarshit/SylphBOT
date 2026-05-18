@@ -47,6 +47,17 @@ const processMetaOAuthContinuationJob = async (
       resumeCount,
     },
   });
+  emitPerformanceMetric({
+    name: "continuation_async_only",
+    value: 1,
+    businessId: job.data.businessId,
+    route: "meta_oauth_continuation_worker",
+    metadata: {
+      operationId: job.data.operationId,
+      replayToken: job.data.replayToken,
+      source: job.data.source || "queue_worker",
+    },
+  });
   void recordObservabilityEvent({
     businessId: job.data.businessId,
     tenantId: job.data.businessId,

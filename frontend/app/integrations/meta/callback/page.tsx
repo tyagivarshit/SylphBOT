@@ -75,6 +75,7 @@ type LifecyclePayload = {
   connectionState?:
     | "PROCESSING"
     | "CONNECTED_PENDING"
+    | "CONTINUATION_SCHEDULED"
     | "ACTION_REQUIRED"
     | "READY_MINIMAL"
     | string
@@ -123,6 +124,12 @@ const lifecycleStageLabel = (stage?: string | null) => {
   if (normalized === "OAUTH_AUTHENTICATED") {
     return "OAuth authenticated";
   }
+  if (normalized === "CALLBACK_ACCEPTED") {
+    return "Callback accepted";
+  }
+  if (normalized === "CONTINUATION_SCHEDULED") {
+    return "Async continuation scheduled";
+  }
   if (normalized === "META_ACCOUNT_CONNECTED") {
     return "Meta account connected";
   }
@@ -169,6 +176,10 @@ const resolveOnboardingPhase = (lifecycle?: LifecyclePayload | null) => {
 
   if (stage === "OAUTH_AUTHENTICATED") {
     return "CONNECTING";
+  }
+
+  if (stage === "CALLBACK_ACCEPTED" || connectionState === "CONTINUATION_SCHEDULED") {
+    return "PROCESSING";
   }
 
   if (stage === "META_ACCOUNT_CONNECTED" || connectionState === "CONNECTED_PENDING") {
@@ -406,60 +417,6 @@ function MetaCallbackContent() {
 
     const pollLifecycle = async (operationId?: string | null) => {
       const maxAttempts = 120;
-      const pollOnboardingProjection = async () => {
-        const projectionResponse = await apiFetch<{
-          integrationProjection?: {
-            processingState?: string | null;
-            verificationState?: string | null;
-            stale?: boolean;
-            degradedRuntime?: {
-              deferred?: boolean;
-              queueUnavailable?: boolean;
-              reason?: string | null;
-              retryAttempt?: number | null;
-            } | null;
-          } | null;
-        }>("/api/integrations/onboarding", {
-          method: "GET",
-          timeoutMs: 7000,
-        });
-
-        if (!projectionResponse.success || !projectionResponse.data) {
-          return;
-        }
-
-        const projectionState = readString(
-          projectionResponse.data.integrationProjection?.processingState
-        );
-        if (!projectionState) {
-          return;
-        }
-
-        setLifecycle((current) => {
-          if (!current) {
-            return current;
-          }
-          const projectionData = projectionResponse?.data;
-          const degradedRuntime =
-            projectionData?.integrationProjection?.degradedRuntime || null;
-          const deferredLabel =
-            degradedRuntime?.deferred || degradedRuntime?.queueUnavailable
-              ? ` (deferred recovery${degradedRuntime.retryAttempt ? ` #${degradedRuntime.retryAttempt}` : ""})`
-              : "";
-          const detail = `Projection: ${projectionState
-            .replaceAll("_", " ")
-            .toLowerCase()}${deferredLabel}`;
-          if (readString(current.statusDetail) === detail) {
-            return current;
-          }
-
-          return {
-            ...current,
-            statusDetail: detail,
-          };
-        });
-      };
-
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (cancelled) {
           return false;
@@ -507,10 +464,6 @@ function MetaCallbackContent() {
             applyFailure(failureFromLifecycle(snapshot, platform));
             return true;
           }
-        }
-
-        if (attempt === 0 || attempt % 4 === 0) {
-          await pollOnboardingProjection().catch(() => undefined);
         }
 
         await new Promise((resolve) => {
@@ -981,4 +934,3 @@ export default function MetaCallbackPage() {
     </Suspense>
   );
 }
-

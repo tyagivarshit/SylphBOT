@@ -5,6 +5,8 @@ export type MetaOAuthLifecyclePlatform = "INSTAGRAM" | "WHATSAPP";
 export type MetaOAuthLifecycleMode = "connect" | "reconnect";
 
 export type MetaOAuthLifecycleStage =
+  | "CALLBACK_ACCEPTED"
+  | "CONTINUATION_SCHEDULED"
   | "OAUTH_AUTHENTICATED"
   | "META_ACCOUNT_CONNECTED"
   | "PAIR_SELECTION"

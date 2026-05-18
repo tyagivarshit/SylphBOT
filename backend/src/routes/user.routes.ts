@@ -198,6 +198,15 @@ const resolveAuthSurfaceCurrentUser = async (input: {
         surface: "auth",
       },
     });
+    emitPerformanceMetric({
+      name: "auth_singleflight_hits",
+      businessId: input.businessId,
+      route: "user_me",
+      metadata: {
+        surface: "auth",
+        source: "shared_me_inflight",
+      },
+    });
     return existing;
   }
 
@@ -419,6 +428,18 @@ router.get("/me", protect, async (req: any, res) => {
             state: cachedAuthSurface?.authLifecycle?.processingState || "READY",
           },
         });
+        emitPerformanceMetric({
+          name: "auth_stabilization_duration_ms",
+          value: Date.now() - startedAt,
+          businessId:
+            cachedAuthSurface?.businessId || req.user?.businessId || null,
+          route: "user_me",
+          metadata: {
+            surface: "auth",
+            cache: "hit",
+            state: cachedAuthSurface?.authLifecycle?.processingState || "READY",
+          },
+        });
         if (
           cachedAuthSurface?.authLifecycle?.processingState === "READY" ||
           cachedAuthSurface?.authLifecycle?.processingState === "READY_MINIMAL"
@@ -588,6 +609,16 @@ router.get("/me", protect, async (req: any, res) => {
               },
             });
             emitPerformanceMetric({
+              name: "auth_fastlane_success_rate",
+              value: 1,
+              businessId: stabilizedUser.businessId || null,
+              route: "user_me",
+              metadata: {
+                surface: "auth",
+                source: "ready_minimal",
+              },
+            });
+            emitPerformanceMetric({
               name: "auth_session_ready",
               value: lifecycle.stabilizationMs,
               businessId: stabilizedUser.businessId || null,
@@ -597,6 +628,17 @@ router.get("/me", protect, async (req: any, res) => {
                 source: "auth_fast_lane",
                 cacheHit: bootstrapSnapshot.cacheHit,
                 bootstrapInFlight: bootstrapSnapshot.inFlight,
+              },
+            });
+          } else {
+            emitPerformanceMetric({
+              name: "auth_fastlane_success_rate",
+              value: 0,
+              businessId: stabilizedUser.businessId || null,
+              route: "user_me",
+              metadata: {
+                surface: "auth",
+                source: "processing",
               },
             });
           }
@@ -627,6 +669,17 @@ router.get("/me", protect, async (req: any, res) => {
       });
       emitPerformanceMetric({
         name: "auth_stabilization_ms",
+        value: Date.now() - startedAt,
+        businessId: user.businessId || null,
+        route: "user_me",
+        metadata: {
+          surface: "auth",
+          cache: "miss",
+          state: user.authLifecycle.processingState,
+        },
+      });
+      emitPerformanceMetric({
+        name: "auth_stabilization_duration_ms",
         value: Date.now() - startedAt,
         businessId: user.businessId || null,
         route: "user_me",

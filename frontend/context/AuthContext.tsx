@@ -67,6 +67,9 @@ const STABILIZATION_ATTEMPTS = 5;
 const DEFAULT_ATTEMPTS = 2;
 const STABILIZATION_DELAY_MS = 150;
 const DEFAULT_DELAY_MS = 90;
+const AUTH_REFRESH_DEBOUNCE_MS = 420;
+const AUTH_STABILIZE_EVENT_COOLDOWN_MS = 850;
+const PUBLIC_ROUTE_DEFERRED_PROBE_DELAY_MS = 640;
 
 const wait = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -92,10 +95,25 @@ export const AuthProvider = ({
   const hasFetched = useRef(false);
   const currentUserRef = useRef<AuthUser | null>(null);
   const inflightBootstrapRef = useRef<Promise<AuthUser | null> | null>(null);
+  const lastRefreshProbeAtRef = useRef(0);
+  const lastStabilizeEventDispatchAtRef = useRef(0);
+  const pendingPublicProbeTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     currentUserRef.current = user;
   }, [user]);
+
+  useEffect(() => {
+    return () => {
+      if (
+        pendingPublicProbeTimeoutRef.current !== null &&
+        typeof window !== "undefined"
+      ) {
+        window.clearTimeout(pendingPublicProbeTimeoutRef.current);
+        pendingPublicProbeTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const recordMetric = useCallback(
     (name: string, valueMs: number, metadata?: Record<string, unknown>) => {
@@ -165,6 +183,13 @@ export const AuthProvider = ({
   };
 
   const beginAuthentication = useCallback(() => {
+    if (
+      pendingPublicProbeTimeoutRef.current !== null &&
+      typeof window !== "undefined"
+    ) {
+      window.clearTimeout(pendingPublicProbeTimeoutRef.current);
+      pendingPublicProbeTimeoutRef.current = null;
+    }
     markLifecycle("authenticating", "AUTHENTICATING", {
       source: "login_submit",
     });
@@ -174,6 +199,24 @@ export const AuthProvider = ({
     async (options?: RefreshUserOptions) => {
       const mode = options?.mode || "default";
       const source = options?.source || "manual";
+      const now = Date.now();
+      if (source === "event_refresh") {
+        const deltaSinceLastProbe = now - lastRefreshProbeAtRef.current;
+        if (
+          deltaSinceLastProbe >= 0 &&
+          deltaSinceLastProbe < AUTH_REFRESH_DEBOUNCE_MS
+        ) {
+          recordMetric("auth_duplicate_probe_count", 1, {
+            source,
+            mode,
+            routeContext,
+            deltaSinceLastProbe,
+            debounceMs: AUTH_REFRESH_DEBOUNCE_MS,
+          });
+          return inflightBootstrapRef.current || currentUserRef.current;
+        }
+      }
+      lastRefreshProbeAtRef.current = now;
       const canUseTransientRetry =
         mode === "stabilize" || routeContext === "AUTHENTICATED_APP_ROUTE";
       const requestRouteContext: AuthRouteContext =
@@ -186,6 +229,11 @@ export const AuthProvider = ({
           routeContext,
         });
         recordMetric("auth_parallel_me_collapsed", 1, {
+          mode,
+          source,
+          routeContext,
+        });
+        recordMetric("auth_singleflight_hits", 1, {
           mode,
           source,
           routeContext,
@@ -248,12 +296,26 @@ export const AuthProvider = ({
               mode,
               routeContext,
             });
+            recordMetric("auth_fastlane_success_rate", 1, {
+              source,
+              mode,
+              routeContext,
+            });
             if (mode === "stabilize") {
               recordMetric("auth_stabilization_ms", performance.now() - startedAt, {
                 source,
                 attempts: attempt + 1,
                 routeContext,
               });
+              recordMetric(
+                "auth_stabilization_duration_ms",
+                performance.now() - startedAt,
+                {
+                  source,
+                  attempts: attempt + 1,
+                  routeContext,
+                }
+              );
             }
 
             if (recoveredFromTimeout || attempt > 0) {
@@ -353,9 +415,25 @@ export const AuthProvider = ({
             typeof window !== "undefined" &&
             (mode === "stabilize" || routeContext === "AUTHENTICATED_APP_ROUTE")
           ) {
-            window.setTimeout(() => {
-              window.dispatchEvent(new Event("auth:refresh"));
-            }, 420);
+            const sinceLastStabilizeDispatchMs =
+              Date.now() - lastStabilizeEventDispatchAtRef.current;
+            if (
+              sinceLastStabilizeDispatchMs >= AUTH_STABILIZE_EVENT_COOLDOWN_MS
+            ) {
+              lastStabilizeEventDispatchAtRef.current = Date.now();
+              window.setTimeout(() => {
+                window.dispatchEvent(new Event("auth:refresh"));
+              }, 420);
+            } else {
+              recordMetric("auth_duplicate_probe_count", 1, {
+                source,
+                mode,
+                routeContext,
+                reason: "stabilize_event_cooldown",
+                sinceLastStabilizeDispatchMs,
+                cooldownMs: AUTH_STABILIZE_EVENT_COOLDOWN_MS,
+              });
+            }
           }
           return currentUserRef.current;
         }
@@ -414,12 +492,58 @@ export const AuthProvider = ({
     }
     hasFetched.current = true;
 
+    const hasSessionHint = () => {
+      if (typeof window === "undefined") {
+        return false;
+      }
+
+      const transportHint = String(
+        sessionStorage.getItem("auth_token_transport") || ""
+      )
+        .trim()
+        .toLowerCase();
+      if (transportHint === "cookie_http_only") {
+        return true;
+      }
+
+      const rawAuthState = sessionStorage.getItem("auth_state");
+      if (!rawAuthState) {
+        return false;
+      }
+
+      try {
+        const parsed = JSON.parse(rawAuthState) as { status?: unknown };
+        return String(parsed?.status || "").trim().toLowerCase() === "authenticated";
+      } catch {
+        return false;
+      }
+    };
+
+    if (routeContext === "PUBLIC_AUTH_ROUTE" && !hasSessionHint()) {
+      markLifecycle("anonymous", "UNAUTHENTICATED_PUBLIC_ROUTE", {
+        source: "initial_bootstrap_skip",
+        routeContext,
+      });
+      setLoading(false);
+      if (typeof window !== "undefined") {
+        pendingPublicProbeTimeoutRef.current = window.setTimeout(() => {
+          pendingPublicProbeTimeoutRef.current = null;
+          void fetchUser({
+            isInitial: false,
+            mode: "default",
+            source: "public_route_probe",
+          });
+        }, PUBLIC_ROUTE_DEFERRED_PROBE_DELAY_MS);
+      }
+      return;
+    }
+
     void fetchUser({
       isInitial: true,
       mode: "default",
       source: "initial_bootstrap",
     });
-  }, [fetchUser]);
+  }, [fetchUser, markLifecycle, routeContext]);
 
   useEffect(() => {
     const handler = () =>

@@ -135,6 +135,17 @@ const classifyRequestPriority = (req: Request): PriorityClass => {
   return "NORMAL";
 };
 
+const isAuthContentionRoute = (route: string) => {
+  const normalized = String(route || "").trim();
+  return (
+    normalized.startsWith("/api/auth") ||
+    normalized.startsWith("/api/user/me") ||
+    normalized.startsWith("/api/user/workspace") ||
+    normalized.startsWith("/api/integrations/onboarding") ||
+    normalized.startsWith("/api/oauth/meta/callback")
+  );
+};
+
 const canAcquireSlot = (priority: PriorityClass) => {
   const activeTotal = sumActive();
   if (priority === "CRITICAL") {
@@ -277,6 +288,19 @@ export const requestPriorityMiddleware = (
         source: "direct",
       },
     });
+    if (isAuthContentionRoute(route)) {
+      emitPerformanceMetric({
+        name: "auth_startup_contention_ms",
+        value: 0,
+        route: "request_priority_wait",
+        metadata: {
+          priority,
+          requestId,
+          source: "direct",
+          route,
+        },
+      });
+    }
     return next();
   }
 
@@ -325,6 +349,19 @@ export const requestPriorityMiddleware = (
           requestId,
         },
       });
+      if (isAuthContentionRoute(route)) {
+        emitPerformanceMetric({
+          name: "auth_startup_contention_ms",
+          value: waitedMs,
+          route: "request_priority_wait",
+          metadata: {
+            priority,
+            requestId,
+            source: "queued",
+            route,
+          },
+        });
+      }
       attachRelease(release);
       logQueueSnapshot("granted", requestId, route);
       next();

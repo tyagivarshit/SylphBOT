@@ -7,6 +7,7 @@ import {
   captureExceptionWithContext,
   initializeSentry,
 } from "./observability/sentry";
+import { emitPerformanceMetric } from "./observability/performanceMetrics";
 import { emitStripeConfigValidation } from "./services/commerce/providers/stripeConfig.service";
 import { reconcilePendingEntitlementSync } from "./services/billingSettlement.service";
 import {
@@ -47,57 +48,144 @@ const STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS = parsePositiveInt(
   process.env.STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS,
   8
 );
+const STARTUP_LOW_PRIORITY_TASK_RETRY_DELAY_MS = parsePositiveInt(
+  process.env.STARTUP_LOW_PRIORITY_TASK_RETRY_DELAY_MS,
+  1_400
+);
+const STARTUP_LOW_PRIORITY_TASK_MAX_DEFERRALS = parsePositiveInt(
+  process.env.STARTUP_LOW_PRIORITY_TASK_MAX_DEFERRALS,
+  10
+);
+
+type StartupTaskPriority = "critical" | "low";
 
 const scheduleBackgroundStartupTask = (
   name: string,
   task: () => Promise<unknown>,
-  metadata?: Record<string, unknown>
+  options?: {
+    metadata?: Record<string, unknown>;
+    priority?: StartupTaskPriority;
+    deferDelayMs?: number;
+    maxDeferrals?: number;
+  }
 ) => {
-  const attempts = 1;
-  recordStartupBackgroundTask({
-    name,
-    status: "scheduled",
-    attempts,
-    metadata,
-  });
+  const priority = options?.priority || "low";
+  const deferDelayMs = Math.max(
+    200,
+    Number(options?.deferDelayMs || STARTUP_LOW_PRIORITY_TASK_RETRY_DELAY_MS)
+  );
+  const maxDeferrals = Math.max(
+    0,
+    Number(options?.maxDeferrals || STARTUP_LOW_PRIORITY_TASK_MAX_DEFERRALS)
+  );
+  const metadata = options?.metadata || {};
 
-  setImmediate(() => {
-    const startedAt = Date.now();
+  let attempts = 0;
+  let deferredCount = 0;
+
+  const scheduleAttempt = (delayMs: number) => {
+    attempts += 1;
     recordStartupBackgroundTask({
       name,
-      status: "started",
+      status: "scheduled",
       attempts,
-      metadata,
+      metadata: {
+        ...metadata,
+        priority,
+        delayMs,
+        deferredCount,
+      },
     });
 
-    void task()
-      .then(() => {
-        recordStartupBackgroundTask({
-          name,
-          status: "completed",
-          attempts,
-          durationMs: Date.now() - startedAt,
-          metadata,
-        });
-      })
-      .catch((error) => {
-        logger.warn(
-          {
-            err: error,
-            task: name,
-          },
-          "Startup background task failed"
-        );
-        recordStartupBackgroundTask({
-          name,
-          status: "failed",
-          attempts,
-          durationMs: Date.now() - startedAt,
-          error,
-          metadata,
-        });
+    const timer = setTimeout(() => {
+      if (priority === "low") {
+        const deferDecision = shouldDeferLowPriorityWarmup();
+        if (deferDecision.defer && deferredCount < maxDeferrals) {
+          deferredCount += 1;
+          emitPerformanceMetric({
+            name: "startup_priority_deferral_count",
+            value: 1,
+            route: "startup_isolation",
+            metadata: {
+              task: name,
+              priority,
+              deferredCount,
+              reasons: deferDecision.reasons,
+              pressure: deferDecision.pressure,
+              requestPriority: deferDecision.prioritySnapshot,
+            },
+          });
+          recordStartupBackgroundTask({
+            name,
+            status: "deferred",
+            attempts,
+            metadata: {
+              ...metadata,
+              priority,
+              deferredCount,
+              reasons: deferDecision.reasons,
+              pressure: deferDecision.pressure,
+              requestPriority: deferDecision.prioritySnapshot,
+            },
+          });
+          scheduleAttempt(deferDelayMs);
+          return;
+        }
+      }
+
+      const startedAt = Date.now();
+      recordStartupBackgroundTask({
+        name,
+        status: "started",
+        attempts,
+        metadata: {
+          ...metadata,
+          priority,
+          deferredCount,
+        },
       });
-  });
+
+      void task()
+        .then(() => {
+          recordStartupBackgroundTask({
+            name,
+            status: "completed",
+            attempts,
+            durationMs: Date.now() - startedAt,
+            metadata: {
+              ...metadata,
+              priority,
+              deferredCount,
+            },
+          });
+        })
+        .catch((error) => {
+          logger.warn(
+            {
+              err: error,
+              task: name,
+            },
+            "Startup background task failed"
+          );
+          recordStartupBackgroundTask({
+            name,
+            status: "failed",
+            attempts,
+            durationMs: Date.now() - startedAt,
+            error,
+            metadata: {
+              ...metadata,
+              priority,
+              deferredCount,
+            },
+          });
+        });
+    }, delayMs);
+
+    timer.unref?.();
+  };
+
+  scheduleAttempt(0);
 };
 
 const scheduleDeferredEmbeddingWarmup = () => {
@@ -185,52 +273,93 @@ const scheduleDeferredEmbeddingWarmup = () => {
 };
 
 const startPostListenBootstrap = () => {
-  scheduleBackgroundStartupTask("stripe_config_validation", async () => {
-    await emitStripeConfigValidation();
-  });
+  scheduleBackgroundStartupTask(
+    "stripe_config_validation",
+    async () => {
+      await emitStripeConfigValidation();
+    },
+    {
+      priority: "low",
+    }
+  );
 
-  scheduleBackgroundStartupTask("commerce_cold_boot_replay", async () => {
-    const coldBootReplay = await commerceProjectionService
-      .replayPendingProviderWebhooks({
-        provider: "STRIPE",
-        businessId: null,
+  scheduleBackgroundStartupTask(
+    "commerce_cold_boot_replay",
+    async () => {
+      const coldBootReplay = await commerceProjectionService
+        .replayPendingProviderWebhooks({
+          provider: "STRIPE",
+          businessId: null,
+          limit: 100,
+          includeClaimedOlderThanMinutes: 5,
+        })
+        .catch(() => null);
+      if (coldBootReplay) {
+        logger.info({ coldBootReplay }, "Commerce cold boot replay completed");
+      }
+    },
+    {
+      priority: "low",
+    }
+  );
+
+  scheduleBackgroundStartupTask(
+    "entitlement_reconcile_replay",
+    async () => {
+      const entitlementReplay = await reconcilePendingEntitlementSync({
         limit: 100,
-        includeClaimedOlderThanMinutes: 5,
-      })
-      .catch(() => null);
-    if (coldBootReplay) {
-      logger.info({ coldBootReplay }, "Commerce cold boot replay completed");
+      }).catch(() => null);
+      if (entitlementReplay && entitlementReplay.pending > 0) {
+        logger.info(
+          {
+            entitlementReplay,
+          },
+          "Commerce entitlement reconcile replay completed"
+        );
+      }
+    },
+    {
+      priority: "low",
     }
-  });
+  );
 
-  scheduleBackgroundStartupTask("entitlement_reconcile_replay", async () => {
-    const entitlementReplay = await reconcilePendingEntitlementSync({
-      limit: 100,
-    }).catch(() => null);
-    if (entitlementReplay && entitlementReplay.pending > 0) {
-      logger.info(
-        {
-          entitlementReplay,
-        },
-        "Commerce entitlement reconcile replay completed"
-      );
+  scheduleBackgroundStartupTask(
+    "worker_bootstrap_core",
+    async () => {
+      initWorkers({
+        authEmail: true,
+      });
+    },
+    {
+      priority: "critical",
     }
-  });
+  );
 
-  scheduleBackgroundStartupTask("worker_bootstrap", async () => {
-    initWorkers({
-      authEmail: true,
-      integrationOnboardingProjection: true,
-      metaOAuthContinuation: true,
-    });
-  });
-
-  scheduleBackgroundStartupTask("cron_bootstrap", async () => {
-    initCriticalRecoveryCron();
-    if (process.env.ENABLE_CRON === "true") {
-      initCrons();
+  scheduleBackgroundStartupTask(
+    "worker_bootstrap_integration",
+    async () => {
+      initWorkers({
+        integrationOnboardingProjection: true,
+        metaOAuthContinuation: true,
+      });
+    },
+    {
+      priority: "low",
     }
-  });
+  );
+
+  scheduleBackgroundStartupTask(
+    "cron_bootstrap",
+    async () => {
+      initCriticalRecoveryCron();
+      if (process.env.ENABLE_CRON === "true") {
+        initCrons();
+      }
+    },
+    {
+      priority: "low",
+    }
+  );
 
   scheduleDeferredEmbeddingWarmup();
 };

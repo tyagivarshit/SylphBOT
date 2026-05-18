@@ -70,6 +70,18 @@ const verifyPassword = async (
   }
 };
 
+const extractBcryptCost = (storedHash: string) => {
+  const match = /^\$2[abxy]\$(\d{2})\$/.exec(String(storedHash || "").trim());
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Math.max(0, Math.floor(parsed));
+};
+
 const isStrongPassword = (password: string) =>
   /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/.test(password);
 
@@ -80,6 +92,7 @@ const LOGIN_BACKGROUND_TASK_TIMEOUT_MS = 1200;
 const LOGIN_LIFECYCLE_LOCK_TTL_MS = 15_000;
 const LOGIN_LIFECYCLE_LOCK_WAIT_MS = 450;
 const LOGIN_LIFECYCLE_LOCK_POLL_MS = 60;
+const LOGIN_PASSWORD_VERIFY_BUDGET_MS = 400;
 
 const buildLoginLifecycleLockKey = (input: {
   userId?: string | null;
@@ -343,10 +356,23 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     const user = await prisma.user.findUnique({ where: { email } });
     measureStep("userLookup", userLookupStartedAt);
     const passwordVerifyStartedAt = Date.now();
+    const passwordHashCost = user ? extractBcryptCost(user.password) : null;
     const passwordVerified = user
       ? await verifyPassword(password, user.password)
       : false;
-    measureStep("passwordVerify", passwordVerifyStartedAt);
+    const passwordVerifyMs = Date.now() - passwordVerifyStartedAt;
+    loginWaterfallMs.passwordVerify = passwordVerifyMs;
+    emitPerformanceMetric({
+      name: "password_verify_ms",
+      value: passwordVerifyMs,
+      businessId: user?.businessId || null,
+      route: "auth.login",
+      metadata: {
+        source: "password_login",
+        hashCost: passwordHashCost,
+        withinBudget: passwordVerifyMs <= LOGIN_PASSWORD_VERIFY_BUDGET_MS,
+      },
+    });
 
     if (
       !user ||
@@ -390,6 +416,15 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           reason: "invalid_credentials",
         },
       });
+      emitPerformanceMetric({
+        name: "auth_login_total_ms",
+        value: Date.now() - startedAt,
+        businessId: user?.businessId || null,
+        route: "auth.login",
+        metadata: {
+          outcome: "invalid_credentials",
+        },
+      });
       console.info("AUTH_LOGIN_WATERFALL", {
         status: "invalid_credentials",
         userId: user?.id || null,
@@ -403,6 +438,24 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       req,
       res,
       stage: "auth.login.verified",
+    });
+    const startupContentionMs = Math.max(
+      0,
+      Number((res.locals as Record<string, unknown>)?.requestQueueWaitMs || 0)
+    );
+    emitPerformanceMetric({
+      name: "auth_startup_contention_ms",
+      value: startupContentionMs,
+      businessId: user.businessId || null,
+      route: "auth.login",
+      metadata: {
+        priorityClass: String(
+          (res.locals as Record<string, unknown>)?.requestPriorityClass || "UNKNOWN"
+        )
+          .trim()
+          .toUpperCase(),
+        source: "request_priority_queue",
+      },
     });
 
     const resolvedUser = {
@@ -420,14 +473,28 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       userAgent,
     });
 
+    type LoginLifecycleResult =
+      | {
+          completed: false;
+          lockHoldMs: number;
+        }
+      | {
+          completed: true;
+          accessToken: string;
+          refreshRaw: string;
+          hashedRefreshToken: string;
+          lockHoldMs: number;
+        };
+
     const lockLifecycleStartedAt = Date.now();
-    const loginResult = await withDistributedLock({
+    const loginResult = await withDistributedLock<LoginLifecycleResult | null>({
       key: lockKey,
       ttlMs: LOGIN_LIFECYCLE_LOCK_TTL_MS,
       waitMs: LOGIN_LIFECYCLE_LOCK_WAIT_MS,
       pollMs: LOGIN_LIFECYCLE_LOCK_POLL_MS,
       onUnavailable: async () => null,
       run: async () => {
+        const lockHoldStartedAt = Date.now();
         const tokenIssueStartedAt = Date.now();
         const accessToken = generateAccessToken(
           resolvedUser.id,
@@ -464,121 +531,34 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           stage: "auth.login.session_persisted",
         });
 
-        primeAuthContextCacheForToken({
-          accessToken,
-          userId: resolvedUser.id,
-          role: resolvedUser.role,
-          tokenVersion: resolvedUser.tokenVersion,
-          email: resolvedUser.email,
-          businessId,
-        });
-
-        void writeAuthAuditLog(req, {
-          action: "auth.login",
-          userId: resolvedUser.id,
-          businessId,
-          metadata: {
-            email: resolvedUser.email,
-            role: resolvedUser.role,
-          },
-        });
         if (isRequestLifecycleAborted({ req, res }) || res.headersSent || res.writableEnded) {
           return {
             completed: false,
+            lockHoldMs: Date.now() - lockHoldStartedAt,
           };
         }
 
-        const responseCommitStartedAt = Date.now();
-        setCookies(req, res, accessToken, refreshRaw);
-
-        res.json({
-          success: true,
-          user: {
-            id: resolvedUser.id,
-            email: resolvedUser.email,
-            name: resolvedUser.name,
-            businessId,
-          },
-        });
-        measureStep("responseCommit", responseCommitStartedAt);
-
-        emitPerformanceMetric({
-          name: "AUTH_MS",
-          value: Date.now() - startedAt,
-          businessId,
-          route: "auth.login",
-          metadata: {
-            source: "password",
-          },
-        });
-        emitPerformanceMetric({
-          name: "auth_bootstrap_ms",
-          value: Date.now() - startedAt,
-          businessId,
-          route: "auth.login",
-          metadata: {
-            stage: "response_committed",
-            source: "password",
-          },
-        });
-        emitPerformanceMetric({
-          name: "auth_session_ready",
-          value: Date.now() - startedAt,
-          businessId,
-          route: "auth.login",
-          metadata: {
-            stage: "session_persisted",
-            source: "password",
-          },
-        });
-
-        runDetachedAuthTask("auth.login.prune_refresh_tokens", async () => {
-          await withFastTimeout(
-            pruneRefreshTokens(resolvedUser.id, 4),
-            LOGIN_BACKGROUND_TASK_TIMEOUT_MS
-          );
-        });
-
-        runDetachedAuthTask("auth.login.session_ledger", async () => {
-          await withFastTimeout(
-            issueSessionLedger({
-              businessId,
-              tenantId: businessId,
-              userId: resolvedUser.id,
-              sessionKey: hashedRefreshToken,
-              ip,
-              userAgent,
-              deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-              expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-              metadata: {
-                source: "auth.login",
-              },
-            }),
-            Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS)
-          );
-        });
-
-        primeAuthBootstrapContext(
-          {
-            userId: resolvedUser.id,
-            preferredBusinessId: businessId,
-            profileSeed: {
-              email: resolvedUser.email,
-              name: resolvedUser.name,
-              avatar: user.avatar || null,
-            },
-          },
-          {
-            shouldRun: () => !isRequestLifecycleAborted({ req, res }),
-          }
-        );
-
         return {
           completed: true,
+          accessToken,
+          refreshRaw,
+          hashedRefreshToken,
+          lockHoldMs: Date.now() - lockHoldStartedAt,
         };
       },
     });
     measureStep("lockLifecycle", lockLifecycleStartedAt);
+    if (loginResult?.lockHoldMs !== undefined) {
+      emitPerformanceMetric({
+        name: "auth_lock_hold_ms",
+        value: loginResult.lockHoldMs,
+        businessId,
+        route: "auth.login",
+        metadata: {
+          lockKey,
+        },
+      });
+    }
 
     if (!loginResult) {
       emitPerformanceMetric({
@@ -618,6 +598,15 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         totalMs: Date.now() - startedAt,
         loginWaterfallMs,
       });
+      emitPerformanceMetric({
+        name: "auth_login_total_ms",
+        value: Date.now() - startedAt,
+        businessId,
+        route: "auth.login",
+        metadata: {
+          outcome: "processing",
+        },
+      });
       return res.status(202).json({
         success: false,
         processing: true,
@@ -630,6 +619,127 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     if (!loginResult.completed) {
       return;
     }
+
+    if (isRequestLifecycleAborted({ req, res }) || res.headersSent || res.writableEnded) {
+      return;
+    }
+
+    const accessToken = loginResult.accessToken;
+    const refreshRaw = loginResult.refreshRaw;
+    const hashedRefreshToken = loginResult.hashedRefreshToken;
+
+    primeAuthContextCacheForToken({
+      accessToken,
+      userId: resolvedUser.id,
+      role: resolvedUser.role,
+      tokenVersion: resolvedUser.tokenVersion,
+      email: resolvedUser.email,
+      businessId,
+    });
+
+    void writeAuthAuditLog(req, {
+      action: "auth.login",
+      userId: resolvedUser.id,
+      businessId,
+      metadata: {
+        email: resolvedUser.email,
+        role: resolvedUser.role,
+      },
+    });
+
+    const responseCommitStartedAt = Date.now();
+    setCookies(req, res, accessToken, refreshRaw);
+
+    res.json({
+      success: true,
+      user: {
+        id: resolvedUser.id,
+        email: resolvedUser.email,
+        name: resolvedUser.name,
+        businessId,
+      },
+    });
+    measureStep("responseCommit", responseCommitStartedAt);
+
+    emitPerformanceMetric({
+      name: "AUTH_MS",
+      value: Date.now() - startedAt,
+      businessId,
+      route: "auth.login",
+      metadata: {
+        source: "password",
+      },
+    });
+    emitPerformanceMetric({
+      name: "auth_bootstrap_ms",
+      value: Date.now() - startedAt,
+      businessId,
+      route: "auth.login",
+      metadata: {
+        stage: "response_committed",
+        source: "password",
+      },
+    });
+    emitPerformanceMetric({
+      name: "auth_session_ready",
+      value: Date.now() - startedAt,
+      businessId,
+      route: "auth.login",
+      metadata: {
+        stage: "session_persisted",
+        source: "password",
+      },
+    });
+    emitPerformanceMetric({
+      name: "auth_login_total_ms",
+      value: Date.now() - startedAt,
+      businessId,
+      route: "auth.login",
+      metadata: {
+        outcome: "success",
+      },
+    });
+
+    runDetachedAuthTask("auth.login.prune_refresh_tokens", async () => {
+      await withFastTimeout(
+        pruneRefreshTokens(resolvedUser.id, 4),
+        LOGIN_BACKGROUND_TASK_TIMEOUT_MS
+      );
+    });
+
+    runDetachedAuthTask("auth.login.session_ledger", async () => {
+      await withFastTimeout(
+        issueSessionLedger({
+          businessId,
+          tenantId: businessId,
+          userId: resolvedUser.id,
+          sessionKey: hashedRefreshToken,
+          ip,
+          userAgent,
+          deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          metadata: {
+            source: "auth.login",
+          },
+        }),
+        Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS)
+      );
+    });
+
+    primeAuthBootstrapContext(
+      {
+        userId: resolvedUser.id,
+        preferredBusinessId: businessId,
+        profileSeed: {
+          email: resolvedUser.email,
+          name: resolvedUser.name,
+          avatar: user.avatar || null,
+        },
+      },
+      {
+        shouldRun: () => !isRequestLifecycleAborted({ req, res }),
+      }
+    );
 
     console.info("AUTH_LOGIN_WATERFALL", {
       status: "success",

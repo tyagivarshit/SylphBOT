@@ -108,11 +108,17 @@ type FetchCurrentUserLifecycleOptions = {
 };
 
 const AUTH_ME_RETRY_DELAY_MS = 180;
-const AUTH_ME_TRANSIENT_RETRY_ATTEMPTS = 1;
+const AUTH_ME_TRANSIENT_RETRY_ATTEMPTS = 0;
+const AUTH_ME_PROBE_COOLDOWN_MS = 320;
 
 const authCurrentUserInFlightByContext = new Map<
   AuthRouteContext,
   Promise<AuthCurrentUserFetchResult>
+>();
+const authCurrentUserLastProbeAtByContext = new Map<AuthRouteContext, number>();
+const authCurrentUserLastResultByContext = new Map<
+  AuthRouteContext,
+  AuthCurrentUserFetchResult
 >();
 const sawAuthProcessingStateByContext = new Map<AuthRouteContext, boolean>();
 
@@ -324,12 +330,40 @@ export async function fetchCurrentUserLifecycle(
       source: "frontend_singleflight",
       routeContext,
     });
+    recordAuthMetric("auth_singleflight_hits", {
+      source: "frontend_singleflight",
+      routeContext,
+    });
     return existing;
+  }
+
+  const now = Date.now();
+  const lastProbeAt = authCurrentUserLastProbeAtByContext.get(routeContext) || 0;
+  const lastResult = authCurrentUserLastResultByContext.get(routeContext) || null;
+  const probeDeltaMs = now - lastProbeAt;
+  const isTransientLastResult =
+    lastResult?.state === "PROCESSING" ||
+    lastResult?.state === "RETRYING" ||
+    lastResult?.state === "STABILIZING";
+  if (
+    isTransientLastResult &&
+    probeDeltaMs >= 0 &&
+    probeDeltaMs < AUTH_ME_PROBE_COOLDOWN_MS
+  ) {
+    recordAuthMetric("auth_duplicate_probe_count", {
+      routeContext,
+      source,
+      probeDeltaMs,
+      cooldownMs: AUTH_ME_PROBE_COOLDOWN_MS,
+      lastState: lastResult.state,
+    });
+    return lastResult;
   }
 
   const run = (async () => {
     let attempt = 0;
     let latestResult: AuthCurrentUserFetchResult | null = null;
+    authCurrentUserLastProbeAtByContext.set(routeContext, Date.now());
 
     while (attempt <= AUTH_ME_TRANSIENT_RETRY_ATTEMPTS) {
       const response = await apiFetch<CurrentUser>("/api/user/me?surface=auth", {
@@ -421,6 +455,8 @@ export async function fetchCurrentUserLifecycle(
         source,
       });
     }
+
+    authCurrentUserLastResultByContext.set(routeContext, finalResult);
 
     return finalResult;
   })().finally(() => {

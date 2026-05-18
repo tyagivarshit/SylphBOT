@@ -219,6 +219,7 @@ const startPostListenBootstrap = () => {
   scheduleBackgroundStartupTask("worker_bootstrap", async () => {
     initWorkers({
       authEmail: true,
+      integrationOnboardingProjection: true,
     });
   });
 

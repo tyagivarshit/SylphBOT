@@ -53,6 +53,30 @@ export type OnboardingSnapshot = {
     message: string;
     ctaHref: "/billing";
   };
+  integrationProjection?: {
+    processingState?:
+      | "READY"
+      | "PROCESSING"
+      | "VERIFYING"
+      | "RECONCILING"
+      | "STALE_VERIFIED"
+      | "PROVIDER_DELAYED"
+      | "ACTION_REQUIRED"
+      | string;
+    verificationState?: "VERIFIED" | "VERIFYING" | "UNVERIFIED" | "DEGRADED" | string;
+    stale?: boolean;
+    staleAgeMs?: number;
+    reconcileInFlight?: boolean;
+    lastSuccessfulReconcileAt?: string | null;
+    providerStateSummary?: {
+      total: number;
+      active: number;
+      verifying: number;
+      reconciling: number;
+      delayed: number;
+      actionRequired: number;
+    };
+  } | null;
 };
 
 export const getOnboardingSnapshot = async () =>

@@ -120,6 +120,39 @@ const getStepCopy = (data: OnboardingSnapshot) => {
   };
 };
 
+const isProjectionProcessingState = (state?: string | null) => {
+  const normalized = String(state || "").trim().toUpperCase();
+  return (
+    normalized === "PROCESSING" ||
+    normalized === "VERIFYING" ||
+    normalized === "RECONCILING" ||
+    normalized === "PROVIDER_DELAYED"
+  );
+};
+
+const getProjectionStatusCopy = (state?: string | null) => {
+  const normalized = String(state || "").trim().toUpperCase();
+  if (normalized === "VERIFYING") {
+    return "Verifying integration connectivity";
+  }
+  if (normalized === "RECONCILING") {
+    return "Reconciling integration state in background";
+  }
+  if (normalized === "PROVIDER_DELAYED") {
+    return "Provider delayed, retrying in background";
+  }
+  if (normalized === "ACTION_REQUIRED") {
+    return "Integration requires attention";
+  }
+  if (normalized === "STALE_VERIFIED") {
+    return "Showing last verified integration snapshot";
+  }
+  if (normalized === "PROCESSING") {
+    return "Preparing integration snapshot";
+  }
+  return null;
+};
+
 export default function OnboardingFlow() {
   const searchParams = useSearchParams();
 
@@ -131,7 +164,16 @@ export default function OnboardingFlow() {
     refetchInterval: (query) => {
       const payload = query.state.data;
       if (!payload?.success || !payload.data) {
-        return 15_000;
+        return 4_000;
+      }
+
+      const projectionState = String(
+        payload.data.integrationProjection?.processingState || ""
+      )
+        .trim()
+        .toUpperCase();
+      if (isProjectionProcessingState(projectionState)) {
+        return 2_500;
       }
       return payload.data.onboardingCompleted ? 60_000 : 12_000;
     },
@@ -153,12 +195,19 @@ export default function OnboardingFlow() {
   }, [searchParams]);
 
   if (!onboarding) {
-    return null;
+    return (
+      <div className="brand-section-shell rounded-[28px] p-5 md:p-6">
+        <p className="text-sm text-slate-600">Loading onboarding snapshot...</p>
+      </div>
+    );
   }
 
   const stepItems = getStepItems(onboarding);
   const stepCopy = getStepCopy(onboarding);
   const completionPercent = Math.round((onboarding.onboardingStep / 5) * 100);
+  const projectionState =
+    onboarding.integrationProjection?.processingState || "READY";
+  const projectionStatusCopy = getProjectionStatusCopy(projectionState);
 
   return (
     <div className="space-y-4">
@@ -179,6 +228,11 @@ export default function OnboardingFlow() {
 
       {!onboarding.onboardingCompleted ? (
         <div className="brand-section-shell rounded-[28px] p-5 md:p-6">
+          {projectionStatusCopy ? (
+            <div className="mb-3 inline-flex rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
+              {projectionStatusCopy}
+            </div>
+          ) : null}
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2 text-xs">

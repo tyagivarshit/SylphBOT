@@ -6133,6 +6133,10 @@ export const getConnectHubProjection = async (input: {
     const sandboxWebhook = sandboxSelection?.integration?.integrationKey
       ? getProviderWebhookRow(sandboxSelection.integration.integrationKey)
       : null;
+    const liveIntegration = liveSelection?.integration || null;
+    const sandboxIntegration = sandboxSelection?.integration || null;
+    const liveMetadata = toRecord(liveIntegration?.metadata);
+    const sandboxMetadata = toRecord(sandboxIntegration?.metadata);
     return {
       provider,
       live: {
@@ -6149,6 +6153,35 @@ export const getConnectHubProjection = async (input: {
         tokenStatus: normalizeIdentifier(liveCredential?.status || "") || "UNKNOWN",
         webhookStatus: normalizeIdentifier(liveWebhook?.status || "") || "INACTIVE",
         missingScopes: toArray(livePermission?.missingScopes || []),
+        reconnect: Boolean(liveMetadata.reconnect),
+        lastVerifiedAt: liveIntegration?.lastVerifiedAt || null,
+        updatedAt: liveIntegration?.updatedAt || null,
+        accountMapping: {
+          externalAccountRef: normalizeIdentifier(liveIntegration?.externalAccountRef || "") || null,
+          pageId: normalizeIdentifier(liveMetadata.pageId || "") || null,
+          instagramProfessionalAccountId:
+            normalizeIdentifier(liveMetadata.instagramProfessionalAccountId || "") || null,
+          businessManagerId: normalizeIdentifier(liveMetadata.businessManagerId || "") || null,
+          wabaId: normalizeIdentifier(liveMetadata.wabaId || "") || null,
+          phoneNumberId: normalizeIdentifier(liveMetadata.phoneNumberId || "") || null,
+          displayNameReviewStatus:
+            normalizeIdentifier(liveMetadata.displayNameReviewStatus || "") || null,
+          qualityRating: normalizeIdentifier(liveMetadata.qualityRating || "") || null,
+          tier: normalizeIdentifier(liveMetadata.tier || "") || null,
+          pairSelectionState:
+            normalizeIdentifier(liveMetadata.pageId || "") &&
+            normalizeIdentifier(liveMetadata.instagramProfessionalAccountId || "")
+              ? "SELECTED"
+              : "PENDING",
+          phoneSelectionState: normalizeIdentifier(liveMetadata.phoneNumberId || "")
+            ? "SELECTED"
+            : "PENDING",
+        },
+        webhook: {
+          consecutiveFailures: toNumber(liveWebhook?.consecutiveFailures, 0),
+          lastDeliveryAt: liveWebhook?.lastDeliveryAt || null,
+          lastFailureAt: liveWebhook?.lastFailureAt || null,
+        },
       },
       sandbox: {
         status: normalizeStatus(
@@ -6164,6 +6197,36 @@ export const getConnectHubProjection = async (input: {
         tokenStatus: normalizeIdentifier(sandboxCredential?.status || "") || "UNKNOWN",
         webhookStatus: normalizeIdentifier(sandboxWebhook?.status || "") || "INACTIVE",
         missingScopes: toArray(sandboxPermission?.missingScopes || []),
+        reconnect: Boolean(sandboxMetadata.reconnect),
+        lastVerifiedAt: sandboxIntegration?.lastVerifiedAt || null,
+        updatedAt: sandboxIntegration?.updatedAt || null,
+        accountMapping: {
+          externalAccountRef:
+            normalizeIdentifier(sandboxIntegration?.externalAccountRef || "") || null,
+          pageId: normalizeIdentifier(sandboxMetadata.pageId || "") || null,
+          instagramProfessionalAccountId:
+            normalizeIdentifier(sandboxMetadata.instagramProfessionalAccountId || "") || null,
+          businessManagerId: normalizeIdentifier(sandboxMetadata.businessManagerId || "") || null,
+          wabaId: normalizeIdentifier(sandboxMetadata.wabaId || "") || null,
+          phoneNumberId: normalizeIdentifier(sandboxMetadata.phoneNumberId || "") || null,
+          displayNameReviewStatus:
+            normalizeIdentifier(sandboxMetadata.displayNameReviewStatus || "") || null,
+          qualityRating: normalizeIdentifier(sandboxMetadata.qualityRating || "") || null,
+          tier: normalizeIdentifier(sandboxMetadata.tier || "") || null,
+          pairSelectionState:
+            normalizeIdentifier(sandboxMetadata.pageId || "") &&
+            normalizeIdentifier(sandboxMetadata.instagramProfessionalAccountId || "")
+              ? "SELECTED"
+              : "PENDING",
+          phoneSelectionState: normalizeIdentifier(sandboxMetadata.phoneNumberId || "")
+            ? "SELECTED"
+            : "PENDING",
+        },
+        webhook: {
+          consecutiveFailures: toNumber(sandboxWebhook?.consecutiveFailures, 0),
+          lastDeliveryAt: sandboxWebhook?.lastDeliveryAt || null,
+          lastFailureAt: sandboxWebhook?.lastFailureAt || null,
+        },
       },
       diagnostics: Array.from(getStore().connectionDiagnosticLedger.values())
         .filter(

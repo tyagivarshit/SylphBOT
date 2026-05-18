@@ -45,6 +45,10 @@ import {
   initWebhookIntakeQueues,
 } from "../queues/webhookIntake.queue";
 import {
+  closeIntegrationOnboardingProjectionQueue,
+  initIntegrationOnboardingProjectionQueue,
+} from "../queues/integrationOnboardingProjection.queue";
+import {
   closeCRMRefreshQueue,
   initCRMRefreshQueue,
 } from "../services/crm/refreshQueue.service";
@@ -93,6 +97,10 @@ import {
   initWebhookIntakeWorkers,
 } from "../workers/webhookIntake.worker";
 import {
+  closeIntegrationOnboardingProjectionWorker,
+  initIntegrationOnboardingProjectionWorker,
+} from "../workers/integrationOnboardingProjection.worker";
+import {
   startCRMRefreshWorker,
   stopCRMRefreshWorker,
 } from "../workers/crmRefresh.worker";
@@ -123,6 +131,7 @@ export type WorkerLifecycleOptions = {
   receptionRuntime?: boolean;
   humanReminder?: boolean;
   webhookIntake?: boolean;
+  integrationOnboardingProjection?: boolean;
 };
 
 const globalForLifecycle = globalThis as typeof globalThis & {
@@ -167,6 +176,7 @@ export const initQueues = async () => {
     initReceptionRuntimeQueues();
     initHumanReminderQueue();
     initWebhookIntakeQueues();
+    initIntegrationOnboardingProjectionQueue();
     globalForLifecycle.__sylphQueuesInitialized = true;
   })();
 
@@ -224,6 +234,10 @@ export const initWorkers = (options: WorkerLifecycleOptions = {}) => {
   if (options.webhookIntake) {
     initWebhookIntakeWorkers();
   }
+
+  if (options.integrationOnboardingProjection) {
+    initIntegrationOnboardingProjectionWorker();
+  }
 };
 
 export const initCrons = () => {
@@ -273,6 +287,7 @@ export const shutdown = async () => {
     closeReceptionRuntimeWorkers(),
     closeHumanReminderWorker(),
     closeWebhookIntakeWorkers(),
+    closeIntegrationOnboardingProjectionWorker(),
     stopRevenueBrainEventWorker(),
     stopCRMRefreshWorker(),
     closeCRMRefreshQueue(),
@@ -285,6 +300,7 @@ export const shutdown = async () => {
     closeReceptionRuntimeQueues(),
     closeHumanReminderQueue(),
     closeWebhookIntakeQueues(),
+    closeIntegrationOnboardingProjectionQueue(),
     prisma.$disconnect(),
     closeRedisConnection(),
   ]);

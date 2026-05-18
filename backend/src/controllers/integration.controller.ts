@@ -1,9 +1,9 @@
 import axios from "axios";
 import prisma from "../config/prisma";
 import { decrypt } from "../utils/encrypt";
-import { getOnboardingSnapshot } from "../services/onboarding.service";
 import { fetchInstagramUsername } from "../services/instagramProfile.service";
 import { withTimeoutFallback } from "../utils/boundedTimeout";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   applyPackagingOverride,
   assignTenantSeat,
@@ -46,6 +46,11 @@ import {
   setExtensionSecretBinding,
   subscribeExtensionEvent,
 } from "../services/developerPlatformExtensibilityOS.service";
+import {
+  noteIntegrationOnboardingReconcileIntent,
+  readIntegrationOnboardingFastLaneSnapshot,
+} from "../services/integrationOnboardingProjection.service";
+import { enqueueIntegrationOnboardingProjectionReconcile } from "../queues/integrationOnboardingProjection.queue";
 
 const INTEGRATION_API_TIMEOUT_MS = 1800;
 
@@ -162,33 +167,173 @@ export const getIntegrations = async (req: any, res: any) => {
 };
 
 export const getOnboarding = async (req: any, res: any) => {
+  const startedAtMs = Date.now();
   try {
     const businessId = req.user?.businessId;
+    const tenantId =
+      normalizeOptionalString(req.user?.tenantId) ||
+      normalizeOptionalString(req.query?.tenantId) ||
+      businessId;
 
     if (!businessId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const onboardingResult = await withTimeoutFallback({
-      label: "integrations_onboarding_projection",
-      timeoutMs: INTEGRATION_API_TIMEOUT_MS,
-      task: getOnboardingSnapshot(businessId),
-      fallback: null,
+    const fastLane = await readIntegrationOnboardingFastLaneSnapshot({
+      businessId,
+      tenantId,
+    });
+
+    let reconcileScheduled = false;
+    if (fastLane.recommendReconcile) {
+      const intent = noteIntegrationOnboardingReconcileIntent({
+        businessId,
+        tenantId,
+      });
+      if (intent.shouldQueue) {
+        reconcileScheduled = true;
+        void enqueueIntegrationOnboardingProjectionReconcile({
+          type: "ONBOARDING_RECONCILE",
+          businessId,
+          tenantId,
+          reason: fastLane.reconcileReason,
+          source: "api_fast_lane",
+        }).catch((error) => {
+          console.warn("INTEGRATIONS_ONBOARDING_RECONCILE_ENQUEUE_FAILED", {
+            businessId,
+            tenantId: tenantId || businessId,
+            reason: String((error as Error)?.message || "enqueue_failed"),
+          });
+        });
+      }
+    }
+
+    emitPerformanceMetric({
+      name: "integration_projection_ms",
+      value: Date.now() - startedAtMs,
+      businessId,
+      route: "integrations_onboarding_projection",
+      metadata: {
+        cache: fastLane.cache,
+        cacheHit: fastLane.cacheHit,
+        stale: fastLane.stale,
+        staleAgeMs: fastLane.staleAgeMs,
+        state: fastLane.processingState,
+        degraded: fastLane.degraded,
+        reconcileScheduled,
+      },
     });
 
     return res.json({
       success: true,
-      data: onboardingResult.value,
+      data: fastLane.snapshot,
       meta: {
-        degraded: onboardingResult.timedOut || onboardingResult.failed,
+        degraded: fastLane.degraded,
+        cache: fastLane.cache,
+        stale: fastLane.stale,
+        staleAgeMs: fastLane.staleAgeMs,
+        processingState: fastLane.processingState,
+        verificationState: fastLane.verificationState,
+        reconcileInFlight: fastLane.reconcileInFlight,
+        reconcileScheduled,
+        lastSuccessfulReconcileAt: fastLane.lastSuccessfulReconcileAt,
+        lastReconcileError: fastLane.lastReconcileError,
       },
     });
   } catch (err) {
+    const businessId = req.user?.businessId || null;
+    const refreshedAt = new Date().toISOString();
+    const fallbackSnapshot = {
+      onboardingCompleted: false,
+      onboardingStep: 1,
+      demoCompleted: false,
+      connectedPlatforms: [],
+      primaryPlatform: null,
+      checklist: {
+        connectedAccount: false,
+        demoReplyReady: false,
+        sendTestPromptReady: false,
+        realReplyReady: false,
+      },
+      demo: {
+        label: "This is how AI replies automatically",
+        prompt: "Hi, I want to know more about your service",
+        leadId: null,
+        userMessage: null,
+        aiMessage: null,
+      },
+      realReply: {
+        leadId: null,
+        userMessage: null,
+        aiMessage: null,
+      },
+      trial: {
+        active: false,
+        totalDays: 14,
+        daysLeft: 0,
+        nearEnd: false,
+      },
+      usage: {
+        aiUsedToday: 0,
+        aiLimit: 0,
+        aiRemaining: null,
+        aiUsagePercent: 0,
+        warning: false,
+        warningMessage: null,
+      },
+      upgrade: {
+        show: false,
+        reasons: [],
+        headline: "You're getting great results",
+        message: "Upgrade to keep automation running",
+        ctaHref: "/billing",
+      },
+      integrationProjection: {
+        processingState: "PROCESSING",
+        verificationState: "UNVERIFIED",
+        providers: [],
+        providerStateSummary: {
+          total: 0,
+          active: 0,
+          verifying: 0,
+          reconciling: 0,
+          delayed: 0,
+          actionRequired: 0,
+        },
+        accountMappingReady: false,
+        reconnectRequired: false,
+        stale: true,
+        staleAgeMs: 0,
+        staleReason: "fast_lane_failed",
+        reconcileInFlight: false,
+        lastSuccessfulReconcileAt: null,
+        refreshedAt,
+      },
+    };
+    emitPerformanceMetric({
+      name: "integration_projection_ms",
+      value: Date.now() - startedAtMs,
+      businessId,
+      route: "integrations_onboarding_projection",
+      metadata: {
+        degraded: true,
+        reason: String((err as Error)?.message || "fast_lane_failed"),
+      },
+    });
     return res.json({
       success: true,
-      data: null,
+      data: fallbackSnapshot,
       meta: {
         degraded: true,
+        cache: "fallback",
+        stale: true,
+        staleAgeMs: 0,
+        processingState: "PROCESSING",
+        verificationState: "UNVERIFIED",
+        reconcileInFlight: false,
+        reconcileScheduled: false,
+        lastSuccessfulReconcileAt: null,
+        lastReconcileError: String((err as Error)?.message || "fast_lane_failed"),
       },
     });
   }

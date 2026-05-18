@@ -43,6 +43,7 @@ export const startWorkerRuntime = async () => {
       receptionRuntime: true,
       humanReminder: true,
       webhookIntake: true,
+      integrationOnboardingProjection: true,
     });
   } catch (error) {
     started = false;

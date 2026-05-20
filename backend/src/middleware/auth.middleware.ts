@@ -73,6 +73,13 @@ const AUTH_DIRECT_LOOKUP_ROUTE_PREFIXES = [
   "/api/billing",
   "/api/integrations",
   "/api/commerce",
+  "/api/ai",
+  "/api/help-ai",
+  "/api/messages",
+  "/api/dashboard",
+  "/api/user/me",
+  "/api/auth/me",
+  "/api/user/workspace",
   "/api/clients/oauth/meta",
   "/api/clients/status",
   "/api/client/status",
@@ -1670,14 +1677,7 @@ export const protect = async (
           decodedAccessToken = decoded;
 
           if (decoded?.id && typeof decoded.tokenVersion === "number") {
-            const accessUser = await runAuthStage({
-              req,
-              res,
-              stage: "direct_access_user_lookup",
-              maxTimeoutMs: AUTH_USER_STAGE_TIMEOUT_MS,
-              minBudgetMs: AUTH_DB_MIN_BUDGET_MS,
-              task: () => getUserWithBusiness(decoded.id),
-            });
+            const accessUser = await getUserWithBusiness(decoded.id);
 
             if (
               accessUser &&
@@ -1710,23 +1710,15 @@ export const protect = async (
           }
 
           const refreshTokenHash = hashToken(refreshToken);
-          const refreshSession = (await runAuthStage({
-            req,
-            res,
-            stage: "direct_refresh_token_lookup",
-            maxTimeoutMs: AUTH_REFRESH_TOKEN_STAGE_TIMEOUT_MS,
-            minBudgetMs: AUTH_DB_MIN_BUDGET_MS,
-            task: () =>
-              prisma.refreshToken.findUnique({
-                where: {
-                  token: refreshTokenHash,
-                },
-                select: {
-                  token: true,
-                  userId: true,
-                  expiresAt: true,
-                },
-              }),
+          const refreshSession = (await prisma.refreshToken.findUnique({
+            where: {
+              token: refreshTokenHash,
+            },
+            select: {
+              token: true,
+              userId: true,
+              expiresAt: true,
+            },
           })) as
             | {
                 userId: string;
@@ -1743,14 +1735,7 @@ export const protect = async (
             throw unauthorized("Session expired");
           }
 
-          const refreshUser = await runAuthStage({
-            req,
-            res,
-            stage: "direct_refresh_user_lookup",
-            maxTimeoutMs: AUTH_USER_STAGE_TIMEOUT_MS,
-            minBudgetMs: AUTH_DB_MIN_BUDGET_MS,
-            task: () => getUserWithBusiness(decodedRefresh.id),
-          });
+          const refreshUser = await getUserWithBusiness(decodedRefresh.id);
 
           if (
             !refreshUser ||

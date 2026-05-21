@@ -17,8 +17,51 @@ const securityGovernanceOS_service_1 = require("../services/security/securityGov
 const requestLifecycle_1 = require("../utils/requestLifecycle");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
 const startupIsolation_service_1 = require("../runtime/startupIsolation.service");
+class LightweightMemoryCache {
+    constructor(maxKeys = 1000, defaultTtlMs = 15000) {
+        this.cache = new Map();
+        this.maxKeys = maxKeys;
+        this.defaultTtlMs = defaultTtlMs;
+    }
+    get(key) {
+        const entry = this.cache.get(key);
+        if (!entry)
+            return undefined;
+        if (entry.expiresAt <= Date.now()) {
+            this.cache.delete(key);
+            return undefined;
+        }
+        return entry.value;
+    }
+    set(key, value, ttlMs = this.defaultTtlMs) {
+        if (this.cache.size >= this.maxKeys) {
+            const oldestKey = this.cache.keys().next().value;
+            if (oldestKey !== undefined) {
+                this.cache.delete(oldestKey);
+            }
+        }
+        this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+        return this;
+    }
+    delete(key) {
+        return this.cache.delete(key);
+    }
+    has(key) {
+        const entry = this.cache.get(key);
+        if (!entry)
+            return false;
+        if (entry.expiresAt <= Date.now()) {
+            this.cache.delete(key);
+            return false;
+        }
+        return true;
+    }
+    clear() {
+        this.cache.clear();
+    }
+}
 const AUTH_CONTEXT_CACHE_TTL_MS = 15000;
-const AUTH_REDIS_CACHE_PREFIX = "auth:context:v1:";
+const AUTH_REDIS_CACHE_PREFIX = "auth:session:v2:";
 const AUTH_REDIS_CACHE_TTL_SECONDS = Math.max(5, Math.ceil(AUTH_CONTEXT_CACHE_TTL_MS / 1000));
 const AUTH_DB_MIN_BUDGET_MS = 360;
 const AUTH_DB_SOFT_BUDGET_MS = 1800;
@@ -79,7 +122,9 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
     "/api/commerce",
 ];
 const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
-const authContextCache = new Map();
+const authContextCache = new LightweightMemoryCache(3000, AUTH_CONTEXT_CACHE_TTL_MS);
+const userBusinessCache = new LightweightMemoryCache(2000, 5000);
+const businessResolutionCache = new LightweightMemoryCache(2000, 15000);
 const authContextInFlight = new Map();
 const refreshAuthInFlight = new Map();
 const staleAuthContextByUser = new Map();
@@ -677,18 +722,28 @@ const primeAuthContextCacheForToken = (input) => {
     void writeAuthContextCache(tokenKey, context);
 };
 exports.primeAuthContextCacheForToken = primeAuthContextCacheForToken;
-const getUserWithBusiness = async (userId) => prisma_1.default.user.findUnique({
-    where: { id: userId },
-    select: {
-        id: true,
-        role: true,
-        isActive: true,
-        deletedAt: true,
-        tokenVersion: true,
-        email: true,
-        businessId: true,
-    },
-});
+const getUserWithBusiness = async (userId) => {
+    const cached = userBusinessCache.get(userId);
+    if (cached) {
+        return cached;
+    }
+    const user = await prisma_1.default.user.findUnique({
+        where: { id: userId },
+        select: {
+            id: true,
+            role: true,
+            isActive: true,
+            deletedAt: true,
+            tokenVersion: true,
+            email: true,
+            businessId: true,
+        },
+    });
+    if (user) {
+        userBusinessCache.set(userId, user);
+    }
+    return user;
+};
 const bindAuthenticatedContext = (req, user) => {
     req.user = user;
     req.businessId = user.businessId;
@@ -725,12 +780,18 @@ const resolveBusinessId = async (input) => {
     if (input.allowWorkspaceFallback === false) {
         return null;
     }
+    const cacheKey = `${input.userId}:${input.preferredBusinessId || ""}`;
+    const cached = businessResolutionCache.get(cacheKey);
+    if (cached !== undefined) {
+        return cached;
+    }
     const identity = await (0, tenant_service_1.resolveUserWorkspaceIdentity)({
         userId: input.userId,
         preferredBusinessId: input.preferredBusinessId || null,
         bootstrapWorkspaceIfMissing: false,
         persistResolvedBusinessId: false,
     });
+    businessResolutionCache.set(cacheKey, identity.businessId);
     return identity.businessId;
 };
 const isCriticalAuthDegradedRoute = (req) => {

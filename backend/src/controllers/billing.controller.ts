@@ -515,6 +515,8 @@ const isCheckoutConfirmStillProcessing = (value: unknown) => {
   return Date.now() - startedAtMs <= BILLING_CONFIRM_DUPLICATE_WINDOW_MS;
 };
 
+const userContextCache = new Map<string, { value: UserContext; expiresAt: number }>();
+
 async function getUserContext(req: Request): Promise<UserContext> {
   const userId = req.user?.id;
 
@@ -533,6 +535,12 @@ async function getUserContext(req: Request): Promise<UserContext> {
       businessId: businessIdFromRequest,
       email: emailFromRequest,
     };
+  }
+
+  const cacheKey = `${userId}:${businessIdFromRequest || ""}:${emailFromRequest || ""}`;
+  const cached = userContextCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
   }
 
   const user = await prisma.user.findUnique({
@@ -562,11 +570,18 @@ async function getUserContext(req: Request): Promise<UserContext> {
       });
   const resolvedEmail = emailFromRequest || String(user.email || "").trim().toLowerCase();
 
-  return {
+  const value = {
     userId,
     businessId: identity.businessId,
     email: resolvedEmail,
   };
+
+  userContextCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + 10_000,
+  });
+
+  return value;
 }
 
 export class BillingController {
@@ -1609,6 +1624,11 @@ export class BillingController {
           status: {
             in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
           },
+        },
+        select: {
+          metadata: true,
+          subscriptionKey: true,
+          providerSubscriptionId: true,
         },
         orderBy: {
           updatedAt: "desc",

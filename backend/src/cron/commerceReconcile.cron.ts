@@ -2,8 +2,15 @@ import cron from "node-cron";
 import { commerceProjectionService } from "../services/commerceProjection.service";
 import { reconcilePendingEntitlementSync } from "../services/billingSettlement.service";
 
+const STARTUP_TIME = Date.now();
+const STARTUP_GRACE_PERIOD_MS = 90_000;
+
 export const startCommerceReconcileCron = () =>
   cron.schedule("*/5 * * * *", async () => {
+    if (Date.now() - STARTUP_TIME < STARTUP_GRACE_PERIOD_MS) {
+      console.info("Skipping commerce reconcile execution during startup grace period (90s).");
+      return;
+    }
     try {
       const result = await commerceProjectionService.replayPendingProviderWebhooks({
         provider: "STRIPE",

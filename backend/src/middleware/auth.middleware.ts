@@ -27,8 +27,58 @@ import {
 import { TimeoutExceededError, withTimeout } from "../utils/boundedTimeout";
 import { getStartupIsolationSnapshot } from "../runtime/startupIsolation.service";
 
+class LightweightMemoryCache<K, V> {
+  private cache = new Map<K, { value: V; expiresAt: number }>();
+  private maxKeys: number;
+  private defaultTtlMs: number;
+
+  constructor(maxKeys = 1000, defaultTtlMs = 15000) {
+    this.maxKeys = maxKeys;
+    this.defaultTtlMs = defaultTtlMs;
+  }
+
+  get(key: K): V | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    if (entry.expiresAt <= Date.now()) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  set(key: K, value: V, ttlMs = this.defaultTtlMs): this {
+    if (this.cache.size >= this.maxKeys) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey);
+      }
+    }
+    this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    return this;
+  }
+
+  delete(key: K): boolean {
+    return this.cache.delete(key);
+  }
+
+  has(key: K): boolean {
+    const entry = this.cache.get(key);
+    if (!entry) return false;
+    if (entry.expiresAt <= Date.now()) {
+      this.cache.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
 const AUTH_CONTEXT_CACHE_TTL_MS = 15_000;
-const AUTH_REDIS_CACHE_PREFIX = "auth:context:v1:";
+const AUTH_REDIS_CACHE_PREFIX = "auth:session:v2:";
 const AUTH_REDIS_CACHE_TTL_SECONDS = Math.max(
   5,
   Math.ceil(AUTH_CONTEXT_CACHE_TTL_MS / 1000)
@@ -139,7 +189,9 @@ type AuthRequest = Request & {
   __localAuthState?: RequestLocalAuthState;
 };
 
-const authContextCache = new Map<string, CachedAuthContext>();
+const authContextCache = new LightweightMemoryCache<string, CachedAuthContext>(3000, AUTH_CONTEXT_CACHE_TTL_MS);
+const userBusinessCache = new LightweightMemoryCache<string, any>(2000, 5000);
+const businessResolutionCache = new LightweightMemoryCache<string, string | null>(2000, 15000);
 const authContextInFlight = new Map<string, Promise<CachedAuthContext | null>>();
 const refreshAuthInFlight = new Map<string, Promise<CachedAuthContext | null>>();
 const staleAuthContextByUser = new Map<
@@ -996,8 +1048,12 @@ export const primeAuthContextCacheForToken = (input: {
   void writeAuthContextCache(tokenKey, context);
 };
 
-const getUserWithBusiness = async (userId: string) =>
-  prisma.user.findUnique({
+const getUserWithBusiness = async (userId: string) => {
+  const cached = userBusinessCache.get(userId);
+  if (cached) {
+    return cached;
+  }
+  const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
       id: true,
@@ -1009,6 +1065,11 @@ const getUserWithBusiness = async (userId: string) =>
       businessId: true,
     },
   });
+  if (user) {
+    userBusinessCache.set(userId, user);
+  }
+  return user;
+};
 
 const bindAuthenticatedContext = (
   req: Request,
@@ -1069,6 +1130,12 @@ const resolveBusinessId = async (input: {
     return null;
   }
 
+  const cacheKey = `${input.userId}:${input.preferredBusinessId || ""}`;
+  const cached = businessResolutionCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const identity = await resolveUserWorkspaceIdentity({
     userId: input.userId,
     preferredBusinessId: input.preferredBusinessId || null,
@@ -1076,6 +1143,7 @@ const resolveBusinessId = async (input: {
     persistResolvedBusinessId: false,
   });
 
+  businessResolutionCache.set(cacheKey, identity.businessId);
   return identity.businessId;
 };
 

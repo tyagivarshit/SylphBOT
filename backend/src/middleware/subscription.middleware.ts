@@ -125,74 +125,96 @@ const getCachedSubscription = async (businessId: string) => {
   }
 
   const loadPromise = (async () => {
-  const cacheKey = getBillingCacheKey(businessId);
-  const cached = await redis.get(cacheKey).catch(() => null);
+    const cacheKey = getBillingCacheKey(businessId);
+    const cached = await redis.get(cacheKey).catch(() => null);
 
-  if (cached) {
+    if (cached) {
+      emitPerformanceMetric({
+        name: "CACHE_HIT",
+        businessId,
+        route: "subscription_context",
+        metadata: {
+          cache: "redis_subscription",
+        },
+      });
+      try {
+        if (cached === "null") {
+          subscriptionMemoryCache.set(businessId, {
+            value: null,
+            expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
+          });
+          return null;
+        }
+        const parsed = JSON.parse(cached);
+        subscriptionMemoryCache.set(businessId, {
+          value: parsed,
+          expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
+        });
+        return parsed;
+      } catch {
+        await redis.del(cacheKey).catch(() => undefined);
+      }
+    }
+
     emitPerformanceMetric({
-      name: "CACHE_HIT",
+      name: "CACHE_MISS",
       businessId,
       route: "subscription_context",
       metadata: {
         cache: "redis_subscription",
       },
     });
-    try {
-      const parsed = JSON.parse(cached);
+
+    const dbStart = Date.now();
+    const canonical = await prisma.subscriptionLedger
+      .findFirst({
+        where: {
+          businessId,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      })
+      .catch(() => null);
+    console.info("BILLING_STAGE_TIME", {
+      stage: "getCachedSubscription.db",
+      durationMs: Date.now() - dbStart,
+      businessId,
+    });
+
+    const subscription = canonical
+      ? mapCanonicalSubscription(canonical)
+      : null;
+
+    if (subscription) {
+      await redis
+        .set(
+          cacheKey,
+          JSON.stringify(subscription),
+          "EX",
+          CACHE_TTL
+        )
+        .catch(() => undefined);
       subscriptionMemoryCache.set(businessId, {
-        value: parsed,
+        value: subscription,
         expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
       });
-      return parsed;
-    } catch {
-      await redis.del(cacheKey).catch(() => undefined);
+    } else {
+      await redis
+        .set(
+          cacheKey,
+          "null",
+          "EX",
+          CACHE_TTL
+        )
+        .catch(() => undefined);
+      subscriptionMemoryCache.set(businessId, {
+        value: null,
+        expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
+      });
     }
-  }
 
-  emitPerformanceMetric({
-    name: "CACHE_MISS",
-    businessId,
-    route: "subscription_context",
-    metadata: {
-      cache: "redis_subscription",
-    },
-  });
-
-  const canonical = await prisma.subscriptionLedger
-    .findFirst({
-      where: {
-        businessId,
-      },
-      orderBy: {
-        updatedAt: "desc",
-      },
-    })
-    .catch(() => null);
-  const subscription = canonical
-    ? mapCanonicalSubscription(canonical)
-    : null;
-
-  if (subscription) {
-    await redis
-      .set(
-        cacheKey,
-        JSON.stringify(subscription),
-        "EX",
-        CACHE_TTL
-      )
-      .catch(() => undefined);
-    subscriptionMemoryCache.set(businessId, {
-      value: subscription,
-      expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
-    });
-  } else {
-    subscriptionMemoryCache.set(businessId, {
-      value: null,
-      expiresAt: Date.now() + 5_000,
-    });
-  }
-
-  return subscription;
+    return subscription;
   })().finally(() => {
     const latest = subscriptionMemoryCache.get(businessId);
     if (latest?.promise) {
@@ -238,6 +260,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
   });
 
   try {
+    const dbStart = Date.now();
     const plans = await prisma.plan.findMany({
       where: {
         type: {
@@ -247,6 +270,11 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
       select: {
         earlyUsed: true,
       },
+    });
+    console.info("BILLING_STAGE_TIME", {
+      stage: "getEarlyAccessSnapshot.db",
+      durationMs: Date.now() - dbStart,
+      businessId: subscription?.businessId || null,
     });
 
     const totalEarlyUsed = plans.reduce(

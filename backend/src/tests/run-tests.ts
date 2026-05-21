@@ -1,3 +1,4 @@
+process.env.GROQ_API_KEY = process.env.GROQ_API_KEY || "gsk_dummy_test_key";
 import assert from "node:assert/strict";
 import { predictLeadBehavior } from "../services/crm/behavior.service";
 import { buildCustomerGraph } from "../services/crm/customerGraph.service";

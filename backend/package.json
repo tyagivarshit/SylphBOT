@@ -22,6 +22,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@fastify/otel": "^0.16.0",
     "@prisma/client": "^6.19.2",
     "@sentry/node": "^10.43.0",
     "@types/socket.io": "^3.0.1",

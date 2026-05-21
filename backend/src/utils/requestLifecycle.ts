@@ -21,7 +21,16 @@ export type RequestLifecycleState = {
 
 const REQUEST_LIFECYCLE_LOCAL_KEY = "__requestLifecycleState";
 
-const toLocals = (res: Response) => res.locals as Record<string, unknown>;
+const toLocals = (res?: Response | null) => {
+  if (!res) {
+    return {} as Record<string, unknown>;
+  }
+  if (!res.locals) {
+    res.locals = {};
+  }
+  return res.locals as Record<string, unknown>;
+};
+
 
 const readFromReq = (req: Request) => {
   const candidate = (req as Request & { requestLifecycle?: unknown }).requestLifecycle;

@@ -56,6 +56,21 @@ const AUTH_CRITICAL_DEGRADED_ROUTE_PREFIXES = [
     "/api/oauth/meta/callback",
     "/api/user/api-key",
 ];
+const AUTH_DIRECT_LOOKUP_ROUTE_PREFIXES = [
+    "/api/billing",
+    "/api/integrations",
+    "/api/commerce",
+    "/api/ai",
+    "/api/help-ai",
+    "/api/messages",
+    "/api/dashboard",
+    "/api/user/me",
+    "/api/auth/me",
+    "/api/user/workspace",
+    "/api/clients/oauth/meta",
+    "/api/clients/status",
+    "/api/client/status",
+];
 const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
     "/api/billing/checkout",
     "/api/security",
@@ -769,6 +784,19 @@ const isAuthSurfaceBootstrapRequest = (req) => {
     return route.includes("/user/me") || route.includes("/auth/me");
 };
 const shouldServeDegradedAuth = (req) => isAuthSurfaceBootstrapRequest(req) || isCriticalAuthDegradedRoute(req);
+const shouldUseDirectAuthLookup = (req) => {
+    const route = String(req.originalUrl || req.path || req.url || "")
+        .trim()
+        .toLowerCase();
+    const path = String(req.path || "").trim().toLowerCase();
+    if (AUTH_DIRECT_LOOKUP_ROUTE_PREFIXES.some((prefix) => route.startsWith(prefix) || path.startsWith(prefix))) {
+        return true;
+    }
+    return (route.includes("/checkout") ||
+        path.includes("/checkout") ||
+        route.includes("/onboarding") ||
+        path.includes("/onboarding"));
+};
 const markDegradedAuthHeaders = (res) => {
     if (!res || res.headersSent || res.writableEnded) {
         return;
@@ -998,8 +1026,9 @@ const serveDegradedAuthenticatedState = async (input) => {
 };
 const protect = async (req, res, next) => {
     const startedAt = Date.now();
-    const degradedAuthAllowed = shouldServeDegradedAuth(req);
-    const routeCritical = isAuthStabilizationCriticalRoute(req);
+    const directLookupRoute = shouldUseDirectAuthLookup(req);
+    const degradedAuthAllowed = !directLookupRoute && shouldServeDegradedAuth(req);
+    const routeCritical = !directLookupRoute && isAuthStabilizationCriticalRoute(req);
     let decodedAccessToken = null;
     let accessLookupTransientReason = null;
     let accessLookupTransientStage = null;
@@ -1166,6 +1195,160 @@ const protect = async (req, res, next) => {
         const refreshToken = req.cookies?.refreshToken;
         if (!accessToken && !refreshToken) {
             throw (0, AppError_1.unauthorized)("Missing session");
+        }
+        if (directLookupRoute) {
+            const lookupStartedAt = Date.now();
+            req.logger?.info({
+                route: req.originalUrl,
+                method: req.method,
+                requestId: req.requestId || null,
+            }, "auth_lookup_start");
+            try {
+                let resolvedContext = null;
+                let resolvedSource = "access_token";
+                if (accessToken) {
+                    const decoded = (0, generateToken_1.verifyAccessToken)(accessToken);
+                    decodedAccessToken = decoded;
+                    if (decoded?.id && typeof decoded.tokenVersion === "number") {
+                        const accessUser = await getUserWithBusiness(decoded.id);
+                        if (accessUser &&
+                            accessUser.isActive &&
+                            !accessUser.deletedAt &&
+                            accessUser.tokenVersion === decoded.tokenVersion) {
+                            resolvedContext = {
+                                userId: accessUser.id,
+                                role: accessUser.role,
+                                email: accessUser.email || undefined,
+                                businessId: String(accessUser.businessId || decoded.businessId || "").trim() || null,
+                                tokenVersion: accessUser.tokenVersion,
+                                expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+                            };
+                        }
+                    }
+                }
+                if (!resolvedContext) {
+                    if (!refreshToken) {
+                        throw (0, AppError_1.unauthorized)("Session expired");
+                    }
+                    const decodedRefresh = (0, generateToken_1.verifyRefreshToken)(refreshToken);
+                    if (!decodedRefresh?.id || typeof decodedRefresh.tokenVersion !== "number") {
+                        (0, authCookies_1.clearAuthCookies)(res, req);
+                        throw (0, AppError_1.unauthorized)("Invalid refresh token");
+                    }
+                    const refreshTokenHash = hashToken(refreshToken);
+                    const refreshSession = (await prisma_1.default.refreshToken.findUnique({
+                        where: {
+                            token: refreshTokenHash,
+                        },
+                        select: {
+                            token: true,
+                            userId: true,
+                            expiresAt: true,
+                        },
+                    }));
+                    if (!refreshSession ||
+                        refreshSession.userId !== decodedRefresh.id ||
+                        refreshSession.expiresAt.getTime() <= Date.now()) {
+                        (0, authCookies_1.clearAuthCookies)(res, req);
+                        throw (0, AppError_1.unauthorized)("Session expired");
+                    }
+                    const refreshUser = await getUserWithBusiness(decodedRefresh.id);
+                    if (!refreshUser ||
+                        !refreshUser.isActive ||
+                        refreshUser.deletedAt ||
+                        refreshUser.tokenVersion !== decodedRefresh.tokenVersion) {
+                        (0, authCookies_1.clearAuthCookies)(res, req);
+                        throw (0, AppError_1.unauthorized)("Session expired");
+                    }
+                    resolvedSource = "refresh_token";
+                    resolvedContext = {
+                        userId: refreshUser.id,
+                        role: refreshUser.role,
+                        email: refreshUser.email || undefined,
+                        businessId: String(refreshUser.businessId || "").trim() || null,
+                        tokenVersion: refreshUser.tokenVersion,
+                        expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+                    };
+                    const newAccessToken = (0, generateToken_1.generateAccessToken)(resolvedContext.userId, resolvedContext.role, resolvedContext.businessId, resolvedContext.tokenVersion);
+                    const newTokenKey = hashToken(newAccessToken);
+                    res.cookie("accessToken", newAccessToken, {
+                        ...(0, authCookies_1.getAuthCookieOptions)(req),
+                        maxAge: 15 * 60 * 1000,
+                    });
+                    writeRequestLocalAuthContext(req, newTokenKey, resolvedContext.tokenVersion, resolvedContext);
+                    void writeAuthContextCache(newTokenKey, resolvedContext);
+                }
+                if (!resolvedContext) {
+                    throw (0, AppError_1.unauthorized)("Session expired");
+                }
+                if (resolvedSource === "access_token" && accessToken) {
+                    const accessTokenKey = hashToken(accessToken);
+                    writeRequestLocalAuthContext(req, accessTokenKey, resolvedContext.tokenVersion, resolvedContext);
+                    markRecentlyVerifiedAuthContext(accessTokenKey, resolvedContext);
+                    void writeAuthContextCache(accessTokenKey, resolvedContext);
+                }
+                bindAuthenticatedContext(req, {
+                    id: resolvedContext.userId,
+                    role: resolvedContext.role,
+                    email: resolvedContext.email,
+                    businessId: resolvedContext.businessId,
+                });
+                await runSessionAnomalyGuard(req, {
+                    userId: resolvedContext.userId,
+                    businessId: resolvedContext.businessId,
+                });
+                bumpAuthStats({
+                    resolved: 1,
+                    dbFallback: 1,
+                });
+                const lookupDurationMs = Date.now() - lookupStartedAt;
+                req.logger?.info({
+                    route: req.originalUrl,
+                    method: req.method,
+                    requestId: req.requestId || null,
+                    source: resolvedSource,
+                    durationMs: lookupDurationMs,
+                }, "auth_lookup_success");
+                req.logger?.info({
+                    route: req.originalUrl,
+                    method: req.method,
+                    requestId: req.requestId || null,
+                    durationMs: lookupDurationMs,
+                }, "auth_lookup_duration_ms");
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "AUTH_MS",
+                    value: Date.now() - startedAt,
+                    businessId: resolvedContext.businessId,
+                    route: req.originalUrl,
+                    metadata: {
+                        source: `direct_${resolvedSource}`,
+                    },
+                });
+                if (isRequestClosed(req, res)) {
+                    return;
+                }
+                return next();
+            }
+            catch (error) {
+                const lookupDurationMs = Date.now() - lookupStartedAt;
+                req.logger?.warn({
+                    route: req.originalUrl,
+                    method: req.method,
+                    requestId: req.requestId || null,
+                    durationMs: lookupDurationMs,
+                    error: error?.message || String(error || "unknown"),
+                }, "auth_lookup_failed");
+                req.logger?.info({
+                    route: req.originalUrl,
+                    method: req.method,
+                    requestId: req.requestId || null,
+                    durationMs: lookupDurationMs,
+                }, "auth_lookup_duration_ms");
+                if (isAuthNonFatalLookupError(error)) {
+                    throw (0, AppError_1.unauthorized)("Session verification failed. Please sign in again.");
+                }
+                throw error;
+            }
         }
         if (accessToken) {
             const decoded = (0, generateToken_1.verifyAccessToken)(accessToken);

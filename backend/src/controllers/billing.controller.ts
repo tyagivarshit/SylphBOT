@@ -1262,7 +1262,7 @@ export class BillingController {
     }> = [];
     let checkoutTimingReported = false;
     const checkoutRequestId = String((req as any)?.requestId || "").trim() || null;
-    const emitCheckoutMetric = (
+const emitCheckoutMetric = (
       name:
         | "auth_ms"
         | "billing_context_ms"
@@ -1273,16 +1273,18 @@ export class BillingController {
       value: number,
       metadata?: Record<string, unknown>
     ) => {
-      emitPerformanceMetric({
-        name,
-        value,
-        businessId: BillingController.getBusinessIdFromRequest(req),
-        route: "billing_checkout",
-        metadata: {
-          requestId: checkoutRequestId,
-          redirectOnSuccess,
-          ...(metadata || {}),
-        },
+      setImmediate(() => {
+        emitPerformanceMetric({
+          name,
+          value,
+          businessId: BillingController.getBusinessIdFromRequest(req),
+          route: "billing_checkout",
+          metadata: {
+            requestId: checkoutRequestId,
+            redirectOnSuccess,
+            ...(metadata || {}),
+          },
+        });
       });
     };
     const hasExplicitFinalResponseWrite = () =>
@@ -1313,18 +1315,20 @@ export class BillingController {
       }
       checkoutTimingReported = true;
       const totalCheckoutMs = Date.now() - checkoutStartedAt;
-      emitCheckoutMetric("total_checkout_ms", totalCheckoutMs, {
-        outcome,
-        ...(details || {}),
-      });
-      console.info("CHECKOUT_TIMING_BREAKDOWN", {
-        requestId: checkoutRequestId,
-        route: req.originalUrl,
-        method: req.method,
-        outcome,
-        totalMs: totalCheckoutMs,
-        stages: checkoutStageTimings,
-        ...(details || {}),
+      setImmediate(() => {
+        emitCheckoutMetric("total_checkout_ms", totalCheckoutMs, {
+          outcome,
+          ...(details || {}),
+        });
+        console.info("CHECKOUT_TIMING_BREAKDOWN", {
+          requestId: checkoutRequestId,
+          route: req.originalUrl,
+          method: req.method,
+          outcome,
+          totalMs: totalCheckoutMs,
+          stages: checkoutStageTimings,
+          ...(details || {}),
+        });
       });
     };
     const logStageOk = (
@@ -1332,21 +1336,23 @@ export class BillingController {
       details?: Record<string, unknown>
     ) => {
       const timing = pushCheckoutStageTiming(stage);
-      console.info("BILLING_STAGE_OK", {
-        stage,
-        requestId: checkoutRequestId,
-        route: req.originalUrl,
-        method: req.method,
-        elapsedMs: timing.elapsedMs,
-        stageMs: timing.stageMs,
-        ...(details || {}),
-      });
-      console.info("CHECKOUT_STAGE_OK", {
-        stage,
-        requestId: checkoutRequestId,
-        elapsedMs: timing.elapsedMs,
-        stageMs: timing.stageMs,
-        ...(details || {}),
+      setImmediate(() => {
+        console.info("BILLING_STAGE_OK", {
+          stage,
+          requestId: checkoutRequestId,
+          route: req.originalUrl,
+          method: req.method,
+          elapsedMs: timing.elapsedMs,
+          stageMs: timing.stageMs,
+          ...(details || {}),
+        });
+        console.info("CHECKOUT_STAGE_OK", {
+          stage,
+          requestId: checkoutRequestId,
+          elapsedMs: timing.elapsedMs,
+          stageMs: timing.stageMs,
+          ...(details || {}),
+        });
       });
     };
     const logStageFail = (
@@ -1355,29 +1361,33 @@ export class BillingController {
       details?: Record<string, unknown>
     ) => {
       const timing = pushCheckoutStageTiming(stage);
-      console.error("CHECKOUT_STAGE_FAIL", {
-        stage,
-        reason,
+      setImmediate(() => {
+        console.error("CHECKOUT_STAGE_FAIL", {
+          stage,
+          reason,
+          requestId: checkoutRequestId,
+          route: req.originalUrl,
+          method: req.method,
+          elapsedMs: timing.elapsedMs,
+          stageMs: timing.stageMs,
+          ...(details || {}),
+        });
+      });
+    };
+    setImmediate(() => {
+      console.info("BILLING_START", {
         requestId: checkoutRequestId,
         route: req.originalUrl,
         method: req.method,
-        elapsedMs: timing.elapsedMs,
-        stageMs: timing.stageMs,
-        ...(details || {}),
+        redirectOnSuccess,
       });
-    };
-    console.info("BILLING_START", {
-      requestId: checkoutRequestId,
-      route: req.originalUrl,
-      method: req.method,
-      redirectOnSuccess,
-    });
-    console.info("CHECKOUT_START", {
-      requestId: checkoutRequestId,
-      route: req.originalUrl,
-      method: req.method,
-      redirectOnSuccess,
-      remainingMs: getRequestRemainingMs({ req, res }, 0),
+      console.info("CHECKOUT_START", {
+        requestId: checkoutRequestId,
+        route: req.originalUrl,
+        method: req.method,
+        redirectOnSuccess,
+        remainingMs: getRequestRemainingMs({ req, res }, 0),
+      });
     });
     if (redirectOnSuccess) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
@@ -1416,16 +1426,18 @@ export class BillingController {
         code: input.code || null,
         redirectOnSuccess,
       });
-      console.error("BILLING_STAGE_FAIL", {
-        stage: "checkout.response",
-        reason: input.reason,
-        status: input.status,
-        code: input.code || null,
-        requestId: checkoutRequestId,
-        route: req.originalUrl,
-        method: req.method,
-        elapsedMs: Date.now() - checkoutStartedAt,
-        redirectOnSuccess,
+      setImmediate(() => {
+        console.error("BILLING_STAGE_FAIL", {
+          stage: "checkout.response",
+          reason: input.reason,
+          status: input.status,
+          code: input.code || null,
+          requestId: checkoutRequestId,
+          route: req.originalUrl,
+          method: req.method,
+          elapsedMs: Date.now() - checkoutStartedAt,
+          redirectOnSuccess,
+        });
       });
       reportCheckoutTiming("failed", {
         status: input.status,
@@ -1618,22 +1630,29 @@ export class BillingController {
         unitPrice,
         customUnitPriceMinor,
       });
-      const activeSubscription = await prisma.subscriptionLedger.findFirst({
-        where: {
-          businessId,
-          status: {
-            in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
-          },
-        },
-        select: {
-          metadata: true,
-          subscriptionKey: true,
-          providerSubscriptionId: true,
-        },
-        orderBy: {
-          updatedAt: "desc",
-        },
-      });
+      const preloadedSubscription = (req as any).subscription;
+      const activeSubscription = preloadedSubscription && ["ACTIVE", "TRIAL", "TRIALING", "PAST_DUE", "PAUSED"].includes(preloadedSubscription.status)
+        ? {
+            metadata: preloadedSubscription.metadata || {},
+            subscriptionKey: preloadedSubscription.subscriptionKey || `sub_${preloadedSubscription.stripeSubscriptionId || preloadedSubscription.id}`,
+            providerSubscriptionId: preloadedSubscription.providerSubscriptionId || preloadedSubscription.stripeSubscriptionId || null,
+          }
+        : await prisma.subscriptionLedger.findFirst({
+            where: {
+              businessId,
+              status: {
+                in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
+              },
+            },
+            select: {
+              metadata: true,
+              subscriptionKey: true,
+              providerSubscriptionId: true,
+            },
+            orderBy: {
+              updatedAt: "desc",
+            },
+          });
       throwIfRequestLifecycleAborted({
         req,
         res,

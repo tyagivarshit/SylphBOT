@@ -44,6 +44,7 @@ router.post(
   requireBusinessContext,
   requirePermission("billing:manage"),
   authLimiter,
+  attachBillingContext,
   auditRequest("billing.checkout_requested"),
   BillingController.createCheckoutSession
 );
@@ -53,6 +54,7 @@ router.get(
   requireBusinessContext,
   requirePermission("billing:manage"),
   authLimiter,
+  attachBillingContext,
   auditRequest("billing.checkout_requested"),
   BillingController.startCheckoutRedirect
 );
@@ -62,6 +64,7 @@ router.post(
   requireBusinessContext,
   requirePermission("billing:manage"),
   authLimiter,
+  attachBillingContext,
   auditRequest("billing.checkout_requested"),
   BillingController.checkout
 );

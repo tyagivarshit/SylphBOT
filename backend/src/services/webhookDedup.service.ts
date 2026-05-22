@@ -111,7 +111,14 @@ export const processWebhookEvent = async ({
       return false;
     }
 
-    const exists = await checkDatabaseDuplicate(eventId);
+    const checkDbPromise = checkDatabaseDuplicate(eventId);
+    const timeoutPromise = new Promise<boolean>((resolve) =>
+      setTimeout(() => {
+        console.warn("[WEBHOOK DB CHECK TIMEOUT] fallback to false", { eventId });
+        resolve(false);
+      }, 150)
+    );
+    const exists = await Promise.race([checkDbPromise, timeoutPromise]);
 
     if (exists) {
       await recordObservabilityEvent({
@@ -133,7 +140,11 @@ export const processWebhookEvent = async ({
       return false;
     }
 
-    await saveWebhookEvent(eventId, platform);
+    // Save webhook event asynchronously in the background (non-blocking)
+    void saveWebhookEvent(eventId, platform).catch((err) => {
+      console.error("[WEBHOOK SAVE BACKGROUND ERROR]", err);
+    });
+
     await recordTraceLedger({
       traceId,
       correlationId: traceId,

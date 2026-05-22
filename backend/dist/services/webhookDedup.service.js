@@ -74,7 +74,12 @@ const processWebhookEvent = async ({ eventId, platform, }) => {
             }).catch(() => undefined);
             return false;
         }
-        const exists = await checkDatabaseDuplicate(eventId);
+        const checkDbPromise = checkDatabaseDuplicate(eventId);
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => {
+            console.warn("[WEBHOOK DB CHECK TIMEOUT] fallback to false", { eventId });
+            resolve(false);
+        }, 150));
+        const exists = await Promise.race([checkDbPromise, timeoutPromise]);
         if (exists) {
             await (0, reliabilityOS_service_1.recordObservabilityEvent)({
                 eventType: "webhook.dedupe.duplicate",
@@ -94,7 +99,10 @@ const processWebhookEvent = async ({ eventId, platform, }) => {
             }).catch(() => undefined);
             return false;
         }
-        await saveWebhookEvent(eventId, platform);
+        // Save webhook event asynchronously in the background (non-blocking)
+        void saveWebhookEvent(eventId, platform).catch((err) => {
+            console.error("[WEBHOOK SAVE BACKGROUND ERROR]", err);
+        });
         await (0, reliabilityOS_service_1.recordTraceLedger)({
             traceId,
             correlationId: traceId,

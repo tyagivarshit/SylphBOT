@@ -1780,6 +1780,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
   let waDiagLastCheckpointAt = waDiagStartedAt;
   let waCheckpointReached = "[WA STEP 0] initialized";
   let waDiagEnabled = false;
+  let shortToken: string | null = null;
+  let longToken: string | null = null;
   const logWaCheckpoint = (
     checkpoint: string,
     metadata: Record<string, unknown> = {}
@@ -1809,6 +1811,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     lifecycleRequestAborted = Boolean(lifecycle?.aborted);
     return Boolean(lifecycle?.aborted) || res.headersSent || res.writableEnded;
   };
+
+  let triggerBullMQFallback: ((source: string, reason: string) => Promise<any>) | undefined;
 
   try {
     (req as any).setTimeout?.(META_OAUTH_CONNECT_TIMEOUT_MS);
@@ -1950,80 +1954,31 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       normalizeOptionalString(instagramProfessionalAccountId) ||
       normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
 
-    if (!internalContinuation) {
-      const stateValidationMs = Date.now() - callbackStartedAtMs;
+    triggerBullMQFallback = async (source: string, reason: string) => {
+      console.info("Meta OAuth Connect: Triggering BullMQ fallback", { source, reason, businessId });
+      const asyncHandoffMs = Date.now() - callbackStartedAtMs;
       emitCallbackMetric({
-        name: "oauth_callback_inline_work_ms",
+        name: "oauth_callback_async_handoff_ms",
         businessId,
-        value: stateValidationMs,
+        value: asyncHandoffMs,
         metadata: {
-          stage: "state_validation",
+          source,
+          reason,
           platform: targetPlatform,
-          mode: oauthState.mode,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
         },
       });
-      if (stateValidationMs > META_OAUTH_CALLBACK_STATE_VALIDATION_BUDGET_MS) {
-        emitPerformanceMetric({
-          name: "callback_timeout_prevented",
-          value: 1,
-          businessId,
-          route: "clients_oauth_meta_callback",
-          metadata: {
-            reason: "state_validation_budget_exceeded",
-            budgetMs: META_OAUTH_CALLBACK_STATE_VALIDATION_BUDGET_MS,
-            actualMs: stateValidationMs,
-            operationId: lifecycleContext.attemptKey,
-          },
-        });
-      }
-
-      const persistedAccepted = await withTimeout({
-        label: "meta_oauth_callback_accept_checkpoint",
-        timeoutMs: META_OAUTH_CALLBACK_PERSISTENCE_BUDGET_MS,
-        task: markMetaOAuthLifecycleStage({
-          context: lifecycleContext,
-          stage: "CALLBACK_ACCEPTED",
-          detail: "OAuth callback accepted. Scheduling async continuation.",
-          metadata: {
-            callbackFastLane: true,
-            workspaceId: oauthState.workspaceId,
-            mode: oauthState.mode,
-            continuationAsyncOnly: true,
-          },
-        }),
-      })
-        .then(() => true)
-        .catch((error) => {
-          if (error instanceof TimeoutExceededError) {
-            emitPerformanceMetric({
-              name: "callback_timeout_prevented",
-              value: 1,
-              businessId,
-              route: "clients_oauth_meta_callback",
-              metadata: {
-                reason: "callback_accept_persistence_timeout",
-                budgetMs: META_OAUTH_CALLBACK_PERSISTENCE_BUDGET_MS,
-                operationId: lifecycleContext?.attemptKey || null,
-              },
-            });
-          }
-          return false;
-        });
-
       const enqueuePayload: MetaOAuthContinuationJobPayload = {
         type: "META_OAUTH_CONTINUATION",
-        operationId: lifecycleContext.attemptKey,
-        replayToken: lifecycleContext.replayToken,
+        operationId: lifecycleContext!.attemptKey,
+        replayToken: lifecycleContext!.replayToken,
         businessId,
         userId,
         platform: targetPlatform,
         mode: oauthState.mode,
         state,
         code: code || null,
-        shortTokenEncrypted: providedShortToken ? encrypt(providedShortToken) : null,
-        longTokenEncrypted: providedLongToken ? encrypt(providedLongToken) : null,
+        shortTokenEncrypted: shortToken ? encrypt(shortToken) : null,
+        longTokenEncrypted: longToken ? encrypt(longToken) : null,
         aiTone: normalizeOptionalString(aiTone),
         businessInfo: normalizeOptionalString(businessInfo),
         pricingInfo: normalizeOptionalString(pricingInfo),
@@ -2034,209 +1989,46 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         instagramProfessionalAccountId: requestedInstagramProfessionalAccountId,
         traceId: instagramTraceId,
         queuedAtIso: new Date().toISOString(),
-        source: "callback_accept",
+        source: source as any,
       };
 
-      const enqueueStartedAtMs = Date.now();
-      let handoffMode: "queue" | "degraded_local_fallback" = "queue";
-      let queueReason: string | null = null;
-      let queueJobId: string | null = null;
-      let queueDuplicate = false;
-
-      if (isRedisCircuitOpen() || !isQueueRedisWritable()) {
-        handoffMode = "degraded_local_fallback";
-        queueReason = isRedisCircuitOpen()
-          ? "redis_circuit_open"
-          : "queue_redis_not_writable";
-      } else {
-        try {
-          const enqueueResult = await withTimeout({
-            label: "meta_oauth_callback_handoff_enqueue",
-            timeoutMs: META_OAUTH_CALLBACK_ENQUEUE_BUDGET_MS,
-            task: enqueueMetaOAuthContinuation(enqueuePayload),
-          });
-          queueJobId = enqueueResult.jobId;
-          queueDuplicate = Boolean(enqueueResult.duplicate);
-        } catch (error) {
-          handoffMode = "degraded_local_fallback";
-          queueReason =
-            error instanceof TimeoutExceededError
-              ? `enqueue_timeout_${META_OAUTH_CALLBACK_ENQUEUE_BUDGET_MS}ms`
-              : normalizeOptionalString((error as Error)?.message) || "enqueue_failed";
-          emitPerformanceMetric({
-            name: "callback_timeout_prevented",
-            value: 1,
-            businessId,
-            route: "clients_oauth_meta_callback",
-            metadata: {
-              reason: queueReason,
-              operationId: lifecycleContext.attemptKey,
-              replayToken: lifecycleContext.replayToken,
-            },
-          });
-        }
-      }
-
-      if (handoffMode !== "queue") {
-        emitCallbackMetric({
-          name: "callback_degraded_handoff",
+      try {
+        const enqueueResult = await enqueueMetaOAuthContinuation(enqueuePayload);
+        emitOnboardingTraceEvent({
           businessId,
-          value: 1,
+          eventType: "callback_handoff_success",
+          message: `callback_handoff_success:meta_oauth_continuation_queued_fallback_${source}`,
           metadata: {
-            reason: queueReason || "queue_unavailable",
-            operationId: lifecycleContext.attemptKey,
-            replayToken: lifecycleContext.replayToken,
+            operationId: lifecycleContext!.attemptKey,
+            replayToken: lifecycleContext!.replayToken,
+            platform: targetPlatform,
+            mode: oauthState.mode,
+            source,
+            reason,
+            queueJobId: enqueueResult.jobId,
+            duplicate: enqueueResult.duplicate,
           },
         });
-        const { type: _type, ...queueInput } = enqueuePayload;
+      } catch (enqueueError) {
+        console.error("Failed to enqueue fallback continuation to BullMQ, executing via setImmediate", enqueueError);
         setImmediate(() => {
-          void runMetaOAuthContinuationFromQueueJob(queueInput)
-            .then(() => {
-              emitCallbackMetric({
-                name: "continuation_async_only",
-                businessId,
-                value: 1,
-                metadata: {
-                  source: "callback_local_fallback",
-                  operationId: lifecycleContext?.attemptKey || null,
-                },
-              });
-            })
-            .catch((error) => {
-              void markMetaOAuthLifecycleFailure({
-                context: lifecycleContext!,
-                stage: "FINAL_ONBOARDING",
-                code: "META_CONTINUATION_DEGRADED_FALLBACK_FAILED",
-                reason:
-                  normalizeOptionalString((error as Error)?.message) ||
-                  "Local continuation fallback failed",
-                resolutionHint: "RETRY",
-                metadata: {
-                  callbackFastLane: true,
-                  degradedHandoff: true,
-                },
-              }).catch(() => undefined);
-            });
+          const { type: _type, ...queueInput } = enqueuePayload;
+          runMetaOAuthContinuationFromQueueJob(queueInput).catch((err) => {
+            console.error("Local async fallback failed:", err);
+          });
         });
       }
 
-      const asyncHandoffMs = Date.now() - enqueueStartedAtMs;
-      emitCallbackMetric({
-        name: "oauth_callback_async_handoff_ms",
-        businessId,
-        value: asyncHandoffMs,
+      await markMetaOAuthLifecycleStage({
+        context: lifecycleContext!,
+        stage: "CONTINUATION_SCHEDULED",
+        detail: `Provider delay detected. Onboarding continuation scheduled asynchronously. Reason: ${reason}`,
         metadata: {
-          handoffMode,
-          queueReason,
-          queueJobId,
-          queueDuplicate,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
+          deferredWork: true,
+          deferredReason: reason,
+          source,
         },
-      });
-
-      void withTimeout({
-        label: "meta_oauth_callback_schedule_checkpoint",
-        timeoutMs: META_OAUTH_CALLBACK_PERSISTENCE_BUDGET_MS,
-        task: markMetaOAuthLifecycleStage({
-          context: lifecycleContext,
-          stage: "CONTINUATION_SCHEDULED",
-          detail:
-            handoffMode === "queue"
-              ? "Continuation queued. Finalization moved to async worker."
-              : "Queue degraded. Local async continuation fallback started.",
-          metadata: {
-            callbackFastLane: true,
-            continuationAsyncOnly: true,
-            handoffMode,
-            queueReason,
-            queueJobId,
-            queueDuplicate,
-          },
-        }),
       }).catch(() => undefined);
-
-      const callbackAcceptMs = Date.now() - callbackStartedAtMs;
-      emitCallbackMetric({
-        name: "oauth_callback_accept_ms",
-        businessId,
-        value: callbackAcceptMs,
-        metadata: {
-          handoffMode,
-          persistedAccepted,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-      emitCallbackMetric({
-        name: "callback_response_before_finalize",
-        businessId,
-        value: callbackAcceptMs,
-        metadata: {
-          budgetMs: META_OAUTH_CALLBACK_RESPONSE_BUDGET_MS,
-          budgetBreached: callbackAcceptMs > META_OAUTH_CALLBACK_RESPONSE_BUDGET_MS,
-          handoffMode,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-      emitCallbackMetric({
-        name: "callback_fast_exit_success",
-        businessId,
-        value: 1,
-        metadata: {
-          handoffMode,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-      emitCallbackMetric({
-        name: "continuation_async_only",
-        businessId,
-        value: 1,
-        metadata: {
-          source: handoffMode === "queue" ? "continuation_queue" : "local_fallback",
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-      emitPerformanceMetric({
-        name: "callback_sync_budget_ms",
-        value: META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
-        businessId,
-        route: "clients_oauth_meta_callback",
-        metadata: {
-          actualMs: callbackAcceptMs,
-          budgetBreached: callbackAcceptMs > META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
-          responseBudgetMs: META_OAUTH_CALLBACK_RESPONSE_BUDGET_MS,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-
-      emitCallbackRuntimeIsolationPreserved({
-        businessId,
-        platform: targetPlatform,
-        mode: oauthState.mode,
-        result: handoffMode === "queue" ? "accepted" : "degraded",
-        operationId: lifecycleContext.attemptKey,
-        metadata: {
-          source: "callback_accept",
-          queueReason,
-          queueJobId,
-          queueDuplicate,
-        },
-      });
-      emitCallbackMetric({
-        name: "callback_projection_leak_detected",
-        businessId,
-        value: 0,
-        metadata: {
-          leakDetected: false,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
 
       return res.status(202).json({
         success: true,
@@ -2246,26 +2038,16 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           workspaceId: oauthState.workspaceId,
           connectionState: "CONTINUATION_SCHEDULED",
           lifecycle: {
-            operationId: lifecycleContext.attemptKey,
-            replayToken: lifecycleContext.replayToken,
+            operationId: lifecycleContext!.attemptKey,
+            replayToken: lifecycleContext!.replayToken,
             status: "PROCESSING",
             stage: "CONTINUATION_SCHEDULED",
-            statusDetail:
-              handoffMode === "queue"
-                ? "Callback accepted. Async continuation scheduled."
-                : "Callback accepted. Queue degraded; local async continuation started.",
+            statusDetail: `Provider delay detected (${reason}). Continuation queued asynchronously.`,
           },
-          degradedRuntime:
-            handoffMode === "queue"
-              ? null
-              : {
-                  queueUnavailable: true,
-                  reason: queueReason || "queue_unavailable",
-                },
         },
-        message: `${targetPlatform} callback accepted`,
+        message: `${targetPlatform} connect processing (deferred)`,
       });
-    }
+    };
 
     if (!internalContinuation) {
       emitCallbackMetric({
@@ -2274,8 +2056,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         value: 1,
         metadata: {
           leakDetected: true,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
+          operationId: lifecycleContext!.attemptKey,
+          replayToken: lifecycleContext!.replayToken,
         },
       });
     }
@@ -2391,7 +2173,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
     }
 
-    let shortToken = providedShortToken;
+    shortToken = providedShortToken;
 
     if (!shortToken) {
       let shortTokenRes: any;
@@ -2417,131 +2199,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           code &&
           isMetaProviderTransientError(error)
         ) {
-          await markMetaOAuthLifecycleStage({
-            context: lifecycleContext,
-            stage: "OAUTH_AUTHENTICATED",
-            detail: "Provider token exchange deferred to async continuation",
-            metadata: {
-              deferredWork: true,
-              deferredReason: getAxiosErrorMessage(error),
-            },
-          });
-
-          const enqueueStartedAtMs = Date.now();
-          const enqueuePayload: MetaOAuthContinuationJobPayload = {
-            type: "META_OAUTH_CONTINUATION",
-            operationId: lifecycleContext.attemptKey,
-            replayToken: lifecycleContext.replayToken,
-            businessId,
-            userId,
-            platform: targetPlatform,
-            mode: oauthState.mode,
-            state,
-            code,
-            shortTokenEncrypted: null,
-            longTokenEncrypted: null,
-            aiTone: normalizeOptionalString(aiTone),
-            businessInfo: normalizeOptionalString(businessInfo),
-            pricingInfo: normalizeOptionalString(pricingInfo),
-            faqKnowledge: normalizeOptionalString(faqKnowledge),
-            salesInstructions: normalizeOptionalString(salesInstructions),
-            phoneNumberId: selectedPhoneNumberId,
-            facebookPageId: requestedFacebookPageId,
-            instagramProfessionalAccountId: requestedInstagramProfessionalAccountId,
-            traceId: instagramTraceId,
-            queuedAtIso: new Date().toISOString(),
-            source: "callback_fast_lane_transient",
-          };
-          const enqueueResult = await enqueueMetaOAuthContinuation(enqueuePayload);
-          emitOnboardingTraceEvent({
-            businessId,
-            eventType: "callback_handoff_success",
-            message: "callback_handoff_success:meta_oauth_continuation_queued",
-            metadata: {
-              operationId: lifecycleContext.attemptKey,
-              replayToken: lifecycleContext.replayToken,
-              platform: targetPlatform,
-              mode: oauthState.mode,
-              source: "callback_fast_lane_transient",
-              queueJobId: enqueueResult.jobId,
-              duplicate: enqueueResult.duplicate,
-            },
-          });
-          emitPerformanceMetric({
-            name: "onboarding_enqueue_ms",
-            value: Date.now() - enqueueStartedAtMs,
-            businessId,
-            route: "clients_oauth_meta_callback",
-            metadata: {
-              platform: targetPlatform,
-              mode: oauthState.mode,
-              operationId: lifecycleContext.attemptKey,
-              replayToken: lifecycleContext.replayToken,
-            },
-          });
-          emitPerformanceMetric({
-            name: "callback_timeout_prevented",
-            value: 1,
-            businessId,
-            route: "clients_oauth_meta_callback",
-            metadata: {
-              reason: "provider_transient_during_token_exchange",
-              operationId: lifecycleContext.attemptKey,
-              replayToken: lifecycleContext.replayToken,
-            },
-          });
-          const fastLaneDurationMs = Date.now() - callbackStartedAtMs;
-          emitPerformanceMetric({
-            name: "oauth_callback_fast_lane_ms",
-            value: fastLaneDurationMs,
-            businessId,
-            route: "clients_oauth_meta_callback",
-            metadata: {
-              platform: targetPlatform,
-              mode: oauthState.mode,
-              source: "token_exchange_deferred",
-            },
-          });
-          emitPerformanceMetric({
-            name: "callback_sync_budget_ms",
-            value: META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
-            businessId,
-            route: "clients_oauth_meta_callback",
-            metadata: {
-              actualMs: fastLaneDurationMs,
-              budgetBreached: fastLaneDurationMs > META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
-              operationId: lifecycleContext.attemptKey,
-            },
-          });
-          emitCallbackRuntimeIsolationPreserved({
-            businessId,
-            platform: targetPlatform,
-            mode: oauthState.mode,
-            result: "accepted",
-            operationId: lifecycleContext.attemptKey,
-            metadata: {
-              source: "token_exchange_deferred",
-            },
-          });
-
-          return res.status(202).json({
-            success: true,
-            data: {
-              platform: targetPlatform,
-              mode: oauthState.mode,
-              workspaceId: oauthState.workspaceId,
-              connectionState: "PROCESSING",
-              lifecycle: {
-                operationId: lifecycleContext.attemptKey,
-                replayToken: lifecycleContext.replayToken,
-                status: "PROCESSING",
-                stage: "OAUTH_AUTHENTICATED",
-                statusDetail:
-                  "Provider delay detected. Continuation queued and processing asynchronously.",
-              },
-            },
-            message: `${targetPlatform} connect processing`,
-          });
+          return await triggerBullMQFallback!("callback_fast_lane_transient", getAxiosErrorMessage(error));
         }
 
         if (targetPlatform === "INSTAGRAM") {
@@ -2597,210 +2255,6 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         businessId,
         stage: "IG_CODE_EXCHANGED",
         status: "COMPLETED",
-      });
-    }
-
-    if (!internalContinuation && lifecycleContext) {
-      let providerIdentity: { id: string | null; name: string | null } | null = null;
-      let providerIdentityResolutionMs = 0;
-      let providerIdentityDeferred = false;
-      try {
-        const identityResolved = await resolveMetaProviderIdentityMinimal({
-          token: shortToken,
-          timeoutMs: META_GRAPH_FAST_LANE_TIMEOUT_MS,
-        });
-        providerIdentity = identityResolved.identity;
-        providerIdentityResolutionMs = identityResolved.durationMs;
-      } catch {
-        providerIdentityDeferred = true;
-      }
-
-      emitPerformanceMetric({
-        name: "provider_identity_resolution_ms",
-        value: providerIdentityResolutionMs,
-        businessId,
-        route: "clients_oauth_meta_callback",
-        metadata: {
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-          deferred: providerIdentityDeferred,
-        },
-      });
-
-      await markMetaOAuthLifecycleStage({
-        context: lifecycleContext,
-        stage: "META_ACCOUNT_CONNECTED",
-        detail: "OAuth token resolved and async continuation queued",
-        metadata: {
-          providerIdentity,
-          providerIdentityDeferred,
-          callbackFastLane: true,
-        },
-      });
-
-      const enqueueStartedAtMs = Date.now();
-      const enqueuePayload: MetaOAuthContinuationJobPayload = {
-        type: "META_OAUTH_CONTINUATION",
-        operationId: lifecycleContext.attemptKey,
-        replayToken: lifecycleContext.replayToken,
-        businessId,
-        userId,
-        platform: targetPlatform,
-        mode: oauthState.mode,
-        state,
-        code: code || null,
-        shortTokenEncrypted: encrypt(shortToken),
-        longTokenEncrypted: providedLongToken ? encrypt(providedLongToken) : null,
-        aiTone: normalizeOptionalString(aiTone),
-        businessInfo: normalizeOptionalString(businessInfo),
-        pricingInfo: normalizeOptionalString(pricingInfo),
-        faqKnowledge: normalizeOptionalString(faqKnowledge),
-        salesInstructions: normalizeOptionalString(salesInstructions),
-        phoneNumberId: selectedPhoneNumberId,
-        facebookPageId: requestedFacebookPageId,
-        instagramProfessionalAccountId: requestedInstagramProfessionalAccountId,
-        traceId: instagramTraceId,
-        queuedAtIso: new Date().toISOString(),
-        source: "callback_fast_lane",
-      };
-
-      try {
-        const enqueueResult = await enqueueMetaOAuthContinuation(enqueuePayload);
-        emitOnboardingTraceEvent({
-          businessId,
-          eventType: "callback_handoff_success",
-          message: "callback_handoff_success:meta_oauth_continuation_queued",
-          metadata: {
-            operationId: lifecycleContext.attemptKey,
-            replayToken: lifecycleContext.replayToken,
-            platform: targetPlatform,
-            mode: oauthState.mode,
-            source: "callback_fast_lane",
-            queueJobId: enqueueResult.jobId,
-            duplicate: enqueueResult.duplicate,
-          },
-        });
-      } catch (error) {
-        await markMetaOAuthLifecycleFailure({
-          context: lifecycleContext,
-          stage: "FINAL_ONBOARDING",
-          code: "META_CONTINUATION_ENQUEUE_FAILED",
-          reason:
-            normalizeOptionalString((error as Error)?.message) ||
-            "Unable to queue onboarding continuation",
-          resolutionHint: "RETRY",
-          metadata: {
-            callbackFastLane: true,
-          },
-        });
-        emitOnboardingTraceEvent({
-          businessId,
-          eventType: "callback_handoff_failed",
-          message: "callback_handoff_failed:meta_continuation_enqueue_failed",
-          severity: "error",
-          metadata: {
-            operationId: lifecycleContext.attemptKey,
-            replayToken: lifecycleContext.replayToken,
-            platform: targetPlatform,
-            mode: oauthState.mode,
-            source: "callback_fast_lane",
-            reason:
-              normalizeOptionalString((error as Error)?.message) || "queue_unavailable",
-          },
-        });
-        emitCallbackRuntimeIsolationPreserved({
-          businessId,
-          platform: targetPlatform,
-          mode: oauthState.mode,
-          result: "queue_failed",
-          operationId: lifecycleContext.attemptKey,
-          metadata: {
-            reason: normalizeOptionalString((error as Error)?.message) || "queue_unavailable",
-          },
-        });
-        return res.status(503).json({
-          success: false,
-          data: {
-            platform: targetPlatform,
-            stage: "FINAL_ONBOARDING",
-            reason: "Unable to queue onboarding continuation",
-            code: "META_CONTINUATION_ENQUEUE_FAILED",
-            actionable: buildActionableFailurePayload({
-              code: "RATE_LIMITED",
-              reason: "Unable to queue onboarding continuation right now.",
-              retryAfterSeconds: 15,
-            }),
-          },
-          message: "Meta connect queue unavailable. Please retry.",
-        });
-      }
-
-      emitPerformanceMetric({
-        name: "onboarding_enqueue_ms",
-        value: Date.now() - enqueueStartedAtMs,
-        businessId,
-        route: "clients_oauth_meta_callback",
-        metadata: {
-          platform: targetPlatform,
-          mode: oauthState.mode,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-
-      const fastLaneDurationMs = Date.now() - callbackStartedAtMs;
-      emitPerformanceMetric({
-        name: "oauth_callback_fast_lane_ms",
-        value: fastLaneDurationMs,
-        businessId,
-        route: "clients_oauth_meta_callback",
-        metadata: {
-          platform: targetPlatform,
-          mode: oauthState.mode,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-      emitPerformanceMetric({
-        name: "callback_sync_budget_ms",
-        value: META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
-        businessId,
-        route: "clients_oauth_meta_callback",
-        metadata: {
-          actualMs: fastLaneDurationMs,
-          budgetBreached: fastLaneDurationMs > META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
-          operationId: lifecycleContext.attemptKey,
-          replayToken: lifecycleContext.replayToken,
-        },
-      });
-      emitCallbackRuntimeIsolationPreserved({
-        businessId,
-        platform: targetPlatform,
-        mode: oauthState.mode,
-        result: "accepted",
-        operationId: lifecycleContext.attemptKey,
-        metadata: {
-          source: "callback_fast_lane",
-        },
-      });
-
-      return res.status(202).json({
-        success: true,
-        data: {
-          platform: targetPlatform,
-          mode: oauthState.mode,
-          workspaceId: oauthState.workspaceId,
-          connectionState: "CONNECTED_PENDING",
-          lifecycle: {
-            operationId: lifecycleContext.attemptKey,
-            replayToken: lifecycleContext.replayToken,
-            status: "PROCESSING",
-            stage: "META_ACCOUNT_CONNECTED",
-            statusDetail:
-              "Connection queued. Verifying assets, webhook, and reconciliation asynchronously.",
-          },
-        },
-        message: `${targetPlatform} connect processing`,
       });
     }
 
@@ -3083,7 +2537,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
     }
 
-    let longToken = providedLongToken;
+    longToken = providedLongToken;
 
     if (!longToken) {
       let longTokenRes: any;
@@ -3102,6 +2556,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           }
         );
       } catch (error: any) {
+        if (
+          !internalContinuation &&
+          lifecycleContext &&
+          isMetaProviderTransientError(error)
+        ) {
+          return await triggerBullMQFallback!("long_token_exchange_transient", getAxiosErrorMessage(error));
+        }
         if (targetPlatform === "INSTAGRAM") {
           failInstagramConnect({
             stage: "IG_LONG_TOKEN_EXCHANGED",
@@ -4031,32 +3492,54 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     lifecycleRequestAborted = isRequestDetached();
 
     if (lifecycleContext) {
-      if (internalContinuation) {
-        await finalizeMetaOnboardingLifecycle(
-          {
-            businessId,
-            lifecycleContext,
-            connectedClients,
-            requestTimedOut: lifecycleRequestTimedOut,
-            requestAborted: lifecycleRequestAborted,
-          },
-          {
-            deferred: false,
-          }
-        );
-      } else {
-        finalizeMetaOnboardingLifecycle({
+      await finalizeMetaOnboardingLifecycle(
+        {
           businessId,
           lifecycleContext,
           connectedClients,
           requestTimedOut: lifecycleRequestTimedOut,
           requestAborted: lifecycleRequestAborted,
-        });
-      }
+        },
+        {
+          deferred: !internalContinuation,
+        }
+      );
     }
 
     if (lifecycleRequestAborted) {
       return;
+    }
+
+    if (!internalContinuation) {
+      const inlineDurationMs = Date.now() - callbackStartedAtMs;
+      emitCallbackMetric({
+        name: "oauth_callback_inline_work_ms",
+        businessId,
+        value: inlineDurationMs,
+        metadata: {
+          platform: targetPlatform,
+          mode: oauthState.mode,
+        },
+      });
+      return res.status(200).json({
+        success: true,
+        data: {
+          platform: targetPlatform,
+          mode: oauthState.mode,
+          workspaceId: oauthState.workspaceId,
+          connectionState: "ACTIVE",
+          clients: clientsSnapshot,
+          lifecycle: lifecycleContext
+            ? {
+                operationId: lifecycleContext.attemptKey,
+                replayToken: lifecycleContext.replayToken,
+                status: "READY_MINIMAL",
+                stage: "FINAL_ONBOARDING",
+              }
+            : null,
+        },
+        message: `${targetPlatform} connected successfully`,
+      });
     }
 
     return res.status(202).json({
@@ -4090,6 +3573,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     }
 
     lifecycleRequestAborted = isRequestDetached();
+
+    if (
+      !internalContinuation &&
+      lifecycleContext &&
+      isMetaProviderTransientError(error) &&
+      triggerBullMQFallback
+    ) {
+      return await triggerBullMQFallback("main_catch_transient", getAxiosErrorMessage(error));
+    }
 
     if (error instanceof MetaOAuthFlowError) {
       const doctorReport = instagramBusinessId
@@ -4423,6 +3915,41 @@ export const getMetaOAuthLifecycle = async (req: Request, res: Response) => {
       platform: provider,
     });
 
+    const resolvedProvider = provider || (row ? (row.provider as any) : null);
+    if (resolvedProvider) {
+      const existingClient = await prisma.client.findFirst({
+        where: {
+          businessId,
+          platform: resolvedProvider,
+          deletedAt: null,
+          isActive: true
+        }
+      });
+      if (existingClient) {
+        return res.json({
+          success: true,
+          data: {
+            operationId: attemptKey,
+            replayToken,
+            platform: resolvedProvider,
+            status: "COMPLETED",
+            connectionState: "ACTIVE",
+            stage: "FINAL_ONBOARDING",
+            processing: false,
+            clients: [{
+              platform: existingClient.platform,
+              healthy: true,
+              connected: true,
+              clientId: existingClient.id,
+              pageId: existingClient.pageId || null,
+              phoneNumberId: existingClient.phoneNumberId || null,
+            }],
+            pollIntervalMs: 5000
+          }
+        });
+      }
+    }
+
     if (!row) {
       return res.status(202).json({
         success: true,
@@ -4434,8 +3961,39 @@ export const getMetaOAuthLifecycle = async (req: Request, res: Response) => {
           connectionState: "PROCESSING",
           stage: "OAUTH_AUTHENTICATED",
           processing: true,
+          pollIntervalMs: 5000,
         },
       });
+    }
+
+    const pollingDurationMs = Date.now() - new Date(row.createdAt).getTime();
+    if (pollingDurationMs > 60000 && row.status === "PROCESSING") {
+      const metadataObj = row.metadata && typeof row.metadata === "object"
+        ? (row.metadata as any)
+        : {};
+      await markMetaOAuthLifecycleFailure({
+        context: {
+          attemptKey: row.attemptKey,
+          replayToken: row.replayToken || "",
+          businessId,
+          tenantKey: row.tenantKey,
+          platform: row.provider as any,
+          mode: (metadataObj?.mode || "ONBOARD") as any,
+          nonce: (metadataObj?.nonce || "") as string,
+          startedAtMs: new Date(row.createdAt).getTime(),
+        },
+        stage: "FAILED",
+        code: "META_ONBOARDING_TIMEOUT",
+        reason: "Onboarding timed out after 60 seconds. Please try again.",
+        resolutionHint: "RETRY",
+      }).catch(() => undefined);
+
+      row.status = "FAILED";
+      row.step = "FAILED";
+      row.statusDetail = "Onboarding timed out after 60 seconds. Please try again.";
+      row.errorCode = "META_ONBOARDING_TIMEOUT";
+      row.errorMessage = "Onboarding timed out after 60 seconds. Please try again.";
+      row.resolutionHint = "RETRY";
     }
 
     const lifecycle = toMetaOAuthLifecycleResponse({
@@ -4478,7 +4036,7 @@ export const getMetaOAuthLifecycle = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...lifecycle,
-        connectionState,
+        connectionState: lifecycle.status === "FAILED" ? "ACTION_REQUIRED" : connectionState,
         processing: lifecycle.status === "PROCESSING",
         requiresPairSelection:
           lifecycle.status === "NEEDS_ACTION" &&
@@ -4490,6 +4048,7 @@ export const getMetaOAuthLifecycle = async (req: Request, res: Response) => {
         validPairs,
         availablePhoneNumbers,
         clients: Array.isArray(metadata.clients) ? metadata.clients : [],
+        pollIntervalMs: 5000,
       },
     });
   } catch (error) {

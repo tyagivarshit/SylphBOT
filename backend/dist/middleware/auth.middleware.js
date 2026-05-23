@@ -61,8 +61,9 @@ class LightweightMemoryCache {
     }
 }
 const AUTH_CONTEXT_CACHE_TTL_MS = 15000;
+const AUTH_SESSION_VALIDITY_MS = 15 * 60 * 1000; // 15 minutes session context validity
 const AUTH_REDIS_CACHE_PREFIX = "auth:session:v2:";
-const AUTH_REDIS_CACHE_TTL_SECONDS = Math.max(5, Math.ceil(AUTH_CONTEXT_CACHE_TTL_MS / 1000));
+const AUTH_REDIS_CACHE_TTL_SECONDS = 15 * 60; // 15 minutes Redis key expiration
 const AUTH_DB_MIN_BUDGET_MS = 360;
 const AUTH_DB_SOFT_BUDGET_MS = 1800;
 const AUTH_STAGE_TIMEOUT_BUFFER_MS = 140;
@@ -107,8 +108,6 @@ const AUTH_DIRECT_LOOKUP_ROUTE_PREFIXES = [
     "/api/help-ai",
     "/api/messages",
     "/api/dashboard",
-    "/api/user/me",
-    "/api/auth/me",
     "/api/user/workspace",
     "/api/clients/oauth/meta",
     "/api/clients/status",
@@ -661,25 +660,43 @@ const isValidCachedContext = (context) => {
     const record = context;
     return (typeof record.userId === "string" &&
         typeof record.role === "string" &&
+        (record.name === undefined || typeof record.name === "string") &&
         typeof record.tokenVersion === "number" &&
         typeof record.expiresAt === "number");
 };
 const readRedisAuthContext = async (tokenKey, tokenVersion) => {
-    const cachedRaw = await redis_1.default
-        .get(getAuthRedisCacheKey(tokenKey))
-        .catch(() => null);
+    const primaryKey = getAuthRedisCacheKey(tokenKey);
+    let cachedRaw = await redis_1.default.get(primaryKey).catch(() => null);
+    let migrated = false;
+    if (!cachedRaw) {
+        const fallbackKeys = [
+            `auth:session:v1:${tokenKey}`,
+            `auth:session:${tokenKey}`
+        ];
+        for (const fbKey of fallbackKeys) {
+            cachedRaw = await redis_1.default.get(fbKey).catch(() => null);
+            if (cachedRaw) {
+                migrated = true;
+                break;
+            }
+        }
+    }
     if (!cachedRaw) {
         return null;
     }
     try {
         const parsed = JSON.parse(cachedRaw);
         if (!isValidCachedContext(parsed)) {
-            await redis_1.default.del(getAuthRedisCacheKey(tokenKey)).catch(() => undefined);
+            await redis_1.default.del(primaryKey).catch(() => undefined);
             return null;
         }
         if (parsed.expiresAt <= Date.now() || parsed.tokenVersion !== tokenVersion) {
-            await redis_1.default.del(getAuthRedisCacheKey(tokenKey)).catch(() => undefined);
+            await redis_1.default.del(primaryKey).catch(() => undefined);
             return null;
+        }
+        if (migrated) {
+            const remainingTtlSeconds = Math.max(5, Math.ceil((parsed.expiresAt - Date.now()) / 1000));
+            await redis_1.default.set(primaryKey, cachedRaw, "EX", remainingTtlSeconds).catch(() => undefined);
         }
         authContextCache.set(tokenKey, parsed);
         writeStaleAuthContext(parsed);
@@ -687,7 +704,7 @@ const readRedisAuthContext = async (tokenKey, tokenVersion) => {
         return parsed;
     }
     catch {
-        await redis_1.default.del(getAuthRedisCacheKey(tokenKey)).catch(() => undefined);
+        await redis_1.default.del(primaryKey).catch(() => undefined);
         return null;
     }
 };
@@ -711,7 +728,8 @@ const primeAuthContextCacheForToken = (input) => {
         tokenVersion: Number(input.tokenVersion || 0),
         businessId: String(input.businessId || "").trim() || null,
         email: String(input.email || "").trim() || undefined,
-        expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+        name: String(input.name || "").trim() || undefined,
+        expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
     };
     if (!context.userId || !Number.isFinite(context.tokenVersion)) {
         return;
@@ -736,6 +754,7 @@ const getUserWithBusiness = async (userId) => {
             deletedAt: true,
             tokenVersion: true,
             email: true,
+            name: true,
             businessId: true,
         },
     });
@@ -873,6 +892,26 @@ const enforceSessionAnomalyGuard = async (req, input) => {
     }
     const sessionKey = getSessionKeyFromRequest(req);
     if (!sessionKey) {
+        return;
+    }
+    if ((0, securityGovernanceOS_service_1.isSessionRevoked)(sessionKey)) {
+        throw (0, AppError_1.unauthorized)("Session locked due to anomaly");
+    }
+    if (req.method === "GET") {
+        setImmediate(() => {
+            (0, securityGovernanceOS_service_1.trackSessionAnomaly)({
+                sessionKey,
+                businessId: input.businessId,
+                tenantId: input.businessId,
+                userId: input.userId,
+                ip: getIpAddress(req),
+                userAgent: getUserAgent(req),
+                deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+                signal: null,
+            }).catch((err) => {
+                req.logger?.warn({ error: err?.message || String(err), sessionKey }, "Background session anomaly tracking failed");
+            });
+        });
         return;
     }
     const now = Date.now();
@@ -1085,6 +1124,55 @@ const serveDegradedAuthenticatedState = async (input) => {
         },
     });
 };
+const rotateRefreshToken = async (req, res, userId, oldRefreshToken, tokenVersion) => {
+    const newRefreshRaw = (0, generateToken_1.generateRefreshToken)(userId, tokenVersion);
+    const oldHashed = hashToken(oldRefreshToken);
+    const newHashed = hashToken(newRefreshRaw);
+    const ip = getIpAddress(req);
+    const userAgent = req.headers["user-agent"] || null;
+    await prisma_1.default.refreshToken.create({
+        data: {
+            token: newHashed,
+            userId,
+            userAgent,
+            ip,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+    });
+    const graceKey = `auth:rotated:${oldHashed}`;
+    const graceValue = JSON.stringify({ userId, tokenVersion, newHashed });
+    await redis_1.default.set(graceKey, graceValue, "EX", 60).catch(() => undefined);
+    await prisma_1.default.refreshToken.deleteMany({
+        where: { token: oldHashed },
+    }).catch(() => undefined);
+    res.cookie("refreshToken", newRefreshRaw, {
+        ...(0, authCookies_1.getAuthCookieOptions)(req),
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+    return newRefreshRaw;
+};
+const validateRefreshTokenDbOrGrace = async (hashedToken, userId) => {
+    const dbToken = await prisma_1.default.refreshToken.findUnique({
+        where: { token: hashedToken },
+        select: { userId: true, expiresAt: true },
+    }).catch(() => null);
+    if (dbToken && dbToken.userId === userId && dbToken.expiresAt.getTime() > Date.now()) {
+        return { userId, valid: true };
+    }
+    const graceValue = await redis_1.default.get(`auth:rotated:${hashedToken}`).catch(() => null);
+    if (graceValue) {
+        try {
+            const parsed = JSON.parse(graceValue);
+            if (parsed.userId === userId) {
+                return { userId, valid: true };
+            }
+        }
+        catch {
+            // ignore
+        }
+    }
+    return { userId, valid: false };
+};
 const protect = async (req, res, next) => {
     const startedAt = Date.now();
     const directLookupRoute = shouldUseDirectAuthLookup(req);
@@ -1109,6 +1197,7 @@ const protect = async (req, res, next) => {
             id: input.context.userId,
             role: input.context.role,
             email: input.context.email,
+            name: input.context.name,
             businessId: input.context.businessId,
         });
         await runSessionAnomalyGuard(req, {
@@ -1198,6 +1287,7 @@ const protect = async (req, res, next) => {
                 id: req.user.id,
                 role: req.user.role,
                 email: req.user.email,
+                name: req.user.name,
                 businessId: req.user.businessId || null,
             });
             (0, performanceMetrics_1.emitPerformanceMetric)({
@@ -1280,9 +1370,10 @@ const protect = async (req, res, next) => {
                                 userId: accessUser.id,
                                 role: accessUser.role,
                                 email: accessUser.email || undefined,
+                                name: accessUser.name || undefined,
                                 businessId: String(accessUser.businessId || decoded.businessId || "").trim() || null,
                                 tokenVersion: accessUser.tokenVersion,
-                                expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+                                expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
                             };
                         }
                     }
@@ -1297,19 +1388,8 @@ const protect = async (req, res, next) => {
                         throw (0, AppError_1.unauthorized)("Invalid refresh token");
                     }
                     const refreshTokenHash = hashToken(refreshToken);
-                    const refreshSession = (await prisma_1.default.refreshToken.findUnique({
-                        where: {
-                            token: refreshTokenHash,
-                        },
-                        select: {
-                            token: true,
-                            userId: true,
-                            expiresAt: true,
-                        },
-                    }));
-                    if (!refreshSession ||
-                        refreshSession.userId !== decodedRefresh.id ||
-                        refreshSession.expiresAt.getTime() <= Date.now()) {
+                    const validation = await validateRefreshTokenDbOrGrace(refreshTokenHash, decodedRefresh.id);
+                    if (!validation.valid) {
                         (0, authCookies_1.clearAuthCookies)(res, req);
                         throw (0, AppError_1.unauthorized)("Session expired");
                     }
@@ -1326,10 +1406,12 @@ const protect = async (req, res, next) => {
                         userId: refreshUser.id,
                         role: refreshUser.role,
                         email: refreshUser.email || undefined,
+                        name: refreshUser.name || undefined,
                         businessId: String(refreshUser.businessId || "").trim() || null,
                         tokenVersion: refreshUser.tokenVersion,
-                        expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+                        expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
                     };
+                    await rotateRefreshToken(req, res, resolvedContext.userId, refreshToken, resolvedContext.tokenVersion).catch(() => undefined);
                     const newAccessToken = (0, generateToken_1.generateAccessToken)(resolvedContext.userId, resolvedContext.role, resolvedContext.businessId, resolvedContext.tokenVersion);
                     const newTokenKey = hashToken(newAccessToken);
                     res.cookie("accessToken", newAccessToken, {
@@ -1352,6 +1434,7 @@ const protect = async (req, res, next) => {
                     id: resolvedContext.userId,
                     role: resolvedContext.role,
                     email: resolvedContext.email,
+                    name: resolvedContext.name,
                     businessId: resolvedContext.businessId,
                 });
                 await runSessionAnomalyGuard(req, {
@@ -1621,6 +1704,7 @@ const protect = async (req, res, next) => {
                         id: redisContext.userId,
                         role: redisContext.role,
                         email: redisContext.email,
+                        name: redisContext.name,
                         businessId: redisContext.businessId,
                     });
                     await runSessionAnomalyGuard(req, {
@@ -1716,10 +1800,11 @@ const protect = async (req, res, next) => {
                             const resolvedContext = {
                                 userId: user.id,
                                 role: user.role,
-                                email: user.email,
+                                email: user.email || undefined,
+                                name: user.name || undefined,
                                 businessId,
                                 tokenVersion: user.tokenVersion,
-                                expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+                                expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
                             };
                             void writeAuthContextCache(accessTokenKey, resolvedContext);
                             return resolvedContext;
@@ -1771,6 +1856,7 @@ const protect = async (req, res, next) => {
                             id: resolvedContext.userId,
                             role: resolvedContext.role,
                             email: resolvedContext.email,
+                            name: resolvedContext.name,
                             businessId: resolvedContext.businessId,
                         });
                         await runSessionAnomalyGuard(req, {
@@ -1919,7 +2005,7 @@ const protect = async (req, res, next) => {
         }
         const refreshLookupPromise = sharedRefreshLookup ||
             (async () => {
-                const dbToken = await runSharedAuthStage({
+                const tokenValidation = await runSharedAuthStage({
                     req,
                     res,
                     stage: "refresh_token_lookup",
@@ -1928,20 +2014,9 @@ const protect = async (req, res, next) => {
                     degradedAuthAllowed,
                     routeCritical,
                     cacheAvailability: "cold",
-                    task: () => prisma_1.default.refreshToken.findUnique({
-                        where: {
-                            token: hashed,
-                        },
-                        select: {
-                            token: true,
-                            userId: true,
-                            expiresAt: true,
-                        },
-                    }),
+                    task: () => validateRefreshTokenDbOrGrace(hashed, decoded.id),
                 });
-                if (!dbToken ||
-                    dbToken.userId !== decoded.id ||
-                    dbToken.expiresAt.getTime() <= Date.now()) {
+                if (!tokenValidation || !tokenValidation.valid) {
                     return null;
                 }
                 const user = await runSharedAuthStage({
@@ -1981,9 +2056,10 @@ const protect = async (req, res, next) => {
                     userId: user.id,
                     role: user.role,
                     email: user.email || undefined,
+                    name: user.name || undefined,
                     businessId,
                     tokenVersion: user.tokenVersion,
-                    expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+                    expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
                 };
             })().finally(() => {
                 refreshAuthInFlight.delete(refreshLookupKey);
@@ -2046,6 +2122,8 @@ const protect = async (req, res, next) => {
         if (isRequestClosed(req, res)) {
             return;
         }
+        // Rotate refresh token!
+        await rotateRefreshToken(req, res, refreshedContext.userId, refreshToken, refreshedContext.tokenVersion).catch(() => undefined);
         const newAccessToken = (0, generateToken_1.generateAccessToken)(refreshedContext.userId, refreshedContext.role, refreshedContext.businessId, refreshedContext.tokenVersion);
         res.cookie("accessToken", newAccessToken, {
             ...(0, authCookies_1.getAuthCookieOptions)(req),
@@ -2055,11 +2133,12 @@ const protect = async (req, res, next) => {
             id: refreshedContext.userId,
             role: refreshedContext.role,
             email: refreshedContext.email,
+            name: refreshedContext.name,
             businessId: refreshedContext.businessId,
         });
         writeRequestLocalAuthContext(req, hashToken(newAccessToken), refreshedContext.tokenVersion, {
             ...refreshedContext,
-            expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+            expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
         });
         await runSessionAnomalyGuard(req, {
             userId: refreshedContext.userId,
@@ -2072,9 +2151,10 @@ const protect = async (req, res, next) => {
             userId: refreshedContext.userId,
             role: refreshedContext.role,
             email: refreshedContext.email,
+            name: refreshedContext.name,
             businessId: refreshedContext.businessId,
             tokenVersion: refreshedContext.tokenVersion,
-            expiresAt: Date.now() + AUTH_CONTEXT_CACHE_TTL_MS,
+            expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
         });
         bumpAuthStats({
             resolved: 1,

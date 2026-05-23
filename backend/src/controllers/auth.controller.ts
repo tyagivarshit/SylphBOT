@@ -1516,7 +1516,7 @@ export const getMe = async (req: any, res: Response, next: NextFunction) => {
 
     let payload = {
       id: String(req.user.id),
-      name: "Workspace User",
+      name: req.user?.name || "Workspace User",
       email: String(req.user?.email || ""),
       role: String(req.user?.role || "AGENT"),
       businessId: String(req.user?.businessId || "").trim() || null,

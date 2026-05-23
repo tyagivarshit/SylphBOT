@@ -32,13 +32,18 @@ const getRequestHost = (req?: Request) => {
 
 const resolveCookieDomain = (req?: Request) => {
   const host = getRequestHost(req) || getConfiguredHost();
+  if (!host || host === "localhost" || host.includes("127.0.0.1")) {
+    return undefined;
+  }
 
-  if (
-    host &&
-    (host === COOKIE_DOMAIN_SUFFIX ||
-      host.endsWith(`.${COOKIE_DOMAIN_SUFFIX}`))
-  ) {
-    return `.${COOKIE_DOMAIN_SUFFIX}`;
+  if (/^[0-9.]+$/.test(host)) {
+    return undefined;
+  }
+
+  const parts = host.split(".");
+  if (parts.length >= 2) {
+    const rootDomain = parts.slice(-2).join(".");
+    return `.${rootDomain}`;
   }
 
   return undefined;
@@ -46,13 +51,11 @@ const resolveCookieDomain = (req?: Request) => {
 
 export const getAuthCookieOptions = (req?: Request) => {
   const domain = resolveCookieDomain(req);
-  const sameSite: "none" | "lax" = isProd ? "none" : "lax";
+  const sameSite: "none" | "lax" = domain ? "lax" : (isProd ? "none" : "lax");
 
   return {
     httpOnly: true,
     secure: isProd,
-    // Production sign-in can happen across app/api subdomains, so use `none`
-    // there while preserving local HTTP development compatibility.
     sameSite,
     ...(domain ? { domain } : {}),
     path: "/",

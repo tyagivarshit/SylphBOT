@@ -237,12 +237,12 @@ const classifyAuthCurrentUserResponse = (
     normalizedReason.includes("timeout") ||
     normalizedReason.includes("timed out");
   const isProcessingAuthGap =
-    normalizedReason.includes("session verification timed out") ||
-    normalizedReason.includes("missing session") ||
-    normalizedReason.includes("not authenticated");
+    normalizedReason.includes("session verification timed out");
   const isTerminalAuthFailure =
     normalizedReason.includes("invalid refresh token") ||
-    normalizedReason.includes("session expired");
+    normalizedReason.includes("session expired") ||
+    normalizedReason.includes("missing session") ||
+    normalizedReason.includes("not authenticated");
 
   if (isTerminalAuthFailure) {
     return {

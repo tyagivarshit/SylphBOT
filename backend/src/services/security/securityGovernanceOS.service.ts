@@ -363,6 +363,10 @@ const getStore = () => {
   return globalForSecurity.__sylphSecurityStore;
 };
 
+export const isSessionRevoked = (sessionKey: string): boolean => {
+  return getStore().revokedSessionKeys.has(sessionKey);
+};
+
 const bumpAuthority = (authorityName: string) => {
   const store = getStore();
   store.authorities.set(

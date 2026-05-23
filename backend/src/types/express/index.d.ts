@@ -23,6 +23,7 @@ declare module "express-serve-static-core" {
       id: string;
       role: string;
       email?: string;
+      name?: string;
       businessId: string | null;
     };
   }

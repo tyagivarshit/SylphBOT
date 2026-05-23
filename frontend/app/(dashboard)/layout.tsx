@@ -183,19 +183,28 @@ export default function DashboardLayout({
 }) {
   const { user, loading, lifecycleState } = useAuth();
   const router = useRouter();
+  const bootstrapActive =
+    loading ||
+    lifecycleState === "authenticating" ||
+    lifecycleState === "session_stabilizing" ||
+    lifecycleState === "retrying" ||
+    lifecycleState === "authenticated";
 
   const [open, setOpen] = useState(false);
   const [upgradeState, setUpgradeState] = useState<OpenUpgradeOptions | null>(null);
 
   useEffect(() => {
+    if (bootstrapActive) {
+      return;
+    }
+
     if (
-      !loading &&
       !user &&
       (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
     ) {
       router.replace("/auth/login");
     }
-  }, [lifecycleState, loading, router, user]);
+  }, [bootstrapActive, lifecycleState, router, user]);
 
   useEffect(() => {
     const handleEsc = (event: KeyboardEvent) => {
@@ -231,14 +240,20 @@ export default function DashboardLayout({
     []
   );
 
-  if (loading) {
-    return <AuthStateCard message="Preparing your workspace..." />;
+  if (bootstrapActive) {
+    const message =
+      lifecycleState === "authenticating"
+        ? "Signing you in securely..."
+        : lifecycleState === "authenticated"
+        ? "Hydrating your workspace..."
+        : "Stabilizing your secure session...";
+    return <AuthStateCard message={message} />;
   }
 
   if (!user) {
     const message =
-      lifecycleState === "session_stabilizing" || lifecycleState === "retrying"
-        ? "Stabilizing your secure session..."
+      lifecycleState === "hydrated"
+        ? "Finalizing secure sign-in..."
         : "Redirecting to secure sign-in...";
     return <AuthStateCard message={message} />;
   }

@@ -99,6 +99,7 @@ export type AuthCurrentUserFetchResult = {
   unauthorized: boolean;
   networkError: boolean;
   code: string | null;
+  clearableTerminal: boolean;
 };
 
 type FetchCurrentUserLifecycleOptions = {
@@ -139,6 +140,41 @@ export async function fetchCurrentUser(): Promise<CurrentUser | null> {
 }
 
 const normalizeReason = (value: unknown) => String(value || "").trim();
+
+const HARD_TERMINAL_REASON_MARKERS = [
+  "invalid refresh token",
+  "refresh token invalid",
+  "refresh token revoked",
+  "session revoked",
+  "token revoked",
+  "token signature",
+  "signature verification",
+  "jwt malformed",
+  "invalid token",
+  "cryptographic",
+  "token validation failed",
+];
+
+const HARD_TERMINAL_CODE_MARKERS = [
+  "AUTH_REFRESH_INVALID",
+  "AUTH_REFRESH_REVOKED",
+  "AUTH_SESSION_REVOKED",
+  "AUTH_TOKEN_INVALID",
+  "AUTH_TOKEN_SIGNATURE_INVALID",
+  "AUTH_CRYPTO_INVALID",
+];
+
+const includesMarker = (value: string, markers: string[]) =>
+  markers.some((marker) => value.includes(marker));
+
+const isHardTerminalAuthFailure = (reason: string, code: string) => {
+  const normalizedReason = reason.toLowerCase();
+  const normalizedCode = code.toUpperCase();
+  return (
+    includesMarker(normalizedReason, HARD_TERMINAL_REASON_MARKERS) ||
+    includesMarker(normalizedCode, HARD_TERMINAL_CODE_MARKERS)
+  );
+};
 
 const wait = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -195,6 +231,20 @@ const classifyAuthCurrentUserResponse = (
     source.includes("login") ||
     source.includes("stabilize") ||
     source.includes("authenticating");
+  const buildResult = (
+    input: Partial<AuthCurrentUserFetchResult> & {
+      state: AuthCurrentUserFetchState;
+    }
+  ): AuthCurrentUserFetchResult => ({
+    user: input.user ?? null,
+    state: input.state,
+    retryable: input.retryable ?? false,
+    reason: input.reason ?? null,
+    unauthorized: input.unauthorized ?? false,
+    networkError: input.networkError ?? false,
+    code: input.code ?? null,
+    clearableTerminal: input.clearableTerminal ?? false,
+  });
 
   if (response.success && response.data) {
     const lifecycle = response.data.authLifecycle || null;
@@ -205,7 +255,7 @@ const classifyAuthCurrentUserResponse = (
     const reason = normalizeReason(lifecycle?.reason);
 
     if (lifecycleState !== "AUTHENTICATED") {
-      return {
+      return buildResult({
         user: response.data,
         state: lifecycleState,
         retryable:
@@ -216,10 +266,11 @@ const classifyAuthCurrentUserResponse = (
         unauthorized: false,
         networkError: false,
         code: response.code || null,
-      };
+        clearableTerminal: false,
+      });
     }
 
-    return {
+    return buildResult({
       user: response.data,
       state: "AUTHENTICATED",
       retryable: false,
@@ -227,25 +278,31 @@ const classifyAuthCurrentUserResponse = (
       unauthorized: false,
       networkError: false,
       code: response.code || null,
-    };
+      clearableTerminal: false,
+    });
   }
 
   const reason = normalizeReason(response.message);
   const normalizedReason = reason.toLowerCase();
+  const normalizedCode = String(response.code || "").trim();
   const isTimeoutLike =
     response.networkError ||
     normalizedReason.includes("timeout") ||
     normalizedReason.includes("timed out");
   const isProcessingAuthGap =
     normalizedReason.includes("session verification timed out");
-  const isTerminalAuthFailure =
-    normalizedReason.includes("invalid refresh token") ||
-    normalizedReason.includes("session expired") ||
+  const isMissingSessionLike =
     normalizedReason.includes("missing session") ||
     normalizedReason.includes("not authenticated");
+  const isUnauthorizedLike =
+    normalizedReason === "unauthorized" || isMissingSessionLike;
+  const isHardTerminalFailure = isHardTerminalAuthFailure(
+    normalizedReason,
+    normalizedCode
+  );
 
-  if (isTerminalAuthFailure) {
-    return {
+  if (isHardTerminalFailure) {
+    return buildResult({
       user: null,
       state: "FAILED_TERMINAL",
       retryable: false,
@@ -253,14 +310,15 @@ const classifyAuthCurrentUserResponse = (
       unauthorized: Boolean(response.unauthorized),
       networkError: Boolean(response.networkError),
       code: response.code || null,
-    };
+      clearableTerminal: true,
+    });
   }
 
   if (
     routeContext !== "AUTHENTICATED_APP_ROUTE" &&
     response.unauthorized
   ) {
-    return {
+    return buildResult({
       user: null,
       state: "FAILED_TERMINAL",
       retryable: false,
@@ -268,12 +326,13 @@ const classifyAuthCurrentUserResponse = (
       unauthorized: true,
       networkError: Boolean(response.networkError),
       code: response.code || null,
-    };
+      clearableTerminal: false,
+    });
   }
 
   if (isTimeoutLike || isProcessingAuthGap) {
     if (!allowTransientRetry) {
-      return {
+      return buildResult({
         user: null,
         state: "FAILED_TERMINAL",
         retryable: false,
@@ -281,10 +340,11 @@ const classifyAuthCurrentUserResponse = (
         unauthorized: Boolean(response.unauthorized),
         networkError: Boolean(response.networkError),
         code: response.code || null,
-      };
+        clearableTerminal: false,
+      });
     }
 
-    return {
+    return buildResult({
       user: null,
       state: isTimeoutLike ? "RETRYING" : "STABILIZING",
       retryable: true,
@@ -292,7 +352,8 @@ const classifyAuthCurrentUserResponse = (
       unauthorized: Boolean(response.unauthorized),
       networkError: Boolean(response.networkError),
       code: response.code || null,
-    };
+      clearableTerminal: false,
+    });
   }
 
   if (response.unauthorized) {
@@ -302,13 +363,12 @@ const classifyAuthCurrentUserResponse = (
       allowTransientRetry &&
       routeContext === "AUTHENTICATED_APP_ROUTE" &&
       (loginStabilizationSource || sawRecentProcessingState) &&
-      !isTerminalAuthFailure &&
-      (normalizedReason === "unauthorized" ||
-        normalizedReason.includes("missing session") ||
+      !isHardTerminalFailure &&
+      (isUnauthorizedLike ||
         normalizedReason.includes("session verification timed out"));
 
     if (isTransientUnauthorizedDuringAuthStabilization) {
-      return {
+      return buildResult({
         user: null,
         state: "STABILIZING",
         retryable: true,
@@ -316,10 +376,24 @@ const classifyAuthCurrentUserResponse = (
         unauthorized: true,
         networkError: Boolean(response.networkError),
         code: response.code || null,
-      };
+        clearableTerminal: false,
+      });
     }
 
-    return {
+    if (allowTransientRetry && routeContext === "AUTHENTICATED_APP_ROUTE") {
+      return buildResult({
+        user: null,
+        state: "STABILIZING",
+        retryable: true,
+        reason: reason || "session_stabilizing",
+        unauthorized: true,
+        networkError: Boolean(response.networkError),
+        code: response.code || null,
+        clearableTerminal: false,
+      });
+    }
+
+    return buildResult({
       user: null,
       state: "FAILED_TERMINAL",
       retryable: false,
@@ -327,10 +401,11 @@ const classifyAuthCurrentUserResponse = (
       unauthorized: true,
       networkError: Boolean(response.networkError),
       code: response.code || null,
-    };
+      clearableTerminal: false,
+    });
   }
 
-  return {
+  return buildResult({
     user: null,
     state: "FAILED_TERMINAL",
     retryable: false,
@@ -338,7 +413,8 @@ const classifyAuthCurrentUserResponse = (
     unauthorized: Boolean(response.unauthorized),
     networkError: Boolean(response.networkError),
     code: response.code || null,
-  };
+    clearableTerminal: false,
+  });
 };
 
 export async function fetchCurrentUserLifecycle(
@@ -403,6 +479,7 @@ export async function fetchCurrentUserLifecycle(
       const response = await apiFetch<CurrentUser>("/api/user/me?surface=auth", {
         cache: "no-store",
         timeoutMs: 4200,
+        skipUnauthorizedRetry: true,
       });
       const result = classifyAuthCurrentUserResponse(response, {
         routeContext,
@@ -444,6 +521,7 @@ export async function fetchCurrentUserLifecycle(
         unauthorized: false,
         networkError: false,
         code: null,
+        clearableTerminal: false,
       } satisfies AuthCurrentUserFetchResult);
 
     recordAuthMetric("auth_processing_state", {

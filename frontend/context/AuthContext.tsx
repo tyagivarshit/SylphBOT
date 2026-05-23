@@ -29,6 +29,7 @@ export type AuthLifecycleState =
   | "authenticating"
   | "session_stabilizing"
   | "authenticated"
+  | "hydrated"
   | "retrying"
   | "failed_terminal"
   | "anonymous";
@@ -49,6 +50,7 @@ type AuthContextType = {
   lifecycleReason: string | null;
   routeContext: AuthRouteContext;
   beginAuthentication: () => void;
+  markLoginResponseReceived: (metadata?: Record<string, unknown>) => void;
   refreshUser: (options?: RefreshUserOptions) => Promise<AuthUser | null>;
 };
 
@@ -60,21 +62,47 @@ const AuthContext = createContext<AuthContextType>({
   lifecycleReason: null,
   routeContext: "PUBLIC_AUTH_ROUTE",
   beginAuthentication: () => undefined,
+  markLoginResponseReceived: () => undefined,
   refreshUser: async () => null,
 });
 
-const STABILIZATION_ATTEMPTS = 4;
+const STABILIZATION_ATTEMPTS = 3;
 const DEFAULT_ATTEMPTS = 2;
-const STABILIZATION_DELAY_MS = 240;
-const DEFAULT_DELAY_MS = 120;
-const AUTH_REFRESH_DEBOUNCE_MS = 640;
-const AUTH_STABILIZE_EVENT_COOLDOWN_MS = 1400;
-const PUBLIC_ROUTE_DEFERRED_PROBE_DELAY_MS = 640;
+const STABILIZATION_DELAY_MS = 280;
+const DEFAULT_DELAY_MS = 160;
+const AUTH_REFRESH_DEBOUNCE_MS = 800;
+const AUTH_STABILIZE_EVENT_COOLDOWN_MS = 1800;
+const PUBLIC_ROUTE_DEFERRED_PROBE_DELAY_MS = 760;
+const AUTH_LOGIN_WINDOW_MAX_MS = 18000;
+
+type LoginWindowState = {
+  active: boolean;
+  startedAt: number;
+  loginResponseReceivedAt: number | null;
+  sessionReadyAt: number | null;
+  source: string | null;
+};
+
+const createInactiveLoginWindowState = (): LoginWindowState => ({
+  active: false,
+  startedAt: 0,
+  loginResponseReceivedAt: null,
+  sessionReadyAt: null,
+  source: null,
+});
 
 const wait = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+
+const isTransientLifecycleState = (state: AuthLifecycleState) =>
+  state === "authenticating" ||
+  state === "session_stabilizing" ||
+  state === "retrying";
+
+const computeBackoffMs = (baseMs: number, attempt: number) =>
+  Math.min(1400, baseMs + attempt * 160 + Math.floor(Math.random() * 80));
 
 export const AuthProvider = ({
   children,
@@ -94,14 +122,21 @@ export const AuthProvider = ({
 
   const hasFetched = useRef(false);
   const currentUserRef = useRef<AuthUser | null>(null);
+  const lifecycleStateRef = useRef<AuthLifecycleState>("anonymous");
   const inflightBootstrapRef = useRef<Promise<AuthUser | null> | null>(null);
   const lastRefreshProbeAtRef = useRef(0);
   const lastStabilizeEventDispatchAtRef = useRef(0);
   const pendingPublicProbeTimeoutRef = useRef<number | null>(null);
+  const pendingStabilizeDispatchTimeoutRef = useRef<number | null>(null);
+  const loginWindowRef = useRef<LoginWindowState>(createInactiveLoginWindowState());
 
   useEffect(() => {
     currentUserRef.current = user;
   }, [user]);
+
+  useEffect(() => {
+    lifecycleStateRef.current = lifecycleState;
+  }, [lifecycleState]);
 
   useEffect(() => {
     return () => {
@@ -111,6 +146,13 @@ export const AuthProvider = ({
       ) {
         window.clearTimeout(pendingPublicProbeTimeoutRef.current);
         pendingPublicProbeTimeoutRef.current = null;
+      }
+      if (
+        pendingStabilizeDispatchTimeoutRef.current !== null &&
+        typeof window !== "undefined"
+      ) {
+        window.clearTimeout(pendingStabilizeDispatchTimeoutRef.current);
+        pendingStabilizeDispatchTimeoutRef.current = null;
       }
     };
   }, []);
@@ -150,7 +192,7 @@ export const AuthProvider = ({
     [recordMetric]
   );
 
-  const persistAuthState = (nextUser: AuthUser | null) => {
+  const persistAuthState = useCallback((nextUser: AuthUser | null) => {
     if (typeof window === "undefined") {
       return;
     }
@@ -180,7 +222,33 @@ export const AuthProvider = ({
     sessionStorage.setItem("auth_tenant_id", tenantId || "");
     sessionStorage.setItem("auth_workspace_id", workspaceId || "");
     sessionStorage.setItem("auth_token_transport", "cookie_http_only");
-  };
+  }, []);
+
+  const closeLoginWindow = useCallback(() => {
+    loginWindowRef.current = createInactiveLoginWindowState();
+  }, []);
+
+  const openLoginWindow = useCallback((source: string) => {
+    loginWindowRef.current = {
+      active: true,
+      startedAt: Date.now(),
+      loginResponseReceivedAt: null,
+      sessionReadyAt: null,
+      source,
+    };
+  }, []);
+
+  const isLoginWindowActive = useCallback(() => {
+    const windowState = loginWindowRef.current;
+    if (!windowState.active) {
+      return false;
+    }
+    if (Date.now() - windowState.startedAt > AUTH_LOGIN_WINDOW_MAX_MS) {
+      loginWindowRef.current = createInactiveLoginWindowState();
+      return false;
+    }
+    return true;
+  }, []);
 
   const beginAuthentication = useCallback(() => {
     if (
@@ -190,16 +258,53 @@ export const AuthProvider = ({
       window.clearTimeout(pendingPublicProbeTimeoutRef.current);
       pendingPublicProbeTimeoutRef.current = null;
     }
+    if (
+      pendingStabilizeDispatchTimeoutRef.current !== null &&
+      typeof window !== "undefined"
+    ) {
+      window.clearTimeout(pendingStabilizeDispatchTimeoutRef.current);
+      pendingStabilizeDispatchTimeoutRef.current = null;
+    }
+
+    openLoginWindow("login_submit");
     markLifecycle("authenticating", "AUTHENTICATING", {
       source: "login_submit",
     });
-  }, [markLifecycle]);
+    recordMetric("login_submit", 1, {
+      routeContext,
+      source: "login_submit",
+    });
+  }, [markLifecycle, openLoginWindow, recordMetric, routeContext]);
+
+  const markLoginResponseReceived = useCallback(
+    (metadata?: Record<string, unknown>) => {
+      if (!isLoginWindowActive()) {
+        openLoginWindow("login_response_received");
+      }
+      const now = Date.now();
+      const startedAt = loginWindowRef.current.startedAt || now;
+      loginWindowRef.current.loginResponseReceivedAt = now;
+      recordMetric("login_response_received", now - startedAt, {
+        routeContext,
+        ...(metadata || {}),
+      });
+    },
+    [isLoginWindowActive, openLoginWindow, recordMetric, routeContext]
+  );
+
+  const shouldClearTerminalAuthState = useCallback(
+    (result: AuthCurrentUserFetchResult | null) =>
+      Boolean(result?.state === "FAILED_TERMINAL" && result?.clearableTerminal),
+    []
+  );
 
   const fetchUser = useCallback(
     async (options?: RefreshUserOptions) => {
       const mode = options?.mode || "default";
       const source = options?.source || "manual";
+      const sourceNormalized = source.trim().toLowerCase();
       const now = Date.now();
+
       if (source === "event_refresh") {
         const deltaSinceLastProbe = now - lastRefreshProbeAtRef.current;
         if (
@@ -213,10 +318,50 @@ export const AuthProvider = ({
             deltaSinceLastProbe,
             debounceMs: AUTH_REFRESH_DEBOUNCE_MS,
           });
+          recordMetric("bootstrap_skipped", 1, {
+            source,
+            mode,
+            routeContext,
+            reason: "event_refresh_debounced",
+            debounceMs: AUTH_REFRESH_DEBOUNCE_MS,
+          });
           return inflightBootstrapRef.current || currentUserRef.current;
         }
       }
+
+      const loginWindowActive = isLoginWindowActive();
+      const allowDuringLoginWindow =
+        sourceNormalized.includes("login") ||
+        sourceNormalized.includes("stabilize") ||
+        sourceNormalized === "event_refresh";
+
+      if (loginWindowActive && mode === "default" && !allowDuringLoginWindow) {
+        recordMetric("bootstrap_skipped", 1, {
+          source,
+          mode,
+          routeContext,
+          reason: "login_window_active",
+        });
+        return inflightBootstrapRef.current || currentUserRef.current;
+      }
+
+      if (
+        mode === "default" &&
+        sourceNormalized === "public_route_probe" &&
+        isTransientLifecycleState(lifecycleStateRef.current)
+      ) {
+        recordMetric("bootstrap_skipped", 1, {
+          source,
+          mode,
+          routeContext,
+          reason: "transient_lifecycle_probe_suppressed",
+          lifecycleState: lifecycleStateRef.current,
+        });
+        return inflightBootstrapRef.current || currentUserRef.current;
+      }
+
       lastRefreshProbeAtRef.current = now;
+
       const canUseTransientRetry =
         mode === "stabilize" || routeContext === "AUTHENTICATED_APP_ROUTE";
       const requestRouteContext: AuthRouteContext =
@@ -238,11 +383,23 @@ export const AuthProvider = ({
           source,
           routeContext,
         });
+        recordMetric("bootstrap_reused", 1, {
+          source,
+          mode,
+          routeContext,
+        });
         return inflightBootstrapRef.current;
       }
 
       const run = (async () => {
         const startedAt = performance.now();
+        recordMetric("bootstrap_started", 1, {
+          source,
+          mode,
+          routeContext,
+          requestRouteContext,
+        });
+
         const maxAttempts = canUseTransientRetry
           ? mode === "stabilize"
             ? STABILIZATION_ATTEMPTS
@@ -276,15 +433,44 @@ export const AuthProvider = ({
           if (result.state === "AUTHENTICATED" && result.user) {
             const nextUser = result.user;
             setUser(nextUser);
+            currentUserRef.current = nextUser;
             persistAuthState(nextUser);
             queryClient.setQueryData(["me"], nextUser);
+
+            if (isLoginWindowActive() && !loginWindowRef.current.sessionReadyAt) {
+              loginWindowRef.current.sessionReadyAt = Date.now();
+              recordMetric(
+                "cookie/session_ready",
+                loginWindowRef.current.sessionReadyAt -
+                  (loginWindowRef.current.startedAt || Date.now()),
+                {
+                  source,
+                  mode,
+                  routeContext,
+                }
+              );
+            }
+
             markLifecycle("authenticated", "AUTHENTICATED", {
               source,
               mode,
               attempts: attempt + 1,
               routeContext,
             });
+            markLifecycle("hydrated", "HYDRATED", {
+              source,
+              mode,
+              attempts: attempt + 1,
+              routeContext,
+            });
+            closeLoginWindow();
 
+            recordMetric("bootstrap_completed", performance.now() - startedAt, {
+              source,
+              mode,
+              attempts: attempt + 1,
+              routeContext,
+            });
             recordMetric("auth_session_ready", performance.now() - startedAt, {
               source,
               mode,
@@ -346,7 +532,7 @@ export const AuthProvider = ({
             reason: result.reason || null,
             routeContext,
           });
-          await wait(baseDelayMs + attempt * 120);
+          await wait(computeBackoffMs(baseDelayMs, attempt));
         }
 
         if (
@@ -355,39 +541,29 @@ export const AuthProvider = ({
             result.state === "RETRYING" ||
             result.state === "STABILIZING")
         ) {
-          if (!canUseTransientRetry) {
-            setUser(null);
-            persistAuthState(null);
-            markLifecycle("anonymous", "UNAUTHENTICATED_PUBLIC_ROUTE", {
-              source,
-              mode,
-              routeContext,
-              reason: result.reason || null,
-            });
-            return null;
-          }
+          recordMetric("bootstrap_failed_transient", performance.now() - startedAt, {
+            source,
+            mode,
+            routeContext,
+            reason: result.reason || null,
+            code: result.code || null,
+            state: result.state,
+          });
 
           const hasExistingSession = Boolean(currentUserRef.current);
           const shouldContinueTransient =
             hasExistingSession ||
             mode === "stabilize" ||
-            routeContext === "AUTHENTICATED_APP_ROUTE";
+            routeContext === "AUTHENTICATED_APP_ROUTE" ||
+            isLoginWindowActive() ||
+            lifecycleStateRef.current === "authenticating";
 
           if (!shouldContinueTransient) {
-            setUser(null);
-            persistAuthState(null);
-            markLifecycle("failed_terminal", "FAILED_TERMINAL", {
+            markLifecycle("anonymous", "UNAUTHENTICATED_PUBLIC_ROUTE", {
               source,
               mode,
               routeContext,
               reason: result.reason || null,
-            });
-            recordMetric("auth_terminal_failure", performance.now() - startedAt, {
-              source,
-              mode,
-              routeContext,
-              reason: result.reason || null,
-              code: result.code || null,
             });
             return null;
           }
@@ -418,10 +594,12 @@ export const AuthProvider = ({
             const sinceLastStabilizeDispatchMs =
               Date.now() - lastStabilizeEventDispatchAtRef.current;
             if (
-              sinceLastStabilizeDispatchMs >= AUTH_STABILIZE_EVENT_COOLDOWN_MS
+              sinceLastStabilizeDispatchMs >= AUTH_STABILIZE_EVENT_COOLDOWN_MS &&
+              pendingStabilizeDispatchTimeoutRef.current === null
             ) {
               lastStabilizeEventDispatchAtRef.current = Date.now();
-              window.setTimeout(() => {
+              pendingStabilizeDispatchTimeoutRef.current = window.setTimeout(() => {
+                pendingStabilizeDispatchTimeoutRef.current = null;
                 window.dispatchEvent(new Event("auth:refresh"));
               }, 420);
             } else {
@@ -438,31 +616,69 @@ export const AuthProvider = ({
           return currentUserRef.current;
         }
 
-        if (mode === "stabilize") {
-          setUser(null);
-          persistAuthState(null);
-          markLifecycle("failed_terminal", "FAILED_TERMINAL", {
-            source,
-            routeContext,
-            reason: result?.reason || null,
-          });
-          recordMetric("auth_terminal_failure", performance.now() - startedAt, {
+        const clearTerminalState = shouldClearTerminalAuthState(result);
+        const holdDuringConvergence =
+          isLoginWindowActive() ||
+          isTransientLifecycleState(lifecycleStateRef.current);
+
+        if (!clearTerminalState || holdDuringConvergence) {
+          const deferredState: AuthLifecycleState = holdDuringConvergence
+            ? currentUserRef.current
+              ? "retrying"
+              : "session_stabilizing"
+            : currentUserRef.current
+            ? "retrying"
+            : "anonymous";
+          const deferredReason = holdDuringConvergence
+            ? "FAILED_TERMINAL_DEFERRED"
+            : "UNAUTHENTICATED_UNCLEARED";
+          recordMetric("bootstrap_failed_transient", performance.now() - startedAt, {
             source,
             mode,
             routeContext,
             reason: result?.reason || null,
             code: result?.code || null,
+            deferredTerminal: true,
+            clearableTerminal: result?.clearableTerminal || false,
+            holdDuringConvergence,
           });
-        } else {
-          setUser(null);
-          persistAuthState(null);
-          markLifecycle("anonymous", "FAILED_TERMINAL", {
+          markLifecycle(deferredState, deferredReason, {
             source,
+            mode,
             routeContext,
             reason: result?.reason || null,
+            code: result?.code || null,
+            holdDuringConvergence,
           });
+          return currentUserRef.current;
         }
 
+        setUser(null);
+        currentUserRef.current = null;
+        persistAuthState(null);
+        queryClient.setQueryData(["me"], null);
+        closeLoginWindow();
+        markLifecycle("failed_terminal", "FAILED_TERMINAL", {
+          source,
+          mode,
+          routeContext,
+          reason: result?.reason || null,
+          code: result?.code || null,
+        });
+        recordMetric("bootstrap_failed_terminal", performance.now() - startedAt, {
+          source,
+          mode,
+          routeContext,
+          reason: result?.reason || null,
+          code: result?.code || null,
+        });
+        recordMetric("auth_terminal_failure", performance.now() - startedAt, {
+          source,
+          mode,
+          routeContext,
+          reason: result?.reason || null,
+          code: result?.code || null,
+        });
         return null;
       })();
 
@@ -483,7 +699,16 @@ export const AuthProvider = ({
         }
       }
     },
-    [markLifecycle, queryClient, recordMetric, routeContext]
+    [
+      closeLoginWindow,
+      isLoginWindowActive,
+      markLifecycle,
+      persistAuthState,
+      queryClient,
+      recordMetric,
+      routeContext,
+      shouldClearTerminalAuthState,
+    ]
   );
 
   useEffect(() => {
@@ -524,8 +749,12 @@ export const AuthProvider = ({
         source: "initial_bootstrap_skip",
         routeContext,
       });
+      recordMetric("bootstrap_skipped", 1, {
+        source: "initial_bootstrap_skip",
+        routeContext,
+      });
       setLoading(false);
-      if (typeof window !== "undefined") {
+      if (typeof window !== "undefined" && !isLoginWindowActive()) {
         pendingPublicProbeTimeoutRef.current = window.setTimeout(() => {
           pendingPublicProbeTimeoutRef.current = null;
           void fetchUser({
@@ -543,15 +772,14 @@ export const AuthProvider = ({
       mode: "default",
       source: "initial_bootstrap",
     });
-  }, [fetchUser, markLifecycle, routeContext]);
+  }, [fetchUser, isLoginWindowActive, markLifecycle, recordMetric, routeContext]);
 
   useEffect(() => {
     const handler = () =>
       void fetchUser({
         mode:
-          lifecycleState === "session_stabilizing" ||
-          lifecycleState === "retrying" ||
-          lifecycleState === "authenticating"
+          isTransientLifecycleState(lifecycleStateRef.current) ||
+          isLoginWindowActive()
             ? "stabilize"
             : "default",
         source: "event_refresh",
@@ -559,7 +787,43 @@ export const AuthProvider = ({
 
     window.addEventListener("auth:refresh", handler);
     return () => window.removeEventListener("auth:refresh", handler);
-  }, [fetchUser, lifecycleState]);
+  }, [fetchUser, isLoginWindowActive]);
+
+  useEffect(() => {
+    const logoutHandler = () => {
+      closeLoginWindow();
+      if (
+        pendingPublicProbeTimeoutRef.current !== null &&
+        typeof window !== "undefined"
+      ) {
+        window.clearTimeout(pendingPublicProbeTimeoutRef.current);
+        pendingPublicProbeTimeoutRef.current = null;
+      }
+      if (
+        pendingStabilizeDispatchTimeoutRef.current !== null &&
+        typeof window !== "undefined"
+      ) {
+        window.clearTimeout(pendingStabilizeDispatchTimeoutRef.current);
+        pendingStabilizeDispatchTimeoutRef.current = null;
+      }
+
+      setUser(null);
+      currentUserRef.current = null;
+      persistAuthState(null);
+      queryClient.setQueryData(["me"], null);
+      markLifecycle("anonymous", "LOGOUT", {
+        source: "auth:logout",
+      });
+      recordMetric("bootstrap_skipped", 1, {
+        source: "auth:logout",
+        reason: "explicit_logout",
+      });
+      setLoading(false);
+    };
+
+    window.addEventListener("auth:logout", logoutHandler);
+    return () => window.removeEventListener("auth:logout", logoutHandler);
+  }, [closeLoginWindow, markLifecycle, persistAuthState, queryClient, recordMetric]);
 
   return (
     <AuthContext.Provider
@@ -571,6 +835,7 @@ export const AuthProvider = ({
         lifecycleReason,
         routeContext,
         beginAuthentication,
+        markLoginResponseReceived,
         refreshUser: fetchUser,
       }}
     >

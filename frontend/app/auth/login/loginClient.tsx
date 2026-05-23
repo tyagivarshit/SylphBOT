@@ -16,13 +16,19 @@ type LoginClientProps = {
   initialAuthError: string;
 };
 
-const LOGIN_STABILIZATION_ATTEMPTS = 6;
-const LOGIN_STABILIZATION_BASE_DELAY_MS = 260;
+const LOGIN_STABILIZATION_ATTEMPTS = 4;
+const LOGIN_STABILIZATION_BASE_DELAY_MS = 320;
 
 const wait = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+
+const computeStabilizationDelayMs = (attempt: number) =>
+  Math.min(
+    1800,
+    LOGIN_STABILIZATION_BASE_DELAY_MS + attempt * 220 + Math.floor(Math.random() * 90)
+  );
 
 export default function LoginClient({
   initialEmail,
@@ -34,6 +40,7 @@ export default function LoginClient({
     loading: authLoading,
     lifecycleState,
     beginAuthentication,
+    markLoginResponseReceived,
     refreshUser,
   } = useAuth();
 
@@ -106,7 +113,7 @@ export default function LoginClient({
       }
 
       if (attempt < LOGIN_STABILIZATION_ATTEMPTS - 1) {
-        await wait(LOGIN_STABILIZATION_BASE_DELAY_MS + attempt * 180);
+        await wait(computeStabilizationDelayMs(attempt));
       }
     }
 
@@ -135,6 +142,11 @@ export default function LoginClient({
       beginAuthentication();
 
       const res = await loginUser(cleanEmail, password);
+      markLoginResponseReceived({
+        source: "password_login",
+        success: res.success,
+        code: res.code || null,
+      });
 
       if (res.code === "AUTH_LOGIN_PROCESSING" || !res.success) {
         const processingUser = await finalizeLoginStabilization(
@@ -149,9 +161,6 @@ export default function LoginClient({
           toast(
             "Sign-in is still stabilizing. We will keep retrying automatically."
           );
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new Event("auth:refresh"));
-          }
           return;
         }
         throw new Error(res.message || "Login failed");
@@ -162,15 +171,18 @@ export default function LoginClient({
         toast(
           "Sign-in is still stabilizing. We will keep retrying automatically."
         );
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("auth:refresh"));
-        }
         return;
       }
 
       toast.success("Login successful");
       router.replace("/dashboard");
     } catch (err: unknown) {
+      markLoginResponseReceived({
+        source: "password_login_error",
+        success: false,
+        error:
+          err instanceof Error ? err.message : "unknown_login_error",
+      });
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {
       loginSubmitInFlightRef.current = false;
@@ -303,6 +315,10 @@ export default function LoginClient({
             ? "Stabilizing session..."
             : lifecycleState === "retrying"
             ? "Retrying session..."
+            : lifecycleState === "authenticated"
+            ? "Finalizing session..."
+            : lifecycleState === "hydrated"
+            ? "Opening workspace..."
             : authLoading
             ? "Checking session..."
             : "Sign in to workspace"}

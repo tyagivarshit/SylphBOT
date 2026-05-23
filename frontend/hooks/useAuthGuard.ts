@@ -7,22 +7,26 @@ import { useAuth } from "@/context/AuthContext";
 export default function useAuthGuard() {
   const { user, loading, lifecycleState } = useAuth();
   const router = useRouter();
+  const bootstrapActive =
+    loading ||
+    lifecycleState === "authenticating" ||
+    lifecycleState === "session_stabilizing" ||
+    lifecycleState === "retrying" ||
+    lifecycleState === "authenticated";
 
   useEffect(() => {
-    if (loading) return;
+    if (bootstrapActive) return;
 
     if (
       !user &&
       (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
     ) {
-      console.log("🚫 Redirecting to login...");
       router.replace("/auth/login");
     }
-  }, [lifecycleState, loading, user, router]);
+  }, [bootstrapActive, lifecycleState, router, user]);
 
-  // 🔥 FIX: return clean structure
   return {
     user,
-    loading, // boolean (correct usage)
+    loading: bootstrapActive,
   };
 }

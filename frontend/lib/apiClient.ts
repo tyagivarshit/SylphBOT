@@ -19,6 +19,7 @@ export type ApiResponse<T = any> = {
 
 export type ApiRequestInit = RequestInit & {
   timeoutMs?: number;
+  skipUnauthorizedRetry?: boolean;
 };
 
 const REQUEST_TIMEOUT_MS = 7000;
@@ -301,7 +302,7 @@ async function coreRequest<T>(
         };
       }
 
-      if (!retry && method === "GET") {
+      if (!retry && method === "GET" && !options.skipUnauthorizedRetry) {
         return coreRequest<T>(path, options, true);
       }
 

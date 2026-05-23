@@ -211,6 +211,7 @@ export async function logoutUser() {
   });
 
   if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("auth:logout"));
     window.dispatchEvent(new Event("auth:refresh"));
   }
 

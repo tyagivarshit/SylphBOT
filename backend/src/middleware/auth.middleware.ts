@@ -1290,76 +1290,24 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
     throw unauthorized("Session locked due to anomaly");
   }
 
-  if (req.method === "GET") {
-    setImmediate(() => {
-      trackSessionAnomaly({
-        sessionKey,
-        businessId: input.businessId,
-        tenantId: input.businessId,
-        userId: input.userId,
-        ip: getIpAddress(req),
-        userAgent: getUserAgent(req),
-        deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-        signal: null,
-      }).catch((err) => {
-        req.logger?.warn(
-          { error: err?.message || String(err), sessionKey },
-          "Background session anomaly tracking failed"
-        );
-      });
-    });
-    return;
-  }
-
-  const now = Date.now();
-  const lastCheckedAt = sessionAnomalyCheckedAt.get(sessionKey) || 0;
-  if (now - lastCheckedAt < SESSION_ANOMALY_RECHECK_MS) {
-    return;
-  }
-  sessionAnomalyCheckedAt.set(sessionKey, now);
-
-  const anomaly = await trackSessionAnomaly({
-    sessionKey,
-    businessId: input.businessId,
-    tenantId: input.businessId,
-    userId: input.userId,
-    ip: getIpAddress(req),
-    userAgent: getUserAgent(req),
-    deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-    signal: input.signal || null,
-  }).catch(() => null);
-
-  if (input.signal?.aborted || isRequestLifecycleAborted({ req })) {
-    return;
-  }
-
-  if (anomaly?.locked) {
-    throw unauthorized("Session locked due to anomaly");
-  }
-
-  if (anomaly?.challengeRequired) {
-    const challengeHeader = Array.isArray(req.headers["x-mfa-challenge"])
-      ? req.headers["x-mfa-challenge"][0]
-      : req.headers["x-mfa-challenge"];
-    const challengeKey = String(challengeHeader || "").trim();
-    if (!challengeKey) {
-      throw unauthorized(
-        `Suspicious login challenge required${anomaly?.challengeKey ? ` (${anomaly.challengeKey})` : ""}`
-      );
-    }
-    const consumed = await authorizeSuspiciousSessionChallenge({
-      challengeKey,
-      userId: input.userId,
+  // Defer trackSessionAnomaly to the background for ALL requests
+  setImmediate(() => {
+    trackSessionAnomaly({
       sessionKey,
-      signal: input.signal || null,
-    }).catch(() => ({
-      consumed: false,
-      reason: "mfa_challenge_consume_failed",
-    }));
-    if (!consumed.consumed) {
-      throw unauthorized("Suspicious login challenge not satisfied");
-    }
-  }
+      businessId: input.businessId,
+      tenantId: input.businessId,
+      userId: input.userId,
+      ip: getIpAddress(req),
+      userAgent: getUserAgent(req),
+      deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+      signal: null,
+    }).catch((err) => {
+      req.logger?.warn(
+        { error: err?.message || String(err), sessionKey },
+        "Background session anomaly tracking failed"
+      );
+    });
+  });
 };
 
 const runSessionAnomalyGuard = async (

@@ -3,6 +3,30 @@ import { Request, Response } from "express";
 const isProd = process.env.NODE_ENV === "production";
 const COOKIE_DOMAIN_SUFFIX = "automexiaai.in";
 
+const normalizeHost = (value?: string | null) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+
+  // Some proxy chains can send a comma-separated host list.
+  const first = raw.split(",")[0]?.trim();
+  if (!first) {
+    return null;
+  }
+
+  // IPv6 host header can be bracketed: [::1]:3000
+  if (first.startsWith("[")) {
+    const endBracketIndex = first.indexOf("]");
+    if (endBracketIndex > 1) {
+      return first.slice(1, endBracketIndex).trim().toLowerCase() || null;
+    }
+    return null;
+  }
+
+  return first.split(":")[0]?.trim().toLowerCase() || null;
+};
+
 const getConfiguredHost = () => {
   const candidates = [process.env.BACKEND_URL, process.env.FRONTEND_URL];
 
@@ -10,7 +34,10 @@ const getConfiguredHost = () => {
     if (!candidate) continue;
 
     try {
-      return new URL(candidate).hostname.toLowerCase();
+      const parsed = normalizeHost(new URL(candidate).hostname);
+      if (parsed) {
+        return parsed;
+      }
     } catch {
       continue;
     }
@@ -23,27 +50,41 @@ const getRequestHost = (req?: Request) => {
   if (!req) return null;
 
   const forwardedHost = req.headers["x-forwarded-host"];
-  const rawHost = Array.isArray(forwardedHost)
+  const forwarded = Array.isArray(forwardedHost)
     ? forwardedHost[0]
-    : forwardedHost || req.hostname;
+    : forwardedHost;
 
-  return rawHost?.split(":")[0]?.toLowerCase() || null;
+  return (
+    normalizeHost(forwarded) ||
+    normalizeHost(req.hostname) ||
+    normalizeHost(req.headers.host) ||
+    null
+  );
 };
 
 const resolveCookieDomain = (req?: Request) => {
   const host = getRequestHost(req) || getConfiguredHost();
-  if (!host || host === "localhost" || host.includes("127.0.0.1")) {
+  if (
+    !host ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.includes("127.0.0.1") ||
+    host === "::1"
+  ) {
     return undefined;
   }
 
-  if (/^[0-9.]+$/.test(host)) {
+  // Do not attach Domain for IP literals or unknown hosts.
+  if (/^[0-9.]+$/.test(host) || host.includes(":")) {
     return undefined;
   }
 
-  const parts = host.split(".");
-  if (parts.length >= 2) {
-    const rootDomain = parts.slice(-2).join(".");
-    return `.${rootDomain}`;
+  // Set a shared domain cookie only for our trusted production suffix.
+  if (
+    host === COOKIE_DOMAIN_SUFFIX ||
+    host.endsWith(`.${COOKIE_DOMAIN_SUFFIX}`)
+  ) {
+    return `.${COOKIE_DOMAIN_SUFFIX}`;
   }
 
   return undefined;

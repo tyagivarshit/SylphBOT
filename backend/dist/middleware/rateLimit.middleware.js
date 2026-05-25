@@ -19,7 +19,7 @@ const createStore = (prefix) => new rate_limit_redis_1.default({
             }
             return null;
         }
-        return (0, redis_1.getSharedRedisConnection)().call(...args);
+        return (0, redis_1.getResilientSharedRedisConnection)().call(...args);
     },
     prefix,
 });

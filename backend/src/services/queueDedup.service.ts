@@ -8,15 +8,12 @@ export const isDuplicateJob = async (
   jobId: string
 ) => {
   const key = buildIdempotencyRedisKey(`queue:${jobId}`);
-
-  const exists = await redis.get(key);
-
-  if (exists) {
-    return true;
-  }
-
-  await redis.set(key, "1", "EX", IDEMPOTENCY_TTL_SECONDS);
-
-  return false;
-
+  const acquired = await redis.set(
+    key,
+    "1",
+    "EX",
+    IDEMPOTENCY_TTL_SECONDS,
+    "NX"
+  );
+  return acquired !== "OK";
 };

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getSharedRedisConnection } from "../config/redis";
+import { isRedisTransientError } from "../redis/redisSafety";
 import {
   recordMetricSnapshot,
   recordObservabilityEvent,
@@ -212,7 +213,14 @@ export const releaseDistributedLock = async ({
 }) => {
   const redis = getSharedRedisConnection();
 
-  await redis.eval(RELEASE_LOCK_SCRIPT, 1, key, token);
+  try {
+    await redis.eval(RELEASE_LOCK_SCRIPT, 1, key, token);
+  } catch (error) {
+    if (isRedisTransientError(error)) {
+      return;
+    }
+    throw error;
+  }
 };
 
 export const extendDistributedLock = async ({
@@ -225,8 +233,16 @@ export const extendDistributedLock = async ({
   ttlMs: number;
 }) => {
   const redis = getSharedRedisConnection();
-  const result = await redis.eval(EXTEND_LOCK_SCRIPT, 1, key, token, String(ttlMs));
-  return Number(result) === 1;
+
+  try {
+    const result = await redis.eval(EXTEND_LOCK_SCRIPT, 1, key, token, String(ttlMs));
+    return Number(result) === 1;
+  } catch (error) {
+    if (isRedisTransientError(error)) {
+      return false;
+    }
+    throw error;
+  }
 };
 
 export const withDistributedLock = async <T>({

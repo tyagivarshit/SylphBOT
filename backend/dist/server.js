@@ -63,6 +63,9 @@ const STARTUP_EMBEDDING_WARMUP_RETRY_DELAY_MS = parsePositiveInt(process.env.STA
 const STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS = parsePositiveInt(process.env.STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS, 8);
 const STARTUP_LOW_PRIORITY_TASK_RETRY_DELAY_MS = parsePositiveInt(process.env.STARTUP_LOW_PRIORITY_TASK_RETRY_DELAY_MS, 1400);
 const STARTUP_LOW_PRIORITY_TASK_MAX_DEFERRALS = parsePositiveInt(process.env.STARTUP_LOW_PRIORITY_TASK_MAX_DEFERRALS, 10);
+const STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS = parsePositiveInt(process.env.STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS, 2400);
+const STARTUP_QUEUE_INIT_RETRY_DELAY_MS = parsePositiveInt(process.env.STARTUP_QUEUE_INIT_RETRY_DELAY_MS, 2000);
+const STARTUP_QUEUE_INIT_MAX_DEFERRALS = parsePositiveInt(process.env.STARTUP_QUEUE_INIT_MAX_DEFERRALS, 8);
 const scheduleBackgroundStartupTask = (name, task, options) => {
     const priority = options?.priority || "low";
     const deferDelayMs = Math.max(200, Number(options?.deferDelayMs || STARTUP_LOW_PRIORITY_TASK_RETRY_DELAY_MS));
@@ -242,6 +245,31 @@ const scheduleDeferredEmbeddingWarmup = () => {
     };
     runAttempt(STARTUP_EMBEDDING_WARMUP_DELAY_MS);
 };
+const waitForRuntimeInfrastructureWithinBudget = async () => {
+    const startedAt = Date.now();
+    const bootstrapPromise = (0, lifecycle_1.initQueues)()
+        .then(() => true)
+        .catch((error) => {
+        logger_1.default.error({
+            err: error,
+        }, "Startup runtime infrastructure initialization failed");
+        return false;
+    });
+    const budgetTimeoutPromise = new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            resolve(false);
+        }, STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS);
+        timer.unref?.();
+    });
+    const readyWithinBudget = await Promise.race([
+        bootstrapPromise,
+        budgetTimeoutPromise,
+    ]);
+    return {
+        readyWithinBudget,
+        durationMs: Date.now() - startedAt,
+    };
+};
 const startPostListenBootstrap = () => {
     scheduleBackgroundStartupTask("stripe_config_validation", async () => {
         await (0, stripeConfig_service_1.emitStripeConfigValidation)();
@@ -303,7 +331,13 @@ const startPostListenBootstrap = () => {
 const startServer = async () => {
     (0, sentry_1.initializeSentry)();
     (0, passport_1.configurePassport)();
-    await (0, lifecycle_1.initQueues)();
+    const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
+    if (!runtimeInfrastructure.readyWithinBudget) {
+        logger_1.default.warn({
+            startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
+            startupQueueInitElapsedMs: runtimeInfrastructure.durationMs,
+        }, "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization");
+    }
     const { default: app } = await Promise.resolve().then(() => __importStar(require("./app")));
     const server = http_1.default.createServer(app);
     (0, socket_server_1.initSocket)(server);
@@ -369,6 +403,18 @@ const startServer = async () => {
         server.listen(env_1.env.PORT, () => {
             logger_1.default.info({ port: env_1.env.PORT }, "Server listening");
             (0, startupIsolation_service_1.markAppBootReady)();
+            if (!runtimeInfrastructure.readyWithinBudget) {
+                scheduleBackgroundStartupTask("runtime_queue_init_recovery", async () => {
+                    await (0, lifecycle_1.initQueues)();
+                }, {
+                    priority: "critical",
+                    deferDelayMs: STARTUP_QUEUE_INIT_RETRY_DELAY_MS,
+                    maxDeferrals: STARTUP_QUEUE_INIT_MAX_DEFERRALS,
+                    metadata: {
+                        startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
+                    },
+                });
+            }
             startPostListenBootstrap();
             resolve(server);
         });

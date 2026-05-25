@@ -1,7 +1,7 @@
 import rateLimit from "express-rate-limit";
 import RedisStore from "rate-limit-redis";
 import {
-  getSharedRedisConnection,
+  getResilientSharedRedisConnection,
   isRedisHealthy,
   isRedisWritable,
 } from "../config/redis";
@@ -22,7 +22,7 @@ const createStore = (prefix: string) =>
         return null;
       }
 
-      return (getSharedRedisConnection() as any).call(...args);
+      return (getResilientSharedRedisConnection() as any).call(...args);
     },
     prefix,
   });

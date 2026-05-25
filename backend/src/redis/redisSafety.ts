@@ -21,6 +21,9 @@ type RedisSafetyState = RedisCircuitState & {
 
 type FallbackValue<T> = T | (() => T);
 
+const REDIS_TRANSIENT_ERROR_PATTERN =
+  /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Connection is in closed state|Connection is not ready|Socket closed unexpectedly|Stream isn't writeable and enableOfflineQueue options is false|Command queue state error|Reached the max retries per request limit/i;
+
 const toPositiveInt = (value: unknown, fallback: number, min = 1) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
@@ -74,6 +77,11 @@ const resolveFallback = <T>(fallback: FallbackValue<T>) =>
   typeof fallback === "function"
     ? (fallback as () => T)()
     : fallback;
+
+export const isRedisTransientError = (error: unknown) =>
+  REDIS_TRANSIENT_ERROR_PATTERN.test(
+    String((error as { message?: unknown })?.message || error || "")
+  );
 
 const enableFallbackMode = () => {
   if (redisSafetyState.fallbackModeEnabled) {
@@ -152,6 +160,7 @@ const recordRedisFailure = (error: unknown, operation?: string) => {
     {
       operation: operation || "redis",
       failures: redisSafetyState.failures,
+      transient: isRedisTransientError(error),
       error,
     },
     "Redis operation failed"

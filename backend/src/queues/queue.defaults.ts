@@ -1,5 +1,6 @@
 import type { JobsOptions, Queue } from "bullmq";
 import logger from "../utils/logger";
+import { isQueueRedisWritable } from "../config/redis";
 import {
   isRedisCircuitOpen,
   safeRedisCall,
@@ -59,6 +60,25 @@ const throwQueueWriteUnavailable = (queueName: string, methodName: string) => {
   throw new Error(`queue_unavailable:${queueName}.${methodName}`);
 };
 
+const rejectQueueWriteUnavailable = (queueName: string, methodName: string) => {
+  void recordObservabilityEvent({
+    eventType: "queue.write.unavailable",
+    message: `Queue unavailable for ${queueName}.${methodName}`,
+    severity: "error",
+    context: {
+      component: "queue",
+      phase: "write",
+    },
+    metadata: {
+      queueName,
+      methodName,
+      source: "redis_not_writable_precheck",
+    },
+  }).catch(() => undefined);
+
+  return Promise.reject(new Error(`queue_unavailable:${queueName}.${methodName}`));
+};
+
 export const createResilientQueue = <T extends Queue<any>>(
   queue: T,
   queueName: string
@@ -80,8 +100,26 @@ export const createResilientQueue = <T extends Queue<any>>(
       ) {
         const methodName = String(property);
 
-        return (...args: unknown[]) =>
-          safeRedisCall(
+        return (...args: unknown[]) => {
+          if (!isQueueRedisWritable()) {
+            if (property === "add") {
+              return rejectQueueWriteUnavailable(queueName, methodName);
+            }
+
+            if (shouldLogRedisSkip(`queue.${queueName}.${methodName}:redis_not_writable`)) {
+              logger.warn(
+                {
+                  queueName,
+                  methodName,
+                },
+                "Queue read operation skipped while Redis queue connection is not writable"
+              );
+            }
+
+            return getQueueMethodFallback(methodName);
+          }
+
+          return safeRedisCall(
             () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
             property === "add"
               ? () => throwQueueWriteUnavailable(queueName, methodName)
@@ -90,19 +128,25 @@ export const createResilientQueue = <T extends Queue<any>>(
               operation: `queue.${queueName}.${methodName}`,
             }
           );
+        };
       }
 
       if (property === "addBulk") {
         const methodName = String(property);
 
-        return (...args: unknown[]) =>
-          safeRedisCall(
+        return (...args: unknown[]) => {
+          if (!isQueueRedisWritable()) {
+            return rejectQueueWriteUnavailable(queueName, methodName);
+          }
+
+          return safeRedisCall(
             () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
             () => throwQueueWriteUnavailable(queueName, methodName),
             {
               operation: `queue.${queueName}.${methodName}`,
             }
           );
+        };
       }
 
       return (...args: unknown[]) =>

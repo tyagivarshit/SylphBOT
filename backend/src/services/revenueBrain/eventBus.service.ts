@@ -3,11 +3,12 @@ import { Job, type JobsOptions, Queue, Worker } from "bullmq";
 import { env } from "../../config/env";
 import {
   getQueueRedisConnection,
-  getSharedRedisConnection,
+  getResilientSharedRedisConnection,
   getWorkerRedisConnection,
 } from "../../config/redis";
 import {
   buildQueueJobOptions,
+  createResilientQueue,
   withRedisWorkerFailSafe,
 } from "../../queues/queue.defaults";
 import logger from "../../utils/logger";
@@ -191,7 +192,7 @@ const getLocalDispatchState = () => {
 };
 
 const getRedisDispatchState = (): RevenueBrainDispatchState => {
-  const redis = getSharedRedisConnection();
+  const redis = getResilientSharedRedisConnection();
 
   return {
     hasProcessed: async (eventId, handlerId) =>
@@ -360,7 +361,7 @@ const queueLocalDispatch = (queuedEvent: RevenueBrainQueuedEvent) => {
 
 export const initRevenueBrainEventQueues = () => {
   if (!globalForRevenueBrainBus.__sylphRevenueBrainEventQueue) {
-    globalForRevenueBrainBus.__sylphRevenueBrainEventQueue =
+    globalForRevenueBrainBus.__sylphRevenueBrainEventQueue = createResilientQueue(
       new Queue<RevenueBrainQueuedEvent>(REVENUE_BRAIN_EVENT_QUEUE_NAME, {
         connection: getQueueRedisConnection(),
         prefix: env.AI_QUEUE_PREFIX,
@@ -370,11 +371,13 @@ export const initRevenueBrainEventQueues = () => {
             maxLen: 1000,
           },
         },
-      });
+      }),
+      REVENUE_BRAIN_EVENT_QUEUE_NAME
+    );
   }
 
   if (!globalForRevenueBrainBus.__sylphRevenueBrainEventDLQ) {
-    globalForRevenueBrainBus.__sylphRevenueBrainEventDLQ =
+    globalForRevenueBrainBus.__sylphRevenueBrainEventDLQ = createResilientQueue(
       new Queue<RevenueBrainDeadLetterEvent>(REVENUE_BRAIN_EVENT_DLQ_NAME, {
         connection: getQueueRedisConnection(),
         prefix: env.AI_QUEUE_PREFIX,
@@ -386,7 +389,9 @@ export const initRevenueBrainEventQueues = () => {
             maxLen: 1000,
           },
         },
-      });
+      }),
+      REVENUE_BRAIN_EVENT_DLQ_NAME
+    );
   }
 
   return {

@@ -2,10 +2,14 @@ import { Job, JobsOptions, Queue, Worker } from "bullmq";
 import { env } from "../../config/env";
 import {
   getQueueRedisConnection,
-  getSharedRedisConnection,
+  getResilientSharedRedisConnection,
   getWorkerRedisConnection,
 } from "../../config/redis";
-import { buildQueueJobOptions, withRedisWorkerFailSafe } from "../../queues/queue.defaults";
+import {
+  buildQueueJobOptions,
+  createResilientQueue,
+  withRedisWorkerFailSafe,
+} from "../../queues/queue.defaults";
 import logger from "../../utils/logger";
 import { acquireDistributedLock } from "../distributedLock.service";
 import { enforceSecurityGovernanceInfluence } from "../security/securityGovernanceOS.service";
@@ -31,9 +35,9 @@ const defaultJobOptions: JobsOptions = buildQueueJobOptions({
   },
 });
 
-const sharedRedis = new Proxy({} as ReturnType<typeof getSharedRedisConnection>, {
+const sharedRedis = new Proxy({} as ReturnType<typeof getResilientSharedRedisConnection>, {
   get(_target, property) {
-    const client = getSharedRedisConnection();
+    const client = getResilientSharedRedisConnection();
     const value = Reflect.get(client, property);
     return typeof value === "function" ? value.bind(client) : value;
   },
@@ -397,9 +401,8 @@ export const getCRMRefreshQueueKey = (businessId: string, leadId: string) =>
 
 export const initCRMRefreshQueue = () => {
   if (!globalForCRMRefresh.__sylphCRMRefreshQueue) {
-    globalForCRMRefresh.__sylphCRMRefreshQueue = new Queue<CRMRefreshWakeJob>(
-      CRM_REFRESH_QUEUE_NAME,
-      {
+    globalForCRMRefresh.__sylphCRMRefreshQueue = createResilientQueue(
+      new Queue<CRMRefreshWakeJob>(CRM_REFRESH_QUEUE_NAME, {
         connection: getQueueRedisConnection(),
         prefix: env.AI_QUEUE_PREFIX,
         defaultJobOptions,
@@ -408,7 +411,8 @@ export const initCRMRefreshQueue = () => {
             maxLen: 1000,
           },
         },
-      }
+      }),
+      CRM_REFRESH_QUEUE_NAME
     );
   }
 

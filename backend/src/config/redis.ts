@@ -2,10 +2,12 @@ import Redis, { type ChainableCommander, type RedisOptions } from "ioredis";
 import { env } from "./env";
 import {
   createEmptyRedisStream,
+  isRedisTransientError,
   isRedisHealthy,
   markRedisFailure,
   markRedisHealthy,
   safeRedisCall,
+  shouldLogRedisSkip,
 } from "../redis/redisSafety";
 import logger from "../utils/logger";
 
@@ -47,13 +49,7 @@ const globalForRedis = globalThis as typeof globalThis & {
   __sylphRedisReconnectStats?: RedisReconnectStats;
 };
 
-const isRetryableRedisError = (error: unknown) => {
-  const message = String((error as { message?: unknown })?.message || error || "");
-
-  return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly|Connection is in closed state/i.test(
-    message
-  );
-};
+const isRetryableRedisError = (error: unknown) => isRedisTransientError(error);
 
 const getRedisReconnectStats = () => {
   if (!globalForRedis.__sylphRedisReconnectStats) {
@@ -206,27 +202,86 @@ const isAlreadyConnectedError = (error: unknown) =>
 const isRedisClientWritable = (client?: ManagedRedisClient | null) =>
   Boolean(client && client.status === "ready");
 
+const REDIS_CONTROL_METHODS = new Set([
+  "connect",
+  "disconnect",
+  "quit",
+  "duplicate",
+  "on",
+  "once",
+  "off",
+  "emit",
+  "addlistener",
+  "removelistener",
+  "removealllisteners",
+  "listeners",
+  "listenercount",
+]);
+
+const shouldBypassRedisCommandDuringReconnect = (methodName: string) =>
+  methodName.length > 0 && !REDIS_CONTROL_METHODS.has(methodName.toLowerCase());
+
 const getMethodFallback = (methodName: string) => {
   switch (methodName) {
     case "get":
+    case "hget":
     case "set":
+    case "setex":
+    case "setnx":
     case "ping":
     case "call":
     case "eval":
       return null;
+    case "hgetall":
+      return {};
+    case "hmget":
+    case "hkeys":
+      return [];
+    case "pttl":
     case "ttl":
       return -1;
+    case "hset":
+    case "hdel":
+    case "hincrby":
+    case "incrby":
+    case "decrby":
+    case "pexpire":
+    case "expireat":
+    case "pexpireat":
+    case "persist":
+    case "publish":
+    case "sadd":
+    case "srem":
+    case "lpush":
+    case "rpush":
+    case "ltrim":
+    case "zincrby":
+    case "zrem":
+    case "zadd":
+      return 0;
+    case "hexists":
+    case "sismember":
+      return 0;
     case "del":
     case "expire":
     case "incr":
-    case "zadd":
     case "zremrangebyscore":
     case "zcard":
+    case "zcount":
     case "exists":
       return 0;
+    case "mset":
+      return "OK";
     case "mget":
+    case "smembers":
+    case "lrange":
+    case "zrange":
+    case "zrangebyscore":
     case "keys":
+    case "scan":
       return [];
+    case "zscore":
+      return null;
     default:
       return null;
   }
@@ -288,6 +343,13 @@ const createSafeRedisProxy = (client: ManagedRedisClient, label: string) =>
         return value;
       }
 
+      const methodName = String(property);
+
+      if (REDIS_CONTROL_METHODS.has(methodName.toLowerCase())) {
+        return (...args: unknown[]) =>
+          (value as (...methodArgs: unknown[]) => unknown).apply(target, args);
+      }
+
       if (property === "multi" || property === "pipeline") {
         return (...args: unknown[]) =>
           createSafeCommandChainProxy(
@@ -318,13 +380,34 @@ const createSafeRedisProxy = (client: ManagedRedisClient, label: string) =>
       }
 
       return (...args: unknown[]) =>
-        safeRedisCall(
-          () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
-          getMethodFallback(String(property)),
-          {
-            operation: `${label}.${String(property)}`,
+        {
+          const operation = `${label}.${methodName}`;
+
+          if (
+            !isRedisClientWritable(target) &&
+            shouldBypassRedisCommandDuringReconnect(methodName)
+          ) {
+            if (shouldLogRedisSkip(`${operation}:redis_not_ready`)) {
+              logger.warn(
+                {
+                  operation,
+                  status: target.status,
+                },
+                "Redis command bypassed while connection is not writable"
+              );
+            }
+
+            return Promise.resolve(getMethodFallback(methodName));
           }
-        );
+
+          return safeRedisCall(
+            () => (value as (...methodArgs: unknown[]) => unknown).apply(target, args),
+            getMethodFallback(methodName),
+            {
+              operation,
+            }
+          );
+        };
     },
   }) as ManagedRedisClient;
 
@@ -482,6 +565,8 @@ export const waitForRedisReady = async (input?: {
 };
 
 export const getSharedRedisConnection = () => ensureSharedRedisClient();
+
+export const getResilientSharedRedisConnection = () => ensureSharedRedisProxy();
 
 export const getQueueRedisConnection = () => ensureQueueRedisClient();
 

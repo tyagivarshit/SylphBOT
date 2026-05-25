@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getRedisReconnectSnapshot = exports.__redisRuntimeTestInternals = exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getSharedRedisConnection = exports.waitForRedisReady = exports.isRedisWritable = exports.isQueueRedisWritable = exports.isSharedRedisWritable = exports.initRedis = void 0;
+exports.getRedisReconnectSnapshot = exports.__redisRuntimeTestInternals = exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getResilientSharedRedisConnection = exports.getSharedRedisConnection = exports.waitForRedisReady = exports.isRedisWritable = exports.isQueueRedisWritable = exports.isSharedRedisWritable = exports.initRedis = void 0;
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
 const redisSafety_1 = require("../redis/redisSafety");
@@ -13,10 +13,7 @@ const MAX_RECONNECT_ATTEMPTS = Math.max(3, Number(process.env.REDIS_MAX_RECONNEC
 const REDIS_READY_POLL_MS = 50;
 const REDIS_RECONNECT_JITTER_MS = Math.max(10, Number(process.env.REDIS_RECONNECT_JITTER_MS || 180));
 const globalForRedis = globalThis;
-const isRetryableRedisError = (error) => {
-    const message = String(error?.message || error || "");
-    return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Socket closed unexpectedly|Connection is in closed state/i.test(message);
-};
+const isRetryableRedisError = (error) => (0, redisSafety_1.isRedisTransientError)(error);
 const getRedisReconnectStats = () => {
     if (!globalForRedis.__sylphRedisReconnectStats) {
         globalForRedis.__sylphRedisReconnectStats = {
@@ -129,27 +126,83 @@ const sleep = (ms) => new Promise((resolve) => {
 });
 const isAlreadyConnectedError = (error) => /already connecting|already connected/i.test(String(error?.message || error || ""));
 const isRedisClientWritable = (client) => Boolean(client && client.status === "ready");
+const REDIS_CONTROL_METHODS = new Set([
+    "connect",
+    "disconnect",
+    "quit",
+    "duplicate",
+    "on",
+    "once",
+    "off",
+    "emit",
+    "addlistener",
+    "removelistener",
+    "removealllisteners",
+    "listeners",
+    "listenercount",
+]);
+const shouldBypassRedisCommandDuringReconnect = (methodName) => methodName.length > 0 && !REDIS_CONTROL_METHODS.has(methodName.toLowerCase());
 const getMethodFallback = (methodName) => {
     switch (methodName) {
         case "get":
+        case "hget":
         case "set":
+        case "setex":
+        case "setnx":
         case "ping":
         case "call":
         case "eval":
             return null;
+        case "hgetall":
+            return {};
+        case "hmget":
+        case "hkeys":
+            return [];
+        case "pttl":
         case "ttl":
             return -1;
+        case "hset":
+        case "hdel":
+        case "hincrby":
+        case "incrby":
+        case "decrby":
+        case "pexpire":
+        case "expireat":
+        case "pexpireat":
+        case "persist":
+        case "publish":
+        case "sadd":
+        case "srem":
+        case "lpush":
+        case "rpush":
+        case "ltrim":
+        case "zincrby":
+        case "zrem":
+        case "zadd":
+            return 0;
+        case "hexists":
+        case "sismember":
+            return 0;
         case "del":
         case "expire":
         case "incr":
-        case "zadd":
         case "zremrangebyscore":
         case "zcard":
+        case "zcount":
         case "exists":
             return 0;
+        case "mset":
+            return "OK";
         case "mget":
+        case "smembers":
+        case "lrange":
+        case "zrange":
+        case "zrangebyscore":
         case "keys":
+        case "scan":
             return [];
+        case "zscore":
+            return null;
         default:
             return null;
     }
@@ -186,6 +239,10 @@ const createSafeRedisProxy = (client, label) => new Proxy(client, {
         if (typeof value !== "function") {
             return value;
         }
+        const methodName = String(property);
+        if (REDIS_CONTROL_METHODS.has(methodName.toLowerCase())) {
+            return (...args) => value.apply(target, args);
+        }
         if (property === "multi" || property === "pipeline") {
             return (...args) => createSafeCommandChainProxy(value.apply(target, args), `${label}.${String(property)}`);
         }
@@ -203,9 +260,22 @@ const createSafeRedisProxy = (client, label) => new Proxy(client, {
                 }
             };
         }
-        return (...args) => (0, redisSafety_1.safeRedisCall)(() => value.apply(target, args), getMethodFallback(String(property)), {
-            operation: `${label}.${String(property)}`,
-        });
+        return (...args) => {
+            const operation = `${label}.${methodName}`;
+            if (!isRedisClientWritable(target) &&
+                shouldBypassRedisCommandDuringReconnect(methodName)) {
+                if ((0, redisSafety_1.shouldLogRedisSkip)(`${operation}:redis_not_ready`)) {
+                    logger_1.default.warn({
+                        operation,
+                        status: target.status,
+                    }, "Redis command bypassed while connection is not writable");
+                }
+                return Promise.resolve(getMethodFallback(methodName));
+            }
+            return (0, redisSafety_1.safeRedisCall)(() => value.apply(target, args), getMethodFallback(methodName), {
+                operation,
+            });
+        };
     },
 });
 const getBullConnections = () => {
@@ -325,6 +395,8 @@ const waitForRedisReady = async (input) => {
 exports.waitForRedisReady = waitForRedisReady;
 const getSharedRedisConnection = () => ensureSharedRedisClient();
 exports.getSharedRedisConnection = getSharedRedisConnection;
+const getResilientSharedRedisConnection = () => ensureSharedRedisProxy();
+exports.getResilientSharedRedisConnection = getResilientSharedRedisConnection;
 const getQueueRedisConnection = () => ensureQueueRedisClient();
 exports.getQueueRedisConnection = getQueueRedisConnection;
 const getWorkerRedisConnection = () => trackBullConnection(createRedisClient(`worker:${++workerConnectionCounter}`));

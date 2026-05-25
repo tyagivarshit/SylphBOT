@@ -1,9 +1,10 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import { usePlan } from "@/hooks/usePlan"
 import { useSearchParams } from "next/navigation"
 import { apiFetch } from "@/lib/apiClient"
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
@@ -38,12 +39,14 @@ function LeadsPageContent(){
   const [page,setPage] = useState(1)
   const [totalPages,setTotalPages] = useState(1)
   const initialSelectedLeadId = searchParams.get("leadId")
+  const leadsRequestSequenceRef = useRef(0)
 
   const isAllowed = hasFeature(plan, "CRM")
 
   useEffect(()=>{
 
     const loadLeads = async()=>{
+      const requestSequence = ++leadsRequestSequenceRef.current
 
       try{
 
@@ -74,13 +77,30 @@ function LeadsPageContent(){
           throw new Error(response.message || "Failed to load leads");
         }
 
+        if (requestSequence !== leadsRequestSequenceRef.current) {
+          recordLifecycleEvent("stale_response_ignored", {
+            area: "leads_list",
+            requestSequence,
+          })
+          return
+        }
+
         setLeads(response.data.leads || [])
         setTotalPages(response.data.pagination?.totalPages || 1)
 
       }catch(err){
+        if (requestSequence !== leadsRequestSequenceRef.current) {
+          recordLifecycleEvent("stale_response_ignored", {
+            area: "leads_list_error",
+            requestSequence,
+          })
+          return
+        }
         console.error("Leads load error",err)
       }finally{
-        setLoading(false)
+        if (requestSequence === leadsRequestSequenceRef.current) {
+          setLoading(false)
+        }
       }
 
     }

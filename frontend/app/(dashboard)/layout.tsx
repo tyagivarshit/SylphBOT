@@ -60,6 +60,35 @@ function AuthStateCard({ message }: { message: string }) {
   );
 }
 
+function ShellHydrationPlaceholder({ message }: { message: string }) {
+  return (
+    <div className="space-y-5">
+      <div className="brand-section-shell rounded-[28px] p-5">
+        <div className="space-y-3">
+          <div className="h-2 w-36 animate-pulse rounded-full bg-slate-200/85" />
+          <div className="h-2 w-52 animate-pulse rounded-full bg-slate-200/75" />
+          <div className="h-2 w-44 animate-pulse rounded-full bg-slate-200/65" />
+        </div>
+        <p className="mt-4 text-sm text-slate-500">{message}</p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-28 animate-pulse rounded-[24px] border border-slate-200/80 bg-white/78"
+          />
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="h-72 animate-pulse rounded-[26px] border border-slate-200/80 bg-white/80 lg:col-span-2" />
+        <div className="h-72 animate-pulse rounded-[26px] border border-slate-200/80 bg-white/80" />
+      </div>
+    </div>
+  );
+}
+
 function UpgradeModal({
   state,
   onClose,
@@ -183,28 +212,29 @@ export default function DashboardLayout({
 }) {
   const { user, loading, lifecycleState } = useAuth();
   const router = useRouter();
-  const bootstrapActive =
+  const authConverging =
     loading ||
     lifecycleState === "authenticating" ||
     lifecycleState === "session_stabilizing" ||
     lifecycleState === "retrying" ||
     lifecycleState === "authenticated";
+  const terminalAnonymous =
+    !user &&
+    (lifecycleState === "failed_terminal" || lifecycleState === "anonymous");
+  const holdChildHydration = authConverging || !user;
 
   const [open, setOpen] = useState(false);
   const [upgradeState, setUpgradeState] = useState<OpenUpgradeOptions | null>(null);
 
   useEffect(() => {
-    if (bootstrapActive) {
+    if (authConverging) {
       return;
     }
 
-    if (
-      !user &&
-      (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
-    ) {
+    if (terminalAnonymous) {
       router.replace("/auth/login");
     }
-  }, [bootstrapActive, lifecycleState, router, user]);
+  }, [authConverging, router, terminalAnonymous]);
 
   useEffect(() => {
     const handleEsc = (event: KeyboardEvent) => {
@@ -240,23 +270,18 @@ export default function DashboardLayout({
     []
   );
 
-  if (bootstrapActive) {
-    const message =
-      lifecycleState === "authenticating"
-        ? "Signing you in securely..."
-        : lifecycleState === "authenticated"
-        ? "Hydrating your workspace..."
-        : "Stabilizing your secure session...";
+  if (terminalAnonymous) {
+    const message = "Redirecting to secure sign-in...";
     return <AuthStateCard message={message} />;
   }
 
-  if (!user) {
-    const message =
-      lifecycleState === "hydrated"
-        ? "Finalizing secure sign-in..."
-        : "Redirecting to secure sign-in...";
-    return <AuthStateCard message={message} />;
-  }
+  const shellMessage = holdChildHydration
+    ? lifecycleState === "authenticating"
+      ? "Signing you in securely..."
+      : lifecycleState === "authenticated"
+      ? "Hydrating your workspace..."
+      : "Stabilizing your workspace session..."
+    : "";
 
   return (
     <UpgradeContext.Provider value={upgradeContextValue}>
@@ -269,7 +294,11 @@ export default function DashboardLayout({
 
             <main className="brand-content-scroll brand-scrollbar">
               <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 pb-6 sm:gap-6">
-                {children}
+                {holdChildHydration ? (
+                  <ShellHydrationPlaceholder message={shellMessage} />
+                ) : (
+                  children
+                )}
               </div>
             </main>
           </div>

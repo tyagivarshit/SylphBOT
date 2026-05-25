@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/apiClient";
 import { socket } from "@/lib/socket";
 import { setDashboardRoutePrefetchPaused } from "@/lib/dashboardRoutePrefetch";
 import { SkeletonCard } from "@/components/ui/feedback";
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 
 export interface Lead {
   id: string;
@@ -227,6 +228,8 @@ function ConversationsPageContent() {
   const leadIdFromQuery = searchParams.get("leadId");
   const seenStateRef = useRef<SeenConversationState>({});
   const selectedLeadRef = useRef<Lead | null>(null);
+  const leadsRequestSequenceRef = useRef(0);
+  const messagesRequestSequenceRef = useRef(0);
 
   useEffect(() => {
     setDashboardRoutePrefetchPaused(true);
@@ -327,6 +330,8 @@ function ConversationsPageContent() {
   }, []);
 
   const fetchLeads = useCallback(async () => {
+    const requestSequence = ++leadsRequestSequenceRef.current;
+
     try {
       setLeadsLoading(true);
       setLeadsError(null);
@@ -340,6 +345,14 @@ function ConversationsPageContent() {
 
       if (!response.success) {
         throw new Error(response.message || "We couldn't load your conversations.");
+      }
+
+      if (requestSequence !== leadsRequestSequenceRef.current) {
+        recordLifecycleEvent("stale_response_ignored", {
+          area: "conversations_leads",
+          requestSequence,
+        });
+        return;
       }
 
       const persistedSeenState = readSeenConversationState();
@@ -366,6 +379,14 @@ function ConversationsPageContent() {
         setSelectedLead(nextLeads[0]);
       }
     } catch (fetchError) {
+      if (requestSequence !== leadsRequestSequenceRef.current) {
+        recordLifecycleEvent("stale_response_ignored", {
+          area: "conversations_leads_error",
+          requestSequence,
+        });
+        return;
+      }
+
       console.error(fetchError);
       setLeads([]);
       setLeadsError(
@@ -374,7 +395,9 @@ function ConversationsPageContent() {
           : "We couldn't load your conversations."
       );
     } finally {
-      setLeadsLoading(false);
+      if (requestSequence === leadsRequestSequenceRef.current) {
+        setLeadsLoading(false);
+      }
     }
   }, [isMobileView, leadIdFromQuery]);
 
@@ -384,6 +407,9 @@ function ConversationsPageContent() {
 
   const fetchMessages = useCallback(
     async (lead: Lead) => {
+      const requestSequence = ++messagesRequestSequenceRef.current;
+      const requestLeadId = lead.id;
+
       try {
         setMessagesLoading(true);
         setMessagesError(null);
@@ -403,6 +429,18 @@ function ConversationsPageContent() {
           throw new Error(response.message || "We couldn't load this conversation yet.");
         }
 
+        if (
+          requestSequence !== messagesRequestSequenceRef.current ||
+          selectedLeadRef.current?.id !== requestLeadId
+        ) {
+          recordLifecycleEvent("stale_response_ignored", {
+            area: "conversation_messages",
+            requestSequence,
+            requestLeadId,
+          });
+          return;
+        }
+
         const fetchedMessages = (response.data?.messages || []).map((message: unknown) =>
           normalizeMessage(message)
         );
@@ -416,6 +454,18 @@ function ConversationsPageContent() {
           seenUnreadCount: activeRawUnreadCount,
         });
       } catch (fetchError) {
+        if (
+          requestSequence !== messagesRequestSequenceRef.current ||
+          selectedLeadRef.current?.id !== requestLeadId
+        ) {
+          recordLifecycleEvent("stale_response_ignored", {
+            area: "conversation_messages_error",
+            requestSequence,
+            requestLeadId,
+          });
+          return;
+        }
+
         console.error(fetchError);
         setMessages([]);
         setMessagesError(
@@ -424,7 +474,9 @@ function ConversationsPageContent() {
             : "We couldn't load this conversation yet."
         );
       } finally {
-        setMessagesLoading(false);
+        if (requestSequence === messagesRequestSequenceRef.current) {
+          setMessagesLoading(false);
+        }
       }
     },
     [markLeadAsSeen]

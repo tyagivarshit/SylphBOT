@@ -1,14 +1,16 @@
 "use client";
 
-import { useAuth } from "@/context/AuthContext";
+import { useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import LeadsChart from "@/components/charts/LeadsCharts";
 import UsageOverview from "@/components/dashboard/UsageOverview";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 import { getActiveConversations, getDashboardStats } from "@/lib/dashboard.api";
 import { useUpgrade } from "@/app/(dashboard)/layout";
+import { useAuth } from "@/context/AuthContext";
+import { useProgressiveHydration } from "@/hooks/useProgressiveHydration";
 import { EmptyState, RetryState, SkeletonCard } from "@/components/ui/feedback";
 
 type DashboardValue = number | string;
@@ -48,104 +50,159 @@ const EMPTY_CONVERSATION_STATS: ConversationStats = {
   resolved: 0,
 };
 
+const parseConversationStats = (value: unknown): ConversationStats => {
+  if (!value || typeof value !== "object") {
+    return EMPTY_CONVERSATION_STATS;
+  }
+
+  const payload = value as Partial<ConversationStats>;
+
+  return {
+    active: payload.active ?? 0,
+    waitingReplies: payload.waitingReplies ?? 0,
+    resolved: payload.resolved ?? 0,
+  };
+};
+
 export default function DashboardPage() {
-  const { user, loading, lifecycleState } = useAuth();
+  const { user, lifecycleState } = useAuth();
   const { openUpgrade } = useUpgrade();
   const router = useRouter();
+  const deferredTriggerRef = useRef<HTMLDivElement | null>(null);
 
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [convo, setConvo] = useState<ConversationStats>(EMPTY_CONVERSATION_STATS);
-  const [limited, setLimited] = useState(false);
-  const [pageLoading, setPageLoading] = useState(true);
-  const [conversationUnavailable, setConversationUnavailable] = useState(false);
-  const [error, setError] = useState("");
+  const authStable = Boolean(user) && lifecycleState === "hydrated";
+  const workspaceKey = user?.businessId || user?.workspace?.id || user?.id || "none";
 
-  useEffect(() => {
-    if (
-      !loading &&
-      !user &&
-      (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
-    ) {
-      router.replace("/auth/login");
-    }
-  }, [lifecycleState, loading, router, user]);
+  const statsQuery = useQuery({
+    queryKey: ["dashboard", "critical", "stats", workspaceKey],
+    enabled: authStable,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const response = await getDashboardStats();
 
-  const loadDashboard = useCallback(async () => {
-    if (!user) {
-      setPageLoading(false);
-      return;
-    }
-
-    try {
-      setPageLoading(true);
-      setError("");
-      setConversationUnavailable(false);
-      setConvo(EMPTY_CONVERSATION_STATS);
-
-      const statsResult = await getDashboardStats();
-
-      if (
-        statsResult.unauthorized &&
-        (lifecycleState === "failed_terminal" || lifecycleState === "anonymous")
-      ) {
-        router.replace("/auth/login");
-        return;
+      if (response.unauthorized) {
+        throw new Error("Your session expired. Please sign in again.");
       }
 
-      if (!statsResult.success || !statsResult.data) {
+      if (!response.success || !response.data) {
         throw new Error(
-          statsResult.message || "We couldn't load your dashboard right now."
+          response.message || "We couldn't load your dashboard right now."
         );
       }
 
-      setStats(statsResult.data as DashboardStats);
-      setLimited(Boolean(statsResult.limited));
+      return response;
+    },
+  });
 
-      // Stagger non-critical panel hydration to avoid request spikes on initial load.
-      setTimeout(() => {
-        void (async () => {
-          const convoResult = await getActiveConversations().catch(() => null);
-          if (convoResult?.success && convoResult.data) {
-            setConvo(convoResult.data as ConversationStats);
-            return;
-          }
-          setConversationUnavailable(true);
-        })();
-      }, 120);
-    } catch (dashboardError) {
-      console.error("Dashboard error", dashboardError);
-      setError("We couldn't load your dashboard right now.");
-    } finally {
-      setPageLoading(false);
-    }
-  }, [lifecycleState, router, user]);
+  const criticalSettled = statsQuery.isSuccess || statsQuery.isError;
+  const importantEnabled = authStable && criticalSettled && statsQuery.isSuccess;
+
+  const conversationQuery = useQuery({
+    queryKey: ["dashboard", "important", "conversations", workspaceKey],
+    enabled: importantEnabled,
+    staleTime: 45_000,
+    retry: 1,
+    queryFn: async () => {
+      const response = await getActiveConversations();
+
+      if (!response?.success || !response.data) {
+        throw new Error(
+          response?.message ||
+            "Conversation insights are temporarily unavailable."
+        );
+      }
+
+      return parseConversationStats(response.data);
+    },
+  });
+
+  const importantSettled =
+    !importantEnabled || conversationQuery.isSuccess || conversationQuery.isError;
+
+  const {
+    canLoadDeferred,
+    markDeferredHydrationComplete,
+    requestDeferredHydration,
+  } = useProgressiveHydration({
+    authStable,
+    criticalSettled,
+    importantSettled,
+  });
 
   useEffect(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
+    if (!importantSettled) {
+      return;
+    }
 
-  if (loading || (pageLoading && Boolean(user))) {
+    const target = deferredTriggerRef.current;
+    if (!target || typeof IntersectionObserver === "undefined") {
+      requestDeferredHydration("dashboard_deferred_fallback");
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const becameVisible = entries.some((entry) => entry.isIntersecting);
+        if (!becameVisible) {
+          return;
+        }
+
+        requestDeferredHydration("dashboard_deferred_visible");
+        observer.disconnect();
+      },
+      { rootMargin: "180px 0px" }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [importantSettled, requestDeferredHydration]);
+
+  useEffect(() => {
+    if (!canLoadDeferred) {
+      return;
+    }
+
+    markDeferredHydrationComplete("dashboard_deferred_sections");
+  }, [canLoadDeferred, markDeferredHydrationComplete]);
+
+  if (statsQuery.isPending) {
     return <DashboardSkeleton />;
   }
 
-  if (error) {
+  if (statsQuery.isError) {
     return (
       <RetryState
         title="Dashboard unavailable"
-        description={error}
-        onRetry={() => void loadDashboard()}
+        description={
+          statsQuery.error instanceof Error
+            ? statsQuery.error.message
+            : "We couldn't load your dashboard right now."
+        }
+        onRetry={() => void statsQuery.refetch()}
       />
     );
   }
 
-  if (!user || !stats) {
-    return null;
+  const statsPayload = statsQuery.data;
+  const stats = statsPayload?.data as DashboardStats | undefined;
+
+  if (!stats) {
+    return (
+      <RetryState
+        title="Dashboard unavailable"
+        description="Dashboard stats are still stabilizing. Please retry."
+        onRetry={() => void statsQuery.refetch()}
+      />
+    );
   }
 
+  const limited = Boolean(statsPayload?.limited);
   const premiumLocked = Boolean(stats.premiumLocked);
   const qualifiedValue: DashboardValue = premiumLocked
     ? "Upgrade required"
     : stats.qualifiedLeads;
+  const conversationStats = conversationQuery.data || EMPTY_CONVERSATION_STATS;
+  const conversationUnavailable = importantEnabled && conversationQuery.isError;
 
   return (
     <div className="relative min-w-0 space-y-6">
@@ -201,12 +258,10 @@ export default function DashboardPage() {
 
       {conversationUnavailable ? (
         <div className="rounded-[22px] border border-slate-200 bg-white/82 px-4 py-3 text-sm text-slate-600">
-          Conversation insights are temporarily unavailable. Core dashboard metrics are still live.
+          Conversation insights are temporarily unavailable. Core dashboard metrics
+          are still live.
         </div>
       ) : null}
-
-      <OnboardingFlow />
-      <UsageOverview />
 
       <div className="space-y-3.5 md:hidden">
         <div className="grid grid-cols-2 gap-2.5">
@@ -217,9 +272,9 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-3 gap-2.5">
-          <MiniCard title="Active" value={convo.active} />
-          <MiniCard title="Waiting" value={convo.waitingReplies} />
-          <MiniCard title="Resolved" value={convo.resolved} />
+          <MiniCard title="Active" value={conversationStats.active} />
+          <MiniCard title="Waiting" value={conversationStats.waitingReplies} />
+          <MiniCard title="Resolved" value={conversationStats.resolved} />
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-3 backdrop-blur-xl">
@@ -263,9 +318,9 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-3 gap-4">
-          <Card title="Active" value={convo.active} />
-          <Card title="Waiting Replies" value={convo.waitingReplies} />
-          <Card title="Resolved" value={convo.resolved} />
+          <Card title="Active" value={conversationStats.active} />
+          <Card title="Waiting Replies" value={conversationStats.waitingReplies} />
+          <Card title="Resolved" value={conversationStats.resolved} />
         </div>
 
         <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
@@ -288,6 +343,20 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      <div ref={deferredTriggerRef} className="h-1 w-full" />
+
+      {canLoadDeferred ? (
+        <>
+          <OnboardingFlow />
+          <UsageOverview />
+        </>
+      ) : (
+        <div className="space-y-4">
+          <SkeletonCard className="h-36" />
+          <SkeletonCard className="h-52" />
+        </div>
+      )}
     </div>
   );
 }

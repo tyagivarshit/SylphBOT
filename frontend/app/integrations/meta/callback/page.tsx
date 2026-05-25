@@ -5,6 +5,7 @@ import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiClient, apiFetch } from "@/lib/apiClient";
 import { buildAppUrl, fetchClientConnectionStatus } from "@/lib/userApi";
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 
 type PairOption = {
   facebookPageId: string;
@@ -466,8 +467,25 @@ function MetaCallbackContent() {
           }
         }
 
+        const baseDelayMs = Math.min(
+          6_000,
+          1_200 + attempt * 180 + Math.floor(Math.random() * 120)
+        );
+        const delayMs =
+          typeof document !== "undefined" && document.visibilityState === "hidden"
+            ? Math.min(8_500, baseDelayMs + 1_800)
+            : baseDelayMs;
+
+        if (attempt > 0) {
+          recordLifecycleEvent("polling_backoff_applied", {
+            area: "meta_oauth_lifecycle",
+            attempt: attempt + 1,
+            delayMs,
+          });
+        }
+
         await new Promise((resolve) => {
-          setTimeout(resolve, 1500);
+          setTimeout(resolve, delayMs);
         });
       }
 

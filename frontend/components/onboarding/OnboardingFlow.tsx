@@ -13,6 +13,7 @@ import {
   type OnboardingSnapshot,
 } from "@/lib/onboarding";
 import { buildAppUrl } from "@/lib/url";
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 
 type StepItem = {
   number: number;
@@ -154,6 +155,62 @@ const getProjectionStatusCopy = (state?: string | null) => {
   return null;
 };
 
+const ONBOARDING_BASE_REFETCH_MS = 12_000;
+const ONBOARDING_MAX_BACKOFF_MS = 90_000;
+
+const resolveOnboardingRefetchMs = (query: unknown) => {
+  const safeQuery =
+    query && typeof query === "object"
+      ? (query as {
+          state?: {
+            fetchFailureCount?: unknown;
+            data?: {
+              success?: boolean;
+              data?: OnboardingSnapshot | null;
+            };
+          };
+        })
+      : null;
+
+  const fetchFailureCount = Number(safeQuery?.state?.fetchFailureCount || 0);
+
+  if (fetchFailureCount > 0) {
+    const delayMs = Math.min(
+      ONBOARDING_MAX_BACKOFF_MS,
+      ONBOARDING_BASE_REFETCH_MS * 2 ** Math.min(fetchFailureCount - 1, 3) +
+        Math.floor(Math.random() * 300)
+    );
+
+    recordLifecycleEvent("polling_backoff_applied", {
+      area: "onboarding_projection",
+      fetchFailureCount,
+      delayMs,
+    });
+
+    return delayMs;
+  }
+
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    return 90_000;
+  }
+
+  const payload = safeQuery?.state?.data;
+  if (!payload?.success || !payload.data) {
+    return 25_000;
+  }
+
+  const projectionState = String(
+    payload.data.integrationProjection?.processingState || ""
+  )
+    .trim()
+    .toUpperCase();
+  if (isProjectionProcessingState(projectionState)) {
+    return 8_000;
+  }
+
+  return payload.data.onboardingCompleted ? 90_000 : 25_000;
+};
+
 export default function OnboardingFlow() {
   const searchParams = useSearchParams();
 
@@ -162,22 +219,8 @@ export default function OnboardingFlow() {
     queryFn: getOnboardingSnapshot,
     staleTime: 15_000,
     refetchOnWindowFocus: false,
-    refetchInterval: (query) => {
-      const payload = query.state.data;
-      if (!payload?.success || !payload.data) {
-        return 4_000;
-      }
-
-      const projectionState = String(
-        payload.data.integrationProjection?.processingState || ""
-      )
-        .trim()
-        .toUpperCase();
-      if (isProjectionProcessingState(projectionState)) {
-        return 2_500;
-      }
-      return payload.data.onboardingCompleted ? 60_000 : 12_000;
-    },
+    refetchInterval: (query) => resolveOnboardingRefetchMs(query),
+    refetchIntervalInBackground: false,
   });
 
   const onboarding = onboardingQuery.data?.success

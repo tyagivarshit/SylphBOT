@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/apiClient";
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 
 export function useNotifications() {
   const qc = useQueryClient();
@@ -20,7 +21,30 @@ export function useNotifications() {
 
       return response.data;
     },
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const failureCount = query.state.fetchFailureCount || 0;
+
+      if (failureCount > 0) {
+        const delayMs = Math.min(
+          120_000,
+          15_000 * 2 ** Math.min(failureCount - 1, 3) +
+            Math.floor(Math.random() * 250)
+        );
+        recordLifecycleEvent("polling_backoff_applied", {
+          area: "notifications",
+          failureCount,
+          delayMs,
+        });
+        return delayMs;
+      }
+
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return 120_000;
+      }
+
+      return 30_000;
+    },
+    refetchIntervalInBackground: false,
   });
 
   const markRead = useMutation({

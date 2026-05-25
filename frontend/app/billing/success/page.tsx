@@ -8,6 +8,7 @@ import {
   type CheckoutConfirmResponse,
 } from "@/lib/billing";
 import { apiFetch } from "@/lib/apiClient";
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 
 type BillingPayload = {
   success?: boolean;
@@ -52,18 +53,38 @@ const resolvePollingDelayMs = (
   confirmResult: CheckoutConfirmResponse | null,
   attempt: number
 ) => {
+  const jitter = Math.floor(Math.random() * 180);
+
   const serverSuggestedMs = Number(confirmResult?.retryAfterMs || 0);
   if (Number.isFinite(serverSuggestedMs) && serverSuggestedMs > 0) {
-    return Math.max(
+    const delayMs = Math.max(
       900,
-      Math.min(CHECKOUT_CONFIRM_MAX_DELAY_MS, Math.floor(serverSuggestedMs))
+      Math.min(
+        CHECKOUT_CONFIRM_MAX_DELAY_MS,
+        Math.floor(serverSuggestedMs) + jitter
+      )
     );
+
+    recordLifecycleEvent("polling_backoff_applied", {
+      area: "checkout_confirmation",
+      attempt,
+      delayMs,
+      source: "server_hint",
+    });
+    return delayMs;
   }
 
-  return Math.min(
+  const delayMs = Math.min(
     CHECKOUT_CONFIRM_MAX_DELAY_MS,
-    CHECKOUT_CONFIRM_MIN_DELAY_MS + attempt * 350
+    CHECKOUT_CONFIRM_MIN_DELAY_MS + attempt * 350 + jitter
   );
+  recordLifecycleEvent("polling_backoff_applied", {
+    area: "checkout_confirmation",
+    attempt,
+    delayMs,
+    source: "client_backoff",
+  });
+  return delayMs;
 };
 
 const normalizePlanKey = (value?: string | null) =>

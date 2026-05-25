@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/apiClient";
 import { setDashboardRoutePrefetchPaused } from "@/lib/dashboardRoutePrefetch";
 import LoadingButton from "@/components/ui/LoadingButton";
 import { SkeletonCard } from "@/components/ui/feedback";
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 
 type Currency = "INR" | "USD";
 type BillingCycle = "monthly" | "yearly";
@@ -99,7 +100,9 @@ const DEFAULT_BILLING_CONTEXT: BillingContext = {
 const BILLING_SNAPSHOT_ENDPOINT = "/api/billing?surface=checkout";
 const BILLING_API_TIMEOUT_MS = 7_000;
 const BILLING_BOOTSTRAP_CACHE_TTL_MS = 30_000;
-const BILLING_BACKGROUND_REFRESH_INTERVAL_MS = 90_000;
+const BILLING_BACKGROUND_REFRESH_BASE_MS = 90_000;
+const BILLING_BACKGROUND_REFRESH_HIDDEN_MS = 180_000;
+const BILLING_BACKGROUND_REFRESH_MAX_MS = 420_000;
 const BILLING_REQUEST_COOLDOWN_MS = 1_200;
 const BILLING_FAILURE_COOLDOWN_MS = 8_000;
 
@@ -498,9 +501,11 @@ function BillingPageContent() {
   const hasLoadedBillingRef = useRef(false);
   const hasLoadedPlansRef = useRef(false);
   const checkoutLockRef = useRef(false);
-  const loadBillingInFlightRef = useRef<Promise<void> | null>(null);
+  const loadBillingInFlightRef = useRef<Promise<boolean> | null>(null);
   const initialTelemetryRecordedRef = useRef(false);
   const checkoutPauseTelemetryLastAtRef = useRef(0);
+  const backgroundFailureCountRef = useRef(0);
+  const backgroundRefreshTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     setDashboardRoutePrefetchPaused(true);
@@ -581,6 +586,8 @@ function BillingPageContent() {
     }
 
     const run = async () => {
+      let successfulRefresh = false;
+
       try {
         if (!initialTelemetryRecordedRef.current) {
           initialTelemetryRecordedRef.current = true;
@@ -654,6 +661,7 @@ function BillingPageContent() {
         }
 
         setLoadWarning(warnings.length ? warnings.join(" ") : null);
+        successfulRefresh = Boolean(snapshot.billingData || snapshot.plansData);
       } catch (loadError) {
         if (!hasLoadedPlansRef.current) {
           setPlansRequestFailed(true);
@@ -663,6 +671,7 @@ function BillingPageContent() {
             ? loadError.message
             : "Some billing data could not be loaded."
         );
+        successfulRefresh = false;
       } finally {
         if (!isBackground) {
           setPageLoading(false);
@@ -670,13 +679,15 @@ function BillingPageContent() {
           setBackgroundRefreshing(false);
         }
       }
+
+      return successfulRefresh;
     };
 
     const pending = run().finally(() => {
       loadBillingInFlightRef.current = null;
     });
     loadBillingInFlightRef.current = pending;
-    await pending;
+    return pending;
   }, [
     applyBillingState,
     applyPlansState,
@@ -685,30 +696,89 @@ function BillingPageContent() {
   ]);
 
   useEffect(() => {
-    void loadBilling();
+    let cancelled = false;
 
-    const interval = window.setInterval(() => {
-      if (checkoutLockRef.current || loading || checkoutPending) {
-        const now = Date.now();
-        if (now - checkoutPauseTelemetryLastAtRef.current > 3_000) {
-          checkoutPauseTelemetryLastAtRef.current = now;
-          recordBillingTelemetry("checkout_background_refresh_paused", {
-            loadingPlan: loading,
-            checkoutPending,
-          });
-        }
+    const clearScheduledRefresh = () => {
+      if (backgroundRefreshTimeoutRef.current === null) {
         return;
       }
+
+      window.clearTimeout(backgroundRefreshTimeoutRef.current);
+      backgroundRefreshTimeoutRef.current = null;
+    };
+
+    const getNextRefreshDelayMs = () => {
+      const failureCount = backgroundFailureCountRef.current;
+      if (failureCount > 0) {
+        const backoffDelayMs = Math.min(
+          BILLING_BACKGROUND_REFRESH_MAX_MS,
+          BILLING_BACKGROUND_REFRESH_BASE_MS *
+            2 ** Math.min(failureCount - 1, 3) +
+            Math.floor(Math.random() * 450)
+        );
+
+        recordLifecycleEvent("polling_backoff_applied", {
+          area: "billing_background_refresh",
+          failureCount,
+          delayMs: backoffDelayMs,
+        });
+
+        return backoffDelayMs;
+      }
+
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return BILLING_BACKGROUND_REFRESH_HIDDEN_MS;
+      }
+
+      return BILLING_BACKGROUND_REFRESH_BASE_MS;
+    };
+
+    const scheduleNextRefresh = (delayMs: number) => {
+      clearScheduledRefresh();
+
+      if (cancelled) {
         return;
       }
-      void loadBilling({
-        background: true,
-      });
-    }, BILLING_BACKGROUND_REFRESH_INTERVAL_MS);
+
+      backgroundRefreshTimeoutRef.current = window.setTimeout(async () => {
+        if (cancelled) {
+          return;
+        }
+
+        if (checkoutLockRef.current || loading || checkoutPending) {
+          const now = Date.now();
+          if (now - checkoutPauseTelemetryLastAtRef.current > 3_000) {
+            checkoutPauseTelemetryLastAtRef.current = now;
+            recordBillingTelemetry("checkout_background_refresh_paused", {
+              loadingPlan: loading,
+              checkoutPending,
+            });
+          }
+
+          scheduleNextRefresh(getNextRefreshDelayMs());
+          return;
+        }
+
+        const successfulRefresh = await loadBilling({
+          background: true,
+        });
+
+        backgroundFailureCountRef.current = successfulRefresh
+          ? 0
+          : backgroundFailureCountRef.current + 1;
+
+        scheduleNextRefresh(getNextRefreshDelayMs());
+      }, Math.max(1_000, Math.floor(delayMs)));
+    };
+
+    void loadBilling().then((successful) => {
+      backgroundFailureCountRef.current = successful ? 0 : 1;
+      scheduleNextRefresh(getNextRefreshDelayMs());
+    });
 
     return () => {
-      window.clearInterval(interval);
+      cancelled = true;
+      clearScheduledRefresh();
     };
   }, [checkoutPending, loadBilling, loading]);
 

@@ -4,6 +4,7 @@ import axios, {
   type AxiosResponse,
 } from "axios";
 import { getApiBaseUrl } from "@/lib/url";
+import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ApiResponse<T = any> = {
@@ -386,6 +387,10 @@ export async function apiFetch<T = any>(
   const existing = inflightRequests.get(dedupeKey) as Promise<ApiResponse<T>> | undefined;
 
   if (existing) {
+    recordLifecycleEvent("duplicate_request_prevented", {
+      dedupeKey,
+      strategy: "inflight_get_coalescing",
+    });
     return existing;
   }
 

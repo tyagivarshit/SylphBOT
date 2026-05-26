@@ -90,6 +90,11 @@ const withLifecycleBudget = async (input) => {
     });
     const outcome = await Promise.race([taskOutcome, timeoutOutcome]);
     if (outcome.timedOut) {
+        (0, requestLifecycle_1.markRequestLifecycleAborted)({
+            req: input.req,
+            res: input.res,
+            reason: "request_timeout",
+        });
         console.warn("REQUEST_ABORTED", {
             requestId: input.req.requestId || null,
             route: input.req.originalUrl,
@@ -132,7 +137,7 @@ const getAnalyticsOverview = async (req, res) => {
                 aiReplies: 0,
                 bookings: 0,
             },
-            task: () => service.getOverview(businessId, range),
+            task: () => service.getOverview(businessId, range, req),
         });
         if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
             return;
@@ -158,7 +163,7 @@ const getAnalyticsCharts = async (req, res) => {
             res,
             label: "analytics_charts",
             fallback: [],
-            task: () => service.getCharts(businessId, range),
+            task: () => service.getCharts(businessId, range, req),
         });
         if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
             return;
@@ -183,7 +188,7 @@ const getConversionFunnel = async (req, res) => {
             res,
             label: "analytics_funnel",
             fallback: {},
-            task: () => service.getFunnel(businessId),
+            task: () => service.getFunnel(businessId, req),
         });
         if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
             return;
@@ -208,7 +213,7 @@ const getTopSources = async (req, res) => {
             res,
             label: "analytics_sources",
             fallback: [],
-            task: () => service.getSources(businessId),
+            task: () => service.getSources(businessId, req),
         });
         if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
             return;

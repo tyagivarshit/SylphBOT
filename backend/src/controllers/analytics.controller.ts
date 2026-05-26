@@ -13,6 +13,7 @@ import {
   getRequestRemainingMs,
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
+  markRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
 
 const getBusinessId = async (
@@ -86,6 +87,11 @@ const withLifecycleBudget = async <T>(input: {
 
   const outcome = await Promise.race([taskOutcome, timeoutOutcome]);
   if (outcome.timedOut) {
+    markRequestLifecycleAborted({
+      req: input.req,
+      res: input.res,
+      reason: "request_timeout",
+    });
     console.warn("REQUEST_ABORTED", {
       requestId: input.req.requestId || null,
       route: input.req.originalUrl,
@@ -133,7 +139,7 @@ export const getAnalyticsOverview = async (req: Request, res: Response) => {
         aiReplies: 0,
         bookings: 0,
       },
-      task: () => service.getOverview(businessId, range),
+      task: () => service.getOverview(businessId, range, req),
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;
@@ -161,7 +167,7 @@ export const getAnalyticsCharts = async (req: Request, res: Response) => {
       res,
       label: "analytics_charts",
       fallback: [] as Array<{ date: string; leads: number }>,
-      task: () => service.getCharts(businessId, range),
+      task: () => service.getCharts(businessId, range, req),
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;
@@ -188,7 +194,7 @@ export const getConversionFunnel = async (req: Request, res: Response) => {
       res,
       label: "analytics_funnel",
       fallback: {} as Record<string, unknown>,
-      task: () => service.getFunnel(businessId),
+      task: () => service.getFunnel(businessId, req),
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;
@@ -215,7 +221,7 @@ export const getTopSources = async (req: Request, res: Response) => {
       res,
       label: "analytics_sources",
       fallback: [] as Array<{ name: string; value: number }>,
-      task: () => service.getSources(businessId),
+      task: () => service.getSources(businessId, req),
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;

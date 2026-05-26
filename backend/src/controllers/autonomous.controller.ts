@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { getAutonomousDashboard } from "../services/autonomous/dashboard.service";
-import { getProjectionSnapshot } from "../services/projectionCoordinator.service";
+import { getIsolatedProjectionSnapshot } from "../analytics/isolatedCache";
 import { runAutonomousSchedulerAsLeader } from "../services/autonomous/scheduler.service";
 import {
   applyManualIntelligenceOverride,
@@ -86,7 +86,7 @@ export const getAutonomousDashboardController = async (
       });
     }
 
-    const projection = await getProjectionSnapshot({
+    const projection = await getIsolatedProjectionSnapshot({
       cacheKey: `autonomous:dashboard:v1:${businessId}`,
       label: "autonomous_dashboard_projection",
       businessId,
@@ -96,7 +96,10 @@ export const getAutonomousDashboardController = async (
       initialWaitMs: AUTONOMOUS_PROJECTION_WAIT_MS,
       requestSignal: getRequestAbortSignal({ req, res }),
       fallback: buildAutonomousDashboardFallback(),
-      compute: () => getAutonomousDashboard(businessId),
+      compute: () =>
+        getAutonomousDashboard(businessId, {
+          requestSignal: getRequestAbortSignal({ req, res }),
+        }),
     });
 
     return res.json({
@@ -382,7 +385,7 @@ export const getGrowthOSProjectionController = async (
       });
     }
 
-    const projection = await getProjectionSnapshot({
+    const projection = await getIsolatedProjectionSnapshot({
       cacheKey: `growth:projection:v1:${businessId}`,
       label: "growth_projection",
       businessId,

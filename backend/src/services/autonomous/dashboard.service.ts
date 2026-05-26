@@ -47,8 +47,12 @@ const countByReason = (events: Array<{ meta: unknown }>) => {
 };
 
 export const getAutonomousDashboard = async (
-  businessId: string
+  businessId: string,
+  options?: { requestSignal?: AbortSignal | null }
 ): Promise<AutonomousDashboardData> => {
+  if (options?.requestSignal?.aborted) {
+    throw new Error("aborted");
+  }
   const startToday = startOfDay(new Date());
   const [opportunities, campaigns, events] = await Promise.all([
     prisma.autonomousOpportunity.findMany({

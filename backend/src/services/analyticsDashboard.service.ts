@@ -24,7 +24,7 @@ import {
 } from "../analytics/analyticsDashboard.repository";
 import { getVariantPerformance } from "./salesAgent/abTesting.service";
 import { runSalesOptimizer } from "./salesAgent/optimizer.service";
-import { getProjectionSnapshot } from "./projectionCoordinator.service";
+import { getIsolatedProjectionSnapshot } from "../analytics/isolatedCache";
 
 type PlanKey = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE";
 type MetricFormat = "number" | "percent" | "minutes";
@@ -1410,7 +1410,7 @@ export async function getAnalyticsDashboard(
   }
 
   const fallback = buildAnalyticsDashboardFallback(range, planKey);
-  const snapshot = await getProjectionSnapshot({
+  const snapshot = await getIsolatedProjectionSnapshot({
     cacheKey,
     label: "analytics_dashboard",
     businessId,

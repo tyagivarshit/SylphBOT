@@ -36,7 +36,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getSources = exports.getFunnel = exports.getCharts = exports.getOverview = void 0;
 const repo = __importStar(require("../analytics/analytics.repository"));
 const analytics_utils_1 = require("../utils/analytics.utils");
-const getOverview = async (businessId, range) => {
+const requestLifecycle_1 = require("../utils/requestLifecycle");
+const getOverview = async (businessId, range, req) => {
+    if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+        throw new Error("request_aborted:analytics_overview");
+    }
     const { start, end } = (0, analytics_utils_1.getDateRange)(range);
     const [totalLeads, messages, aiReplies, bookings] = await Promise.all([
         repo.countLeads(businessId, start, end),
@@ -52,7 +56,10 @@ const getOverview = async (businessId, range) => {
     };
 };
 exports.getOverview = getOverview;
-const getCharts = async (businessId, range) => {
+const getCharts = async (businessId, range, req) => {
+    if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+        throw new Error("request_aborted:analytics_charts");
+    }
     const { start, end } = (0, analytics_utils_1.getDateRange)(range);
     const data = await repo.getLeadsGroupedByDate(businessId, start, end);
     return data.map((item) => ({
@@ -61,11 +68,17 @@ const getCharts = async (businessId, range) => {
     }));
 };
 exports.getCharts = getCharts;
-const getFunnel = async (businessId) => {
+const getFunnel = async (businessId, req) => {
+    if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+        throw new Error("request_aborted:analytics_funnel");
+    }
     return repo.getFunnelStats(businessId);
 };
 exports.getFunnel = getFunnel;
-const getSources = async (businessId) => {
+const getSources = async (businessId, req) => {
+    if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+        throw new Error("request_aborted:analytics_sources");
+    }
     const data = await repo.getTopSources(businessId);
     return data.map((item) => ({
         name: item._id,

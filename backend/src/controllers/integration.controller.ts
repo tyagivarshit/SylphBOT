@@ -234,18 +234,17 @@ export const getOnboarding = async (req: any, res: any) => {
         }
 
         if (!reconcileScheduled) {
-          const deferred = await scheduleDeferredIntegrationProjectionReconcile({
+          reconcileDeferred = true;
+          scheduleDeferredIntegrationProjectionReconcile({
             businessId,
             tenantId,
             reason: fastLane.reconcileReason,
             source: "api_fast_lane",
             queueError: queueDegradedReason || "queue_unavailable",
             includeQueueDepth: false,
-          }).catch(() => null);
-          reconcileDeferred = true;
-          recoveryKey = deferred?.recoveryKey || null;
-          recoveryRetryAttempt = deferred?.retryAttempt ?? null;
-          projectionRecoveryQueueDepth = deferred?.queueDepth ?? null;
+          }).catch((err) => {
+            console.warn("Async scheduleDeferredIntegrationProjectionReconcile error:", err);
+          });
           emitPerformanceMetric({
             name: "reconcile_inline_prevented",
             value: 1,

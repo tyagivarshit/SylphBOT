@@ -4,6 +4,7 @@ import {
   getRequestRemainingMs,
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
+  markRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
 
 type AuthRequest = Request & {
@@ -63,7 +64,7 @@ function logError(req: AuthRequest, error: unknown) {
 async function baseHandler(
   req: AuthRequest,
   res: Response,
-  handler: (businessId: string) => Promise<unknown>,
+  handler: (businessId: string, req: AuthRequest) => Promise<unknown>,
   options: BaseHandlerOptions
 ) {
   try {
@@ -91,7 +92,7 @@ async function baseHandler(
       120,
       Math.min(options.timeoutMs || 1800, Math.max(120, remainingMs - 120))
     );
-    const projectionTask = handler(businessId)
+    const projectionTask = handler(businessId, req)
       .then(
         (value) =>
           ({
@@ -120,6 +121,11 @@ async function baseHandler(
     });
     const projection = await Promise.race([projectionTask, timeoutTask]);
     if (projection.timedOut) {
+      markRequestLifecycleAborted({
+        req,
+        res,
+        reason: "request_timeout",
+      });
       console.warn("REQUEST_ABORTED", {
         requestId: req.requestId || null,
         route: req.originalUrl,
@@ -156,7 +162,7 @@ export class DashboardController {
     return baseHandler(
       req,
       res,
-      async (businessId) => DashboardService.getStats(businessId),
+      async (businessId, r) => DashboardService.getStats(businessId, r),
       {
         timeoutLabel: "dashboard_stats_projection",
         timeoutMs: 1800,
@@ -205,7 +211,8 @@ export class DashboardController {
           page,
           limit,
           stage,
-          search
+          search,
+          req
         );
 
         return {
@@ -239,7 +246,7 @@ export class DashboardController {
           throw new Error("Valid Lead ID is required");
         }
 
-        return DashboardService.getLeadDetail(businessId, id);
+        return DashboardService.getLeadDetail(businessId, id, req);
       },
       {
         timeoutLabel: "dashboard_lead_detail_projection",
@@ -261,7 +268,7 @@ export class DashboardController {
           throw new Error("Valid Lead ID and stage are required");
         }
 
-        return DashboardService.updateLeadStage(businessId, id, stage);
+        return DashboardService.updateLeadStage(businessId, id, stage, req);
       },
       {
         timeoutLabel: "dashboard_lead_stage_projection",
@@ -275,7 +282,7 @@ export class DashboardController {
     return baseHandler(
       req,
       res,
-      async (businessId) => DashboardService.getActiveConversations(businessId),
+      async (businessId) => DashboardService.getActiveConversations(businessId, req),
       {
         timeoutLabel: "dashboard_conversation_projection",
         timeoutMs: 1600,

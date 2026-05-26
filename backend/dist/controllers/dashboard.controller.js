@@ -49,7 +49,7 @@ async function baseHandler(req, res, handler, options) {
         const fallbackValue = options.fallback;
         const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, options.timeoutMs || 1800);
         const timeoutMs = Math.max(120, Math.min(options.timeoutMs || 1800, Math.max(120, remainingMs - 120)));
-        const projectionTask = handler(businessId)
+        const projectionTask = handler(businessId, req)
             .then((value) => ({
             timedOut: false,
             failed: false,
@@ -71,6 +71,11 @@ async function baseHandler(req, res, handler, options) {
         });
         const projection = await Promise.race([projectionTask, timeoutTask]);
         if (projection.timedOut) {
+            (0, requestLifecycle_1.markRequestLifecycleAborted)({
+                req,
+                res,
+                reason: "request_timeout",
+            });
             console.warn("REQUEST_ABORTED", {
                 requestId: req.requestId || null,
                 route: req.originalUrl,
@@ -101,7 +106,7 @@ async function baseHandler(req, res, handler, options) {
 }
 class DashboardController {
     static async getStats(req, res) {
-        return baseHandler(req, res, async (businessId) => dashboard_service_1.DashboardService.getStats(businessId), {
+        return baseHandler(req, res, async (businessId, r) => dashboard_service_1.DashboardService.getStats(businessId, r), {
             timeoutLabel: "dashboard_stats_projection",
             timeoutMs: 1800,
             fallback: {
@@ -138,7 +143,7 @@ class DashboardController {
             const search = isValidString(req.query.search)
                 ? String(req.query.search)
                 : undefined;
-            const result = await dashboard_service_1.DashboardService.getLeadsList(businessId, page, limit, stage, search);
+            const result = await dashboard_service_1.DashboardService.getLeadsList(businessId, page, limit, stage, search, req);
             return {
                 leads: result.leads,
                 pagination: result.pagination,
@@ -163,7 +168,7 @@ class DashboardController {
             if (!isValidString(id)) {
                 throw new Error("Valid Lead ID is required");
             }
-            return dashboard_service_1.DashboardService.getLeadDetail(businessId, id);
+            return dashboard_service_1.DashboardService.getLeadDetail(businessId, id, req);
         }, {
             timeoutLabel: "dashboard_lead_detail_projection",
             timeoutMs: 1700,
@@ -177,7 +182,7 @@ class DashboardController {
             if (!isValidString(id) || !isValidString(stage)) {
                 throw new Error("Valid Lead ID and stage are required");
             }
-            return dashboard_service_1.DashboardService.updateLeadStage(businessId, id, stage);
+            return dashboard_service_1.DashboardService.updateLeadStage(businessId, id, stage, req);
         }, {
             timeoutLabel: "dashboard_lead_stage_projection",
             timeoutMs: 1700,
@@ -185,7 +190,7 @@ class DashboardController {
         });
     }
     static async getActiveConversations(req, res) {
-        return baseHandler(req, res, async (businessId) => dashboard_service_1.DashboardService.getActiveConversations(businessId), {
+        return baseHandler(req, res, async (businessId) => dashboard_service_1.DashboardService.getActiveConversations(businessId, req), {
             timeoutLabel: "dashboard_conversation_projection",
             timeoutMs: 1600,
             fallback: {

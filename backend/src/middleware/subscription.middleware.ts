@@ -492,11 +492,10 @@ export const loadBillingContext = async (businessId: string) => {
   }
 
   if (context.planKey === "FREE_LOCKED") {
-    const fallbackSubscription = await verifyStripeSubscriptionFallback(businessId).catch(() => null);
-    if (fallbackSubscription && fallbackSubscription.plan) {
-      subscription = fallbackSubscription;
-      context = evaluateContext(subscription);
-    }
+    // Run direct Stripe fallback verification asynchronously to keep hot path latency low
+    verifyStripeSubscriptionFallback(businessId).catch((err) => {
+      console.warn("Async verifyStripeSubscriptionFallback error:", err);
+    });
   }
 
   const earlyAccess = await getEarlyAccessSnapshot(subscription).catch(() => ({

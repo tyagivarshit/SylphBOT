@@ -75,7 +75,7 @@ const fetchBilling = async () => {
         name?: string;
       };
     };
-  }>("/api/billing", {
+  }>("/api/billing?surface=billing", {
     credentials: "include",
     cache: "no-store",
     timeoutMs: BILLING_FETCH_TIMEOUT_MS,

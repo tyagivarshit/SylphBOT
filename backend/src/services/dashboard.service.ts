@@ -6,6 +6,7 @@ import { getPricingPlanLabel } from "../config/pricing.config";
 import { getUsageOverview } from "./usage.service";
 import { getCanonicalSubscriptionSnapshot } from "./subscriptionAuthority.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import { isRequestLifecycleAborted } from "../utils/requestLifecycle";
 
 type UsageOverviewSafe = {
   warning: boolean;
@@ -54,7 +55,7 @@ const getSettledValue = <T>(result: PromiseSettledResult<T>, fallback: T) =>
   result.status === "fulfilled" ? result.value : fallback;
 
 export class DashboardService {
-  static async getStats(businessId: string) {
+  static async getStats(businessId: string, req?: any) {
     const nowMs = Date.now();
     const cached = dashboardStatsCache.get(businessId);
 
@@ -84,6 +85,9 @@ export class DashboardService {
     });
 
     const computePromise = (async () => {
+      if (req && isRequestLifecycleAborted({ req })) {
+        throw new Error("request_aborted:dashboard_stats_preflight");
+      }
       const startedAt = Date.now();
     const now = new Date();
     const todayStart = startOfDay(now);
@@ -122,9 +126,9 @@ export class DashboardService {
       ]),
       getUsageOverview(businessId).catch(() => EMPTY_USAGE),
       Promise.allSettled([
-        this.getLeadsGrowth(businessId),
-        this.getMessagesGrowth(businessId),
-        this.getRecentActivity(businessId),
+        this.getLeadsGrowth(businessId, req),
+        this.getMessagesGrowth(businessId, req),
+        this.getRecentActivity(businessId, req),
       ]),
     ]);
 
@@ -206,8 +210,20 @@ export class DashboardService {
     page: number,
     limit: number,
     stage?: string,
-    search?: string
+    search?: string,
+    req?: any
   ) {
+    if (req && isRequestLifecycleAborted({ req })) {
+      return {
+        leads: [],
+        pagination: {
+          total: 0,
+          page: 1,
+          limit,
+          totalPages: 0,
+        },
+      };
+    }
     try {
       const skip = (page - 1) * limit;
       const where: Prisma.LeadWhereInput = { businessId };
@@ -267,7 +283,10 @@ export class DashboardService {
     }
   }
 
-  static async getLeadDetail(businessId: string, leadId: string) {
+  static async getLeadDetail(businessId: string, leadId: string, req?: any) {
+    if (req && isRequestLifecycleAborted({ req })) {
+      return null;
+    }
     try {
       return await prisma.lead.findFirst({
         where: { id: leadId, businessId },
@@ -286,8 +305,12 @@ export class DashboardService {
   static async updateLeadStage(
     businessId: string,
     leadId: string,
-    stage: string
+    stage: string,
+    req?: any
   ) {
+    if (req && isRequestLifecycleAborted({ req })) {
+      return null;
+    }
     try {
       const lead = await prisma.lead.findFirst({
         where: { id: leadId, businessId },
@@ -308,7 +331,10 @@ export class DashboardService {
     }
   }
 
-  static async getLeadsGrowth(businessId: string) {
+  static async getLeadsGrowth(businessId: string, req?: any) {
+    if (req && isRequestLifecycleAborted({ req })) {
+      return [];
+    }
     const today = startOfDay(new Date());
 
     try {
@@ -352,7 +378,10 @@ export class DashboardService {
     }
   }
 
-  static async getMessagesGrowth(businessId: string) {
+  static async getMessagesGrowth(businessId: string, req?: any) {
+    if (req && isRequestLifecycleAborted({ req })) {
+      return [];
+    }
     const today = startOfDay(new Date());
 
     try {
@@ -396,7 +425,10 @@ export class DashboardService {
     }
   }
 
-  static async getRecentActivity(businessId: string) {
+  static async getRecentActivity(businessId: string, req?: any) {
+    if (req && isRequestLifecycleAborted({ req })) {
+      return [];
+    }
     try {
       const leads = await prisma.lead.findMany({
         where: { businessId },
@@ -426,7 +458,14 @@ export class DashboardService {
     }
   }
 
-  static async getActiveConversations(businessId: string) {
+  static async getActiveConversations(businessId: string, req?: any) {
+    if (req && isRequestLifecycleAborted({ req })) {
+      return {
+        active: 0,
+        waitingReplies: 0,
+        resolved: 0,
+      };
+    }
     try {
       const [active, waitingReplies] = await Promise.all([
         prisma.lead.count({

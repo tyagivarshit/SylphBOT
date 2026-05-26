@@ -11,6 +11,7 @@ const pricing_config_1 = require("../config/pricing.config");
 const usage_service_1 = require("./usage.service");
 const subscriptionAuthority_service_1 = require("./subscriptionAuthority.service");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 const EMPTY_USAGE = {
     warning: false,
     warningMessage: null,
@@ -30,7 +31,7 @@ const DASHBOARD_STATS_CACHE_TTL_MS = 8000;
 const dashboardStatsCache = new Map();
 const getSettledValue = (result, fallback) => result.status === "fulfilled" ? result.value : fallback;
 class DashboardService {
-    static async getStats(businessId) {
+    static async getStats(businessId, req) {
         const nowMs = Date.now();
         const cached = dashboardStatsCache.get(businessId);
         if (cached?.value && cached.expiresAt > nowMs) {
@@ -56,6 +57,9 @@ class DashboardService {
             },
         });
         const computePromise = (async () => {
+            if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+                throw new Error("request_aborted:dashboard_stats_preflight");
+            }
             const startedAt = Date.now();
             const now = new Date();
             const todayStart = (0, date_fns_1.startOfDay)(now);
@@ -92,9 +96,9 @@ class DashboardService {
                 ]),
                 (0, usage_service_1.getUsageOverview)(businessId).catch(() => EMPTY_USAGE),
                 Promise.allSettled([
-                    this.getLeadsGrowth(businessId),
-                    this.getMessagesGrowth(businessId),
-                    this.getRecentActivity(businessId),
+                    this.getLeadsGrowth(businessId, req),
+                    this.getMessagesGrowth(businessId, req),
+                    this.getRecentActivity(businessId, req),
                 ]),
             ]);
             const planKey = (0, plan_config_1.getPlanKey)(subscription?.plan || null);
@@ -159,7 +163,18 @@ class DashboardService {
         });
         return computePromise;
     }
-    static async getLeadsList(businessId, page, limit, stage, search) {
+    static async getLeadsList(businessId, page, limit, stage, search, req) {
+        if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+            return {
+                leads: [],
+                pagination: {
+                    total: 0,
+                    page: 1,
+                    limit,
+                    totalPages: 0,
+                },
+            };
+        }
         try {
             const skip = (page - 1) * limit;
             const where = { businessId };
@@ -215,7 +230,10 @@ class DashboardService {
             };
         }
     }
-    static async getLeadDetail(businessId, leadId) {
+    static async getLeadDetail(businessId, leadId, req) {
+        if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+            return null;
+        }
         try {
             return await prisma_1.default.lead.findFirst({
                 where: { id: leadId, businessId },
@@ -231,7 +249,10 @@ class DashboardService {
             return null;
         }
     }
-    static async updateLeadStage(businessId, leadId, stage) {
+    static async updateLeadStage(businessId, leadId, stage, req) {
+        if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+            return null;
+        }
         try {
             const lead = await prisma_1.default.lead.findFirst({
                 where: { id: leadId, businessId },
@@ -250,7 +271,10 @@ class DashboardService {
             return null;
         }
     }
-    static async getLeadsGrowth(businessId) {
+    static async getLeadsGrowth(businessId, req) {
+        if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+            return [];
+        }
         const today = (0, date_fns_1.startOfDay)(new Date());
         try {
             const days = Array.from({ length: 7 }, (_, index) => {
@@ -291,7 +315,10 @@ class DashboardService {
             return [];
         }
     }
-    static async getMessagesGrowth(businessId) {
+    static async getMessagesGrowth(businessId, req) {
+        if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+            return [];
+        }
         const today = (0, date_fns_1.startOfDay)(new Date());
         try {
             const days = Array.from({ length: 7 }, (_, index) => {
@@ -332,7 +359,10 @@ class DashboardService {
             return [];
         }
     }
-    static async getRecentActivity(businessId) {
+    static async getRecentActivity(businessId, req) {
+        if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+            return [];
+        }
         try {
             const leads = await prisma_1.default.lead.findMany({
                 where: { businessId },
@@ -360,7 +390,14 @@ class DashboardService {
             return [];
         }
     }
-    static async getActiveConversations(businessId) {
+    static async getActiveConversations(businessId, req) {
+        if (req && (0, requestLifecycle_1.isRequestLifecycleAborted)({ req })) {
+            return {
+                active: 0,
+                waitingReplies: 0,
+                resolved: 0,
+            };
+        }
         try {
             const [active, waitingReplies] = await Promise.all([
                 prisma_1.default.lead.count({

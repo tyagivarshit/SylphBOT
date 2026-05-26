@@ -1,5 +1,5 @@
 import express from "express";
-import bcrypt from "bcryptjs";
+import { verifyPasswordWorker, hashPasswordWorker } from "../utils/bcryptWorker";
 import prisma from "../config/prisma";
 import upload from "../middleware/upload";
 import cloudinary from "../config/cloudinary";
@@ -953,7 +953,7 @@ router.post("/change-password", protect, async (req: any, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const matches = await bcrypt.compare(currentPassword, user.password);
+    const matches = await verifyPasswordWorker(currentPassword, user.password);
 
     if (!matches) {
       return res.status(400).json({
@@ -961,7 +961,7 @@ router.post("/change-password", protect, async (req: any, res) => {
       });
     }
 
-    const nextPassword = await bcrypt.hash(newPassword, 12);
+    const nextPassword = await hashPasswordWorker(newPassword, 12);
 
     await prisma.$transaction([
       prisma.user.update({

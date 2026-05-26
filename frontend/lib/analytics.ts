@@ -160,18 +160,34 @@ export async function getAnalyticsDashboard(
   return res.data;
 }
 
-export async function getOverview(range: string) {
-  return (await getAnalyticsDashboard(range)).summary;
+export async function getOverview(range: string): Promise<any> {
+  const res = await apiFetch<any>(`/api/analytics/overview?range=${range}`);
+  if (!res.success || !res.data) {
+    throw new Error(res.message || "Failed to load overview");
+  }
+  return res.data;
 }
 
-export async function getCharts(range: string) {
-  return (await getAnalyticsDashboard(range)).trends.series;
+export async function getCharts(range: string): Promise<any[]> {
+  const res = await apiFetch<any[]>(`/api/analytics/charts?range=${range}`);
+  if (!res.success || !res.data) {
+    throw new Error(res.message || "Failed to load charts");
+  }
+  return res.data;
 }
 
-export async function getFunnel(range = "30d") {
-  return (await getAnalyticsDashboard(range)).funnel;
+export async function getFunnel(range = "30d"): Promise<any[]> {
+  const res = await apiFetch<any[]>(`/api/analytics/funnel?range=${range}`);
+  if (!res.success || !res.data) {
+    throw new Error(res.message || "Failed to load funnel");
+  }
+  return res.data;
 }
 
-export async function getSources(range = "30d") {
-  return (await getAnalyticsDashboard(range)).sourcePerformance;
+export async function getSources(range = "30d"): Promise<any[]> {
+  const res = await apiFetch<any[]>(`/api/analytics/sources?range=${range}`);
+  if (!res.success || !res.data) {
+    throw new Error(res.message || "Failed to load sources");
+  }
+  return res.data;
 }

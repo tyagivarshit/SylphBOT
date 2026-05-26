@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import bcrypt from "bcryptjs";
+import { hashPasswordWorker } from "../utils/bcryptWorker";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import prisma from "./prisma";
@@ -57,7 +57,7 @@ export const configurePassport = () => {
               data: {
                 email,
                 name: displayName,
-                password: await bcrypt.hash(randomPassword, 12),
+                password: await hashPasswordWorker(randomPassword, 12),
                 isVerified: true,
                 avatar: avatarUrl,
               },

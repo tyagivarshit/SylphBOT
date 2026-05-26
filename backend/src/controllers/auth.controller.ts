@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { verifyPasswordWorker, hashPasswordWorker } from "../utils/bcryptWorker";
 import { env } from "../config/env";
 import prisma from "../config/prisma";
 import  redis  from "../config/redis";
@@ -65,11 +66,7 @@ const verifyPassword = async (
   plainTextPassword: string,
   storedHash: string
 ) => {
-  try {
-    return await bcrypt.compare(plainTextPassword, storedHash);
-  } catch {
-    return false;
-  }
+  return verifyPasswordWorker(plainTextPassword, storedHash);
 };
 
 const extractBcryptCost = (storedHash: string) => {
@@ -519,7 +516,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       );
     }
 
-    const hashed = await bcrypt.hash(password, 12);
+    const hashed = await hashPasswordWorker(password, 12);
     const rawToken = crypto.randomBytes(32).toString("hex");
     const verifyToken = hashToken(rawToken);
     const verifyTokenExpiry = new Date(
@@ -962,7 +959,7 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        password: await bcrypt.hash(password, 12),
+        password: await hashPasswordWorker(password, 12),
         resetToken: null,
         resetTokenExpiry: null,
         tokenVersion: { increment: 1 },

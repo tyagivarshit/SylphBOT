@@ -70,7 +70,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const deferredTriggerRef = useRef<HTMLDivElement | null>(null);
 
-  const authStable = Boolean(user) && lifecycleState === "hydrated";
+  const authStable = Boolean(user);
   const workspaceKey = user?.businessId || user?.workspace?.id || user?.id || "none";
 
   const statsQuery = useQuery({
@@ -95,11 +95,10 @@ export default function DashboardPage() {
   });
 
   const criticalSettled = statsQuery.isSuccess || statsQuery.isError;
-  const importantEnabled = authStable && criticalSettled && statsQuery.isSuccess;
 
   const conversationQuery = useQuery({
     queryKey: ["dashboard", "important", "conversations", workspaceKey],
-    enabled: importantEnabled,
+    enabled: authStable,
     staleTime: 45_000,
     retry: 1,
     queryFn: async () => {
@@ -116,8 +115,7 @@ export default function DashboardPage() {
     },
   });
 
-  const importantSettled =
-    !importantEnabled || conversationQuery.isSuccess || conversationQuery.isError;
+  const importantSettled = conversationQuery.isSuccess || conversationQuery.isError;
 
   const {
     canLoadDeferred,
@@ -165,10 +163,6 @@ export default function DashboardPage() {
     markDeferredHydrationComplete("dashboard_deferred_sections");
   }, [canLoadDeferred, markDeferredHydrationComplete]);
 
-  if (statsQuery.isPending) {
-    return <DashboardSkeleton />;
-  }
-
   if (statsQuery.isError) {
     return (
       <RetryState
@@ -186,23 +180,13 @@ export default function DashboardPage() {
   const statsPayload = statsQuery.data;
   const stats = statsPayload?.data as DashboardStats | undefined;
 
-  if (!stats) {
-    return (
-      <RetryState
-        title="Dashboard unavailable"
-        description="Dashboard stats are still stabilizing. Please retry."
-        onRetry={() => void statsQuery.refetch()}
-      />
-    );
-  }
-
   const limited = Boolean(statsPayload?.limited);
-  const premiumLocked = Boolean(stats.premiumLocked);
+  const premiumLocked = Boolean(stats?.premiumLocked);
   const qualifiedValue: DashboardValue = premiumLocked
     ? "Upgrade required"
-    : stats.qualifiedLeads;
+    : stats?.qualifiedLeads ?? 0;
   const conversationStats = conversationQuery.data || EMPTY_CONVERSATION_STATS;
-  const conversationUnavailable = importantEnabled && conversationQuery.isError;
+  const conversationUnavailable = authStable && conversationQuery.isError;
 
   return (
     <div className="relative min-w-0 space-y-6">
@@ -265,26 +249,35 @@ export default function DashboardPage() {
 
       <div className="space-y-3.5 md:hidden">
         <div className="grid grid-cols-2 gap-2.5">
-          <MiniCard title="Leads" value={stats.totalLeads} />
-          <MiniCard title="Today" value={stats.leadsToday} />
-          <MiniCard title="Month" value={stats.leadsThisMonth} />
-          <MiniCard title="Messages" value={stats.messagesToday} />
+          <MiniCard title="Leads" value={stats?.totalLeads} loading={statsQuery.isPending} />
+          <MiniCard title="Today" value={stats?.leadsToday} loading={statsQuery.isPending} />
+          <MiniCard title="Month" value={stats?.leadsThisMonth} loading={statsQuery.isPending} />
+          <MiniCard title="Messages" value={stats?.messagesToday} loading={statsQuery.isPending} />
         </div>
 
         <div className="grid grid-cols-3 gap-2.5">
-          <MiniCard title="Active" value={conversationStats.active} />
-          <MiniCard title="Waiting" value={conversationStats.waitingReplies} />
-          <MiniCard title="Resolved" value={conversationStats.resolved} />
+          <MiniCard title="Active" value={conversationStats.active} loading={conversationQuery.isPending} />
+          <MiniCard title="Waiting" value={conversationStats.waitingReplies} loading={conversationQuery.isPending} />
+          <MiniCard title="Resolved" value={conversationStats.resolved} loading={conversationQuery.isPending} />
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-3 backdrop-blur-xl">
-          <LeadsChart data={stats.chartData} />
+          {statsQuery.isPending ? (
+            <div className="h-40 w-full animate-pulse rounded bg-slate-200" />
+          ) : (
+            <LeadsChart data={stats?.chartData || []} />
+          )}
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 backdrop-blur-xl">
           <h2 className="mb-3 text-sm font-semibold text-gray-900">Activity</h2>
 
-          {stats.recentActivity.length ? (
+          {statsQuery.isPending ? (
+            <div className="space-y-2">
+              <div className="h-3 w-3/4 animate-pulse rounded bg-slate-200" />
+              <div className="h-3 w-1/2 animate-pulse rounded bg-slate-200" />
+            </div>
+          ) : stats?.recentActivity.length ? (
             stats.recentActivity.map((item) => (
               <div
                 key={item.id}
@@ -304,29 +297,39 @@ export default function DashboardPage() {
 
       <div className="hidden space-y-8 md:block">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
-          <Card title="Total Leads" value={stats.totalLeads} />
-          <Card title="Today" value={stats.leadsToday} />
-          <Card title="This Month" value={stats.leadsThisMonth} />
-          <Card title="Messages" value={stats.messagesToday} />
-          <Card title="Qualified" value={qualifiedValue} />
-          <Card title="Plan" value={stats.plan} />
+          <Card title="Total Leads" value={stats?.totalLeads} loading={statsQuery.isPending} />
+          <Card title="Today" value={stats?.leadsToday} loading={statsQuery.isPending} />
+          <Card title="This Month" value={stats?.leadsThisMonth} loading={statsQuery.isPending} />
+          <Card title="Messages" value={stats?.messagesToday} loading={statsQuery.isPending} />
+          <Card title="Qualified" value={qualifiedValue} loading={statsQuery.isPending} />
+          <Card title="Plan" value={stats?.plan} loading={statsQuery.isPending} />
         </div>
 
         <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
           <h2 className="mb-4 font-semibold text-gray-900">Leads growth</h2>
-          <LeadsChart data={stats.chartData} />
+          {statsQuery.isPending ? (
+            <div className="h-56 w-full animate-pulse rounded bg-slate-200" />
+          ) : (
+            <LeadsChart data={stats?.chartData || []} />
+          )}
         </div>
 
         <div className="grid grid-cols-3 gap-4">
-          <Card title="Active" value={conversationStats.active} />
-          <Card title="Waiting Replies" value={conversationStats.waitingReplies} />
-          <Card title="Resolved" value={conversationStats.resolved} />
+          <Card title="Active" value={conversationStats.active} loading={conversationQuery.isPending} />
+          <Card title="Waiting Replies" value={conversationStats.waitingReplies} loading={conversationQuery.isPending} />
+          <Card title="Resolved" value={conversationStats.resolved} loading={conversationQuery.isPending} />
         </div>
 
         <div className="rounded-2xl border border-blue-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
           <h2 className="mb-4 font-semibold text-gray-900">Recent activity</h2>
 
-          {stats.recentActivity.length ? (
+          {statsQuery.isPending ? (
+            <div className="space-y-3">
+              <div className="h-4 w-3/4 animate-pulse rounded bg-slate-200" />
+              <div className="h-4 w-1/2 animate-pulse rounded bg-slate-200" />
+              <div className="h-4 w-2/3 animate-pulse rounded bg-slate-200" />
+            </div>
+          ) : stats?.recentActivity.length ? (
             stats.recentActivity.map((item) => (
               <div
                 key={item.id}
@@ -361,20 +364,28 @@ export default function DashboardPage() {
   );
 }
 
-function Card({ title, value }: { title: string; value: DashboardValue }) {
+function Card({ title, value, loading }: { title: string; value?: DashboardValue; loading?: boolean }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-sm transition hover:shadow-md">
       <p className="text-sm font-medium text-gray-500">{title}</p>
-      <h2 className="mt-1 break-words text-xl font-semibold text-gray-900">{value}</h2>
+      {loading ? (
+        <div className="mt-2.5 h-6 w-16 animate-pulse rounded bg-slate-200" />
+      ) : (
+        <h2 className="mt-1 break-words text-xl font-semibold text-gray-900">{value}</h2>
+      )}
     </div>
   );
 }
 
-function MiniCard({ title, value }: { title: string; value: DashboardValue }) {
+function MiniCard({ title, value, loading }: { title: string; value?: DashboardValue; loading?: boolean }) {
   return (
     <div className="overflow-hidden rounded-xl border border-blue-100 bg-white/80 p-3 shadow-sm">
       <p className="text-[10px] font-medium text-gray-500">{title}</p>
-      <h2 className="break-words text-sm font-semibold text-gray-900">{value}</h2>
+      {loading ? (
+        <div className="mt-1.5 h-4 w-10 animate-pulse rounded bg-slate-200" />
+      ) : (
+        <h2 className="break-words text-sm font-semibold text-gray-900">{value}</h2>
+      )}
     </div>
   );
 }

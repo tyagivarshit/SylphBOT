@@ -148,32 +148,11 @@ export default function LoginClient({
         code: res.code || null,
       });
 
-      if (res.code === "AUTH_LOGIN_PROCESSING" || !res.success) {
-        const processingUser = await finalizeLoginStabilization(
-          "duplicate_login_processing"
-        );
-        if (processingUser) {
-          toast.success("Login successful");
-          router.replace("/dashboard");
-          return;
-        }
-        if (res.code === "AUTH_LOGIN_PROCESSING") {
-          toast(
-            "Sign-in is still stabilizing. We will keep retrying automatically."
-          );
-          return;
-        }
+      if (!res.success) {
         throw new Error(res.message || "Login failed");
       }
 
-      const refreshedUser = await finalizeLoginStabilization("password_login");
-      if (!refreshedUser) {
-        toast(
-          "Sign-in is still stabilizing. We will keep retrying automatically."
-        );
-        return;
-      }
-
+      await refreshUser({ mode: "default", source: "password_login" });
       toast.success("Login successful");
       router.replace("/dashboard");
     } catch (err: unknown) {

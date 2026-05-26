@@ -411,10 +411,10 @@ const checkGlobalLimit = async (ip: string) => {
   const key = `global:${ip}`;
 
   try {
-    const count = await withFastTimeout(redis.incr(key), 350);
+    const count = await withFastTimeout(redis.incr(key), 80);
 
     if (count === 1) {
-      await withFastTimeout(redis.expire(key, 60), 350);
+      await withFastTimeout(redis.expire(key, 60), 80);
     }
 
     if (count > 60) {
@@ -588,77 +588,19 @@ LOGIN
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   const startedAt = Date.now();
-  const loginWaterfallMs: Record<string, number> = {};
-  const measureStep = (label: string, stepStartedAt: number) => {
-    loginWaterfallMs[label] = Date.now() - stepStartedAt;
-  };
   try {
-    throwIfRequestLifecycleAborted({
-      req,
-      res,
-      stage: "auth.login.start",
-    });
     const ip = getIP(req);
     const userAgent = String(getUA(req));
-    const globalLimitStartedAt = Date.now();
+
     await checkGlobalLimit(ip);
-    measureStep("globalLimit", globalLimitStartedAt);
 
     const email = normalizeEmail(String(req.body.email || ""));
     const password = String(req.body.password || "");
 
-    const userLookupStartedAt = Date.now();
     const user = await prisma.user.findUnique({ where: { email } });
-    measureStep("userLookup", userLookupStartedAt);
-    const passwordVerifyStartedAt = Date.now();
-    const passwordHashCost = user ? extractBcryptCost(user.password) : null;
     const passwordVerified = user
       ? await verifyPassword(password, user.password)
       : false;
-    const passwordVerifyMs = Date.now() - passwordVerifyStartedAt;
-    loginWaterfallMs.passwordVerify = passwordVerifyMs;
-    const startupContentionMs = Math.max(
-      0,
-      Number((res.locals as Record<string, unknown>)?.requestQueueWaitMs || 0)
-    );
-    const adaptiveBudgets = computeAdaptiveLoginBudgets({
-      req,
-      res,
-      passwordHashCost,
-      startupContentionMs,
-    });
-    const passwordVerifyBudgetMs = adaptiveBudgets.stageBudgets.password_verify_budget;
-    const passwordVerifyWithinBudget = passwordVerifyMs <= passwordVerifyBudgetMs;
-
-    emitPerformanceMetric({
-      name: "password_verify_ms",
-      value: passwordVerifyMs,
-      businessId: user?.businessId || null,
-      route: "auth.login",
-      metadata: {
-        source: "password_login",
-        hashCost: passwordHashCost,
-        budgetMs: passwordVerifyBudgetMs,
-        withinBudget: passwordVerifyWithinBudget,
-        timeoutEnforced: false,
-        multiplier: adaptiveBudgets.multiplier,
-        degradedRuntime: adaptiveBudgets.degradedRuntime,
-        startupWindowActive: adaptiveBudgets.startupWindowActive,
-      },
-    });
-    emitLoginBudgetTelemetry({
-      businessId: user?.businessId || null,
-      stage: "password_verify_budget",
-      elapsedMs: passwordVerifyMs,
-      budgetMs: passwordVerifyBudgetMs,
-      policy: "soft",
-      outcome: passwordVerifyWithinBudget ? "ok" : "budget_exceeded",
-      metadata: {
-        hashCost: passwordHashCost,
-        multiplier: adaptiveBudgets.multiplier,
-        degradedRuntime: adaptiveBudgets.degradedRuntime,
-      },
-    });
 
     if (
       !user ||
@@ -693,80 +635,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           route: req.originalUrl,
         },
       }).catch(() => undefined);
-      emitPerformanceMetric({
-        name: "auth_terminal_failure",
-        value: Date.now() - startedAt,
-        businessId: user?.businessId || null,
-        route: "auth.login",
-        metadata: {
-          reason: "invalid_credentials",
-        },
-      });
-      emitPerformanceMetric({
-        name: "auth_login_total_ms",
-        value: Date.now() - startedAt,
-        businessId: user?.businessId || null,
-        route: "auth.login",
-        metadata: {
-          outcome: "invalid_credentials",
-        },
-      });
-      console.info("AUTH_LOGIN_WATERFALL", {
-        status: "invalid_credentials",
-        userId: user?.id || null,
-        businessId: user?.businessId || null,
-        totalMs: Date.now() - startedAt,
-        loginWaterfallMs,
-      });
       throw unauthorized("Invalid credentials");
     }
-    throwIfRequestLifecycleAborted({
-      req,
-      res,
-      stage: "auth.login.verified",
-    });
-    const stageBudgets = adaptiveBudgets.stageBudgets;
-    emitPerformanceMetric({
-      name: "auth_startup_contention_ms",
-      value: startupContentionMs,
-      businessId: user.businessId || null,
-      route: "auth.login",
-      metadata: {
-        priorityClass: String(
-          (res.locals as Record<string, unknown>)?.requestPriorityClass || "UNKNOWN"
-        )
-          .trim()
-          .toUpperCase(),
-        source: "request_priority_queue",
-        multiplier: adaptiveBudgets.multiplier,
-        pressureReasons: adaptiveBudgets.pressureReasons.join(",") || null,
-        requestRemainingMs: adaptiveBudgets.requestRemainingMs,
-        startupWindowActive: adaptiveBudgets.startupWindowActive,
-        eventLoopLagMs: adaptiveBudgets.startupPressure.eventLoopLagMs,
-        cpuPressurePercent: adaptiveBudgets.startupPressure.cpuPressurePercent,
-        activeCritical: adaptiveBudgets.requestQueue.activeCritical,
-        queuedCritical: adaptiveBudgets.requestQueue.queuedCritical,
-      },
-    });
-    emitPerformanceMetric({
-      name: "auth_processing_state",
-      value: Date.now() - startedAt,
-      businessId: user.businessId || null,
-      route: "auth.login",
-      metadata: {
-        state: "PROCESSING",
-        stage: "adaptive_budget_profile",
-        policy: "mixed",
-        pressureMultiplier: adaptiveBudgets.multiplier,
-        pressureReasons: adaptiveBudgets.pressureReasons,
-        budgets: stageBudgets,
-        startupWindowActive: adaptiveBudgets.startupWindowActive,
-        startupPressure: adaptiveBudgets.startupPressure,
-        requestQueue: adaptiveBudgets.requestQueue,
-        degradedRuntime: adaptiveBudgets.degradedRuntime,
-        requestRemainingMs: adaptiveBudgets.requestRemainingMs,
-      },
-    });
 
     const resolvedUser = {
       id: user.id,
@@ -776,329 +646,28 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       name: user.name,
     };
     const businessId = user.businessId || null;
-    const lockKey = buildLoginLifecycleLockKey({
-      userId: resolvedUser.id,
-      email,
-      ip,
-      userAgent,
-    });
 
-    type LoginLifecycleResult =
-      | {
-          completed: false;
-          lockHoldMs: number;
-        }
-      | {
-          completed: true;
-          accessToken: string;
-          refreshRaw: string;
-          hashedRefreshToken: string;
-          lockHoldMs: number;
-        };
-
-    const lockLifecycleStartedAt = Date.now();
-    let loginResult: LoginLifecycleResult | null = null;
-    try {
-      loginResult = await withDistributedLock<LoginLifecycleResult | null>({
-        key: lockKey,
-        ttlMs: LOGIN_LIFECYCLE_LOCK_TTL_MS,
-        waitMs: Math.max(
-          LOGIN_LIFECYCLE_LOCK_WAIT_MS,
-          stageBudgets.lifecycle_lock_budget
-        ),
-        pollMs: LOGIN_LIFECYCLE_LOCK_POLL_MS,
-        onUnavailable: async () => null,
-        run: async () => {
-          const lockHoldStartedAt = Date.now();
-          const tokenIssueStartedAt = Date.now();
-          const accessToken = generateAccessToken(
-            resolvedUser.id,
-            resolvedUser.role,
-            businessId,
-            resolvedUser.tokenVersion
-          );
-          const refreshRaw = generateRefreshToken(
-            resolvedUser.id,
-            resolvedUser.tokenVersion
-          );
-          const hashedRefreshToken = hashToken(refreshRaw);
-          const tokenIssueMs = Date.now() - tokenIssueStartedAt;
-          measureStep("tokenIssue", tokenIssueStartedAt);
-          emitLoginBudgetTelemetry({
-            businessId,
-            stage: "token_issue_budget",
-            elapsedMs: tokenIssueMs,
-            budgetMs: stageBudgets.token_issue_budget,
-            policy: "soft",
-            outcome:
-              tokenIssueMs <= stageBudgets.token_issue_budget
-                ? "ok"
-                : "budget_exceeded",
-            metadata: {
-              source: "token_generation",
-            },
-          });
-
-          const refreshPersistStartedAt = Date.now();
-          try {
-            await withTimeout({
-              label: "auth_login_db_persistence",
-              timeoutMs: Math.max(
-                LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
-                stageBudgets.db_persistence_budget
-              ),
-              task: prisma.refreshToken.create({
-                data: {
-                  token: hashedRefreshToken,
-                  userId: resolvedUser.id,
-                  userAgent,
-                  ip,
-                  expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                },
-              }),
-            });
-          } catch (error) {
-            const elapsedMs = Date.now() - refreshPersistStartedAt;
-            if (
-              error instanceof TimeoutExceededError ||
-              String((error as Error)?.message || "").includes(
-                "timeout_exceeded:auth_login_db_persistence"
-              )
-            ) {
-              emitPerformanceMetric({
-                name: "TIMEOUT_PREVENTED",
-                value: elapsedMs,
-                businessId,
-                route: "auth.login",
-                metadata: {
-                  stage: "db_persistence_budget",
-                  reason: "db_persistence_timeout",
-                  budgetMs: Math.max(
-                    LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
-                    stageBudgets.db_persistence_budget
-                  ),
-                },
-              });
-              emitLoginBudgetTelemetry({
-                businessId,
-                stage: "db_persistence_budget",
-                elapsedMs,
-                budgetMs: Math.max(
-                  LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
-                  stageBudgets.db_persistence_budget
-                ),
-                policy: "hard",
-                outcome: "timeout",
-                metadata: {
-                  reason: "db_persistence_timeout",
-                },
-              });
-              throw new LoginStageTimeoutError(
-                "db_persistence_budget",
-                Math.max(
-                  LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
-                  stageBudgets.db_persistence_budget
-                ),
-                elapsedMs
-              );
-            }
-            throw error;
-          }
-          const refreshPersistMs = Date.now() - refreshPersistStartedAt;
-          measureStep("refreshPersist", refreshPersistStartedAt);
-          emitLoginBudgetTelemetry({
-            businessId,
-            stage: "db_persistence_budget",
-            elapsedMs: refreshPersistMs,
-            budgetMs: Math.max(
-              LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
-              stageBudgets.db_persistence_budget
-            ),
-            policy: "hard",
-            outcome:
-              refreshPersistMs <=
-              Math.max(
-                LOGIN_REFRESH_TOKEN_TIMEOUT_MS,
-                stageBudgets.db_persistence_budget
-              )
-                ? "ok"
-                : "budget_exceeded",
-          });
-
-          throwIfRequestLifecycleAborted({
-            req,
-            res,
-            stage: "auth.login.session_persisted",
-          });
-
-          if (
-            isRequestLifecycleAborted({ req, res }) ||
-            res.headersSent ||
-            res.writableEnded
-          ) {
-            return {
-              completed: false,
-              lockHoldMs: Date.now() - lockHoldStartedAt,
-            };
-          }
-
-          return {
-            completed: true,
-            accessToken,
-            refreshRaw,
-            hashedRefreshToken,
-            lockHoldMs: Date.now() - lockHoldStartedAt,
-          };
-        },
-      });
-    } catch (error) {
-      if (error instanceof LoginStageTimeoutError) {
-        emitPerformanceMetric({
-          name: "auth_processing_state",
-          value: error.elapsedMs,
-          businessId,
-          route: "auth.login",
-          metadata: {
-            state: "PROCESSING",
-            reason: "db_persistence_timeout",
-            stage: error.stage,
-            budgetMs: error.budgetMs,
-            retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
-            terminal: false,
-          },
-        });
-        emitPerformanceMetric({
-          name: "auth_login_total_ms",
-          value: Date.now() - startedAt,
-          businessId,
-          route: "auth.login",
-          metadata: {
-            outcome: "processing",
-            reason: "db_persistence_timeout",
-            stage: error.stage,
-            budgetMs: error.budgetMs,
-          },
-        });
-        return sendLoginProcessing({
-          res,
-          startedAt,
-          businessId,
-          code: "db_persistence_timeout",
-          retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
-          message:
-            "Login is stabilizing under runtime pressure. Please wait a moment and retry.",
-          metadata: {
-            stage: error.stage,
-            budgetMs: error.budgetMs,
-          },
-        });
-      }
-      throw error;
-    }
-    measureStep("lockLifecycle", lockLifecycleStartedAt);
-    const lockLifecycleMs = Date.now() - lockLifecycleStartedAt;
-    emitLoginBudgetTelemetry({
+    const accessToken = generateAccessToken(
+      resolvedUser.id,
+      resolvedUser.role,
       businessId,
-      stage: "lifecycle_lock_budget",
-      elapsedMs: lockLifecycleMs,
-      budgetMs: Math.max(
-        LOGIN_LIFECYCLE_LOCK_WAIT_MS,
-        stageBudgets.lifecycle_lock_budget
-      ),
-      policy: "hard",
-      outcome:
-        lockLifecycleMs <=
-        Math.max(LOGIN_LIFECYCLE_LOCK_WAIT_MS, stageBudgets.lifecycle_lock_budget)
-          ? "ok"
-          : "budget_exceeded",
-      metadata: {
-        lockKey,
+      resolvedUser.tokenVersion
+    );
+    const refreshRaw = generateRefreshToken(
+      resolvedUser.id,
+      resolvedUser.tokenVersion
+    );
+    const hashedRefreshToken = hashToken(refreshRaw);
+
+    await prisma.refreshToken.create({
+      data: {
+        token: hashedRefreshToken,
+        userId: resolvedUser.id,
+        userAgent,
+        ip,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-    if (loginResult?.lockHoldMs !== undefined) {
-      emitPerformanceMetric({
-        name: "auth_lock_hold_ms",
-        value: loginResult.lockHoldMs,
-        businessId,
-        route: "auth.login",
-        metadata: {
-          lockKey,
-        },
-      });
-    }
-
-    if (!loginResult) {
-      emitPerformanceMetric({
-        name: "auth_duplicate_login_blocked",
-        value: Date.now() - startedAt,
-        businessId,
-        route: "auth.login",
-        metadata: {
-          reason: "inflight_lock_unavailable",
-          lockKey,
-        },
-      });
-      emitPerformanceMetric({
-        name: "auth_processing_state",
-        value: Date.now() - startedAt,
-        businessId,
-        route: "auth.login",
-        metadata: {
-          state: "PROCESSING",
-          reason: "login_inflight",
-          retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
-          terminal: false,
-        },
-      });
-      emitPerformanceMetric({
-        name: "auth_inflight_reused",
-        value: Date.now() - startedAt,
-        businessId,
-        route: "auth.login",
-        metadata: {
-          source: "distributed_lock",
-        },
-      });
-      console.info("AUTH_LOGIN_WATERFALL", {
-        status: "lock_unavailable",
-        userId: resolvedUser.id,
-        businessId,
-        requestId: req.requestId || null,
-        totalMs: Date.now() - startedAt,
-        loginWaterfallMs,
-      });
-      emitPerformanceMetric({
-        name: "auth_login_total_ms",
-        value: Date.now() - startedAt,
-        businessId,
-        route: "auth.login",
-        metadata: {
-          outcome: "processing",
-          reason: "login_inflight",
-        },
-      });
-      return sendLoginProcessing({
-        res,
-        startedAt,
-        businessId,
-        code: "login_inflight",
-        retryAfterMs: adaptiveBudgets.processingRetryAfterMs,
-        message:
-          "Login is still processing. Please wait a moment and retry.",
-      });
-    }
-
-    if (!loginResult.completed) {
-      return;
-    }
-
-    if (isRequestLifecycleAborted({ req, res }) || res.headersSent || res.writableEnded) {
-      return;
-    }
-
-    const accessToken = loginResult.accessToken;
-    const refreshRaw = loginResult.refreshRaw;
-    const hashedRefreshToken = loginResult.hashedRefreshToken;
 
     primeAuthContextCacheForToken({
       accessToken,
@@ -1119,7 +688,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       },
     });
 
-    const responseCommitStartedAt = Date.now();
     setCookies(req, res, accessToken, refreshRaw);
 
     res.json({
@@ -1131,18 +699,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         businessId,
       },
     });
-    measureStep("responseCommit", responseCommitStartedAt);
-    emitLoginBudgetTelemetry({
-      businessId,
-      stage: "response_commit_budget",
-      elapsedMs: Date.now() - responseCommitStartedAt,
-      budgetMs: stageBudgets.response_commit_budget,
-      policy: "soft",
-      outcome:
-        Date.now() - responseCommitStartedAt <= stageBudgets.response_commit_budget
-          ? "ok"
-          : "budget_exceeded",
-    });
 
     emitPerformanceMetric({
       name: "AUTH_MS",
@@ -1151,35 +707,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       route: "auth.login",
       metadata: {
         source: "password",
-      },
-    });
-    emitPerformanceMetric({
-      name: "auth_bootstrap_ms",
-      value: Date.now() - startedAt,
-      businessId,
-      route: "auth.login",
-      metadata: {
-        stage: "response_committed",
-        source: "password",
-      },
-    });
-    emitPerformanceMetric({
-      name: "auth_session_ready",
-      value: Date.now() - startedAt,
-      businessId,
-      route: "auth.login",
-      metadata: {
-        stage: "session_persisted",
-        source: "password",
-      },
-    });
-    emitPerformanceMetric({
-      name: "auth_login_total_ms",
-      value: Date.now() - startedAt,
-      businessId,
-      route: "auth.login",
-      metadata: {
-        outcome: "success",
       },
     });
 
@@ -1220,52 +747,11 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         },
       },
       {
-        shouldRun: () => !isRequestLifecycleAborted({ req, res }),
+        shouldRun: () => true,
       }
     );
 
-    console.info("AUTH_LOGIN_WATERFALL", {
-      status: "success",
-      userId: resolvedUser.id,
-      businessId,
-      requestId: req.requestId || null,
-      totalMs: Date.now() - startedAt,
-      loginWaterfallMs,
-    });
-
   } catch (err) {
-    if (
-      err instanceof TimeoutExceededError &&
-      String(err.message || "").includes("auth_login")
-    ) {
-      const businessId = null;
-      emitPerformanceMetric({
-        name: "auth_login_total_ms",
-        value: Date.now() - startedAt,
-        businessId,
-        route: "auth.login",
-        metadata: {
-          outcome: "processing",
-          reason: "lifecycle_lock_timeout",
-          error: err.message,
-        },
-      });
-      if (!res.headersSent && !res.writableEnded) {
-        return sendLoginProcessing({
-          res,
-          startedAt,
-          businessId,
-          code: "lifecycle_lock_timeout",
-          retryAfterMs: LOGIN_PROCESSING_RETRY_AFTER_BASE_MS,
-          message:
-            "Login is still stabilizing. Please wait a moment and retry.",
-          metadata: {
-            error: err.message,
-          },
-        });
-      }
-      return;
-    }
     next(err);
   }
 };

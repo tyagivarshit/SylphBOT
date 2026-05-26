@@ -8,16 +8,6 @@ type Invoice = {
   subtotal?: number;
   taxAmount?: number;
   currency?: string;
-"use client";
-
-import { ExternalLink, Download } from "lucide-react";
-
-type Invoice = {
-  id: string;
-  amount?: number;
-  subtotal?: number;
-  taxAmount?: number;
-  currency?: string;
   created?: number;
   status?: string;
   hosted_invoice_url?: string;

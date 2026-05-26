@@ -485,6 +485,8 @@ async function fetchJson<T>(url: string, timeoutMs = BILLING_API_TIMEOUT_MS) {
 function BillingPageContent() {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<"plans" | "history">("plans");
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [hasLoadedInvoices, setHasLoadedInvoices] = useState(false);
   const [loading, setLoading] = useState<PlanId | null>(null);
   const [checkoutProgressMessage, setCheckoutProgressMessage] = useState<string | null>(null);
   const [checkoutPending, setCheckoutPending] = useState(false);
@@ -507,6 +509,25 @@ function BillingPageContent() {
   const checkoutPauseTelemetryLastAtRef = useRef(0);
   const backgroundFailureCountRef = useRef(0);
   const backgroundRefreshTimeoutRef = useRef<number | null>(null);
+
+  const loadInvoices = useCallback(async () => {
+    setInvoicesLoading(true);
+    try {
+      const data = await fetchJson<BillingApiResponse>("/api/billing?surface=history");
+      setInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+      setHasLoadedInvoices(true);
+    } catch (err) {
+      notify.error("Could not load payment history. Please retry.");
+    } finally {
+      setInvoicesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "history" && !hasLoadedInvoices && !invoicesLoading) {
+      void loadInvoices();
+    }
+  }, [activeTab, hasLoadedInvoices, invoicesLoading, loadInvoices]);
 
   useEffect(() => {
     setDashboardRoutePrefetchPaused(true);
@@ -598,8 +619,7 @@ function BillingPageContent() {
           });
         }
 
-        const hasAnyData = hasLoadedBillingRef.current || hasLoadedPlansRef.current;
-        if (!isBackground && !hasAnyData) {
+        if (!isBackground) {
           setPageLoading(true);
           setLoadWarning(null);
         } else {
@@ -624,7 +644,7 @@ function BillingPageContent() {
         }
 
         const snapshot = await refreshBillingBootstrapSnapshot({
-          background: isBackground || hasAnyData,
+          background: isBackground,
         });
         const warnings: string[] = [];
 
@@ -675,8 +695,11 @@ function BillingPageContent() {
         );
         successfulRefresh = false;
       } finally {
-        setPageLoading(false);
-        setBackgroundRefreshing(false);
+        if (!isBackground) {
+          setPageLoading(false);
+        } else {
+          setBackgroundRefreshing(false);
+        }
       }
 
       return successfulRefresh;
@@ -758,13 +781,6 @@ function BillingPageContent() {
           return;
         }
 
-        // Restrict background fetch loops on mount unless the "history" tab is selected or initial load is completing.
-        const initialLoadCompleted = hasLoadedBillingRef.current && hasLoadedPlansRef.current;
-        if (activeTab !== "history" && initialLoadCompleted) {
-          scheduleNextRefresh(getNextRefreshDelayMs());
-          return;
-        }
-
         const successfulRefresh = await loadBilling({
           background: true,
         });
@@ -786,6 +802,371 @@ function BillingPageContent() {
       cancelled = true;
       clearScheduledRefresh();
     };
+  }, [checkoutPending, loadBilling, loading]);
+
+  const planKey = billingContext?.planKey || "FREE_LOCKED";
+  const billingStatus = billingContext?.status || "INACTIVE";
+  const allowEarly = Boolean(billingContext?.allowEarly);
+  const remainingEarly = billingContext?.remainingEarly || 0;
+  const hasUsedTrial = Boolean(subscription?.trialUsed);
+  const isCancelled = searchParams.get("checkout") === "cancelled";
+  const isCheckoutFailed = searchParams.get("checkout") === "failed";
+  const checkoutFailureReason = searchParams.get("reason");
+  const checkoutFailureMessage = getCheckoutFailureMessage(checkoutFailureReason);
+  const currentPeriodEnd = subscription?.currentPeriodEnd
+    ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
+    : null;
+
+  const plans = useMemo(
+    () =>
+      plansResponse.plans.slice().sort((left, right) => {
+        const order: PlanId[] = ["BASIC", "PRO", "ELITE"];
+        return order.indexOf(left.type) - order.indexOf(right.type);
+      }),
+    [plansResponse.plans]
+  );
+
+  const handleCheckout = async (plan: PlanId) => {
+    if (loading || checkoutLockRef.current) {
+      return;
+    }
+
+    try {
+      checkoutLockRef.current = true;
+      setCheckoutPending(true);
+      setLoading(plan);
+      setCheckoutProgressMessage("Redirecting to secure checkout...");
+
+      if (lockedCurrency && lockedCurrency !== currency) {
+        throw new Error(
+          "Your billing currency is already locked for this workspace."
+        );
+      }
+
+      redirectToCheckout(plan, billing);
+    } catch (checkoutError) {
+      checkoutLockRef.current = false;
+      setCheckoutPending(false);
+      setLoading(null);
+      setCheckoutProgressMessage(null);
+      notify.error(
+        checkoutError instanceof Error
+          ? checkoutError.message
+          : "We couldn't start checkout right now."
+      );
+    }
+  };
+
+  if (pageLoading) {
+    return <BillingPageSkeleton />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+              Pricing and billing
+            </p>
+          </div>
+
+          <div className="flex rounded-2xl border border-slate-200/80 bg-white/90 p-1 shadow-sm">
+            {(["monthly", "yearly"] as BillingCycle[]).map((type) => (
+              <button
+                key={type}
+                onClick={() => setBilling(type)}
+                className={`rounded-[14px] px-5 py-2 text-sm font-semibold transition-all ${
+                  billing === type
+                    ? "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white shadow"
+                    : "text-slate-600"
+                }`}
+              >
+                {type === "monthly" ? "Monthly" : "Yearly"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* TAB NAVIGATION */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200/80 bg-slate-50/70 p-2.5 rounded-[22px]">
+        <button
+          type="button"
+          onClick={() => setActiveTab("plans")}
+          className={`rounded-xl px-5 py-2.5 text-xs sm:text-sm font-semibold transition-all duration-200 ${
+            activeTab === "plans"
+              ? "bg-white text-blue-600 shadow-sm border border-slate-200/60"
+              : "text-slate-600 hover:bg-white/80 hover:text-slate-900"
+          }`}
+        >
+          Plans & Pricing
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("history")}
+          className={`rounded-xl px-5 py-2.5 text-xs sm:text-sm font-semibold transition-all duration-200 ${
+            activeTab === "history"
+              ? "bg-white text-blue-600 shadow-sm border border-slate-200/60"
+              : "text-slate-600 hover:bg-white/80 hover:text-slate-900"
+          }`}
+        >
+          Payment History
+        </button>
+      </div>
+
+      {activeTab === "plans" ? (
+        <>
+          {loadWarning ? (
+            <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <span>{loadWarning}</span>
+                <button
+                  onClick={() => {
+                    void loadBilling();
+                  }}
+                  className="inline-flex w-fit items-center rounded-lg border border-amber-300 bg-white/80 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-white"
+                >
+                  Retry now
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {backgroundRefreshing && !checkoutProgressMessage ? (
+            <div className="rounded-[18px] border border-slate-200/80 bg-white/85 px-4 py-2 text-xs font-medium text-slate-600">
+              Refreshing billing snapshot in background...
+            </div>
+          ) : null}
+
+          {checkoutProgressMessage ? (
+            <div className="rounded-[24px] border border-blue-200 bg-blue-50/90 px-5 py-4 text-sm text-blue-700 shadow-sm">
+              {checkoutProgressMessage}
+            </div>
+          ) : null}
+
+          {isCancelled ? (
+            <div className="rounded-[24px] border border-amber-200 bg-amber-50/90 px-5 py-4 text-sm text-amber-800 shadow-sm">
+              Checkout was cancelled. Your current plan has not changed.
+            </div>
+          ) : null}
+
+          {isCheckoutFailed ? (
+            <div className="rounded-[24px] border border-rose-200 bg-rose-50/90 px-5 py-4 text-sm text-rose-700 shadow-sm">
+              {checkoutFailureMessage}
+            </div>
+          ) : null}
+
+          {allowEarly ? (
+            <div className="brand-info-strip rounded-[24px] px-5 py-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    Early access offer is still live
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    {remainingEarly} discounted spot{remainingEarly === 1 ? "" : "s"} remaining.
+                  </p>
+                </div>
+                <span className="brand-chip">
+                  <Sparkles size={13} />
+                  Early pricing
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="brand-section-shell rounded-[26px] p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  {billingStatus === "TRIAL"
+                    ? `${plansResponse.trialDays} day trial is active`
+                    : billingStatus === "ACTIVE"
+                      ? "Paid subscription is active"
+                      : hasUsedTrial
+                        ? "Trial already used"
+                        : `Your first checkout includes a ${plansResponse.trialDays} day free trial`}
+                </p>
+                <p className="mt-1 text-sm text-gray-600">
+                  {billingStatus === "TRIAL" && currentPeriodEnd
+                    ? `Trial access stays active until ${currentPeriodEnd}.`
+                    : billingStatus === "ACTIVE"
+                      ? "You can switch plans anytime and Stripe will handle the billing update."
+                      : hasUsedTrial
+                        ? "Pick a paid plan to unlock replies, automation, and billing access again."
+                        : "Start with a free trial, then keep the momentum going with the plan that fits your volume."}
+                </p>
+              </div>
+
+              <span className="brand-chip brand-chip-success">
+                <ShieldCheck size={13} />
+                Secure billing
+              </span>
+            </div>
+          </div>
+
+          <div id="plans" className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            {plans.map((plan) => {
+              const displayPrice =
+                billing === "monthly"
+                  ? plan.monthlyPrice[currency]
+                  : plan.yearlyPrice[currency];
+              const current = isCurrentPlan(subscription, plan.type, planKey);
+
+              return (
+                <div
+                  key={plan.type}
+                  className={`relative rounded-2xl border bg-white/85 p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg ${
+                    plan.popular ? "border-blue-300" : "border-blue-100"
+                  }`}
+                >
+                  {plan.popular ? (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 px-3 py-1 text-xs font-semibold text-white">
+                      Most popular
+                    </span>
+                  ) : null}
+
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          {plan.name}
+                        </h2>
+                        <p className="mt-1 text-sm text-gray-500">
+                          {plan.description}
+                        </p>
+                      </div>
+
+                      {current ? (
+                        <span className="rounded-md bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">
+                          Active
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <div className="flex items-end gap-2">
+                        <span className="text-3xl font-bold text-gray-900">
+                          {formatMoney(displayPrice, currency)}
+                        </span>
+                        <span className="pb-1 text-sm text-gray-500">
+                          /{billing}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs font-medium text-blue-600">
+                        Includes {plan.limits.aiDailyLimit} AI replies per day
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-blue-50/70 p-3 text-xs text-slate-600">
+                      <p>{plan.limits.contactsLimit.toLocaleString()} contacts included</p>
+                      <p className="mt-1">
+                        {plan.limits.aiMonthlyLimit.toLocaleString()} AI replies per month
+                      </p>
+                      <p className="mt-1">
+                        {plan.limits.messageLimit === -1
+                          ? "Unlimited monthly messages"
+                          : `${plan.limits.messageLimit.toLocaleString()} messages per month`}
+                      </p>
+                    </div>
+
+                    <ul className="space-y-2 text-sm text-gray-700">
+                      {plan.features.map((feature) => (
+                        <li key={feature} className="flex gap-2">
+                          <span className="text-blue-500">+</span>
+                          {feature}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <LoadingButton
+                    onClick={() => void handleCheckout(plan.type)}
+                    loading={loading === plan.type}
+                    loadingLabel="Redirecting to secure checkout..."
+                    disabled={Boolean(loading) || current}
+                    className={`mt-6 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                      current
+                        ? "bg-gray-200 text-gray-600"
+                        : "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white hover:shadow-lg"
+                    }`}
+                  >
+                    {current
+                      ? "Current Plan"
+                      : planKey === "FREE_LOCKED" || planKey === "LOCKED"
+                        ? hasUsedTrial
+                          ? "Buy Now"
+                          : "Start Free Trial"
+                        : "Upgrade Now"}
+                  </LoadingButton>
+
+                  <p className="mt-3 text-xs text-gray-500">
+                    {planKey === "FREE_LOCKED" || planKey === "LOCKED"
+                      ? hasUsedTrial
+                        ? "Need more flexibility? Buy extra AI credits anytime."
+                        : `${plansResponse.trialDays} day free trial applies on the first checkout only.`
+                      : "Need more headroom? Buy extra AI credits anytime."}
+                  </p>
+                </div>
+              );
+            })}
+
+            {plans.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200/80 bg-white/86 p-6 text-sm text-slate-600 sm:col-span-2 xl:col-span-3">
+                {plansRequestFailed
+                  ? "Plan options are temporarily unavailable. Your billing state and payment history are still accessible below."
+                  : "Plan options are still syncing. Safe defaults are shown as soon as available."}
+              </div>
+            ) : null}
+          </div>
+
+          {plansResponse.addons?.length ? (
+            <div className="brand-section-shell rounded-[26px] p-5">
+              <h3 className="text-base font-semibold text-gray-900">
+                Extra AI credits
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Top up when conversations spike without changing your base plan.
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                {plansResponse.addons.map((addon) => (
+                  <div
+                    key={addon.type}
+                    className="rounded-[20px] border border-slate-200/80 bg-white/84 p-4 shadow-sm"
+                  >
+                    <p className="text-sm font-semibold text-slate-950">
+                      {addon.label}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {addon.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className="brand-section-shell rounded-[28px] p-5">
+          {invoicesLoading ? (
+            <div className="space-y-4">
+              <SkeletonCard className="h-16" />
+              <SkeletonCard className="h-16" />
+              <SkeletonCard className="h-16" />
+            </div>
+          ) : (
+            <PaymentHistory invoices={invoices} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BillingPageSkeleton() {
+  return (
+    <div className="space-y-6">
       <SkeletonCard className="h-28" />
       <SkeletonCard className="h-36" />
       <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">

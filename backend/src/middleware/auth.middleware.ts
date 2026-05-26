@@ -377,89 +377,20 @@ const computeSharedLookupBudgetProfile = (input: {
   routeCritical: boolean;
   cacheAvailability: "warm" | "cold";
 }) => {
-  const startupSnapshot = getStartupIsolationSnapshot();
-  const requestBudgetMs = getAuthBudgetMs(input.req, input.res || undefined);
-  const startupWindowActive = Boolean(startupSnapshot?.startupWindowActive);
-  const eventLoopLagMs = Math.max(
-    0,
-    asNumber(startupSnapshot?.pressure?.eventLoopLagMs, 0)
-  );
-  const cpuPressurePercent = Math.max(
-    0,
-    asNumber(startupSnapshot?.pressure?.cpuPressurePercent, 0)
-  );
-  const criticalQueueDepth = Math.max(
-    0,
-    Math.floor(asNumber(startupSnapshot?.requestPriority?.queue?.critical, 0))
-  );
-  const activeCritical = Math.max(
-    0,
-    Math.floor(asNumber(startupSnapshot?.requestPriority?.active?.critical, 0))
-  );
-  const reasons: string[] = [];
-  let multiplier = 1;
-
-  if (startupWindowActive) {
-    multiplier += 0.2;
-    reasons.push("startup_window_active");
-  }
-  if (eventLoopLagMs >= 45) {
-    multiplier += 0.2;
-    reasons.push("event_loop_lag_elevated");
-  }
-  if (eventLoopLagMs >= 90) {
-    multiplier += 0.2;
-    reasons.push("event_loop_lag_high");
-  }
-  if (cpuPressurePercent >= 65) {
-    multiplier += 0.2;
-    reasons.push("cpu_pressure_elevated");
-  }
-  if (cpuPressurePercent >= 85) {
-    multiplier += 0.2;
-    reasons.push("cpu_pressure_high");
-  }
-  if (criticalQueueDepth > 0 || activeCritical > 0) {
-    multiplier += 0.2;
-    reasons.push("critical_queue_contention");
-  }
-  if (input.degradedAuthAllowed || input.routeCritical) {
-    multiplier += 0.25;
-    reasons.push("stabilization_priority_route");
-  }
-  if (input.cacheAvailability === "cold") {
-    multiplier += 0.2;
-    reasons.push("auth_cache_cold");
-  }
-
-  multiplier = clamp(
-    Number(multiplier.toFixed(2)),
-    AUTH_SHARED_LOOKUP_ADAPTIVE_MIN_MULTIPLIER,
-    AUTH_SHARED_LOOKUP_ADAPTIVE_MAX_MULTIPLIER
-  );
-  const timeoutMs = clamp(
-    Math.round(Math.max(1, input.maxTimeoutMs) * multiplier),
-    AUTH_SHARED_LOOKUP_MIN_TIMEOUT_MS,
-    Math.min(
-      AUTH_SHARED_LOOKUP_MAX_TIMEOUT_MS,
-      Math.max(AUTH_SHARED_LOOKUP_MIN_TIMEOUT_MS, requestBudgetMs)
-    )
-  );
-
   return {
     stage: input.stage,
-    timeoutMs,
-    requestBudgetMs,
-    multiplier,
-    startupWindowActive,
-    eventLoopLagMs,
-    cpuPressurePercent,
-    criticalQueueDepth,
-    activeCritical,
+    timeoutMs: input.maxTimeoutMs || 2000,
+    requestBudgetMs: 2000,
+    multiplier: 1,
+    startupWindowActive: false,
+    eventLoopLagMs: 0,
+    cpuPressurePercent: 0,
+    criticalQueueDepth: 0,
+    activeCritical: 0,
     degradedAuthAllowed: input.degradedAuthAllowed,
     cacheAvailability: input.cacheAvailability,
     routeCritical: input.routeCritical,
-    reasons,
+    reasons: [],
   } satisfies SharedLookupBudgetProfile;
 };
 
@@ -719,155 +650,33 @@ const runSharedAuthStage = async <T>(input: {
   cacheAvailability: "warm" | "cold";
   retryAttempts?: number;
 }) => {
-  const retryAttempts = Math.max(
-    0,
-    Math.floor(
-      input.retryAttempts ??
-        Math.max(AUTH_DB_FALLBACK_RETRY_ATTEMPTS, AUTH_DEADLOCK_RETRY_ATTEMPTS)
-    )
-  );
+  const retryAttempts = 1; // 1 bounded retry maximum
   let attempt = 0;
 
   while (attempt <= retryAttempts) {
-    const budgetProfile = computeSharedLookupBudgetProfile({
-      req: input.req,
-      res: input.res || null,
-      stage: input.stage,
-      maxTimeoutMs: input.maxTimeoutMs,
-      degradedAuthAllowed: input.degradedAuthAllowed,
-      routeCritical: input.routeCritical,
-      cacheAvailability: input.cacheAvailability,
-    });
     const lookupStartedAt = Date.now();
-
-    emitPerformanceMetric({
-      name: "auth_shared_lookup_budget_profile",
-      value: budgetProfile.timeoutMs,
-      businessId: input.businessId || null,
-      route: input.req.originalUrl,
-      metadata: {
-        stage: input.stage,
-        requestBudgetMs: budgetProfile.requestBudgetMs,
-        multiplier: budgetProfile.multiplier,
-        startupWindowActive: budgetProfile.startupWindowActive,
-        eventLoopLagMs: budgetProfile.eventLoopLagMs,
-        cpuPressurePercent: budgetProfile.cpuPressurePercent,
-        criticalQueueDepth: budgetProfile.criticalQueueDepth,
-        activeCritical: budgetProfile.activeCritical,
-        degradedAuthAllowed: budgetProfile.degradedAuthAllowed,
-        routeCritical: budgetProfile.routeCritical,
-        cacheAvailability: budgetProfile.cacheAvailability,
-        reasons: budgetProfile.reasons,
-        attempt: attempt + 1,
-      },
-    });
-
     try {
       const value = await withTimeout({
         label: `auth_shared_${input.stage}`,
-        timeoutMs: budgetProfile.timeoutMs,
+        timeoutMs: input.maxTimeoutMs || 2000,
         task: input.task(),
       });
-      const elapsedMs = Date.now() - lookupStartedAt;
-      emitPerformanceMetric({
-        name: "auth_shared_lookup_ms",
-        value: elapsedMs,
-        businessId: input.businessId || null,
-        route: input.req.originalUrl,
-        metadata: {
-          stage: input.stage,
-          attempt: attempt + 1,
-          timeoutMs: budgetProfile.timeoutMs,
-          outcome: "ok",
-        },
-      });
-      if (attempt > 0) {
-        emitPerformanceMetric({
-          name: "auth_verification_stabilized",
-          value: elapsedMs,
-          businessId: input.businessId || null,
-          route: input.req.originalUrl,
-          metadata: {
-            stage: input.stage,
-            retries: attempt,
-            timeoutMs: budgetProfile.timeoutMs,
-          },
-        });
-      }
       return value;
     } catch (error) {
       const elapsedMs = Date.now() - lookupStartedAt;
       const deadlockLike = isDeadlockLikePrismaError(error);
       const timeoutLike = isAuthStageTimeoutError(error);
 
-      emitPerformanceMetric({
-        name: "auth_shared_lookup_ms",
-        value: elapsedMs,
-        businessId: input.businessId || null,
-        route: input.req.originalUrl,
-        metadata: {
-          stage: input.stage,
-          attempt: attempt + 1,
-          timeoutMs: budgetProfile.timeoutMs,
-          outcome: deadlockLike ? "deadlock" : timeoutLike ? "timeout" : "failed",
-          errorCode: String((error as { code?: unknown })?.code || "").trim() || null,
-          error: String((error as Error)?.message || "").trim() || null,
-        },
-      });
-
-      if (timeoutLike) {
-        emitPerformanceMetric({
-          name: "auth_transient_lookup_timeout",
-          value: elapsedMs,
-          businessId: input.businessId || null,
-          route: input.req.originalUrl,
-          metadata: {
-            stage: input.stage,
-            timeoutMs: budgetProfile.timeoutMs,
-            attempt: attempt + 1,
-          },
-        });
-      }
-
       const retryable = deadlockLike || timeoutLike;
       if (!retryable || attempt >= retryAttempts) {
         throw error;
       }
 
-      const retryDelayMs =
-        AUTH_DEADLOCK_RETRY_BASE_DELAY_MS * (attempt + 1) +
-        randomJitterMs(AUTH_DEADLOCK_RETRY_MAX_JITTER_MS);
-
-      if (deadlockLike) {
-        emitPerformanceMetric({
-          name: "auth_deadlock_retry_count",
-          value: attempt + 1,
-          businessId: input.businessId || null,
-          route: input.req.originalUrl,
-          metadata: {
-            stage: input.stage,
-            retryDelayMs,
-            errorCode: String((error as { code?: unknown })?.code || "").trim() || null,
-          },
-        });
-      }
-      emitPerformanceMetric({
-        name: "auth_db_fallback_retry_ms",
-        value: retryDelayMs,
-        businessId: input.businessId || null,
-        route: input.req.originalUrl,
-        metadata: {
-          stage: input.stage,
-          reason: deadlockLike ? "deadlock" : "timeout",
-          attempt: attempt + 1,
-        },
-      });
-
+      const retryDelayMs = 50; // tiny backoff window
       await sleep(retryDelayMs);
       attempt += 1;
     }
   }
-
   throw new Error(`auth_shared_lookup_failed:${input.stage}`);
 };
 

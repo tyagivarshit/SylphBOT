@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.configurePassport = void 0;
 const crypto_1 = __importDefault(require("crypto"));
-const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const bcryptWorker_1 = require("../utils/bcryptWorker");
 const passport_1 = __importDefault(require("passport"));
 const passport_google_oauth20_1 = require("passport-google-oauth20");
 const prisma_1 = __importDefault(require("./prisma"));
@@ -47,7 +47,7 @@ const configurePassport = () => {
                     data: {
                         email,
                         name: displayName,
-                        password: await bcryptjs_1.default.hash(randomPassword, 12),
+                        password: await (0, bcryptWorker_1.hashPasswordWorker)(randomPassword, 12),
                         isVerified: true,
                         avatar: avatarUrl,
                     },

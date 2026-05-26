@@ -221,7 +221,7 @@ export default function DashboardLayout({
   const terminalAnonymous =
     !user &&
     (lifecycleState === "failed_terminal" || lifecycleState === "anonymous");
-  const holdChildHydration = loading && !user;
+  const holdChildHydration = false;
 
   const [open, setOpen] = useState(false);
   const [upgradeState, setUpgradeState] = useState<OpenUpgradeOptions | null>(null);

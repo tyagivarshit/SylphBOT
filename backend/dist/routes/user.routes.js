@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const bcryptWorker_1 = require("../utils/bcryptWorker");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const upload_1 = __importDefault(require("../middleware/upload"));
 const cloudinary_1 = __importDefault(require("../config/cloudinary"));
@@ -757,13 +757,13 @@ router.post("/change-password", auth_middleware_1.protect, async (req, res) => {
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
-        const matches = await bcryptjs_1.default.compare(currentPassword, user.password);
+        const matches = await (0, bcryptWorker_1.verifyPasswordWorker)(currentPassword, user.password);
         if (!matches) {
             return res.status(400).json({
                 error: "Current password is incorrect",
             });
         }
-        const nextPassword = await bcryptjs_1.default.hash(newPassword, 12);
+        const nextPassword = await (0, bcryptWorker_1.hashPasswordWorker)(newPassword, 12);
         await prisma_1.default.$transaction([
             prisma_1.default.user.update({
                 where: { id: userId },

@@ -170,7 +170,6 @@ export const initQueues = async () => {
 
   const initPromise = (async () => {
     initRedisConnections();
-    await waitForRedisReady();
     void bootstrapReliabilityOS().catch(() => undefined);
     void bootstrapInfrastructureResilienceOS().catch(() => undefined);
     void bootstrapSaaSPackagingConnectHubOS().catch(() => undefined);

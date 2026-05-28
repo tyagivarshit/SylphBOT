@@ -316,7 +316,39 @@ export const securityPhase6BTests: TestCase[] = [
       });
 
       assert.equal(isolation.allowed, false);
-      assert.equal(isolation.reason, "cross_tenant_bleed_blocked");
+      assert.equal(isolation.reason, "tenant_context_mismatch");
+    },
+  },
+  {
+    name: "phase6b subsystem specificity avoids tenant freeze for non-critical subsystems",
+    run: async () => {
+      await reset();
+
+      // Mismatch in non-critical subsystem (e.g. ANALYTICS) should block but NOT freeze tenant
+      const nonCriticalRes = await assertTenantIsolation({
+        businessId: "tenant_A",
+        tenantId: "tenant_A",
+        actorTenantId: "tenant_A",
+        resourceTenantId: "tenant_B",
+        subsystem: "ANALYTICS",
+      });
+
+      assert.equal(nonCriticalRes.allowed, false);
+      assert.equal(nonCriticalRes.reason, "tenant_context_mismatch");
+      assert.equal(getStore().frozenTenants.has("tenant_A"), false);
+
+      // Mismatch in critical subsystem (e.g. BILLING) should block AND freeze tenant
+      const criticalRes = await assertTenantIsolation({
+        businessId: "tenant_A",
+        tenantId: "tenant_A",
+        actorTenantId: "tenant_A",
+        resourceTenantId: "tenant_B",
+        subsystem: "BILLING",
+      });
+
+      assert.equal(criticalRes.allowed, false);
+      assert.equal(criticalRes.reason, "cross_tenant_bleed_blocked");
+      assert.equal(getStore().frozenTenants.has("tenant_A"), true);
     },
   },
   {

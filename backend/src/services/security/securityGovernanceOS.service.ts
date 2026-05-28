@@ -930,6 +930,7 @@ export const assertTenantIsolation = async (input: {
     String(actorTenantId) !== String(resourceTenantId);
   const timestamp = now();
   const subsystem = String(input.subsystem || "runtime").trim().toUpperCase();
+  const isCritical = ["AUTH", "SECURITY", "BILLING"].includes(subsystem);
   const normalizedBusinessId = normalizeBusinessId(input.businessId);
   const normalizedTenantId = normalizeTenantId({
     tenantId: input.tenantId,
@@ -956,7 +957,13 @@ export const assertTenantIsolation = async (input: {
     resourceTenantId,
     verdict: mismatch ? "BLOCKED" : "ALLOWED",
     bleedDetected: Boolean(mismatch),
-    reason: input.reason || (mismatch ? "cross_tenant_mismatch" : "ok"),
+    reason:
+      input.reason ||
+      (mismatch
+        ? isCritical
+          ? "cross_tenant_mismatch"
+          : "tenant_context_mismatch"
+        : "ok"),
     metadata: toRecord(input.metadata),
     createdAt: timestamp,
   };
@@ -991,47 +998,55 @@ export const assertTenantIsolation = async (input: {
   });
 
   if (mismatch) {
-    if (actorTenantId) {
-      getStore().frozenTenants.add(actorTenantId);
+    if (isCritical) {
+      if (actorTenantId) {
+        getStore().frozenTenants.add(actorTenantId);
+      }
+      await attestInfraIsolation({
+        businessId: row.businessId,
+        tenantId: actorTenantId || row.tenantId,
+        source: "TENANT_ISOLATION",
+        checks: {
+          db: true,
+          cache: true,
+          queue: true,
+          logs: true,
+          files: true,
+          tokens: false,
+          providers: true,
+          analytics: true,
+          traces: false,
+        },
+        metadata: {
+          actorTenantId,
+          resourceTenantId,
+        },
+      }).catch(() => undefined);
+      await openSecurityIncident({
+        businessId: row.businessId,
+        tenantId: row.tenantId,
+        severity: "HIGH",
+        title: "Cross-tenant bleed blocked",
+        summary: "Tenant isolation guard blocked a cross-tenant access attempt.",
+        signalKey: null,
+        actions: {
+          containment: "TENANT_ISOLATION_BLOCK",
+        },
+        metadata: {
+          actorTenantId,
+          resourceTenantId,
+        },
+      });
+      return {
+        allowed: false,
+        reason: "cross_tenant_bleed_blocked",
+        ledger: row,
+      };
     }
-    await attestInfraIsolation({
-      businessId: row.businessId,
-      tenantId: actorTenantId || row.tenantId,
-      source: "TENANT_ISOLATION",
-      checks: {
-        db: true,
-        cache: true,
-        queue: true,
-        logs: true,
-        files: true,
-        tokens: false,
-        providers: true,
-        analytics: true,
-        traces: false,
-      },
-      metadata: {
-        actorTenantId,
-        resourceTenantId,
-      },
-    }).catch(() => undefined);
-    await openSecurityIncident({
-      businessId: row.businessId,
-      tenantId: row.tenantId,
-      severity: "HIGH",
-      title: "Cross-tenant bleed blocked",
-      summary: "Tenant isolation guard blocked a cross-tenant access attempt.",
-      signalKey: null,
-      actions: {
-        containment: "TENANT_ISOLATION_BLOCK",
-      },
-      metadata: {
-        actorTenantId,
-        resourceTenantId,
-      },
-    });
+
     return {
       allowed: false,
-      reason: "cross_tenant_bleed_blocked",
+      reason: "tenant_context_mismatch",
       ledger: row,
     };
   }

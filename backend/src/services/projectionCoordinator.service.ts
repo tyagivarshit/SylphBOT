@@ -79,7 +79,7 @@ const parsePositiveInt = (raw: string | undefined, fallbackValue: number) => {
 
 const PROJECTION_MAX_CONCURRENT_COMPUTE = parsePositiveInt(
   process.env.PROJECTION_MAX_CONCURRENT_COMPUTE,
-  2
+  4
 );
 const PROJECTION_MAX_QUEUED_COMPUTE = parsePositiveInt(
   process.env.PROJECTION_MAX_QUEUED_COMPUTE,

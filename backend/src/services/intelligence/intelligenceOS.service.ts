@@ -8,6 +8,7 @@ import { resetIntelligenceRuntimeInfluenceCache } from "./intelligenceRuntimeInf
 import { getQueueHealth } from "../queueHealth.service";
 import { getReceptionMetricsSnapshot } from "../receptionMetrics.service";
 import { enforceSecurityGovernanceInfluence } from "../security/securityGovernanceOS.service";
+import { getProjectionSnapshot } from "../projectionCoordinator.service";
 
 export const INTELLIGENCE_FORECAST_METRICS = [
   "revenue_forecast",
@@ -786,6 +787,24 @@ const buildSnapshotSignals = ({
   };
 };
 
+const buildFallbackSnapshot = (
+  businessId: string,
+  asOf: Date
+): IntelligenceDomainSnapshot => ({
+  businessId,
+  asOf,
+  ownerUserId: null,
+  timezone: "UTC",
+  signals: {},
+  reception: {},
+  queueHealth: {},
+  projections: {
+    appointment: {},
+    commerce: {},
+  },
+  leads: [],
+});
+
 export const collectIntelligenceDomainSnapshot = async ({
   businessId,
   asOf = new Date(),
@@ -793,339 +812,356 @@ export const collectIntelligenceDomainSnapshot = async ({
   businessId: string;
   asOf?: Date;
 }): Promise<IntelligenceDomainSnapshot> => {
-  const window30 = new Date(asOf.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const window7 = new Date(asOf.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const roundedTime = Math.floor(asOf.getTime() / 15_000) * 15_000;
+  const cacheKey = `telemetry:snapshot:${businessId}:${roundedTime}`;
 
-  const [
-    business,
-    leadRows,
-    leadCount,
-    newLeadCount7,
-    newLeadCount30,
-    appointmentRows,
-    renewalsDue30,
-    churnedSubscriptions30,
-    inboundRows,
-    queueRows,
-    slotReservations7,
-    revenueRows,
-    paymentFailures7,
-    refundCount30,
-    chargebackCount30,
-    outboxPendingCount,
-    outboxFailedCount,
-    queueHealth,
-  ] = await Promise.all([
-    prisma.business.findUnique({
-      where: {
-        id: businessId,
-      },
-      select: {
-        id: true,
-        ownerId: true,
-        timezone: true,
-      },
-    }),
-    prisma.lead.findMany({
-      where: {
-        businessId,
-        deletedAt: null,
-      },
-      orderBy: [
-        {
-          intelligenceUpdatedAt: "desc",
-        },
-        {
-          createdAt: "desc",
-        },
-      ],
-      take: 40,
-      select: {
-        id: true,
-        stage: true,
-        followupCount: true,
-        unreadCount: true,
-        lastEngagedAt: true,
-        leadScore: true,
-      },
-    }),
-    prisma.lead.count({ where: { businessId, deletedAt: null } }),
-    prisma.lead.count({
-      where: {
-        businessId,
-        deletedAt: null,
-        createdAt: { gte: window7, lte: asOf },
-      },
-    }),
-    prisma.lead.count({
-      where: {
-        businessId,
-        deletedAt: null,
-        createdAt: { gte: window30, lte: asOf },
-      },
-    }),
-    prisma.appointmentLedger.findMany({
-      where: {
-        businessId,
-        createdAt: { gte: window30, lte: asOf },
-      },
-      select: {
-        leadId: true,
-        status: true,
-      },
-    }),
-    prisma.subscriptionLedger.count({
-      where: {
-        businessId,
-        renewAt: {
-          gte: asOf,
-          lte: new Date(asOf.getTime() + 30 * 24 * 60 * 60 * 1000),
-        },
-      },
-    }),
-    prisma.subscriptionLedger.count({
-      where: {
-        businessId,
-        status: "CANCELLED",
-        updatedAt: { gte: window30, lte: asOf },
-      },
-    }),
-    prisma.inboundInteraction.findMany({
-      where: {
-        businessId,
-        createdAt: { gte: window7, lte: asOf },
-      },
-      select: {
-        spamScore: true,
-        routeDecision: true,
-      },
-    }),
-    prisma.humanWorkQueue.findMany({
-      where: {
-        businessId,
-        createdAt: { gte: window7, lte: asOf },
-      },
-      select: {
-        state: true,
-        priority: true,
-      },
-    }),
-    prisma.slotReservationLedger.count({
-      where: {
-        businessId,
-        createdAt: { gte: window7, lte: asOf },
-      },
-    }),
-    prisma.revenueRecognitionLedger.findMany({
-      where: {
-        businessId,
-        stage: {
-          in: ["RECOGNIZED", "COLLECTED"],
-        },
-        createdAt: { gte: window30, lte: asOf },
-      },
-      select: {
-        amountMinor: true,
-      },
-    }),
-    prisma.paymentAttemptLedger.count({
-      where: {
-        businessId,
-        status: "FAILED",
-        createdAt: { gte: window7, lte: asOf },
-      },
-    }),
-    prisma.refundLedger.count({
-      where: {
-        businessId,
-        createdAt: { gte: window30, lte: asOf },
-      },
-    }),
-    prisma.chargebackLedger.count({
-      where: {
-        businessId,
-        createdAt: { gte: window30, lte: asOf },
-      },
-    }),
-    prisma.eventOutbox.count({
-      where: {
-        businessId,
-        publishedAt: null,
-        failedAt: null,
-      },
-    }),
-    prisma.eventOutbox.count({
-      where: {
-        businessId,
-        failedAt: {
-          not: null,
-        },
-      },
-    }),
-    getQueueHealth().catch(() => []),
-  ]);
-
-  const appointmentProjection = await appointmentProjectionService
-    .getOpsProjection({
-      businessId,
-      from: window30,
-      to: asOf,
-    })
-    .catch(() => ({}));
-  const commerceProjection = await commerceProjectionService
-    .buildProjection({
-      businessId,
-      from: window30,
-      to: asOf,
-    })
-    .catch(() => ({}));
-
-  const bookingsRequested = appointmentRows.filter(
-    (row) => row.status === "REQUESTED"
-  ).length;
-  const bookingsConfirmed = appointmentRows.filter((row) =>
-    [
-      "CONFIRMED",
-      "IN_PROGRESS",
-      "CHECKED_IN",
-      "COMPLETED",
-      "FOLLOWUP_BOOKED",
-      "REMINDER_SENT",
-    ].includes(row.status)
-  ).length;
-  const noShowCount = appointmentRows.filter(
-    (row) => row.status === "NO_SHOW"
-  ).length;
-
-  const supportVolume7 = inboundRows.length;
-  const queueLagScore = queueRows.filter(
-    (row) => row.state === "PENDING" || row.state === "ESCALATED"
-  ).length;
-
-  const escalationCount7 = queueRows.filter(
-    (row) => row.state === "ESCALATED"
-  ).length;
-
-  const spamScore7 = mean(inboundRows.map((row) => Number(row.spamScore || 0)));
-
-  const revenueRecognizedMinor30 = sum(
-    revenueRows.map((row) => Number(row.amountMinor || 0))
-  );
-
-  const receptionSnapshot = getReceptionMetricsSnapshot();
-  const queueHealthRecord = (queueHealth || []).reduce<Record<string, number>>(
-    (acc, row: any) => {
-      acc[`${row.name}:waiting`] = toNumber(row.waiting);
-      acc[`${row.name}:failed`] = toNumber(row.failed);
-      acc[`${row.name}:active`] = toNumber(row.active);
-      return acc;
-    },
-    {}
-  );
-  const workerLagSignal = Object.entries(queueHealthRecord)
-    .filter(([key]) => key.endsWith(":waiting"))
-    .reduce((sumWaiting, [, value]) => sumWaiting + toNumber(value), 0);
-  const calendarSyncFailureSignal = Object.entries(queueHealthRecord)
-    .filter(([key]) => key.includes("calendarSync") && key.endsWith(":failed"))
-    .reduce((sumFailed, [, value]) => sumFailed + toNumber(value), 0);
-  const providerOutageSignal =
-    paymentFailures7 + outboxFailedCount + calendarSyncFailureSignal;
-
-  const leadAppointmentMap = new Map<string, { booked: number; noShow: number }>();
-
-  for (const row of appointmentRows) {
-    const current = leadAppointmentMap.get(row.leadId) || {
-      booked: 0,
-      noShow: 0,
-    };
-
-    if (
-      ["CONFIRMED", "COMPLETED", "FOLLOWUP_BOOKED", "NO_SHOW"].includes(
-        row.status
-      )
-    ) {
-      current.booked += 1;
-    }
-
-    if (row.status === "NO_SHOW") {
-      current.noShow += 1;
-    }
-
-    leadAppointmentMap.set(row.leadId, current);
-  }
-
-  const leads: LeadSignal[] = leadRows.map((row) => {
-    const leadAppointments = leadAppointmentMap.get(row.id) || {
-      booked: 0,
-      noShow: 0,
-    };
-
-    return {
-      leadId: row.id,
-      stage: row.stage || "UNKNOWN",
-      compositeScore: toNumber(row.leadScore) * 0.8,
-      churnScore: 40,
-      valueScore: 45,
-      followupCount: toNumber(row.followupCount),
-      unreadCount: toNumber(row.unreadCount),
-      hoursSinceLastEngagement: row.lastEngagedAt
-        ? Math.max(0, (asOf.getTime() - row.lastEngagedAt.getTime()) / (60 * 60 * 1000))
-        : 240,
-      bookedCount: leadAppointments.booked,
-      paymentCount: 0,
-      noShowCount: leadAppointments.noShow,
-      refundCount: 0,
-      chargebackCount: 0,
-      escalationCount: escalationCount7 > 0 ? 1 : 0,
-      spamScore: spamScore7,
-    };
-  });
-
-  const signals = buildSnapshotSignals({
-    leadCount,
-    newLeadCount7,
-    newLeadCount30,
-    bookingsRequested,
-    bookingsConfirmed,
-    noShowCount,
-    renewalsDue30,
-    churnedSubscriptions30,
-    supportVolume7,
-    slotReservations7,
-    revenueRecognizedMinor30,
-    paymentFailures7,
-    refundCount30,
-    chargebackCount30,
-    escalationCount7,
-    spamScore7,
-    queueLagScore,
-    outboxPendingCount,
-    outboxFailedCount,
-    workerLagSignal,
-    calendarSyncFailureSignal,
-    providerOutageSignal,
-  });
-
-  return {
+  const result = await getProjectionSnapshot<IntelligenceDomainSnapshot>({
+    cacheKey,
+    label: "intelligence_domain_snapshot",
     businessId,
-    asOf,
-    ownerUserId: business?.ownerId || null,
-    timezone: business?.timezone || null,
-    signals,
-    reception: {
-      inbound_received_total: toNumber(receptionSnapshot.inbound_received_total),
-      routed_total: toNumber(receptionSnapshot.routed_total),
-      sla_breach_total: toNumber(receptionSnapshot.sla_breach_total),
-      avg_first_response_time: toNumber(receptionSnapshot.avg_first_response_time),
-      avg_resolution_time: toNumber(receptionSnapshot.avg_resolution_time),
+    cacheTtlMs: 25_000,          // 25 second cache TTL
+    staleTtlMs: 90_000,          // 90 second stale window
+    computeBudgetMs: 5_500,      // 5.5 second compute budget
+    initialWaitMs: 2_000,        // 2 second wait budget before fallback
+    fallback: () => buildFallbackSnapshot(businessId, asOf),
+    compute: async () => {
+      const window30 = new Date(asOf.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const window7 = new Date(asOf.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const [
+        business,
+        leadRows,
+        leadCount,
+        newLeadCount7,
+        newLeadCount30,
+        appointmentRows,
+        renewalsDue30,
+        churnedSubscriptions30,
+        inboundRows,
+        queueRows,
+        slotReservations7,
+        revenueRows,
+        paymentFailures7,
+        refundCount30,
+        chargebackCount30,
+        outboxPendingCount,
+        outboxFailedCount,
+        queueHealth,
+      ] = await Promise.all([
+        prisma.business.findUnique({
+          where: {
+            id: businessId,
+          },
+          select: {
+            id: true,
+            ownerId: true,
+            timezone: true,
+          },
+        }),
+        prisma.lead.findMany({
+          where: {
+            businessId,
+            deletedAt: null,
+          },
+          orderBy: [
+            {
+              intelligenceUpdatedAt: "desc",
+            },
+            {
+              createdAt: "desc",
+            },
+          ],
+          take: 40,
+          select: {
+            id: true,
+            stage: true,
+            followupCount: true,
+            unreadCount: true,
+            lastEngagedAt: true,
+            leadScore: true,
+          },
+        }),
+        prisma.lead.count({ where: { businessId, deletedAt: null } }),
+        prisma.lead.count({
+          where: {
+            businessId,
+            deletedAt: null,
+            createdAt: { gte: window7, lte: asOf },
+          },
+        }),
+        prisma.lead.count({
+          where: {
+            businessId,
+            deletedAt: null,
+            createdAt: { gte: window30, lte: asOf },
+          },
+        }),
+        prisma.appointmentLedger.findMany({
+          where: {
+            businessId,
+            createdAt: { gte: window30, lte: asOf },
+          },
+          select: {
+            leadId: true,
+            status: true,
+          },
+        }),
+        prisma.subscriptionLedger.count({
+          where: {
+            businessId,
+            renewAt: {
+              gte: asOf,
+              lte: new Date(asOf.getTime() + 30 * 24 * 60 * 60 * 1000),
+            },
+          },
+        }),
+        prisma.subscriptionLedger.count({
+          where: {
+            businessId,
+            status: "CANCELLED",
+            updatedAt: { gte: window30, lte: asOf },
+          },
+        }),
+        prisma.inboundInteraction.findMany({
+          where: {
+            businessId,
+            createdAt: { gte: window7, lte: asOf },
+          },
+          select: {
+            spamScore: true,
+            routeDecision: true,
+          },
+        }),
+        prisma.humanWorkQueue.findMany({
+          where: {
+            businessId,
+            createdAt: { gte: window7, lte: asOf },
+          },
+          select: {
+            state: true,
+            priority: true,
+          },
+        }),
+        prisma.slotReservationLedger.count({
+          where: {
+            businessId,
+            createdAt: { gte: window7, lte: asOf },
+          },
+        }),
+        prisma.revenueRecognitionLedger.findMany({
+          where: {
+            businessId,
+            stage: {
+              in: ["RECOGNIZED", "COLLECTED"],
+            },
+            createdAt: { gte: window30, lte: asOf },
+          },
+          select: {
+            amountMinor: true,
+          },
+        }),
+        prisma.paymentAttemptLedger.count({
+          where: {
+            businessId,
+            status: "FAILED",
+            createdAt: { gte: window7, lte: asOf },
+          },
+        }),
+        prisma.refundLedger.count({
+          where: {
+            businessId,
+            createdAt: { gte: window30, lte: asOf },
+          },
+        }),
+        prisma.chargebackLedger.count({
+          where: {
+            businessId,
+            createdAt: { gte: window30, lte: asOf },
+          },
+        }),
+        prisma.eventOutbox.count({
+          where: {
+            businessId,
+            publishedAt: null,
+            failedAt: null,
+          },
+        }),
+        prisma.eventOutbox.count({
+          where: {
+            businessId,
+            failedAt: {
+              not: null,
+            },
+          },
+        }),
+        getQueueHealth().catch(() => []),
+      ]);
+
+      const appointmentProjection = await appointmentProjectionService
+        .getOpsProjection({
+          businessId,
+          from: window30,
+          to: asOf,
+        })
+        .catch(() => ({}));
+      const commerceProjection = await commerceProjectionService
+        .buildProjection({
+          businessId,
+          from: window30,
+          to: asOf,
+        })
+        .catch(() => ({}));
+
+      const bookingsRequested = appointmentRows.filter(
+        (row) => row.status === "REQUESTED"
+      ).length;
+      const bookingsConfirmed = appointmentRows.filter((row) =>
+        [
+          "CONFIRMED",
+          "IN_PROGRESS",
+          "CHECKED_IN",
+          "COMPLETED",
+          "FOLLOWUP_BOOKED",
+          "REMINDER_SENT",
+        ].includes(row.status)
+      ).length;
+      const noShowCount = appointmentRows.filter(
+        (row) => row.status === "NO_SHOW"
+      ).length;
+
+      const supportVolume7 = inboundRows.length;
+      const queueLagScore = queueRows.filter(
+        (row) => row.state === "PENDING" || row.state === "ESCALATED"
+      ).length;
+
+      const escalationCount7 = queueRows.filter(
+        (row) => row.state === "ESCALATED"
+      ).length;
+
+      const spamScore7 = mean(inboundRows.map((row) => Number(row.spamScore || 0)));
+
+      const revenueRecognizedMinor30 = sum(
+        revenueRows.map((row) => Number(row.amountMinor || 0))
+      );
+
+      const receptionSnapshot = getReceptionMetricsSnapshot();
+      const queueHealthRecord = (queueHealth || []).reduce<Record<string, number>>(
+        (acc, row: any) => {
+          acc[`${row.name}:waiting`] = toNumber(row.waiting);
+          acc[`${row.name}:failed`] = toNumber(row.failed);
+          acc[`${row.name}:active`] = toNumber(row.active);
+          return acc;
+        },
+        {}
+      );
+      const workerLagSignal = Object.entries(queueHealthRecord)
+        .filter(([key]) => key.endsWith(":waiting"))
+        .reduce((sumWaiting, [, value]) => sumWaiting + toNumber(value), 0);
+      const calendarSyncFailureSignal = Object.entries(queueHealthRecord)
+        .filter(([key]) => key.includes("calendarSync") && key.endsWith(":failed"))
+        .reduce((sumFailed, [, value]) => sumFailed + toNumber(value), 0);
+      const providerOutageSignal =
+        paymentFailures7 + outboxFailedCount + calendarSyncFailureSignal;
+
+      const leadAppointmentMap = new Map<string, { booked: number; noShow: number }>();
+
+      for (const row of appointmentRows) {
+        const current = leadAppointmentMap.get(row.leadId) || {
+          booked: 0,
+          noShow: 0,
+        };
+
+        if (
+          ["CONFIRMED", "COMPLETED", "FOLLOWUP_BOOKED", "NO_SHOW"].includes(
+            row.status
+          )
+        ) {
+          current.booked += 1;
+        }
+
+        if (row.status === "NO_SHOW") {
+          current.noShow += 1;
+        }
+
+        leadAppointmentMap.set(row.leadId, current);
+      }
+
+      const leads: LeadSignal[] = leadRows.map((row) => {
+        const leadAppointments = leadAppointmentMap.get(row.id) || {
+          booked: 0,
+          noShow: 0,
+        };
+
+        return {
+          leadId: row.id,
+          stage: row.stage || "UNKNOWN",
+          compositeScore: toNumber(row.leadScore) * 0.8,
+          churnScore: 40,
+          valueScore: 45,
+          followupCount: toNumber(row.followupCount),
+          unreadCount: toNumber(row.unreadCount),
+          hoursSinceLastEngagement: row.lastEngagedAt
+            ? Math.max(0, (asOf.getTime() - row.lastEngagedAt.getTime()) / (60 * 60 * 1000))
+            : 240,
+          bookedCount: leadAppointments.booked,
+          paymentCount: 0,
+          noShowCount: leadAppointments.noShow,
+          refundCount: 0,
+          chargebackCount: 0,
+          escalationCount: escalationCount7 > 0 ? 1 : 0,
+          spamScore: spamScore7,
+        };
+      });
+
+      const signals = buildSnapshotSignals({
+        leadCount,
+        newLeadCount7,
+        newLeadCount30,
+        bookingsRequested,
+        bookingsConfirmed,
+        noShowCount,
+        renewalsDue30,
+        churnedSubscriptions30,
+        supportVolume7,
+        slotReservations7,
+        revenueRecognizedMinor30,
+        paymentFailures7,
+        refundCount30,
+        chargebackCount30,
+        escalationCount7,
+        spamScore7,
+        queueLagScore,
+        outboxPendingCount,
+        outboxFailedCount,
+        workerLagSignal,
+        calendarSyncFailureSignal,
+        providerOutageSignal,
+      });
+
+      return {
+        businessId,
+        asOf,
+        ownerUserId: business?.ownerId || null,
+        timezone: business?.timezone || null,
+        signals,
+        reception: {
+          inbound_received_total: toNumber(receptionSnapshot.inbound_received_total),
+          routed_total: toNumber(receptionSnapshot.routed_total),
+          sla_breach_total: toNumber(receptionSnapshot.sla_breach_total),
+          avg_first_response_time: toNumber(receptionSnapshot.avg_first_response_time),
+          avg_resolution_time: toNumber(receptionSnapshot.avg_resolution_time),
+        },
+        queueHealth: queueHealthRecord,
+        projections: {
+          appointment: toRecord(appointmentProjection),
+          commerce: toRecord(commerceProjection),
+        },
+        leads,
+      };
     },
-    queueHealth: queueHealthRecord,
-    projections: {
-      appointment: toRecord(appointmentProjection),
-      commerce: toRecord(commerceProjection),
-    },
-    leads,
-  };
+  });
+
+  return result.value;
 };
 const persistFeatureSnapshot = async ({
   snapshot,

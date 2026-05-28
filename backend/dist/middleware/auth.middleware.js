@@ -511,9 +511,44 @@ const isValidCachedContext = (context) => {
         typeof record.tokenVersion === "number" &&
         typeof record.expiresAt === "number");
 };
+const safeRedisGet = async (key) => {
+    try {
+        return await Promise.race([
+            redis_1.default.get(key),
+            new Promise((resolve) => setTimeout(() => resolve(null), 120)),
+        ]);
+    }
+    catch {
+        return null;
+    }
+};
+const safeRedisSet = async (key, value, mode, ttl) => {
+    try {
+        return await Promise.race([
+            mode && ttl
+                ? redis_1.default.set(key, value, "EX", ttl)
+                : redis_1.default.set(key, value),
+            new Promise((resolve) => setTimeout(() => resolve(null), 120)),
+        ]);
+    }
+    catch {
+        return null;
+    }
+};
+const safeRedisDel = async (key) => {
+    try {
+        return await Promise.race([
+            redis_1.default.del(key),
+            new Promise((resolve) => setTimeout(() => resolve(null), 120)),
+        ]);
+    }
+    catch {
+        return null;
+    }
+};
 const readRedisAuthContext = async (tokenKey, tokenVersion) => {
     const primaryKey = getAuthRedisCacheKey(tokenKey);
-    let cachedRaw = await redis_1.default.get(primaryKey).catch(() => null);
+    let cachedRaw = await safeRedisGet(primaryKey).catch(() => null);
     let migrated = false;
     if (!cachedRaw) {
         const fallbackKeys = [
@@ -521,7 +556,7 @@ const readRedisAuthContext = async (tokenKey, tokenVersion) => {
             `auth:session:${tokenKey}`
         ];
         for (const fbKey of fallbackKeys) {
-            cachedRaw = await redis_1.default.get(fbKey).catch(() => null);
+            cachedRaw = await safeRedisGet(fbKey).catch(() => null);
             if (cachedRaw) {
                 migrated = true;
                 break;
@@ -534,16 +569,16 @@ const readRedisAuthContext = async (tokenKey, tokenVersion) => {
     try {
         const parsed = JSON.parse(cachedRaw);
         if (!isValidCachedContext(parsed)) {
-            await redis_1.default.del(primaryKey).catch(() => undefined);
+            await safeRedisDel(primaryKey).catch(() => undefined);
             return null;
         }
         if (parsed.expiresAt <= Date.now() || parsed.tokenVersion !== tokenVersion) {
-            await redis_1.default.del(primaryKey).catch(() => undefined);
+            await safeRedisDel(primaryKey).catch(() => undefined);
             return null;
         }
         if (migrated) {
             const remainingTtlSeconds = Math.max(5, Math.ceil((parsed.expiresAt - Date.now()) / 1000));
-            await redis_1.default.set(primaryKey, cachedRaw, "EX", remainingTtlSeconds).catch(() => undefined);
+            await safeRedisSet(primaryKey, cachedRaw, "EX", remainingTtlSeconds).catch(() => undefined);
         }
         authContextCache.set(tokenKey, parsed);
         writeStaleAuthContext(parsed);
@@ -551,7 +586,7 @@ const readRedisAuthContext = async (tokenKey, tokenVersion) => {
         return parsed;
     }
     catch {
-        await redis_1.default.del(primaryKey).catch(() => undefined);
+        await safeRedisDel(primaryKey).catch(() => undefined);
         return null;
     }
 };
@@ -961,7 +996,7 @@ const validateRefreshTokenDbOrGrace = async (hashedToken, userId) => {
     if (dbToken && dbToken.userId === userId && dbToken.expiresAt.getTime() > Date.now()) {
         return { userId, valid: true };
     }
-    const graceValue = await redis_1.default.get(`auth:rotated:${hashedToken}`).catch(() => null);
+    const graceValue = await safeRedisGet(`auth:rotated:${hashedToken}`).catch(() => null);
     if (graceValue) {
         try {
             const parsed = JSON.parse(graceValue);

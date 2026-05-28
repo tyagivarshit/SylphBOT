@@ -54,6 +54,13 @@ type FeatureCacheEntry = {
 
 const featureCache = new Map<string, FeatureCacheEntry>();
 
+export const invalidateFeatureCache = (businessId: string): void => {
+  const normalized = String(businessId || "").trim();
+  if (normalized) {
+    featureCache.delete(normalized);
+  }
+};
+
 const normalizeBusinessId = (businessId: string) =>
   String(businessId || "").trim();
 

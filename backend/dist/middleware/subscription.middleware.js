@@ -11,45 +11,38 @@ const env_1 = require("../config/env");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
 const stripe_service_1 = require("../services/stripe.service");
 const stripe_price_map_1 = require("../config/stripe.price.map");
+const feature_service_1 = require("../services/feature.service");
+const redisSafety_1 = require("../redis/redisSafety");
 const CACHE_TTL = 60 * 3;
 const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15000;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
 const EARLY_ACCESS_CACHE_TTL_MS = 30000;
 const EARLY_ACCESS_CACHE_KEY = "__global__";
 const safeRedisGet = async (key) => {
-    try {
+    return (0, redisSafety_1.safeRedisCall)(async () => {
         return await Promise.race([
             redis_1.default.get(key),
             new Promise((resolve) => setTimeout(() => resolve(null), 120)),
         ]);
-    }
-    catch {
-        return null;
-    }
+    }, null, { operation: "subscription_middleware:get" });
 };
 const safeRedisSet = async (key, value, ttl) => {
-    try {
+    return (0, redisSafety_1.safeRedisCall)(async () => {
         return await Promise.race([
             ttl
                 ? redis_1.default.set(key, value, "EX", ttl)
                 : redis_1.default.set(key, value),
             new Promise((resolve) => setTimeout(() => resolve(null), 120)),
         ]);
-    }
-    catch {
-        return null;
-    }
+    }, null, { operation: "subscription_middleware:set" });
 };
 const safeRedisDel = async (key) => {
-    try {
+    return (0, redisSafety_1.safeRedisCall)(async () => {
         return await Promise.race([
             redis_1.default.del(key),
             new Promise((resolve) => setTimeout(() => resolve(null), 120)),
         ]);
-    }
-    catch {
-        return null;
-    }
+    }, null, { operation: "subscription_middleware:del" });
 };
 const earlyAccessCache = new Map();
 const subscriptionMemoryCache = new Map();
@@ -61,6 +54,7 @@ const invalidateBillingContextCache = async (businessId) => {
         return false;
     }
     subscriptionMemoryCache.delete(normalizedBusinessId);
+    (0, feature_service_1.invalidateFeatureCache)(normalizedBusinessId);
     await safeRedisDel((0, exports.getBillingCacheKey)(normalizedBusinessId)).catch(() => undefined);
     return true;
 };
@@ -286,18 +280,14 @@ const getCachedSubscription = async (businessId) => {
             ? mapCanonicalSubscription(canonical)
             : null;
         if (subscription) {
-            await redis_1.default
-                .set(cacheKey, JSON.stringify(subscription), "EX", CACHE_TTL)
-                .catch(() => undefined);
+            await safeRedisSet(cacheKey, JSON.stringify(subscription), CACHE_TTL).catch(() => undefined);
             subscriptionMemoryCache.set(businessId, {
                 value: subscription,
                 expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
             });
         }
         else {
-            await redis_1.default
-                .set(cacheKey, "null", "EX", CACHE_TTL)
-                .catch(() => undefined);
+            await safeRedisSet(cacheKey, "null", CACHE_TTL).catch(() => undefined);
             subscriptionMemoryCache.set(businessId, {
                 value: null,
                 expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,

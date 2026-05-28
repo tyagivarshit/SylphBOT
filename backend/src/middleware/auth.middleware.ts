@@ -3,7 +3,6 @@ import prisma from "../config/prisma";
 import { unauthorized } from "../utils/AppError";
 import crypto from "crypto";
 import redis from "../config/redis";
-import { safeRedisCall } from "../redis/redisSafety";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   generateAccessToken,
@@ -774,64 +773,13 @@ const isValidCachedContext = (context: unknown): context is CachedAuthContext =>
     typeof record.expiresAt === "number"
   );
 };
-const safeRedisGet = async (key: string) => {
-  return safeRedisCall(
-    async () => {
-      return await Promise.race([
-        redis.get(key),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 120)
-        ),
-      ]);
-    },
-    null,
-    { operation: "auth_middleware:get" }
-  );
-};
-
-const safeRedisSet = async (
-  key: string,
-  value: string,
-  mode?: string,
-  ttl?: number
-) => {
-  return safeRedisCall(
-    async () => {
-      return await Promise.race([
-        mode && ttl
-          ? redis.set(key, value, "EX", ttl)
-          : redis.set(key, value),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 120)
-        ),
-      ]);
-    },
-    null,
-    { operation: "auth_middleware:set" }
-  );
-};
-
-const safeRedisDel = async (key: string) => {
-  return safeRedisCall(
-    async () => {
-      return await Promise.race([
-        redis.del(key),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 120)
-        ),
-      ]);
-    },
-    null,
-    { operation: "auth_middleware:del" }
-  );
-};
 
 const readRedisAuthContext = async (
   tokenKey: string,
   tokenVersion: number
 ): Promise<CachedAuthContext | null> => {
   const primaryKey = getAuthRedisCacheKey(tokenKey);
-  let cachedRaw = await safeRedisGet(primaryKey).catch(() => null);
+  let cachedRaw = await redis.get(primaryKey).catch(() => null);
 
   let migrated = false;
   if (!cachedRaw) {
@@ -840,7 +788,7 @@ const readRedisAuthContext = async (
       `auth:session:${tokenKey}`
     ];
     for (const fbKey of fallbackKeys) {
-      cachedRaw = await safeRedisGet(fbKey).catch(() => null);
+      cachedRaw = await redis.get(fbKey).catch(() => null);
       if (cachedRaw) {
         migrated = true;
         break;
@@ -855,23 +803,18 @@ const readRedisAuthContext = async (
   try {
     const parsed = JSON.parse(cachedRaw) as unknown;
     if (!isValidCachedContext(parsed)) {
-      await safeRedisDel(primaryKey).catch(() => undefined);
+      await redis.del(primaryKey).catch(() => undefined);
       return null;
     }
 
     if (parsed.expiresAt <= Date.now() || parsed.tokenVersion !== tokenVersion) {
-      await safeRedisDel(primaryKey).catch(() => undefined);
+      await redis.del(primaryKey).catch(() => undefined);
       return null;
     }
 
     if (migrated) {
       const remainingTtlSeconds = Math.max(5, Math.ceil((parsed.expiresAt - Date.now()) / 1000));
-      await safeRedisSet(
-  primaryKey,
-  cachedRaw,
-  "EX",
-  remainingTtlSeconds
-).catch(() => undefined);
+      await redis.set(primaryKey, cachedRaw, "EX", remainingTtlSeconds).catch(() => undefined);
     }
 
     authContextCache.set(tokenKey, parsed);
@@ -879,9 +822,9 @@ const readRedisAuthContext = async (
     markRecentlyVerifiedAuthContext(tokenKey, parsed);
     return parsed;
   } catch {
-  await safeRedisDel(primaryKey).catch(() => undefined);
-  return null;
-}
+    await redis.del(primaryKey).catch(() => undefined);
+    return null;
+  }
 };
 
 const writeAuthContextCache = async (
@@ -891,12 +834,14 @@ const writeAuthContextCache = async (
   authContextCache.set(tokenKey, context);
   writeStaleAuthContext(context);
   markRecentlyVerifiedAuthContext(tokenKey, context);
-  await safeRedisSet(
-    getAuthRedisCacheKey(tokenKey),
-    JSON.stringify(context),
-    "EX",
-    AUTH_REDIS_CACHE_TTL_SECONDS
-  ).catch(() => undefined);
+  await redis
+    .set(
+      getAuthRedisCacheKey(tokenKey),
+      JSON.stringify(context),
+      "EX",
+      AUTH_REDIS_CACHE_TTL_SECONDS
+    )
+    .catch(() => undefined);
 };
 
 export const primeAuthContextCacheForToken = (input: {
@@ -1402,7 +1347,7 @@ const rotateRefreshToken = async (
 
   const graceKey = `auth:rotated:${oldHashed}`;
   const graceValue = JSON.stringify({ userId, tokenVersion, newHashed });
-  await safeRedisSet(graceKey, graceValue, "EX", 60).catch(() => undefined);
+  await redis.set(graceKey, graceValue, "EX", 60).catch(() => undefined);
 
   await prisma.refreshToken.deleteMany({
     where: { token: oldHashed },
@@ -1429,7 +1374,7 @@ const validateRefreshTokenDbOrGrace = async (
     return { userId, valid: true };
   }
 
-  const graceValue = await safeRedisGet(`auth:rotated:${hashedToken}`).catch(() => null);
+  const graceValue = await redis.get(`auth:rotated:${hashedToken}`).catch(() => null);
   if (graceValue) {
     try {
       const parsed = JSON.parse(graceValue);

@@ -12,6 +12,50 @@ const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15_000;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
 const EARLY_ACCESS_CACHE_TTL_MS = 30_000;
 const EARLY_ACCESS_CACHE_KEY = "__global__";
+const safeRedisGet = async (key: string) => {
+  try {
+    return await Promise.race([
+      redis.get(key),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 120)
+      ),
+    ]);
+  } catch {
+    return null;
+  }
+};
+
+const safeRedisSet = async (
+  key: string,
+  value: string,
+  ttl?: number
+) => {
+  try {
+    return await Promise.race([
+      ttl
+        ? redis.set(key, value, "EX", ttl)
+        : redis.set(key, value),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 120)
+      ),
+    ]);
+  } catch {
+    return null;
+  }
+};
+
+const safeRedisDel = async (key: string) => {
+  try {
+    return await Promise.race([
+      redis.del(key),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 120)
+      ),
+    ]);
+  } catch {
+    return null;
+  }
+};
 
 const earlyAccessCache = new Map<
   string,
@@ -43,7 +87,7 @@ export const invalidateBillingContextCache = async (businessId: string) => {
   }
 
   subscriptionMemoryCache.delete(normalizedBusinessId);
-  await redis.del(getBillingCacheKey(normalizedBusinessId)).catch(() => undefined);
+  await safeRedisDel(getBillingCacheKey(normalizedBusinessId)).catch(() => undefined);
   return true;
 };
 
@@ -118,13 +162,13 @@ export const verifyStripeSubscriptionFallback = async (businessId: string): Prom
   const rateLimitKey = `fb_chk:${normalizedBusinessId}`;
   
   try {
-    const isRateLimited = await redis.get(rateLimitKey).catch(() => null);
+    const isRateLimited = await safeRedisGet(rateLimitKey).catch(() => null);
     if (isRateLimited) {
       console.info("Stripe direct fallback skipped due to 30s rate-limit", { businessId: normalizedBusinessId });
       return null;
     }
     
-    await redis.set(rateLimitKey, "1", "EX", 30).catch(() => undefined);
+    await safeRedisSet(rateLimitKey, "1", 30).catch(() => undefined);
 
     const business = await prisma.business.findUnique({
       where: { id: normalizedBusinessId },
@@ -213,7 +257,7 @@ export const verifyStripeSubscriptionFallback = async (businessId: string): Prom
     const mappedSub = mapCanonicalSubscription(rowForMapping);
 
     const cacheKey = getBillingCacheKey(normalizedBusinessId);
-    await redis.set(cacheKey, JSON.stringify(mappedSub), "EX", 30).catch(() => undefined);
+    await safeRedisSet(cacheKey, JSON.stringify(mappedSub), 30).catch(() => undefined);
 
     subscriptionMemoryCache.set(normalizedBusinessId, {
       value: mappedSub,
@@ -253,7 +297,7 @@ const getCachedSubscription = async (businessId: string) => {
 
   const loadPromise = (async () => {
     const cacheKey = getBillingCacheKey(businessId);
-    const cached = await redis.get(cacheKey).catch(() => null);
+    const cached = await safeRedisGet(cacheKey).catch(() => null);
 
     if (cached) {
       emitPerformanceMetric({
@@ -279,7 +323,7 @@ const getCachedSubscription = async (businessId: string) => {
         });
         return parsed;
       } catch {
-        await redis.del(cacheKey).catch(() => undefined);
+        await safeRedisDel(cacheKey).catch(() => undefined);
       }
     }
 

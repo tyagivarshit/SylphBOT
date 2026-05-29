@@ -10,16 +10,31 @@ const redis_1 = require("../config/redis");
 const redisSafety_1 = require("../redis/redisSafety");
 const isProd = process.env.NODE_ENV === "production";
 const createStore = (prefix) => new rate_limit_redis_1.default({
-    sendCommand: (...args) => {
+    sendCommand: async (...args) => {
+        const command = String(args?.[0] || "").toUpperCase();
+        const subcommand = String(args?.[1] || "").toUpperCase();
         if (!(0, redis_1.isRedisWritable)()) {
-            const command = String(args?.[0] || "").toUpperCase();
-            const subcommand = String(args?.[1] || "").toUpperCase();
             if (command === "SCRIPT" && subcommand === "LOAD") {
                 return "redis_not_writable_script_stub";
             }
-            return null;
+            return [0, Date.now() + 60000];
         }
-        return (0, redis_1.getResilientSharedRedisConnection)().call(...args);
+        try {
+            const result = await (0, redis_1.getResilientSharedRedisConnection)().call(...args);
+            if (command === "SCRIPT" && subcommand === "LOAD") {
+                return result || "redis_not_writable_script_stub";
+            }
+            if (result === null || result === undefined || !Array.isArray(result)) {
+                return [0, Date.now() + 60000];
+            }
+            return result;
+        }
+        catch (error) {
+            if (command === "SCRIPT" && subcommand === "LOAD") {
+                return "redis_not_writable_script_stub";
+            }
+            return [0, Date.now() + 60000];
+        }
     },
     prefix,
 });

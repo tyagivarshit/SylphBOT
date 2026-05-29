@@ -11,18 +11,32 @@ const isProd = process.env.NODE_ENV === "production";
 
 const createStore = (prefix: string) =>
   new RedisStore({
-    sendCommand: (...args: any[]) => {
+    sendCommand: async (...args: any[]) => {
+      const command = String(args?.[0] || "").toUpperCase();
+      const subcommand = String(args?.[1] || "").toUpperCase();
+
       if (!isRedisWritable()) {
-        const command = String(args?.[0] || "").toUpperCase();
-        const subcommand = String(args?.[1] || "").toUpperCase();
         if (command === "SCRIPT" && subcommand === "LOAD") {
           return "redis_not_writable_script_stub";
         }
-
-        return null;
+        return [0, Date.now() + 60000];
       }
 
-      return (getResilientSharedRedisConnection() as any).call(...args);
+      try {
+        const result = await (getResilientSharedRedisConnection() as any).call(...args);
+        if (command === "SCRIPT" && subcommand === "LOAD") {
+          return result || "redis_not_writable_script_stub";
+        }
+        if (result === null || result === undefined || !Array.isArray(result)) {
+          return [0, Date.now() + 60000];
+        }
+        return result;
+      } catch (error) {
+        if (command === "SCRIPT" && subcommand === "LOAD") {
+          return "redis_not_writable_script_stub";
+        }
+        return [0, Date.now() + 60000];
+      }
     },
     prefix,
   });

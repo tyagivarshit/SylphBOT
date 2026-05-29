@@ -29,6 +29,8 @@ import {
   markRedisReady,
   markDbReady,
 } from "./runtime/startupIsolation.service";
+import { PrewarmService } from "./services/prewarm.service";
+
 
 let isShuttingDown = false;
 
@@ -321,6 +323,9 @@ const waitForRuntimeInfrastructureWithinBudget = async () => {
 };
 
 const startPostListenBootstrap = () => {
+  // Trigger async prewarm pipeline for critical paths
+  PrewarmService.triggerAsyncPrewarm("startup_boot");
+
   scheduleBackgroundStartupTask(
     "stripe_config_validation",
     async () => {

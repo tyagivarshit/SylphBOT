@@ -3,6 +3,8 @@ import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { buildLedgerKey } from "./commerce/shared";
 import { resolveUserWorkspaceIdentity } from "./tenant.service";
 import { getCurrentMonthYear } from "../utils/monthlyUsage.helper";
+import { prewarmState } from "./prewarmState";
+
 
 type ProfileSeed = {
   name?: string | null;
@@ -596,6 +598,23 @@ export const waitForAuthBootstrapContext = async (
   }
 
   const startedAt = Date.now();
+
+  // Serve stale-valid context during recovery or cold wakeup
+  const recovering = prewarmState.isCold;
+  if (recovering) {
+    const fastLane = getAuthBootstrapFastLaneSnapshot(input);
+    if (fastLane.context) {
+      // Trigger background ensure so it warms up asynchronously
+      primeAuthBootstrapContext(input);
+      return {
+        state: "READY",
+        context: fastLane.context,
+        reason: "recovering_stale_valid",
+        reusedInFlight: false,
+        elapsedMs: Date.now() - startedAt,
+      };
+    }
+  }
   const timeoutMs = Math.max(
     250,
     Math.floor(options?.timeoutMs || AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS)

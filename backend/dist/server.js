@@ -52,6 +52,7 @@ const commerceProjection_service_1 = require("./services/commerceProjection.serv
 const prisma_1 = __importDefault(require("./config/prisma"));
 const redis_1 = require("./config/redis");
 const startupIsolation_service_1 = require("./runtime/startupIsolation.service");
+const prewarm_service_1 = require("./services/prewarm.service");
 let isShuttingDown = false;
 const parsePositiveInt = (raw, fallbackValue) => {
     const parsed = Number(raw);
@@ -273,6 +274,8 @@ const waitForRuntimeInfrastructureWithinBudget = async () => {
     };
 };
 const startPostListenBootstrap = () => {
+    // Trigger async prewarm pipeline for critical paths
+    prewarm_service_1.PrewarmService.triggerAsyncPrewarm("startup_boot");
     scheduleBackgroundStartupTask("stripe_config_validation", async () => {
         await (0, stripeConfig_service_1.emitStripeConfigValidation)();
     }, {

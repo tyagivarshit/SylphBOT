@@ -17,6 +17,7 @@ const rbac_middleware_1 = require("../middleware/rbac.middleware");
 const rateLimit_middleware_1 = require("../middleware/rateLimit.middleware");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
+const prewarmState_1 = require("../services/prewarmState");
 const router = express_1.default.Router();
 const safeUserSelect = {
     id: true,
@@ -285,13 +286,33 @@ router.get("/me", auth_middleware_1.protect, async (req, res) => {
             : `${String(req.user?.businessId || "").trim()}:full`;
         const cacheKey = buildCurrentUserCacheKey(userId, scopedCacheKey);
         const cached = currentUserCache.get(cacheKey);
-        if (cached && cached.expiresAt > Date.now() && !forceProcessingFastLane) {
+        const isCold = prewarmState_1.prewarmState.isCold;
+        if (cached && (cached.expiresAt > Date.now() || isCold) && !forceProcessingFastLane) {
+            if (cached.expiresAt <= Date.now()) {
+                (0, boundedTimeout_1.withTimeoutFallback)({
+                    label: "user_me_hydration_bg",
+                    timeoutMs: 5000,
+                    task: getCurrentUser({
+                        userId,
+                        preferredBusinessId: req.user?.businessId || null,
+                    }),
+                    fallback: null,
+                }).then((res) => {
+                    if (res.value) {
+                        currentUserCache.set(cacheKey, {
+                            value: res.value,
+                            expiresAt: Date.now() + USER_ME_CACHE_TTL_MS,
+                        });
+                    }
+                }).catch(() => null);
+            }
             (0, performanceMetrics_1.emitPerformanceMetric)({
                 name: "CACHE_HIT",
                 businessId: req.user?.businessId || null,
                 route: "user_me",
                 metadata: {
                     cache: "memory_user_me",
+                    isCold,
                 },
             });
             res.setHeader("Cache-Control", "no-store");

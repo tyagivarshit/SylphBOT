@@ -12,6 +12,7 @@ const passport_1 = __importDefault(require("passport"));
 const env_1 = require("./config/env");
 const auth_middleware_1 = require("./middleware/auth.middleware");
 const subscription_middleware_1 = require("./middleware/subscription.middleware");
+const prewarm_service_1 = require("./services/prewarm.service");
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const googleAuth_routes_1 = __importDefault(require("./routes/googleAuth.routes"));
 const client_routes_1 = __importDefault(require("./routes/client.routes"));
@@ -250,6 +251,10 @@ app.use((0, helmet_1.default)({
         }
         : false,
 }));
+app.use((req, res, next) => {
+    prewarm_service_1.PrewarmService.noteRequest();
+    next();
+});
 app.use(requestContext_middleware_1.requestContextMiddleware);
 app.use((0, compression_1.default)());
 app.use((0, cors_1.default)(corsOptions));

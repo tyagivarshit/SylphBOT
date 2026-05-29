@@ -7,6 +7,12 @@ import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { stripe } from "../services/stripe.service";
 import { getPlanFromPrice } from "../config/stripe.price.map";
 import { invalidateFeatureCache } from "../services/feature.service";
+import { prewarmState } from "../services/prewarmState";
+import { registerBillingPrewarmer } from "../services/prewarm.service";
+
+registerBillingPrewarmer(async (businessId) => {
+  await loadBillingContext(businessId).catch(() => null);
+});
 const CACHE_TTL = 60 * 3;
 const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15_000;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
@@ -433,7 +439,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
 
   try {
     const dbStart = Date.now();
-    const plans = await prisma.plan.findMany({
+    const dbPromise = prisma.plan.findMany({
       where: {
         type: {
           in: ["BASIC", "PRO", "ELITE"],
@@ -443,6 +449,10 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
         earlyUsed: true,
       },
     });
+    const plans = (await Promise.race([
+      dbPromise,
+      new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 200)),
+    ]).catch(() => [])) as any[];
     console.info("BILLING_STAGE_TIME", {
       stage: "getEarlyAccessSnapshot.db",
       durationMs: Date.now() - dbStart,
@@ -480,12 +490,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
 
 export const loadBillingContext = async (businessId: string) => {
   const startedAt = Date.now();
-  const cachedSubscription = await getCachedSubscription(businessId).catch(
-    () => null
-  );
-  let subscription = cachedSubscription;
   const now = new Date();
-
   let context = getBaseContext();
 
   const evaluateContext = (sub: any): BillingContext => {
@@ -532,8 +537,50 @@ export const loadBillingContext = async (businessId: string) => {
     return ctx;
   };
 
+  // If recovering/cold, serve stale-valid immediately
+  const recovering = prewarmState.isCold;
+  if (recovering) {
+    const lkvSub = prewarmState.lastKnownValidSubscription.get(businessId);
+    const lkvBill = prewarmState.lastKnownValidBilling.get(businessId);
+    if (lkvSub && lkvBill) {
+      // Trigger background reload
+      getCachedSubscription(businessId).catch(() => null);
+      return {
+        subscription: lkvSub,
+        context: lkvBill,
+      };
+    }
+  }
+
+  const cachedSubscription = await Promise.race([
+    getCachedSubscription(businessId),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 300)),
+  ]).catch(() => null);
+
+  let subscription = cachedSubscription;
+
   if (subscription?.plan) {
     context = evaluateContext(subscription);
+  } else {
+    // Attempt fallback to stale/last-known-valid
+    const lkvSub = prewarmState.lastKnownValidSubscription.get(businessId);
+    const lkvBill = prewarmState.lastKnownValidBilling.get(businessId);
+    if (lkvSub && lkvBill) {
+      subscription = lkvSub;
+      context = lkvBill;
+    } else {
+      const memoryEntry = subscriptionMemoryCache.get(businessId);
+      if (memoryEntry?.value) {
+        subscription = memoryEntry.value;
+        context = evaluateContext(memoryEntry.value);
+      }
+    }
+  }
+
+  // Save successful load as last-known-valid
+  if (subscription) {
+    prewarmState.lastKnownValidSubscription.set(businessId, subscription);
+    prewarmState.lastKnownValidBilling.set(businessId, context);
   }
 
   if (context.planKey === "FREE_LOCKED") {

@@ -12,6 +12,11 @@ const performanceMetrics_1 = require("../observability/performanceMetrics");
 const stripe_service_1 = require("../services/stripe.service");
 const stripe_price_map_1 = require("../config/stripe.price.map");
 const feature_service_1 = require("../services/feature.service");
+const prewarmState_1 = require("../services/prewarmState");
+const prewarm_service_1 = require("../services/prewarm.service");
+(0, prewarm_service_1.registerBillingPrewarmer)(async (businessId) => {
+    await (0, exports.loadBillingContext)(businessId).catch(() => null);
+});
 const CACHE_TTL = 60 * 3;
 const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15000;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
@@ -346,7 +351,7 @@ const getEarlyAccessSnapshot = async (subscription) => {
     });
     try {
         const dbStart = Date.now();
-        const plans = await prisma_1.default.plan.findMany({
+        const dbPromise = prisma_1.default.plan.findMany({
             where: {
                 type: {
                     in: ["BASIC", "PRO", "ELITE"],
@@ -356,6 +361,10 @@ const getEarlyAccessSnapshot = async (subscription) => {
                 earlyUsed: true,
             },
         });
+        const plans = (await Promise.race([
+            dbPromise,
+            new Promise((resolve) => setTimeout(() => resolve([]), 200)),
+        ]).catch(() => []));
         console.info("BILLING_STAGE_TIME", {
             stage: "getEarlyAccessSnapshot.db",
             durationMs: Date.now() - dbStart,
@@ -382,8 +391,6 @@ const getEarlyAccessSnapshot = async (subscription) => {
 };
 const loadBillingContext = async (businessId) => {
     const startedAt = Date.now();
-    const cachedSubscription = await getCachedSubscription(businessId).catch(() => null);
-    let subscription = cachedSubscription;
     const now = new Date();
     let context = getBaseContext();
     const evaluateContext = (sub) => {
@@ -425,8 +432,48 @@ const loadBillingContext = async (businessId) => {
         }
         return ctx;
     };
+    // If recovering/cold, serve stale-valid immediately
+    const recovering = prewarmState_1.prewarmState.isCold;
+    if (recovering) {
+        const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(businessId);
+        const lkvBill = prewarmState_1.prewarmState.lastKnownValidBilling.get(businessId);
+        if (lkvSub && lkvBill) {
+            // Trigger background reload
+            getCachedSubscription(businessId).catch(() => null);
+            return {
+                subscription: lkvSub,
+                context: lkvBill,
+            };
+        }
+    }
+    const cachedSubscription = await Promise.race([
+        getCachedSubscription(businessId),
+        new Promise((resolve) => setTimeout(() => resolve(null), 300)),
+    ]).catch(() => null);
+    let subscription = cachedSubscription;
     if (subscription?.plan) {
         context = evaluateContext(subscription);
+    }
+    else {
+        // Attempt fallback to stale/last-known-valid
+        const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(businessId);
+        const lkvBill = prewarmState_1.prewarmState.lastKnownValidBilling.get(businessId);
+        if (lkvSub && lkvBill) {
+            subscription = lkvSub;
+            context = lkvBill;
+        }
+        else {
+            const memoryEntry = subscriptionMemoryCache.get(businessId);
+            if (memoryEntry?.value) {
+                subscription = memoryEntry.value;
+                context = evaluateContext(memoryEntry.value);
+            }
+        }
+    }
+    // Save successful load as last-known-valid
+    if (subscription) {
+        prewarmState_1.prewarmState.lastKnownValidSubscription.set(businessId, subscription);
+        prewarmState_1.prewarmState.lastKnownValidBilling.set(businessId, context);
     }
     if (context.planKey === "FREE_LOCKED") {
         // Run direct Stripe fallback verification asynchronously to keep hot path latency low

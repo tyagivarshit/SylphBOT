@@ -7,6 +7,7 @@ import passport from "passport";
 import { env } from "./config/env";
 import { protect } from "./middleware/auth.middleware";
 import { attachBillingContext } from "./middleware/subscription.middleware";
+import { PrewarmService } from "./services/prewarm.service";
 
 import authRoutes from "./routes/auth.routes";
 import googleAuthRoutes from "./routes/googleAuth.routes";
@@ -321,6 +322,11 @@ app.use(
       : false,
   })
 );
+
+app.use((req, res, next) => {
+  PrewarmService.noteRequest();
+  next();
+});
 
 app.use(requestContextMiddleware);
 app.use(compression());

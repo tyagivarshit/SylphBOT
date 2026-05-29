@@ -1,0 +1,106 @@
+import prisma from "../config/prisma";
+import { primeAuthBootstrapContext } from "./authBootstrap.service";
+import { bootstrapInfrastructureResilienceOS } from "./reliability/infrastructureResilienceOS.service";
+import { bootstrapSecurityGovernanceOS } from "./security/securityGovernanceOS.service";
+import { getSharedRedisConnection, getQueueRedisConnection } from "../config/redis";
+import logger from "../utils/logger";
+import { prewarmState } from "./prewarmState";
+
+let prewarmInFlight: Promise<void> | null = null;
+let lastPrewarmAt = 0;
+let billingPrewarmer: ((businessId: string) => Promise<void>) | null = null;
+
+export const registerBillingPrewarmer = (fn: (businessId: string) => Promise<void>) => {
+  billingPrewarmer = fn;
+};
+
+export const PrewarmService = {
+  isRecovering() {
+    return prewarmState.isCold;
+  },
+
+  noteRequest() {
+    const now = Date.now();
+    const idlePeriod = now - prewarmState.lastRequestAt;
+    prewarmState.lastRequestAt = now;
+
+    // Detect long idle period (e.g., > 5 minutes)
+    if (idlePeriod > 5 * 60 * 1000 && !prewarmState.isCold) {
+      logger.info({ idlePeriod }, "Lightweight wake detection: Long idle period detected. Triggering async prewarm.");
+      this.triggerAsyncPrewarm("long_idle_wake");
+    }
+  },
+
+  triggerAsyncPrewarm(reason: string) {
+    const now = Date.now();
+    if (now - lastPrewarmAt < 30 * 1000) {
+      // Throttle prewarming to prevent storm
+      return;
+    }
+
+    if (prewarmInFlight) {
+      return;
+    }
+
+    prewarmInFlight = (async () => {
+      lastPrewarmAt = Date.now();
+      logger.info({ reason }, "Starting critical-only prewarm pipeline...");
+
+      try {
+        // 1. Redis writable pre-verification & stabilization
+        const shared = getSharedRedisConnection();
+        const queue = getQueueRedisConnection();
+
+        await Promise.allSettled([
+          shared.status === "ready" ? Promise.resolve() : shared.connect().catch(() => undefined),
+          queue.status === "ready" ? Promise.resolve() : queue.connect().catch(() => undefined)
+        ]);
+
+        // Ping test to verify writability
+        if (shared.status === "ready") {
+          await shared.set("prewarm:ping", "1", "EX", 10).catch(() => undefined);
+        }
+
+        // 2. Critical runtime coordinators
+        await Promise.allSettled([
+          bootstrapInfrastructureResilienceOS().catch(() => undefined),
+          bootstrapSecurityGovernanceOS().catch(() => undefined)
+        ]);
+
+        // 3. Prewarm Auth cache & Billing/subscription contexts for recently active users
+        // Startup-safe query: if DB is not ready, this will just fail/catch safely
+        const activeUsers = await prisma.user.findMany({
+          where: { isActive: true, deletedAt: null },
+          orderBy: { id: "desc" },
+          take: 5,
+          select: { id: true, businessId: true, name: true, email: true, avatar: true }
+        }).catch(() => []);
+
+        for (const user of activeUsers) {
+          // Prewarm auth bootstrap cache
+          primeAuthBootstrapContext({
+            userId: user.id,
+            preferredBusinessId: user.businessId,
+            profileSeed: {
+              name: user.name,
+              email: user.email,
+              avatar: user.avatar,
+            }
+          });
+
+          // Prewarm billing/subscription context using registered prewarmer
+          if (user.businessId && billingPrewarmer) {
+            billingPrewarmer(user.businessId).catch(() => undefined);
+          }
+        }
+
+        prewarmState.isCold = false;
+        logger.info("Critical-only prewarm pipeline completed successfully.");
+      } catch (err) {
+        logger.warn({ err }, "Error during prewarm pipeline execution");
+      } finally {
+        prewarmInFlight = null;
+      }
+    })();
+  }
+};

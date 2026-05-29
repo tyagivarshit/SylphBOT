@@ -15,6 +15,8 @@ import { requirePermission } from "../middleware/rbac.middleware";
 import { userActionLimiter } from "../middleware/rateLimit.middleware";
 import { withTimeoutFallback } from "../utils/boundedTimeout";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
+import { prewarmState } from "../services/prewarmState";
+
 
 const router = express.Router();
 
@@ -388,13 +390,33 @@ router.get("/me", protect, async (req: any, res) => {
       scopedCacheKey
     );
     const cached = currentUserCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now() && !forceProcessingFastLane) {
+    const isCold = prewarmState.isCold;
+    if (cached && (cached.expiresAt > Date.now() || isCold) && !forceProcessingFastLane) {
+      if (cached.expiresAt <= Date.now()) {
+        withTimeoutFallback({
+          label: "user_me_hydration_bg",
+          timeoutMs: 5000,
+          task: getCurrentUser({
+            userId,
+            preferredBusinessId: req.user?.businessId || null,
+          }),
+          fallback: null,
+        }).then((res) => {
+          if (res.value) {
+            currentUserCache.set(cacheKey, {
+              value: res.value,
+              expiresAt: Date.now() + USER_ME_CACHE_TTL_MS,
+            });
+          }
+        }).catch(() => null);
+      }
       emitPerformanceMetric({
         name: "CACHE_HIT",
         businessId: req.user?.businessId || null,
         route: "user_me",
         metadata: {
           cache: "memory_user_me",
+          isCold,
         },
       });
       res.setHeader("Cache-Control", "no-store");

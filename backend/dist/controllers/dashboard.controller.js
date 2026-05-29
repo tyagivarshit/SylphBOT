@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DashboardController = void 0;
 const dashboard_service_1 = require("../services/dashboard.service");
+const prewarmState_1 = require("../services/prewarmState");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
 function isValidString(value) {
     return typeof value === "string" && value.trim().length > 0;
@@ -47,8 +48,12 @@ async function baseHandler(req, res, handler, options) {
             });
         }
         const fallbackValue = options.fallback;
-        const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, options.timeoutMs || 1800);
-        const timeoutMs = Math.max(120, Math.min(options.timeoutMs || 1800, Math.max(120, remainingMs - 120)));
+        const baseTimeout = options.timeoutMs || 1800;
+        const adjustedTimeoutMs = prewarmState_1.prewarmState.isCold
+            ? Math.max(3500, baseTimeout + 1500)
+            : baseTimeout;
+        const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req, res }, adjustedTimeoutMs);
+        const timeoutMs = Math.max(120, Math.min(adjustedTimeoutMs, Math.max(120, remainingMs - 120)));
         const projectionTask = handler(businessId, req)
             .then((value) => ({
             timedOut: false,

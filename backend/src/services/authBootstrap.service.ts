@@ -52,7 +52,7 @@ export type AuthBootstrapWaitResult = {
   elapsedMs: number;
 };
 
-const AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS = 1_900;
+const AUTH_BOOTSTRAP_BACKGROUND_TIMEOUT_MS = 30_000;
 const AUTH_BOOTSTRAP_BACKGROUND_DELAY_MS = 35;
 const AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS = 1_250;
 const AUTH_BOOTSTRAP_READY_CACHE_TTL_MS = 30_000;
@@ -640,9 +640,10 @@ export const waitForAuthBootstrapContext = async (
       };
     }
   }
+  const defaultTimeout = options?.timeoutMs || AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS;
   const timeoutMs = Math.max(
     250,
-    Math.floor(options?.timeoutMs || AUTH_BOOTSTRAP_WAIT_TIMEOUT_MS)
+    Math.floor(prewarmState.isCold ? Math.max(3500, defaultTimeout + 2250) : defaultTimeout)
   );
   const cached = getReadyBootstrapCache(buildAuthBootstrapKey(input));
   if (cached) {
@@ -781,11 +782,19 @@ export const primeAuthBootstrapContext = (
 
       void withTimeout(shared.promise, timeoutMs)
         .catch((error) => {
-          console.warn("AUTH_BOOTSTRAP_DEFERRED_FAILED", {
-            userId: input.userId,
-            preferredBusinessId: input.preferredBusinessId || null,
-            reason: toBootstrapReason(error),
-          });
+          const reason = toBootstrapReason(error);
+          if (reason === "auth_bootstrap_timeout") {
+            console.info("AUTH_BOOTSTRAP_DEFERRED_TIMEOUT", {
+              userId: input.userId,
+              preferredBusinessId: input.preferredBusinessId || null,
+            });
+          } else {
+            console.warn("AUTH_BOOTSTRAP_DEFERRED_FAILED", {
+              userId: input.userId,
+              preferredBusinessId: input.preferredBusinessId || null,
+              reason,
+            });
+          }
         })
         .finally(() => {
           emitPerformanceMetric({

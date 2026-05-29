@@ -9,6 +9,7 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const env_1 = require("../config/env");
 const billingGeo_service_1 = require("../services/billingGeo.service");
+const prewarmState_1 = require("../services/prewarmState");
 const subscription_middleware_1 = require("../middleware/subscription.middleware");
 const commerceProjection_service_1 = require("../services/commerceProjection.service");
 const paymentIntent_service_1 = require("../services/paymentIntent.service");
@@ -172,11 +173,12 @@ const isRequestLifecycleClosed = (req, res) => Boolean(res.locals?.requestTimedO
 const resolveBillingProjectionWaitBudgetMs = (res) => {
     const locals = (res.locals || {});
     const deadlineAt = Number(locals.requestDeadlineAt || 0);
+    const maxWait = prewarmState_1.prewarmState.isCold ? 5500 : BILLING_PROJECTION_MAX_WAIT_MS;
     if (!Number.isFinite(deadlineAt) || deadlineAt <= 0) {
-        return BILLING_PROJECTION_MAX_WAIT_MS;
+        return maxWait;
     }
     const remainingBudgetMs = Math.floor(deadlineAt - Date.now() - BILLING_PROJECTION_TIMEOUT_BUFFER_MS);
-    return Math.max(1, Math.min(BILLING_PROJECTION_MAX_WAIT_MS, remainingBudgetMs));
+    return Math.max(1, Math.min(maxWait, remainingBudgetMs));
 };
 const waitForBillingProjection = async (promise, timeoutMs, requestSignal) => new Promise((resolve, reject) => {
     let settled = false;

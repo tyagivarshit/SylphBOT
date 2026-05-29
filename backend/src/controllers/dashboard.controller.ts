@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { DashboardService } from "../services/dashboard.service";
+import { prewarmState } from "../services/prewarmState";
 import {
   getRequestRemainingMs,
   isRequestLifecycleAborted,
@@ -87,10 +88,14 @@ async function baseHandler(
     }
 
     const fallbackValue = options.fallback;
-    const remainingMs = getRequestRemainingMs({ req, res }, options.timeoutMs || 1800);
+    const baseTimeout = options.timeoutMs || 1800;
+    const adjustedTimeoutMs = prewarmState.isCold
+      ? Math.max(3500, baseTimeout + 1500)
+      : baseTimeout;
+    const remainingMs = getRequestRemainingMs({ req, res }, adjustedTimeoutMs);
     const timeoutMs = Math.max(
       120,
-      Math.min(options.timeoutMs || 1800, Math.max(120, remainingMs - 120))
+      Math.min(adjustedTimeoutMs, Math.max(120, remainingMs - 120))
     );
     const projectionTask = handler(businessId, req)
       .then(

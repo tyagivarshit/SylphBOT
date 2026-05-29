@@ -446,9 +446,12 @@ const loadBillingContext = async (businessId) => {
             };
         }
     }
+    const hasFallback = prewarmState_1.prewarmState.lastKnownValidSubscription.has(businessId) ||
+        subscriptionMemoryCache.get(businessId)?.value;
+    const timeoutLimit = hasFallback ? 300 : (prewarmState_1.prewarmState.isCold ? 5500 : 1500);
     const cachedSubscription = await Promise.race([
         getCachedSubscription(businessId),
-        new Promise((resolve) => setTimeout(() => resolve(null), 300)),
+        new Promise((resolve) => setTimeout(() => resolve(null), timeoutLimit)),
     ]).catch(() => null);
     let subscription = cachedSubscription;
     if (subscription?.plan) {

@@ -4,6 +4,7 @@ import prisma from "../config/prisma";
 import redis from "../config/redis";
 import { env } from "../config/env";
 import { resolveBillingCurrency } from "../services/billingGeo.service";
+import { prewarmState } from "../services/prewarmState";
 import {
   loadBillingContext,
   type BillingContext,
@@ -274,15 +275,16 @@ const isRequestLifecycleClosed = (req: Request, res: Response) =>
 const resolveBillingProjectionWaitBudgetMs = (res: Response) => {
   const locals = (res.locals || {}) as Record<string, unknown>;
   const deadlineAt = Number(locals.requestDeadlineAt || 0);
+  const maxWait = prewarmState.isCold ? 5500 : BILLING_PROJECTION_MAX_WAIT_MS;
 
   if (!Number.isFinite(deadlineAt) || deadlineAt <= 0) {
-    return BILLING_PROJECTION_MAX_WAIT_MS;
+    return maxWait;
   }
 
   const remainingBudgetMs = Math.floor(
     deadlineAt - Date.now() - BILLING_PROJECTION_TIMEOUT_BUFFER_MS
   );
-  return Math.max(1, Math.min(BILLING_PROJECTION_MAX_WAIT_MS, remainingBudgetMs));
+  return Math.max(1, Math.min(maxWait, remainingBudgetMs));
 };
 
 const waitForBillingProjection = async (

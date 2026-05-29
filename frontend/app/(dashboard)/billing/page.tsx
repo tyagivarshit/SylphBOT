@@ -362,11 +362,16 @@ const refreshBillingBootstrapSnapshot = async (options?: { background?: boolean 
       fetchPlansCatalog(options),
     ]);
 
+    const prevSnapshot = billingBootstrapSnapshot;
     const nextSnapshot: BillingBootstrapSnapshot = {
       billingData:
-        billingResult.status === "fulfilled" ? (billingResult.value || null) : null,
+        billingResult.status === "fulfilled" && billingResult.value
+          ? billingResult.value
+          : (prevSnapshot?.billingData || null),
       plansData:
-        plansResult.status === "fulfilled" ? (plansResult.value || null) : null,
+        plansResult.status === "fulfilled" && plansResult.value
+          ? plansResult.value
+          : (prevSnapshot?.plansData || null),
       updatedAt: Date.now(),
     };
 

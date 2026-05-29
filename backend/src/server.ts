@@ -19,11 +19,15 @@ import {
 } from "./runtime/lifecycle";
 import { warmupEmbeddingRuntime } from "./services/embedding.service";
 import { commerceProjectionService } from "./services/commerceProjection.service";
+import prisma from "./config/prisma";
+import { initRedis, waitForRedisReady, isRedisWritable } from "./config/redis";
 import {
   markAppBootReady,
   markEmbeddingWarmupReady,
   recordStartupBackgroundTask,
   shouldDeferLowPriorityWarmup,
+  markRedisReady,
+  markDbReady,
 } from "./runtime/startupIsolation.service";
 
 let isShuttingDown = false;
@@ -411,15 +415,36 @@ const startPostListenBootstrap = () => {
 export const startServer = async () => {
   initializeSentry();
   configurePassport();
-  const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
-  if (!runtimeInfrastructure.readyWithinBudget) {
-    logger.warn(
-      {
-        startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
-        startupQueueInitElapsedMs: runtimeInfrastructure.durationMs,
-      },
-      "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization"
-    );
+
+  // 1. Minimal Env Validation
+  if (!env.PORT || !env.REDIS_URL || !process.env.DATABASE_URL) {
+    logger.error("Critical environment variables missing during startup validation");
+    process.exit(1);
+  }
+
+  // 2. Initialize DB pool
+  logger.info("Initializing database connection pool...");
+  try {
+    await prisma.$connect();
+    markDbReady(true);
+    logger.info("Database connection pool initialized successfully");
+  } catch (error) {
+    logger.warn({ err: error }, "Database connection failed or deferred during startup");
+    markDbReady(false);
+  }
+
+  // 3. Initialize Redis
+  logger.info("Initializing Redis connections...");
+  try {
+    initRedis();
+    // Wait for Redis to be ready with a short timeout of 1000ms
+    await waitForRedisReady({ timeoutMs: 1000 }).catch(() => null);
+    const redisWritable = isRedisWritable();
+    markRedisReady(redisWritable);
+    logger.info({ redisWritable }, "Redis connection status evaluated");
+  } catch (error) {
+    logger.warn({ err: error }, "Redis initialization failed or deferred during startup");
+    markRedisReady(false);
   }
 
   const { default: app } = await import("./app");
@@ -500,25 +525,24 @@ export const startServer = async () => {
 
   return await new Promise<http.Server>((resolve) => {
     server.listen(env.PORT, () => {
-      logger.info({ port: env.PORT }, "Server listening");
+      logger.info({ port: env.PORT }, "Server listening immediately and responsive");
       markAppBootReady();
-      if (!runtimeInfrastructure.readyWithinBudget) {
-        scheduleBackgroundStartupTask(
-          "runtime_queue_init_recovery",
-          async () => {
-            await initQueues();
-          },
-          {
-            priority: "critical",
-            deferDelayMs: STARTUP_QUEUE_INIT_RETRY_DELAY_MS,
-            maxDeferrals: STARTUP_QUEUE_INIT_MAX_DEFERRALS,
-            metadata: {
-              startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
-            },
-          }
-        );
-      }
-      startPostListenBootstrap();
+
+      // Defer all heavy startup tasks asynchronously to run cleanly in background after HTTP startup
+      void Promise.resolve().then(async () => {
+        const bgStartedAt = Date.now();
+        logger.info("Starting non-blocking background initialization tasks");
+        
+        try {
+          await initQueues();
+          logger.info({ durationMs: Date.now() - bgStartedAt }, "Runtime queues initialized successfully in background");
+        } catch (error) {
+          logger.error({ err: error }, "Runtime queues background initialization failed");
+        }
+
+        startPostListenBootstrap();
+      });
+
       resolve(server);
     });
   });

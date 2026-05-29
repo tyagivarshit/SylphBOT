@@ -864,8 +864,19 @@ export const warmupEmbeddingRuntime = async (
     };
   }
 
-  embeddingWarmupState.initiatedBy = String(initiatedBy || "manual").trim() || "manual";
+  const normalizedInitiatedBy = String(initiatedBy || "manual").trim() || "manual";
+  embeddingWarmupState.initiatedBy = normalizedInitiatedBy;
   const startedAt = Date.now();
+
+  if (normalizedInitiatedBy === "startup_background") {
+    logger.info("Skipping eager embedding model warmup during startup to prevent event-loop blocking");
+    return {
+      mode: MODE,
+      ready: false,
+      skipped: true,
+      durationMs: 0,
+    };
+  }
 
   try {
     await getModel();
@@ -880,7 +891,7 @@ export const warmupEmbeddingRuntime = async (
       durationMs,
     };
   } catch (error) {
-    logger.warn({ err: error }, "Embedding warmup skipped");
+    logger.warn({ err: error }, "Embedding warmup failed");
     throw error;
   }
 };

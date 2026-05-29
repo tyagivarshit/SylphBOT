@@ -8,7 +8,6 @@ const prisma_1 = __importDefault(require("../config/prisma"));
 const AppError_1 = require("../utils/AppError");
 const crypto_1 = __importDefault(require("crypto"));
 const redis_1 = __importDefault(require("../config/redis"));
-const redisSafety_1 = require("../redis/redisSafety");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
 const generateToken_1 = require("../utils/generateToken");
 const authCookies_1 = require("../utils/authCookies");
@@ -513,30 +512,39 @@ const isValidCachedContext = (context) => {
         typeof record.expiresAt === "number");
 };
 const safeRedisGet = async (key) => {
-    return (0, redisSafety_1.safeRedisCall)(async () => {
+    try {
         return await Promise.race([
             redis_1.default.get(key),
             new Promise((resolve) => setTimeout(() => resolve(null), 120)),
         ]);
-    }, null, { operation: "auth_middleware:get" });
+    }
+    catch {
+        return null;
+    }
 };
 const safeRedisSet = async (key, value, mode, ttl) => {
-    return (0, redisSafety_1.safeRedisCall)(async () => {
+    try {
         return await Promise.race([
             mode && ttl
                 ? redis_1.default.set(key, value, "EX", ttl)
                 : redis_1.default.set(key, value),
             new Promise((resolve) => setTimeout(() => resolve(null), 120)),
         ]);
-    }, null, { operation: "auth_middleware:set" });
+    }
+    catch {
+        return null;
+    }
 };
 const safeRedisDel = async (key) => {
-    return (0, redisSafety_1.safeRedisCall)(async () => {
+    try {
         return await Promise.race([
             redis_1.default.del(key),
             new Promise((resolve) => setTimeout(() => resolve(null), 120)),
         ]);
-    }, null, { operation: "auth_middleware:del" });
+    }
+    catch {
+        return null;
+    }
 };
 const readRedisAuthContext = async (tokenKey, tokenVersion) => {
     const primaryKey = getAuthRedisCacheKey(tokenKey);

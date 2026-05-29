@@ -7,26 +7,22 @@ import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { stripe } from "../services/stripe.service";
 import { getPlanFromPrice } from "../config/stripe.price.map";
 import { invalidateFeatureCache } from "../services/feature.service";
-import { safeRedisCall } from "../redis/redisSafety";
-
 const CACHE_TTL = 60 * 3;
 const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15_000;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
 const EARLY_ACCESS_CACHE_TTL_MS = 30_000;
 const EARLY_ACCESS_CACHE_KEY = "__global__";
 const safeRedisGet = async (key: string) => {
-  return safeRedisCall(
-    async () => {
-      return await Promise.race([
-        redis.get(key),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 120)
-        ),
-      ]);
-    },
-    null,
-    { operation: "subscription_middleware:get" }
-  );
+  try {
+    return await Promise.race([
+      redis.get(key),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 120)
+      ),
+    ]);
+  } catch {
+    return null;
+  }
 };
 
 const safeRedisSet = async (
@@ -34,35 +30,31 @@ const safeRedisSet = async (
   value: string,
   ttl?: number
 ) => {
-  return safeRedisCall(
-    async () => {
-      return await Promise.race([
-        ttl
-          ? redis.set(key, value, "EX", ttl)
-          : redis.set(key, value),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 120)
-        ),
-      ]);
-    },
-    null,
-    { operation: "subscription_middleware:set" }
-  );
+  try {
+    return await Promise.race([
+      ttl
+        ? redis.set(key, value, "EX", ttl)
+        : redis.set(key, value),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 120)
+      ),
+    ]);
+  } catch {
+    return null;
+  }
 };
 
 const safeRedisDel = async (key: string) => {
-  return safeRedisCall(
-    async () => {
-      return await Promise.race([
-        redis.del(key),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 120)
-        ),
-      ]);
-    },
-    null,
-    { operation: "subscription_middleware:del" }
-  );
+  try {
+    return await Promise.race([
+      redis.del(key),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 120)
+      ),
+    ]);
+  } catch {
+    return null;
+  }
 };
 
 const earlyAccessCache = new Map<
@@ -367,21 +359,27 @@ const getCachedSubscription = async (businessId: string) => {
       : null;
 
     if (subscription) {
-      await safeRedisSet(
-        cacheKey,
-        JSON.stringify(subscription),
-        CACHE_TTL
-      ).catch(() => undefined);
+      await redis
+        .set(
+          cacheKey,
+          JSON.stringify(subscription),
+          "EX",
+          CACHE_TTL
+        )
+        .catch(() => undefined);
       subscriptionMemoryCache.set(businessId, {
         value: subscription,
         expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,
       });
     } else {
-      await safeRedisSet(
-        cacheKey,
-        "null",
-        CACHE_TTL
-      ).catch(() => undefined);
+      await redis
+        .set(
+          cacheKey,
+          "null",
+          "EX",
+          CACHE_TTL
+        )
+        .catch(() => undefined);
       subscriptionMemoryCache.set(businessId, {
         value: null,
         expiresAt: Date.now() + SUBSCRIPTION_MEMORY_CACHE_TTL_MS,

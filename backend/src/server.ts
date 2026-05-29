@@ -433,18 +433,19 @@ export const startServer = async () => {
     markDbReady(false);
   }
 
-  // 3. Initialize Redis
-  logger.info("Initializing Redis connections...");
-  try {
-    initRedis();
-    // Wait for Redis to be ready with a short timeout of 1000ms
-    await waitForRedisReady({ timeoutMs: 1000 }).catch(() => null);
-    const redisWritable = isRedisWritable();
-    markRedisReady(redisWritable);
-    logger.info({ redisWritable }, "Redis connection status evaluated");
-  } catch (error) {
-    logger.warn({ err: error }, "Redis initialization failed or deferred during startup");
+  // 3. Queue / Redis initialization within budget before HTTP listen
+  const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
+  if (!runtimeInfrastructure.readyWithinBudget) {
+    logger.warn(
+      {
+        startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
+        startupQueueInitElapsedMs: runtimeInfrastructure.durationMs,
+      },
+      "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization"
+    );
     markRedisReady(false);
+  } else {
+    markRedisReady(true);
   }
 
   const { default: app } = await import("./app");
@@ -525,24 +526,31 @@ export const startServer = async () => {
 
   return await new Promise<http.Server>((resolve) => {
     server.listen(env.PORT, () => {
-      logger.info({ port: env.PORT }, "Server listening immediately and responsive");
+      logger.info({ port: env.PORT }, "Server listening");
+      
+      // Projection recovery initialization before runtime ready
+      startPostListenBootstrap();
+      
+      // Mark app boot ready
       markAppBootReady();
 
-      // Defer all heavy startup tasks asynchronously to run cleanly in background after HTTP startup
-      void Promise.resolve().then(async () => {
-        const bgStartedAt = Date.now();
-        logger.info("Starting non-blocking background initialization tasks");
-        
-        try {
-          await initQueues();
-          logger.info({ durationMs: Date.now() - bgStartedAt }, "Runtime queues initialized successfully in background");
-        } catch (error) {
-          logger.error({ err: error }, "Runtime queues background initialization failed");
-        }
-
-        startPostListenBootstrap();
-      });
-
+      if (!runtimeInfrastructure.readyWithinBudget) {
+        scheduleBackgroundStartupTask(
+          "runtime_queue_init_recovery",
+          async () => {
+            await initQueues();
+            markRedisReady(isRedisWritable());
+          },
+          {
+            priority: "critical",
+            deferDelayMs: STARTUP_QUEUE_INIT_RETRY_DELAY_MS,
+            maxDeferrals: STARTUP_QUEUE_INIT_MAX_DEFERRALS,
+            metadata: {
+              startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
+            },
+          }
+        );
+      }
       resolve(server);
     });
   });

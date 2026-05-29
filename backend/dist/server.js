@@ -49,6 +49,8 @@ const billingSettlement_service_1 = require("./services/billingSettlement.servic
 const lifecycle_1 = require("./runtime/lifecycle");
 const embedding_service_1 = require("./services/embedding.service");
 const commerceProjection_service_1 = require("./services/commerceProjection.service");
+const prisma_1 = __importDefault(require("./config/prisma"));
+const redis_1 = require("./config/redis");
 const startupIsolation_service_1 = require("./runtime/startupIsolation.service");
 let isShuttingDown = false;
 const parsePositiveInt = (raw, fallbackValue) => {
@@ -331,12 +333,33 @@ const startPostListenBootstrap = () => {
 const startServer = async () => {
     (0, sentry_1.initializeSentry)();
     (0, passport_1.configurePassport)();
+    // 1. Minimal Env Validation
+    if (!env_1.env.PORT || !env_1.env.REDIS_URL || !process.env.DATABASE_URL) {
+        logger_1.default.error("Critical environment variables missing during startup validation");
+        process.exit(1);
+    }
+    // 2. Initialize DB pool
+    logger_1.default.info("Initializing database connection pool...");
+    try {
+        await prisma_1.default.$connect();
+        (0, startupIsolation_service_1.markDbReady)(true);
+        logger_1.default.info("Database connection pool initialized successfully");
+    }
+    catch (error) {
+        logger_1.default.warn({ err: error }, "Database connection failed or deferred during startup");
+        (0, startupIsolation_service_1.markDbReady)(false);
+    }
+    // 3. Queue / Redis initialization within budget before HTTP listen
     const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
     if (!runtimeInfrastructure.readyWithinBudget) {
         logger_1.default.warn({
             startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
             startupQueueInitElapsedMs: runtimeInfrastructure.durationMs,
         }, "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization");
+        (0, startupIsolation_service_1.markRedisReady)(false);
+    }
+    else {
+        (0, startupIsolation_service_1.markRedisReady)(true);
     }
     const { default: app } = await Promise.resolve().then(() => __importStar(require("./app")));
     const server = http_1.default.createServer(app);
@@ -402,10 +425,14 @@ const startServer = async () => {
     return await new Promise((resolve) => {
         server.listen(env_1.env.PORT, () => {
             logger_1.default.info({ port: env_1.env.PORT }, "Server listening");
+            // Projection recovery initialization before runtime ready
+            startPostListenBootstrap();
+            // Mark app boot ready
             (0, startupIsolation_service_1.markAppBootReady)();
             if (!runtimeInfrastructure.readyWithinBudget) {
                 scheduleBackgroundStartupTask("runtime_queue_init_recovery", async () => {
                     await (0, lifecycle_1.initQueues)();
+                    (0, startupIsolation_service_1.markRedisReady)((0, redis_1.isRedisWritable)());
                 }, {
                     priority: "critical",
                     deferDelayMs: STARTUP_QUEUE_INIT_RETRY_DELAY_MS,
@@ -415,7 +442,6 @@ const startServer = async () => {
                     },
                 });
             }
-            startPostListenBootstrap();
             resolve(server);
         });
     });

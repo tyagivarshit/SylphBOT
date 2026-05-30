@@ -100,7 +100,7 @@ export function usePlan() {
     isError,
     refetch
   } = useQuery({
-    queryKey: ["billing"],
+    queryKey: ["billing-plan"],
     queryFn: fetchBilling,
 
     staleTime: 1000 * 20,
@@ -128,7 +128,7 @@ export function usePlan() {
 
   /* 🔥 FORCE REFRESH (AFTER CHECKOUT) */
   const refreshPlan = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["billing"] })
+    await queryClient.invalidateQueries({ queryKey: ["billing-plan"] })
     await refetch()
   }
 

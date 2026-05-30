@@ -56,7 +56,7 @@ export default function BillingSettings() {
   const queryClient = useQueryClient();
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["billing"],
+    queryKey: ["billing-settings"],
     queryFn: async () => {
       const response = await apiFetch<BillingResponse>("/api/billing", {
         credentials: "include",
@@ -108,7 +108,8 @@ export default function BillingSettings() {
       return response.data;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["billing"] });
+      await queryClient.invalidateQueries({ queryKey: ["billing-settings"] });
+      await queryClient.invalidateQueries({ queryKey: ["billing-plan"] });
       alert("Subscription will cancel at period end.");
     },
   });

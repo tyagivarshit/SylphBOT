@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.attachBillingContext = exports.loadBillingContext = exports.verifyStripeSubscriptionFallback = exports.invalidateBillingContextCache = exports.getBillingCacheKey = void 0;
+exports.attachBillingContext = exports.loadBillingContext = exports.verifyStripeSubscriptionFallback = exports.getAuthoritativeSubscriptionLKV = exports.evaluateBillingContext = exports.invalidateBillingContextCache = exports.getBillingCacheKey = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
 const plan_config_1 = require("../config/plan.config");
@@ -118,6 +118,86 @@ const mapCanonicalSubscription = (row) => ({
     subscriptionKey: row.subscriptionKey || null,
     providerSubscriptionId: row.providerSubscriptionId || null,
 });
+const evaluateBillingContext = (sub, now = new Date()) => {
+    let ctx = {
+        subscription: sub,
+        plan: sub.plan,
+        planKey: (0, plan_config_1.getPlanKey)(sub.plan),
+        status: "ACTIVE",
+        isLimited: false,
+        upgradeRequired: false,
+        allowEarly: false,
+        remainingEarly: 0,
+    };
+    if (sub.status === "INACTIVE" || sub.status === "CANCELLED") {
+        ctx = lockContext(ctx);
+    }
+    if (sub.status === "PAST_DUE") {
+        ctx =
+            sub.graceUntil &&
+                now <= new Date(sub.graceUntil)
+                ? {
+                    ...ctx,
+                    status: "ACTIVE",
+                }
+                : lockContext(ctx);
+    }
+    if (sub.isTrial) {
+        ctx =
+            sub.currentPeriodEnd &&
+                now <= new Date(sub.currentPeriodEnd)
+                ? {
+                    ...ctx,
+                    status: "TRIAL",
+                }
+                : lockContext(ctx);
+    }
+    return ctx;
+};
+exports.evaluateBillingContext = evaluateBillingContext;
+const getAuthoritativeSubscriptionLKV = async (businessId, now = new Date()) => {
+    const normalizedBusinessId = String(businessId || "").trim();
+    if (!normalizedBusinessId)
+        return null;
+    // 1. Existing valid entitlement snapshot (memory LKV)
+    const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(normalizedBusinessId);
+    const lkvBill = prewarmState_1.prewarmState.lastKnownValidBilling.get(normalizedBusinessId);
+    if (lkvSub &&
+        lkvBill &&
+        lkvSub.plan?.name !== "FREE_LOCKED" &&
+        lkvSub.plan?.name !== "LOCKED") {
+        return { subscription: lkvSub, context: lkvBill };
+    }
+    // 2. Existing Redis subscription projection
+    const cacheKey = (0, exports.getBillingCacheKey)(normalizedBusinessId);
+    const cached = await safeRedisGet(cacheKey).catch(() => null);
+    if (cached && cached !== "null") {
+        try {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.plan?.name !== "FREE_LOCKED" && parsed.plan?.name !== "LOCKED") {
+                const context = (0, exports.evaluateBillingContext)(parsed, now);
+                prewarmState_1.prewarmState.lastKnownValidSubscription.set(normalizedBusinessId, parsed);
+                prewarmState_1.prewarmState.lastKnownValidBilling.set(normalizedBusinessId, context);
+                return { subscription: parsed, context };
+            }
+        }
+        catch { }
+    }
+    // 3. Local DB subscription ledger
+    const canonical = await prisma_1.default.subscriptionLedger.findFirst({
+        where: { businessId: normalizedBusinessId },
+        orderBy: { updatedAt: "desc" },
+    }).catch(() => null);
+    if (canonical && canonical.planCode !== "FREE_LOCKED" && canonical.planCode !== "LOCKED") {
+        const parsed = mapCanonicalSubscription(canonical);
+        const context = (0, exports.evaluateBillingContext)(parsed, now);
+        prewarmState_1.prewarmState.lastKnownValidSubscription.set(normalizedBusinessId, parsed);
+        prewarmState_1.prewarmState.lastKnownValidBilling.set(normalizedBusinessId, context);
+        return { subscription: parsed, context };
+    }
+    return null;
+};
+exports.getAuthoritativeSubscriptionLKV = getAuthoritativeSubscriptionLKV;
 const makeAbortable = (promise, signal) => {
     if (!signal)
         return promise;
@@ -435,60 +515,33 @@ const getEarlyAccessSnapshot = async (subscription) => {
 const loadBillingContext = async (businessId) => {
     const startedAt = Date.now();
     const now = new Date();
-    let context = getBaseContext();
-    const evaluateContext = (sub) => {
-        let ctx = {
-            subscription: sub,
-            plan: sub.plan,
-            planKey: (0, plan_config_1.getPlanKey)(sub.plan),
-            status: "ACTIVE",
-            isLimited: false,
-            upgradeRequired: false,
+    // 1. Check for authoritative LKV first (covers memory LKV, Redis cache, and DB ledger)
+    const authoritativeLkv = await (0, exports.getAuthoritativeSubscriptionLKV)(businessId, now);
+    if (authoritativeLkv) {
+        // Kicks off background fetch to refresh the projection and memory map
+        getCachedSubscription(businessId).catch(() => null);
+        // Serve early access snapshot check
+        const earlyAccess = await getEarlyAccessSnapshot(authoritativeLkv.subscription).catch(() => ({
             allowEarly: false,
             remainingEarly: 0,
-        };
-        if (sub.status === "INACTIVE") {
-            ctx = lockContext(ctx);
-        }
-        if (sub.status === "CANCELLED") {
-            ctx = lockContext(ctx);
-        }
-        if (sub.status === "PAST_DUE") {
-            ctx =
-                sub.graceUntil &&
-                    now <= new Date(sub.graceUntil)
-                    ? {
-                        ...ctx,
-                        status: "ACTIVE",
-                    }
-                    : lockContext(ctx);
-        }
-        if (sub.isTrial) {
-            ctx =
-                sub.currentPeriodEnd &&
-                    now <= new Date(sub.currentPeriodEnd)
-                    ? {
-                        ...ctx,
-                        status: "TRIAL",
-                    }
-                    : lockContext(ctx);
-        }
-        return ctx;
-    };
-    // If recovering/cold, serve stale-valid immediately
-    const recovering = prewarmState_1.prewarmState.isCold;
-    if (recovering) {
-        const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(businessId);
-        const lkvBill = prewarmState_1.prewarmState.lastKnownValidBilling.get(businessId);
-        if (lkvSub && lkvBill) {
-            // Trigger background reload
-            getCachedSubscription(businessId).catch(() => null);
-            return {
-                subscription: lkvSub,
-                context: lkvBill,
-            };
-        }
+        }));
+        authoritativeLkv.context.allowEarly = earlyAccess.allowEarly;
+        authoritativeLkv.context.remainingEarly = earlyAccess.remainingEarly;
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "PROJECTION_MS",
+            value: Date.now() - startedAt,
+            businessId,
+            route: "billing_context",
+            metadata: {
+                planKey: authoritativeLkv.context.planKey,
+                status: authoritativeLkv.context.status,
+                recoverySource: "LKV",
+            },
+        });
+        return authoritativeLkv;
     }
+    // 2. No valid paid LKV history exists. Proceed to standard lookup and fallback to FREE_LOCKED/FREE_TRIAL.
+    let context = getBaseContext();
     const hasFallback = prewarmState_1.prewarmState.lastKnownValidSubscription.has(businessId) ||
         subscriptionMemoryCache.get(businessId)?.value;
     let timeoutLimit = hasFallback ? 300 : (prewarmState_1.prewarmState.isCold ? 5500 : 1500);
@@ -504,7 +557,7 @@ const loadBillingContext = async (businessId) => {
     ]).catch(() => null);
     let subscription = cachedSubscription;
     if (subscription?.plan) {
-        context = evaluateContext(subscription);
+        context = (0, exports.evaluateBillingContext)(subscription, now);
     }
     else {
         // Attempt fallback to stale/last-known-valid
@@ -518,15 +571,13 @@ const loadBillingContext = async (businessId) => {
             const memoryEntry = subscriptionMemoryCache.get(businessId);
             if (memoryEntry?.value) {
                 subscription = memoryEntry.value;
-                context = evaluateContext(memoryEntry.value);
+                context = (0, exports.evaluateBillingContext)(memoryEntry.value, now);
             }
         }
     }
     let stripeCheckTriggeredSync = false;
     const isFreeLockedOrMissing = !subscription || context.planKey === "FREE_LOCKED";
-    const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(businessId);
-    const hasValidLkv = lkvSub && lkvSub.plan?.name !== "FREE_LOCKED";
-    if (isFreeLockedOrMissing && isRequestPath && !hasValidLkv) {
+    if (isFreeLockedOrMissing && isRequestPath) {
         const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)(null, 0);
         if (remainingMs >= 1500) {
             const requestSignal = (0, requestLifecycle_1.getRequestAbortSignal)({ req: store.req, res: store.res });
@@ -535,7 +586,7 @@ const loadBillingContext = async (businessId) => {
                 const resolvedSub = await (0, exports.verifyStripeSubscriptionFallback)(businessId, requestSignal);
                 if (resolvedSub && resolvedSub.plan?.name !== "FREE_LOCKED") {
                     subscription = resolvedSub;
-                    context = evaluateContext(subscription);
+                    context = (0, exports.evaluateBillingContext)(subscription, now);
                 }
             }
             catch (err) {

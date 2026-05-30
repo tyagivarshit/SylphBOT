@@ -5,6 +5,7 @@ import {
   type PlanType,
 } from "../config/plan.config";
 import prisma from "../config/prisma";
+import { getAuthoritativeSubscriptionLKV } from "../middleware/subscription.middleware";
 
 type PlanRecord = {
   name?: string | null;
@@ -167,24 +168,36 @@ const createResolvedPlan = (
 const loadResolvedPlan = async (
   businessId: string
 ): Promise<ResolvedPlanContext> => {
-  const canonical = await prisma.subscriptionLedger.findFirst({
-    where: {
-      businessId,
-    },
-    orderBy: {
-      updatedAt: "desc",
-    },
-    select: {
-      status: true,
-      planCode: true,
-      trialEndsAt: true,
-      currentPeriodEnd: true,
-      renewAt: true,
-    },
-  });
+  const authoritative = await getAuthoritativeSubscriptionLKV(businessId).catch(() => null);
+  
+  const now = Date.now();
+  let subscription: SubscriptionRecord = null;
+  
+  if (authoritative?.subscription) {
+    const sub = authoritative.subscription;
+    subscription = {
+      status: sub.status,
+      graceUntil: sub.graceUntil ? new Date(sub.graceUntil) : null,
+      currentPeriodEnd: sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd) : null,
+      isTrial: sub.isTrial,
+      plan: sub.plan,
+    };
+  } else {
+    // If not found in LKV/authority resolver, do a safe db fallback (same as before)
+    const canonical = await prisma.subscriptionLedger.findFirst({
+      where: { businessId },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        status: true,
+        planCode: true,
+        trialEndsAt: true,
+        currentPeriodEnd: true,
+        renewAt: true,
+      },
+    }).catch(() => null);
 
-  const subscription: SubscriptionRecord = canonical
-    ? {
+    if (canonical) {
+      subscription = {
         status:
           canonical.status === "TRIALING"
             ? "TRIAL"
@@ -202,15 +215,14 @@ const loadResolvedPlan = async (
         currentPeriodEnd: canonical.currentPeriodEnd || null,
         isTrial:
           canonical.status === "TRIALING" ||
-          (canonical.trialEndsAt ? canonical.trialEndsAt.getTime() > Date.now() : false),
+          (canonical.trialEndsAt ? canonical.trialEndsAt.getTime() > now : false),
         plan: {
           name: canonical.planCode,
           type: canonical.planCode,
         },
-      }
-    : null;
-
-  const now = Date.now();
+      };
+    }
+  }
 
   if (isSubscriptionActive(subscription, now)) {
     return createResolvedPlan(

@@ -614,16 +614,17 @@ function BillingPageContent() {
     const isBackground = Boolean(options?.background);
     const checkoutSafePaused =
       checkoutLockRef.current || Boolean(loading) || checkoutPending;
-    if (isBackground && checkoutSafePaused) {
+    if (checkoutSafePaused) {
       const now = Date.now();
       if (now - checkoutPauseTelemetryLastAtRef.current > 3_000) {
         checkoutPauseTelemetryLastAtRef.current = now;
         recordBillingTelemetry("checkout_background_refresh_paused", {
           loadingPlan: loading,
           checkoutPending,
+          background: isBackground,
         });
       }
-      return;
+      return false;
     }
 
     if (loadBillingInFlightRef.current) {
@@ -813,10 +814,14 @@ function BillingPageContent() {
       }, Math.max(1_000, Math.floor(delayMs)));
     };
 
-    void loadBilling().then((successful) => {
-      backgroundFailureCountRef.current = successful ? 0 : 1;
+    if (checkoutLockRef.current || loading || checkoutPending) {
       scheduleNextRefresh(getNextRefreshDelayMs());
-    });
+    } else {
+      void loadBilling().then((successful) => {
+        backgroundFailureCountRef.current = successful ? 0 : 1;
+        scheduleNextRefresh(getNextRefreshDelayMs());
+      });
+    }
 
     return () => {
       cancelled = true;
@@ -858,43 +863,30 @@ function BillingPageContent() {
       setLoading(plan);
       setCheckoutProgressMessage("Redirecting to secure checkout...");
 
-      // 1. If entitlement is not yet known, wait for in-flight load or trigger one
-      if (!isEntitlementKnown) {
-        if (loadBillingInFlightRef.current) {
-          await loadBillingInFlightRef.current;
-        } else {
-          await loadBilling();
+      // Perform optimistic validation only if billing data is already loaded in memory
+      const latestBilling = billingBootstrapSnapshot?.billingData;
+      if (latestBilling) {
+        const latestPlanKey = latestBilling.billing?.planKey || "FREE_LOCKED";
+        const latestSubscription = latestBilling.subscription || null;
+        const isCurrent = isCurrentPlan(latestSubscription, plan, latestPlanKey);
+
+        if (isCurrent) {
+          throw new Error(
+            `You are already subscribed to the ${plan.charAt(0) + plan.slice(1).toLowerCase()} plan.`
+          );
+        }
+
+        const latestLockedCurrency = latestSubscription?.currency || null;
+        const latestCurrency = latestSubscription?.currency || latestBilling.currency || "INR";
+
+        if (latestLockedCurrency && latestLockedCurrency !== latestCurrency) {
+          throw new Error(
+            "Your billing currency is already locked for this workspace."
+          );
         }
       }
 
-      const latestBilling = billingBootstrapSnapshot?.billingData;
-      if (!latestBilling) {
-        throw new Error(
-          "We could not verify your current subscription state. Please check your connection and try again."
-        );
-      }
-
-      // 2. Resolve latest billing parameters to bypass stale closures
-      const latestPlanKey = latestBilling.billing?.planKey || "FREE_LOCKED";
-      const latestSubscription = latestBilling.subscription || null;
-      const isCurrent = isCurrentPlan(latestSubscription, plan, latestPlanKey);
-
-      // 3. Active-plan protection check
-      if (isCurrent) {
-        throw new Error(
-          `You are already subscribed to the ${plan.charAt(0) + plan.slice(1).toLowerCase()} plan.`
-        );
-      }
-
-      const latestLockedCurrency = latestSubscription?.currency || null;
-      const latestCurrency = latestSubscription?.currency || latestBilling.currency || "INR";
-
-      if (latestLockedCurrency && latestLockedCurrency !== latestCurrency) {
-        throw new Error(
-          "Your billing currency is already locked for this workspace."
-        );
-      }
-
+      // Immediately launch redirect without waiting for any further database/network hydration
       redirectToCheckout(plan, billing);
     } catch (checkoutError) {
       checkoutLockRef.current = false;

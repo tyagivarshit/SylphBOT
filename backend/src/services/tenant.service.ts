@@ -70,6 +70,45 @@ const selectWorkspaceById = async (
     select: workspaceSelect,
   });
 
+const workspaceIdentityCache = new Map<
+  string,
+  {
+    value: UserWorkspaceIdentity;
+    expiresAt: number;
+  }
+>();
+
+const getWorkspaceIdentityCache = (key: string): UserWorkspaceIdentity | null => {
+  const cached = workspaceIdentityCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    workspaceIdentityCache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+const setWorkspaceIdentityCache = (key: string, value: UserWorkspaceIdentity) => {
+  if (workspaceIdentityCache.size >= 1000) {
+    for (const [k, v] of workspaceIdentityCache.entries()) {
+      if (v.expiresAt <= Date.now()) {
+        workspaceIdentityCache.delete(k);
+      }
+    }
+    if (workspaceIdentityCache.size >= 1000) {
+      workspaceIdentityCache.clear();
+    }
+  }
+  workspaceIdentityCache.set(key, {
+    value,
+    expiresAt: Date.now() + 10_000, // 10 seconds TTL
+  });
+};
+
+export const clearWorkspaceIdentityCache = () => {
+  workspaceIdentityCache.clear();
+};
+
 const createWorkspaceForUser = async (input: {
   userId: string;
   userName?: string | null;
@@ -154,7 +193,7 @@ const createWorkspaceForUser = async (input: {
   return withDistributedLock({
     key: `auth:workspace-bootstrap:${input.userId}`,
     ttlMs: 15_000,
-    waitMs: 5_000,
+    waitMs: 1500, // Reduced from 5000 to prevent request path wait accumulation
     pollMs: 75,
     onUnavailable: ensureOwnerWorkspace,
     run: async () => ensureOwnerWorkspace(),
@@ -178,6 +217,11 @@ export const resolveUserWorkspaceIdentity = async (input: {
   }
 
   const preferredBusinessId = normalizeBusinessId(input.preferredBusinessId);
+  const cacheKey = `${userId}:${preferredBusinessId || "none"}`;
+  const cachedResult = getWorkspaceIdentityCache(cacheKey);
+  if (cachedResult) {
+    return cachedResult;
+  }
   const user = await prisma.user.findUnique({
     where: {
       id: userId,
@@ -203,20 +247,24 @@ export const resolveUserWorkspaceIdentity = async (input: {
   });
 
   if (!user) {
-    return {
+    const res: UserWorkspaceIdentity = {
       businessId: null,
       workspace: null,
       source: "none",
     };
+    setWorkspaceIdentityCache(cacheKey, res);
+    return res;
   }
 
   const linkedWorkspace = toWorkspaceSnapshot(user.business as WorkspaceSnapshot | null);
   if (linkedWorkspace) {
-    return {
+    const res: UserWorkspaceIdentity = {
       businessId: linkedWorkspace.id,
       workspace: linkedWorkspace,
       source: "linked",
     };
+    setWorkspaceIdentityCache(cacheKey, res);
+    return res;
   }
 
   let resolvedWorkspace: WorkspaceSnapshot | null = null;
@@ -277,11 +325,13 @@ export const resolveUserWorkspaceIdentity = async (input: {
       .catch(() => undefined);
   }
 
-  return {
+  const result: UserWorkspaceIdentity = {
     businessId: resolvedWorkspace?.id || null,
     workspace: resolvedWorkspace,
     source,
   };
+  setWorkspaceIdentityCache(cacheKey, result);
+  return result;
 };
 
 export const getRequestBusinessId = (req: Request) =>

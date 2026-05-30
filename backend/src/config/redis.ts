@@ -10,6 +10,7 @@ import {
   shouldLogRedisSkip,
 } from "../redis/redisSafety";
 import logger from "../utils/logger";
+import { requestStorage, getRequestRemainingMs } from "../utils/requestLifecycle";
 
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
 const MAX_RECONNECT_ATTEMPTS = Math.max(
@@ -540,14 +541,36 @@ export const waitForRedisReady = async (input?: {
   requireQueue?: boolean;
   timeoutMs?: number;
 }) => {
-  const timeoutMs = Math.max(
-    1_000,
-    Math.floor(
-      Number(input?.timeoutMs ?? Math.max(env.REDIS_CONNECT_TIMEOUT_MS * 3, 15_000))
-    )
-  );
+  const store = requestStorage.getStore();
+  const isRequestPath = Boolean(store);
+  
+  let timeoutMs = input?.timeoutMs;
+  if (timeoutMs === undefined || timeoutMs === null) {
+    if (isRequestPath) {
+      const remainingMs = getRequestRemainingMs(null, 2000);
+      timeoutMs = Math.min(2000, remainingMs);
+    } else {
+      timeoutMs = Math.max(env.REDIS_CONNECT_TIMEOUT_MS * 3, 15_000);
+    }
+  } else {
+    if (isRequestPath) {
+      const remainingMs = getRequestRemainingMs(null, timeoutMs);
+      timeoutMs = Math.min(timeoutMs, remainingMs);
+    }
+  }
+
+  timeoutMs = Math.max(1_000, Math.floor(Number(timeoutMs)));
+  
   const shared = ensureSharedRedisClient();
-  await waitForClientReady(shared, "shared", timeoutMs);
+  try {
+    await waitForClientReady(shared, "shared", timeoutMs);
+  } catch (error) {
+    if (isRequestPath) {
+      logger.warn({ error, timeoutMs }, "Redis shared client not ready on request path, failing open/stale and continuing async recovery");
+    } else {
+      throw error;
+    }
+  }
 
   if (input?.requireQueue === false) {
     return {
@@ -557,7 +580,16 @@ export const waitForRedisReady = async (input?: {
   }
 
   const queue = ensureQueueRedisClient();
-  await waitForClientReady(queue, "queue", timeoutMs);
+  try {
+    await waitForClientReady(queue, "queue", timeoutMs);
+  } catch (error) {
+    if (isRequestPath) {
+      logger.warn({ error, timeoutMs }, "Redis queue client not ready on request path, failing open/stale and continuing async recovery");
+    } else {
+      throw error;
+    }
+  }
+
   return {
     shared,
     queue,

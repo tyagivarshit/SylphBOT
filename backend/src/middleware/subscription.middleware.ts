@@ -9,11 +9,12 @@ import { getPlanFromPrice } from "../config/stripe.price.map";
 import { invalidateFeatureCache } from "../services/feature.service";
 import { prewarmState } from "../services/prewarmState";
 import { registerBillingPrewarmer } from "../services/prewarm.service";
+import { requestStorage, getRequestRemainingMs } from "../utils/requestLifecycle";
 
 registerBillingPrewarmer(async (businessId) => {
   await loadBillingContext(businessId).catch(() => null);
 });
-const CACHE_TTL = 60 * 3;
+const CACHE_TTL = 60 * 60 * 12;
 const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15_000;
 const EARLY_ACCESS_LIMIT = Number(env.EARLY_ACCESS_LIMIT || 50);
 const EARLY_ACCESS_CACHE_TTL_MS = 30_000;
@@ -555,7 +556,14 @@ export const loadBillingContext = async (businessId: string) => {
   const hasFallback =
     prewarmState.lastKnownValidSubscription.has(businessId) ||
     subscriptionMemoryCache.get(businessId)?.value;
-  const timeoutLimit = hasFallback ? 300 : (prewarmState.isCold ? 5500 : 1500);
+  let timeoutLimit = hasFallback ? 300 : (prewarmState.isCold ? 5500 : 1500);
+
+  const store = requestStorage.getStore();
+  const isRequestPath = Boolean(store);
+  if (isRequestPath) {
+    const remainingMs = getRequestRemainingMs(null, timeoutLimit);
+    timeoutLimit = Math.max(100, Math.min(timeoutLimit, remainingMs - 150));
+  }
 
   const cachedSubscription = await Promise.race([
     getCachedSubscription(businessId),

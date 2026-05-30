@@ -76,6 +76,7 @@ import {
   initRequestLifecycle,
   isRequestLifecycleAborted,
   markRequestLifecycleAborted,
+  requestStorage,
 } from "./utils/requestLifecycle";
 
 const app = express();
@@ -553,7 +554,10 @@ app.use((req, res, next) => {
       requestId: (req as any).requestId,
     });
   });
-  next();
+
+  requestStorage.run({ req, res }, () => {
+    next();
+  });
 });
 
 app.use(requestPriorityMiddleware);

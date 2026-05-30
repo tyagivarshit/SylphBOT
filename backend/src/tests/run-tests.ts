@@ -74,6 +74,7 @@ import { growthPhase6FTests } from "./growth.phase6f.test";
 import { metaOAuthStateTests } from "./metaOAuthState.test";
 import { tenantWorkspaceIdentityTests } from "./tenantWorkspaceIdentity.test";
 import { authHydrationBootstrapTests } from "./authHydrationBootstrap.test";
+import { clearWorkspaceIdentityCache } from "../services/tenant.service";
 
 type TestCase = {
   name: string;
@@ -901,6 +902,7 @@ const run = async () => {
   try {
     for (const testCase of tests) {
       try {
+        clearWorkspaceIdentityCache();
         await testCase.run();
         console.log(`PASS ${testCase.name}`);
       } catch (error) {

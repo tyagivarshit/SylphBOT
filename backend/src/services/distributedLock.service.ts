@@ -5,6 +5,7 @@ import {
   recordMetricSnapshot,
   recordObservabilityEvent,
 } from "./reliability/reliabilityOS.service";
+import { requestStorage, getRequestRemainingMs } from "../utils/requestLifecycle";
 
 const RELEASE_LOCK_SCRIPT = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -73,9 +74,24 @@ export const acquireDistributedLock = async ({
   token?: string;
   refreshIntervalMs?: number;
 }): Promise<DistributedLockHandle | null> => {
+  const store = requestStorage.getStore();
+  const isRequestPath = Boolean(store);
+
+  // If request budget is extremely low (e.g. < 100ms), fail-fast to prevent lock queue amplification
+  if (isRequestPath && getRequestRemainingMs(null, 1000) < 100) {
+    return null;
+  }
+
   const redis = getSharedRedisConnection();
   const lockToken = token || crypto.randomUUID();
-  const deadline = Date.now() + Math.max(0, waitMs);
+
+  let effectiveWaitMs = Math.max(0, waitMs);
+  if (isRequestPath) {
+    const remainingMs = getRequestRemainingMs(null, effectiveWaitMs);
+    effectiveWaitMs = Math.min(effectiveWaitMs, remainingMs);
+  }
+
+  const deadline = Date.now() + effectiveWaitMs;
   const effectivePollMs = Math.max(10, pollMs);
 
   do {
@@ -84,7 +100,7 @@ export const acquireDistributedLock = async ({
       50,
       Math.min(
         ttlMs,
-        waitMs > 0 ? Math.max(remainingWaitMs, effectivePollMs) : effectivePollMs,
+        effectiveWaitMs > 0 ? Math.max(remainingWaitMs, effectivePollMs) : effectivePollMs,
         1000
       )
     );

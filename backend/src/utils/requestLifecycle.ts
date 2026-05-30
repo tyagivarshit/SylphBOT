@@ -1,4 +1,7 @@
 import type { Request, Response } from "express";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+export const requestStorage = new AsyncLocalStorage<{ req: Request; res?: Response | null }>();
 
 export type RequestLifecycleAbortReason =
   | "request_timeout"
@@ -136,13 +139,19 @@ export const getRequestAbortSignal = (input: {
 }) => getRequestLifecycle(input)?.abortController.signal || null;
 
 export const getRequestRemainingMs = (
-  input: {
-    req: Request;
+  input?: {
+    req?: Request | null;
     res?: Response | null;
-  },
+  } | null,
   fallbackMs = 500
 ) => {
-  const lifecycle = getRequestLifecycle(input);
+  const store = requestStorage.getStore();
+  const req = input?.req || store?.req;
+  const res = input?.res || store?.res;
+  if (!req) {
+    return Math.max(1, Math.floor(fallbackMs));
+  }
+  const lifecycle = getRequestLifecycle({ req, res });
   if (!lifecycle) {
     return Math.max(1, Math.floor(fallbackMs));
   }

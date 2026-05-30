@@ -459,7 +459,9 @@ app.use((req, res, next) => {
             requestId: req.requestId,
         });
     });
-    next();
+    requestLifecycle_1.requestStorage.run({ req, res }, () => {
+        next();
+    });
 });
 app.use(requestPriority_middleware_1.requestPriorityMiddleware);
 app.use("/api/webhooks/commerce", express_1.default.raw({ type: "*/*", limit: "1mb" }), commerceWebhook_routes_1.default);

@@ -8,6 +8,7 @@ const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
 const redisSafety_1 = require("../redis/redisSafety");
 const logger_1 = __importDefault(require("../utils/logger"));
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 const MANUAL_CLOSE_SYMBOL = Symbol.for("sylph.redis.manualClose");
 const MAX_RECONNECT_ATTEMPTS = Math.max(3, Number(process.env.REDIS_MAX_RECONNECT_ATTEMPTS || 8));
 const REDIS_READY_POLL_MS = 50;
@@ -376,9 +377,37 @@ exports.isQueueRedisWritable = isQueueRedisWritable;
 const isRedisWritable = () => (0, exports.isSharedRedisWritable)();
 exports.isRedisWritable = isRedisWritable;
 const waitForRedisReady = async (input) => {
-    const timeoutMs = Math.max(1000, Math.floor(Number(input?.timeoutMs ?? Math.max(env_1.env.REDIS_CONNECT_TIMEOUT_MS * 3, 15000))));
+    const store = requestLifecycle_1.requestStorage.getStore();
+    const isRequestPath = Boolean(store);
+    let timeoutMs = input?.timeoutMs;
+    if (timeoutMs === undefined || timeoutMs === null) {
+        if (isRequestPath) {
+            const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)(null, 2000);
+            timeoutMs = Math.min(2000, remainingMs);
+        }
+        else {
+            timeoutMs = Math.max(env_1.env.REDIS_CONNECT_TIMEOUT_MS * 3, 15000);
+        }
+    }
+    else {
+        if (isRequestPath) {
+            const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)(null, timeoutMs);
+            timeoutMs = Math.min(timeoutMs, remainingMs);
+        }
+    }
+    timeoutMs = Math.max(1000, Math.floor(Number(timeoutMs)));
     const shared = ensureSharedRedisClient();
-    await waitForClientReady(shared, "shared", timeoutMs);
+    try {
+        await waitForClientReady(shared, "shared", timeoutMs);
+    }
+    catch (error) {
+        if (isRequestPath) {
+            logger_1.default.warn({ error, timeoutMs }, "Redis shared client not ready on request path, failing open/stale and continuing async recovery");
+        }
+        else {
+            throw error;
+        }
+    }
     if (input?.requireQueue === false) {
         return {
             shared,
@@ -386,7 +415,17 @@ const waitForRedisReady = async (input) => {
         };
     }
     const queue = ensureQueueRedisClient();
-    await waitForClientReady(queue, "queue", timeoutMs);
+    try {
+        await waitForClientReady(queue, "queue", timeoutMs);
+    }
+    catch (error) {
+        if (isRequestPath) {
+            logger_1.default.warn({ error, timeoutMs }, "Redis queue client not ready on request path, failing open/stale and continuing async recovery");
+        }
+        else {
+            throw error;
+        }
+    }
     return {
         shared,
         queue,

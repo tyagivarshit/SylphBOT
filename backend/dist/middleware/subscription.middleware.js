@@ -14,10 +14,11 @@ const stripe_price_map_1 = require("../config/stripe.price.map");
 const feature_service_1 = require("../services/feature.service");
 const prewarmState_1 = require("../services/prewarmState");
 const prewarm_service_1 = require("../services/prewarm.service");
+const requestLifecycle_1 = require("../utils/requestLifecycle");
 (0, prewarm_service_1.registerBillingPrewarmer)(async (businessId) => {
     await (0, exports.loadBillingContext)(businessId).catch(() => null);
 });
-const CACHE_TTL = 60 * 3;
+const CACHE_TTL = 60 * 60 * 12;
 const SUBSCRIPTION_MEMORY_CACHE_TTL_MS = 15000;
 const EARLY_ACCESS_LIMIT = Number(env_1.env.EARLY_ACCESS_LIMIT || 50);
 const EARLY_ACCESS_CACHE_TTL_MS = 30000;
@@ -448,7 +449,13 @@ const loadBillingContext = async (businessId) => {
     }
     const hasFallback = prewarmState_1.prewarmState.lastKnownValidSubscription.has(businessId) ||
         subscriptionMemoryCache.get(businessId)?.value;
-    const timeoutLimit = hasFallback ? 300 : (prewarmState_1.prewarmState.isCold ? 5500 : 1500);
+    let timeoutLimit = hasFallback ? 300 : (prewarmState_1.prewarmState.isCold ? 5500 : 1500);
+    const store = requestLifecycle_1.requestStorage.getStore();
+    const isRequestPath = Boolean(store);
+    if (isRequestPath) {
+        const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)(null, timeoutLimit);
+        timeoutLimit = Math.max(100, Math.min(timeoutLimit, remainingMs - 150));
+    }
     const cachedSubscription = await Promise.race([
         getCachedSubscription(businessId),
         new Promise((resolve) => setTimeout(() => resolve(null), timeoutLimit)),

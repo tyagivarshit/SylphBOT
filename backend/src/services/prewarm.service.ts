@@ -61,6 +61,19 @@ export const PrewarmService = {
           await shared.set("prewarm:ping", "1", "EX", 10).catch(() => undefined);
         }
 
+        // Database pool warmup & connectivity check
+        const dbWarmupStartedAt = Date.now();
+        await Promise.race([
+          prisma.user.findFirst({ select: { id: true } }),
+          new Promise<null>((_, reject) =>
+            setTimeout(() => reject(new Error("Database warmup timeout")), 2500)
+          ),
+        ]).then(() => {
+          logger.info({ durationMs: Date.now() - dbWarmupStartedAt }, "Database pool warmed up successfully during prewarm");
+        }).catch((err) => {
+          logger.warn({ err, durationMs: Date.now() - dbWarmupStartedAt }, "Database warmup/ping failed or timed out during prewarm");
+        });
+
         // 2. Critical runtime coordinators
         await Promise.allSettled([
           bootstrapInfrastructureResilienceOS().catch(() => undefined),
@@ -92,6 +105,9 @@ export const PrewarmService = {
           if (user.businessId && billingPrewarmer) {
             billingPrewarmer(user.businessId).catch(() => undefined);
           }
+
+          // Spread out DB pool allocation requests to smooth warmup
+          await new Promise((resolve) => setTimeout(resolve, 150));
         }
 
         prewarmState.isCold = false;

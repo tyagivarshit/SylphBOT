@@ -527,7 +527,6 @@ function BillingPageContent() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingContext, setBillingContext] = useState<BillingContext | null>(null);
   const [plansResponse, setPlansResponse] = useState<PlansResponse>(FALLBACK_PLANS_RESPONSE);
-  const [pageLoading, setPageLoading] = useState(true);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [plansRequestFailed, setPlansRequestFailed] = useState(false);
@@ -650,7 +649,6 @@ function BillingPageContent() {
         }
 
         if (!isBackground) {
-          setPageLoading(true);
           setLoadWarning(null);
         } else {
           setBackgroundRefreshing(true);
@@ -660,17 +658,11 @@ function BillingPageContent() {
         if (cachedSnapshot?.billingData && !hasLoadedBillingRef.current) {
           applyBillingState(cachedSnapshot.billingData);
           hasLoadedBillingRef.current = true;
-          if (!isBackground) {
-            setPageLoading(false);
-          }
         }
         if (cachedSnapshot?.plansData && !hasLoadedPlansRef.current) {
           applyPlansState(cachedSnapshot.plansData);
           hasLoadedPlansRef.current = true;
           setPlansRequestFailed(false);
-          if (!isBackground) {
-            setPageLoading(false);
-          }
         }
 
         const snapshot = await refreshBillingBootstrapSnapshot({
@@ -725,9 +717,7 @@ function BillingPageContent() {
         );
         successfulRefresh = false;
       } finally {
-        if (!isBackground) {
-          setPageLoading(false);
-        } else {
+        if (isBackground) {
           setBackgroundRefreshing(false);
         }
       }
@@ -888,10 +878,6 @@ function BillingPageContent() {
     }
   };
 
-  if (pageLoading) {
-    return <BillingPageSkeleton />;
-  }
-
   return (
     <div className="space-y-6">
       <div className="brand-info-strip rounded-[26px] p-4 sm:p-5">
@@ -978,11 +964,7 @@ function BillingPageContent() {
             )
           ) : null}
 
-          {backgroundRefreshing && !checkoutProgressMessage ? (
-            <div className="rounded-[18px] border border-slate-200/80 bg-white/85 px-4 py-2 text-xs font-medium text-slate-600">
-              Refreshing billing snapshot in background...
-            </div>
-          ) : null}
+
 
           {checkoutProgressMessage ? (
             <div className="rounded-[24px] border border-blue-200 bg-blue-50/90 px-5 py-4 text-sm text-blue-700 shadow-sm">
@@ -1023,31 +1005,45 @@ function BillingPageContent() {
 
           <div className="brand-section-shell rounded-[26px] p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-gray-900">
-                  {billingStatus === "TRIAL"
-                    ? `${plansResponse.trialDays} day trial is active`
-                    : billingStatus === "ACTIVE"
-                      ? "Paid subscription is active"
-                      : hasUsedTrial
-                        ? "Trial already used"
-                        : `Your first checkout includes a ${plansResponse.trialDays} day free trial`}
-                </p>
-                <p className="mt-1 text-sm text-gray-600">
-                  {billingStatus === "TRIAL" && currentPeriodEnd
-                    ? `Trial access stays active until ${currentPeriodEnd}.`
-                    : billingStatus === "ACTIVE"
-                      ? "You can switch plans anytime and Stripe will handle the billing update."
-                      : hasUsedTrial
-                        ? "Pick a paid plan to unlock replies, automation, and billing access again."
-                        : "Start with a free trial, then keep the momentum going with the plan that fits your volume."}
-                </p>
-              </div>
+              {!isEntitlementKnown ? (
+                <div className="space-y-2 w-full max-w-lg">
+                  <div className="h-4 bg-slate-200/80 rounded animate-pulse w-2/3" />
+                  <div className="h-3 bg-slate-200/80 rounded animate-pulse w-[90%]" />
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {billingStatus === "TRIAL"
+                      ? `${plansResponse.trialDays} day trial is active`
+                      : billingStatus === "ACTIVE"
+                        ? "Paid subscription is active"
+                        : hasUsedTrial
+                          ? "Trial already used"
+                          : `Your first checkout includes a ${plansResponse.trialDays} day free trial`}
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    {billingStatus === "TRIAL" && currentPeriodEnd
+                      ? `Trial access stays active until ${currentPeriodEnd}.`
+                      : billingStatus === "ACTIVE"
+                        ? "You can switch plans anytime and Stripe will handle the billing update."
+                        : hasUsedTrial
+                          ? "Pick a paid plan to unlock replies, automation, and billing access again."
+                          : "Start with a free trial, then keep the momentum going with the plan that fits your volume."}
+                  </p>
+                </div>
+              )}
 
-              <span className="brand-chip brand-chip-success">
-                <ShieldCheck size={13} />
-                Secure billing
-              </span>
+              <div className="flex items-center gap-2.5">
+                {backgroundRefreshing && (
+                  <span className="text-xs font-semibold text-blue-500 animate-pulse bg-blue-50/80 px-2 py-1 rounded-lg border border-blue-100">
+                    Syncing...
+                  </span>
+                )}
+                <span className="brand-chip brand-chip-success">
+                  <ShieldCheck size={13} />
+                  Secure billing
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1130,15 +1126,15 @@ function BillingPageContent() {
                     onClick={() => void handleCheckout(plan.type)}
                     loading={loading === plan.type}
                     loadingLabel="Redirecting to secure checkout..."
-                    disabled={Boolean(loading) || current || !isEntitlementKnown}
+                    disabled={Boolean(loading) || (isEntitlementKnown && current)}
                     className={`mt-6 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                      current
+                      isEntitlementKnown && current
                         ? "bg-gray-200 text-gray-600"
                         : "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white hover:shadow-lg"
                     }`}
                   >
                     {!isEntitlementKnown
-                      ? "Loading Plan..."
+                      ? `Choose ${plan.name}`
                       : current
                       ? "Current Plan"
                       : planKey === "FREE_LOCKED" || planKey === "LOCKED"
@@ -1150,7 +1146,7 @@ function BillingPageContent() {
 
                   <p className="mt-3 text-xs text-gray-500">
                     {!isEntitlementKnown
-                      ? "Loading details..."
+                      ? "Need more headroom? Buy extra AI credits anytime."
                       : planKey === "FREE_LOCKED" || planKey === "LOCKED"
                         ? hasUsedTrial
                           ? "Need more flexibility? Buy extra AI credits anytime."

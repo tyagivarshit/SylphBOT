@@ -9,7 +9,7 @@ import { getPlanFromPrice } from "../config/stripe.price.map";
 import { invalidateFeatureCache } from "../services/feature.service";
 import { prewarmState } from "../services/prewarmState";
 import { registerBillingPrewarmer } from "../services/prewarm.service";
-import { requestStorage, getRequestRemainingMs } from "../utils/requestLifecycle";
+import { requestStorage, getRequestRemainingMs, getRequestAbortSignal } from "../utils/requestLifecycle";
 
 registerBillingPrewarmer(async (businessId) => {
   await loadBillingContext(businessId).catch(() => null);
@@ -163,7 +163,33 @@ const mapCanonicalSubscription = (row: any) => ({
   providerSubscriptionId: row.providerSubscriptionId || null,
 });
 
-export const verifyStripeSubscriptionFallback = async (businessId: string): Promise<any | null> => {
+const makeAbortable = <T>(promise: Promise<T>, signal?: AbortSignal | null): Promise<T> => {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new Error("request_aborted:stripe_query"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new Error("request_aborted:stripe_query"));
+    };
+    signal.addEventListener("abort", onAbort);
+    promise.then(
+      (res) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(res);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      }
+    );
+  });
+};
+
+export const verifyStripeSubscriptionFallback = async (
+  businessId: string,
+  requestSignal?: AbortSignal | null
+): Promise<any | null> => {
   const normalizedBusinessId = String(businessId || "").trim();
   if (!normalizedBusinessId) return null;
 
@@ -178,39 +204,68 @@ export const verifyStripeSubscriptionFallback = async (businessId: string): Prom
     
     await safeRedisSet(rateLimitKey, "1", 30).catch(() => undefined);
 
-    const business = await prisma.business.findUnique({
-      where: { id: normalizedBusinessId },
-      select: {
-        owner: {
-          select: {
-            email: true,
+    const store = requestStorage.getStore();
+    const remainingMs = getRequestRemainingMs(null, 4000);
+    const stripeTimeout = Math.max(200, Math.min(4000, remainingMs - 100));
+
+    // Try to retrieve existing stripeCustomerId from DB (including PENDING rows)
+    const ledgerRows = await prisma.subscriptionLedger.findMany({
+      where: { businessId: normalizedBusinessId },
+      select: { metadata: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    let customerId: string | null = null;
+    for (const r of ledgerRows) {
+      const meta = r.metadata as Record<string, any> | null;
+      if (meta && typeof meta === "object" && meta.stripeCustomerId) {
+        customerId = String(meta.stripeCustomerId).trim();
+        break;
+      }
+    }
+
+    if (!customerId) {
+      const business = await prisma.business.findUnique({
+        where: { id: normalizedBusinessId },
+        select: {
+          owner: {
+            select: {
+              email: true,
+            }
           }
         }
+      });
+
+      const email = business?.owner?.email;
+      if (!email) {
+        console.info("Stripe direct fallback: No owner email found", { businessId: normalizedBusinessId });
+        return null;
       }
-    });
 
-    const email = business?.owner?.email;
-    if (!email) {
-      console.info("Stripe direct fallback: No owner email found", { businessId: normalizedBusinessId });
-      return null;
+      const customers = await makeAbortable(
+        stripe.customers.list({
+          email,
+          limit: 1,
+        }, { timeout: stripeTimeout }),
+        requestSignal
+      );
+
+      if (!customers.data || customers.data.length === 0) {
+        console.info("Stripe direct fallback: No Stripe customer found", { email });
+        return null;
+      }
+
+      customerId = customers.data[0].id;
     }
 
-    const customers = await stripe.customers.list({
-      email,
-      limit: 1,
-    });
-
-    if (!customers.data || customers.data.length === 0) {
-      console.info("Stripe direct fallback: No Stripe customer found", { email });
-      return null;
-    }
-
-    const customerId = customers.data[0].id;
-    const stripeSubs = await stripe.subscriptions.list({
-      customer: customerId,
-      status: "all",
-      limit: 10,
-    });
+    const stripeSubs = await makeAbortable(
+      stripe.subscriptions.list({
+        customer: customerId,
+        status: "all",
+        limit: 10,
+      }, { timeout: stripeTimeout }),
+      requestSignal
+    );
 
     if (!stripeSubs.data || stripeSubs.data.length === 0) {
       console.info("Stripe direct fallback: No subscriptions found for customer", { customerId });
@@ -258,7 +313,10 @@ export const verifyStripeSubscriptionFallback = async (businessId: string): Prom
       currency: activeSub.currency?.toUpperCase() || "USD",
       billingCycle: item.price.recurring?.interval === "year" ? "yearly" : "monthly",
       planCode,
-      metadata: activeSub.metadata || null,
+      metadata: {
+        ...(activeSub.metadata || {}),
+        stripeCustomerId: customerId,
+      },
       subscriptionKey: `sub_${activeSub.id}`,
     };
 
@@ -590,13 +648,35 @@ export const loadBillingContext = async (businessId: string) => {
     }
   }
 
+  let stripeCheckTriggeredSync = false;
+  const isFreeLockedOrMissing = !subscription || context.planKey === "FREE_LOCKED";
+  const lkvSub = prewarmState.lastKnownValidSubscription.get(businessId);
+  const hasValidLkv = lkvSub && lkvSub.plan?.name !== "FREE_LOCKED";
+
+  if (isFreeLockedOrMissing && isRequestPath && !hasValidLkv) {
+    const remainingMs = getRequestRemainingMs(null, 0);
+    if (remainingMs >= 1500) {
+      const requestSignal = getRequestAbortSignal({ req: store.req, res: store.res });
+      try {
+        stripeCheckTriggeredSync = true;
+        const resolvedSub = await verifyStripeSubscriptionFallback(businessId, requestSignal);
+        if (resolvedSub && resolvedSub.plan?.name !== "FREE_LOCKED") {
+          subscription = resolvedSub;
+          context = evaluateContext(subscription);
+        }
+      } catch (err) {
+        console.warn("Synchronous verifyStripeSubscriptionFallback failed:", err);
+      }
+    }
+  }
+
   // Save successful load as last-known-valid
   if (subscription) {
     prewarmState.lastKnownValidSubscription.set(businessId, subscription);
     prewarmState.lastKnownValidBilling.set(businessId, context);
   }
 
-  if (context.planKey === "FREE_LOCKED") {
+  if (context.planKey === "FREE_LOCKED" && !stripeCheckTriggeredSync) {
     // Run direct Stripe fallback verification asynchronously to keep hot path latency low
     verifyStripeSubscriptionFallback(businessId).catch((err) => {
       console.warn("Async verifyStripeSubscriptionFallback error:", err);

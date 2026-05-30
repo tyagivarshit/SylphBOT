@@ -1633,18 +1633,44 @@ const emitCheckoutMetric = (
         customUnitPriceMinor,
       });
       const preloadedSubscription = (req as any).subscription;
-      const activeSubscription = preloadedSubscription && ["ACTIVE", "TRIAL", "TRIALING", "PAST_DUE", "PAUSED"].includes(preloadedSubscription.status)
+      let activeSubscription = preloadedSubscription && ["ACTIVE", "TRIAL", "TRIALING", "PAST_DUE", "PAUSED"].includes(preloadedSubscription.status)
         ? {
             metadata: preloadedSubscription.metadata || {},
             subscriptionKey: preloadedSubscription.subscriptionKey || `sub_${preloadedSubscription.stripeSubscriptionId || preloadedSubscription.id}`,
             providerSubscriptionId: preloadedSubscription.providerSubscriptionId || preloadedSubscription.stripeSubscriptionId || null,
           }
-        : await prisma.subscriptionLedger.findFirst({
+        : null;
+
+      if (!activeSubscription) {
+        const foundActive = await prisma.subscriptionLedger.findFirst({
+          where: {
+            businessId,
+            status: {
+              in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
+            },
+          },
+          select: {
+            metadata: true,
+            subscriptionKey: true,
+            providerSubscriptionId: true,
+          },
+          orderBy: {
+            updatedAt: "desc",
+          },
+        });
+
+        if (foundActive) {
+          activeSubscription = {
+            metadata: foundActive.metadata || {},
+            subscriptionKey: foundActive.subscriptionKey,
+            providerSubscriptionId: foundActive.providerSubscriptionId,
+          };
+        } else {
+          // Fall back to checking PENDING subscriptions if no ACTIVE/TRIAL subscription is found.
+          const foundPending = await prisma.subscriptionLedger.findFirst({
             where: {
               businessId,
-              status: {
-                in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
-              },
+              status: "PENDING",
             },
             select: {
               metadata: true,
@@ -1655,6 +1681,16 @@ const emitCheckoutMetric = (
               updatedAt: "desc",
             },
           });
+
+          if (foundPending) {
+            activeSubscription = {
+              metadata: foundPending.metadata || {},
+              subscriptionKey: foundPending.subscriptionKey,
+              providerSubscriptionId: foundPending.providerSubscriptionId,
+            };
+          }
+        }
+      }
       throwIfRequestLifecycleAborted({
         req,
         res,

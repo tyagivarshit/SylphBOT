@@ -32,6 +32,7 @@ import {
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
+import { getPlanKey } from "../config/plan.config";
 
 const EMPTY_USAGE_SUMMARY = {
   aiCallsUsed: 0,
@@ -1196,7 +1197,7 @@ export class BillingController {
     };
   }
 
-  private static buildDegradedBillingResponse(input: {
+  private static async buildDegradedBillingResponse(input: {
     req: Request;
     fallbackValue?: Record<string, unknown>;
     reason: string;
@@ -1220,6 +1221,71 @@ export class BillingController {
           reason: normalizedReason,
         },
       };
+    }
+
+    const businessId = BillingController.getBusinessIdFromRequest(input.req);
+    if (businessId) {
+      try {
+        const ledger = await prisma.subscriptionLedger.findFirst({
+          where: { businessId },
+          orderBy: { updatedAt: "desc" },
+        });
+
+        if (ledger) {
+          const isTrial =
+            ledger.status === "TRIALING" ||
+            (ledger.trialEndsAt && new Date(ledger.trialEndsAt).getTime() > Date.now());
+
+          const sub = {
+            id: ledger.id,
+            status: ledger.status,
+            plan: ledger.planCode
+              ? {
+                  name: ledger.planCode,
+                  type: ledger.planCode,
+                }
+              : null,
+            currency: ledger.currency,
+            currentPeriodEnd: ledger.currentPeriodEnd || ledger.renewAt || ledger.trialEndsAt || null,
+            isTrial,
+            provider: ledger.provider,
+            providerSubscriptionId: ledger.providerSubscriptionId || null,
+            billingCycle: ledger.billingCycle,
+          };
+
+          const planKey = getPlanKey(sub.plan);
+          const isActive =
+            ledger.status === "ACTIVE" ||
+            ledger.status === "TRIALING" ||
+            ledger.status === "PAST_DUE";
+
+          const billingContext: BillingContext = {
+            subscription: sub as any,
+            plan: sub.plan as any,
+            planKey,
+            status: (isActive ? (isTrial ? "TRIAL" : "ACTIVE") : "INACTIVE") as any,
+            isLimited: planKey === "FREE_LOCKED",
+            upgradeRequired: planKey === "FREE_LOCKED",
+            allowEarly: false,
+            remainingEarly: 0,
+          };
+
+          return {
+            success: true,
+            subscription: sub,
+            billing: billingContext,
+            usage: EMPTY_USAGE_SUMMARY,
+            currency: ledger.currency || resolveBillingCurrency(input.req),
+            invoices: [],
+            meta: {
+              degraded: true,
+              reason: `${normalizedReason}_lkv_ledger`,
+            },
+          };
+        }
+      } catch (err) {
+        console.error("Failed to query LKV subscription ledger:", err);
+      }
     }
 
     return {
@@ -2337,13 +2403,12 @@ const emitCheckoutMetric = (
           );
         }
 
-        return res.status(200).json(
-          BillingController.buildDegradedBillingResponse({
-            req,
-            fallbackValue: staleCacheValue,
-            reason: "projection_timeout",
-          })
-        );
+        const degradedResponse = await BillingController.buildDegradedBillingResponse({
+          req,
+          fallbackValue: staleCacheValue,
+          reason: "projection_timeout",
+        });
+        return res.status(200).json(degradedResponse);
       }
 
       if (isRequestLifecycleClosed(req, res)) {

@@ -23,6 +23,7 @@ const stripeConfig_service_1 = require("../services/commerce/providers/stripeCon
 const performanceMetrics_1 = require("../observability/performanceMetrics");
 const projectionCoordinator_service_1 = require("../services/projectionCoordinator.service");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
+const plan_config_1 = require("../config/plan.config");
 const EMPTY_USAGE_SUMMARY = {
     aiCallsUsed: 0,
     messagesUsed: 0,
@@ -890,7 +891,7 @@ class BillingController {
             },
         };
     }
-    static buildDegradedBillingResponse(input) {
+    static async buildDegradedBillingResponse(input) {
         const normalizedReason = String(input.reason || "").trim() || "projection_timeout";
         const fallbackRecord = input.fallbackValue &&
             typeof input.fallbackValue === "object" &&
@@ -908,6 +909,64 @@ class BillingController {
                     reason: normalizedReason,
                 },
             };
+        }
+        const businessId = BillingController.getBusinessIdFromRequest(input.req);
+        if (businessId) {
+            try {
+                const ledger = await prisma_1.default.subscriptionLedger.findFirst({
+                    where: { businessId },
+                    orderBy: { updatedAt: "desc" },
+                });
+                if (ledger) {
+                    const isTrial = ledger.status === "TRIALING" ||
+                        (ledger.trialEndsAt && new Date(ledger.trialEndsAt).getTime() > Date.now());
+                    const sub = {
+                        id: ledger.id,
+                        status: ledger.status,
+                        plan: ledger.planCode
+                            ? {
+                                name: ledger.planCode,
+                                type: ledger.planCode,
+                            }
+                            : null,
+                        currency: ledger.currency,
+                        currentPeriodEnd: ledger.currentPeriodEnd || ledger.renewAt || ledger.trialEndsAt || null,
+                        isTrial,
+                        provider: ledger.provider,
+                        providerSubscriptionId: ledger.providerSubscriptionId || null,
+                        billingCycle: ledger.billingCycle,
+                    };
+                    const planKey = (0, plan_config_1.getPlanKey)(sub.plan);
+                    const isActive = ledger.status === "ACTIVE" ||
+                        ledger.status === "TRIALING" ||
+                        ledger.status === "PAST_DUE";
+                    const billingContext = {
+                        subscription: sub,
+                        plan: sub.plan,
+                        planKey,
+                        status: (isActive ? (isTrial ? "TRIAL" : "ACTIVE") : "INACTIVE"),
+                        isLimited: planKey === "FREE_LOCKED",
+                        upgradeRequired: planKey === "FREE_LOCKED",
+                        allowEarly: false,
+                        remainingEarly: 0,
+                    };
+                    return {
+                        success: true,
+                        subscription: sub,
+                        billing: billingContext,
+                        usage: EMPTY_USAGE_SUMMARY,
+                        currency: ledger.currency || (0, billingGeo_service_1.resolveBillingCurrency)(input.req),
+                        invoices: [],
+                        meta: {
+                            degraded: true,
+                            reason: `${normalizedReason}_lkv_ledger`,
+                        },
+                    };
+                }
+            }
+            catch (err) {
+                console.error("Failed to query LKV subscription ledger:", err);
+            }
         }
         return {
             success: true,
@@ -1886,11 +1945,12 @@ class BillingController {
                 if (staleCacheValue) {
                     return res.status(200).json(markBillingSnapshotAsStale(staleCacheValue, "projection_timeout_stale"));
                 }
-                return res.status(200).json(BillingController.buildDegradedBillingResponse({
+                const degradedResponse = await BillingController.buildDegradedBillingResponse({
                     req,
                     fallbackValue: staleCacheValue,
                     reason: "projection_timeout",
-                }));
+                });
+                return res.status(200).json(degradedResponse);
             }
             if (isRequestLifecycleClosed(req, res)) {
                 return;

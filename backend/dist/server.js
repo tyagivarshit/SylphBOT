@@ -274,39 +274,65 @@ const waitForRuntimeInfrastructureWithinBudget = async () => {
     };
 };
 const startPostListenBootstrap = () => {
-    // Trigger async prewarm pipeline for critical paths
-    prewarm_service_1.PrewarmService.triggerAsyncPrewarm("startup_boot");
+    let stripeConfigValidationCompleted = false;
+    let commerceColdBootReplayCompleted = false;
+    let entitlementReconcileReplayCompleted = false;
+    const checkAndRunPrewarm = () => {
+        if (stripeConfigValidationCompleted &&
+            commerceColdBootReplayCompleted &&
+            entitlementReconcileReplayCompleted) {
+            prewarm_service_1.PrewarmService.triggerAsyncPrewarm("startup_boot");
+        }
+    };
     scheduleBackgroundStartupTask("stripe_config_validation", async () => {
-        await (0, stripeConfig_service_1.emitStripeConfigValidation)();
+        try {
+            await (0, stripeConfig_service_1.emitStripeConfigValidation)();
+        }
+        finally {
+            stripeConfigValidationCompleted = true;
+            checkAndRunPrewarm();
+        }
     }, {
-        priority: "low",
+        priority: "critical",
     });
     scheduleBackgroundStartupTask("commerce_cold_boot_replay", async () => {
-        const coldBootReplay = await commerceProjection_service_1.commerceProjectionService
-            .replayPendingProviderWebhooks({
-            provider: "STRIPE",
-            businessId: null,
-            limit: 100,
-            includeClaimedOlderThanMinutes: 5,
-        })
-            .catch(() => null);
-        if (coldBootReplay) {
-            logger_1.default.info({ coldBootReplay }, "Commerce cold boot replay completed");
+        try {
+            const coldBootReplay = await commerceProjection_service_1.commerceProjectionService
+                .replayPendingProviderWebhooks({
+                provider: "STRIPE",
+                businessId: null,
+                limit: 100,
+                includeClaimedOlderThanMinutes: 5,
+            })
+                .catch(() => null);
+            if (coldBootReplay) {
+                logger_1.default.info({ coldBootReplay }, "Commerce cold boot replay completed");
+            }
+        }
+        finally {
+            commerceColdBootReplayCompleted = true;
+            checkAndRunPrewarm();
         }
     }, {
-        priority: "low",
+        priority: "critical",
     });
     scheduleBackgroundStartupTask("entitlement_reconcile_replay", async () => {
-        const entitlementReplay = await (0, billingSettlement_service_1.reconcilePendingEntitlementSync)({
-            limit: 100,
-        }).catch(() => null);
-        if (entitlementReplay && entitlementReplay.pending > 0) {
-            logger_1.default.info({
-                entitlementReplay,
-            }, "Commerce entitlement reconcile replay completed");
+        try {
+            const entitlementReplay = await (0, billingSettlement_service_1.reconcilePendingEntitlementSync)({
+                limit: 100,
+            }).catch(() => null);
+            if (entitlementReplay && entitlementReplay.pending > 0) {
+                logger_1.default.info({
+                    entitlementReplay,
+                }, "Commerce entitlement reconcile replay completed");
+            }
+        }
+        finally {
+            entitlementReconcileReplayCompleted = true;
+            checkAndRunPrewarm();
         }
     }, {
-        priority: "low",
+        priority: "critical",
     });
     scheduleBackgroundStartupTask("worker_bootstrap_core", async () => {
         (0, lifecycle_1.initWorkers)({

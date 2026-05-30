@@ -323,56 +323,82 @@ const waitForRuntimeInfrastructureWithinBudget = async () => {
 };
 
 const startPostListenBootstrap = () => {
-  // Trigger async prewarm pipeline for critical paths
-  PrewarmService.triggerAsyncPrewarm("startup_boot");
+  let stripeConfigValidationCompleted = false;
+  let commerceColdBootReplayCompleted = false;
+  let entitlementReconcileReplayCompleted = false;
+
+  const checkAndRunPrewarm = () => {
+    if (
+      stripeConfigValidationCompleted &&
+      commerceColdBootReplayCompleted &&
+      entitlementReconcileReplayCompleted
+    ) {
+      PrewarmService.triggerAsyncPrewarm("startup_boot");
+    }
+  };
 
   scheduleBackgroundStartupTask(
     "stripe_config_validation",
     async () => {
-      await emitStripeConfigValidation();
+      try {
+        await emitStripeConfigValidation();
+      } finally {
+        stripeConfigValidationCompleted = true;
+        checkAndRunPrewarm();
+      }
     },
     {
-      priority: "low",
+      priority: "critical",
     }
   );
 
   scheduleBackgroundStartupTask(
     "commerce_cold_boot_replay",
     async () => {
-      const coldBootReplay = await commerceProjectionService
-        .replayPendingProviderWebhooks({
-          provider: "STRIPE",
-          businessId: null,
-          limit: 100,
-          includeClaimedOlderThanMinutes: 5,
-        })
-        .catch(() => null);
-      if (coldBootReplay) {
-        logger.info({ coldBootReplay }, "Commerce cold boot replay completed");
+      try {
+        const coldBootReplay = await commerceProjectionService
+          .replayPendingProviderWebhooks({
+            provider: "STRIPE",
+            businessId: null,
+            limit: 100,
+            includeClaimedOlderThanMinutes: 5,
+          })
+          .catch(() => null);
+        if (coldBootReplay) {
+          logger.info({ coldBootReplay }, "Commerce cold boot replay completed");
+        }
+      } finally {
+        commerceColdBootReplayCompleted = true;
+        checkAndRunPrewarm();
       }
     },
     {
-      priority: "low",
+      priority: "critical",
     }
   );
 
   scheduleBackgroundStartupTask(
     "entitlement_reconcile_replay",
     async () => {
-      const entitlementReplay = await reconcilePendingEntitlementSync({
-        limit: 100,
-      }).catch(() => null);
-      if (entitlementReplay && entitlementReplay.pending > 0) {
-        logger.info(
-          {
-            entitlementReplay,
-          },
-          "Commerce entitlement reconcile replay completed"
-        );
+      try {
+        const entitlementReplay = await reconcilePendingEntitlementSync({
+          limit: 100,
+        }).catch(() => null);
+        if (entitlementReplay && entitlementReplay.pending > 0) {
+          logger.info(
+            {
+              entitlementReplay,
+            },
+            "Commerce entitlement reconcile replay completed"
+          );
+        }
+      } finally {
+        entitlementReconcileReplayCompleted = true;
+        checkAndRunPrewarm();
       }
     },
     {
-      priority: "low",
+      priority: "critical",
     }
   );
 

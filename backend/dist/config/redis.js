@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getRedisReconnectSnapshot = exports.__redisRuntimeTestInternals = exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getResilientSharedRedisConnection = exports.getSharedRedisConnection = exports.waitForRedisReady = exports.isRedisWritable = exports.isQueueRedisWritable = exports.isSharedRedisWritable = exports.initRedis = void 0;
+exports.getRedisReconnectSnapshot = exports.__redisRuntimeTestInternals = exports.isRedisHealthy = exports.closeRedisConnection = exports.getWorkerRedisConnection = exports.getQueueRedisConnection = exports.getResilientSharedRedisConnection = exports.getSharedRedisConnection = exports.waitForRedisReady = exports.ensureBackgroundQueueRecovery = exports.isRedisWritable = exports.isQueueRedisWritable = exports.isSharedRedisWritable = exports.initRedis = void 0;
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
 const redisSafety_1 = require("../redis/redisSafety");
@@ -376,6 +376,21 @@ const isQueueRedisWritable = () => isRedisClientWritable(globalForRedis.__sylphQ
 exports.isQueueRedisWritable = isQueueRedisWritable;
 const isRedisWritable = () => (0, exports.isSharedRedisWritable)();
 exports.isRedisWritable = isRedisWritable;
+const ensureBackgroundQueueRecovery = () => {
+    const queueClient = globalForRedis.__sylphQueueRedis;
+    if (!queueClient) {
+        return;
+    }
+    if (queueClient.status === "end" || queueClient.status === "wait") {
+        logger_1.default.info({ status: queueClient.status }, "Background Queue Recovery: queue Redis in wait/end state, initiating reconnect...");
+        queueClient.connect().catch((err) => {
+            if (!isAlreadyConnectedError(err)) {
+                logger_1.default.warn({ err }, "Background Queue Recovery reconnect attempt failed");
+            }
+        });
+    }
+};
+exports.ensureBackgroundQueueRecovery = ensureBackgroundQueueRecovery;
 const waitForRedisReady = async (input) => {
     const store = requestLifecycle_1.requestStorage.getStore();
     const isRequestPath = Boolean(store);
@@ -408,24 +423,21 @@ const waitForRedisReady = async (input) => {
             throw error;
         }
     }
-    if (input?.requireQueue === false) {
+    if (input?.requireQueue === false || isRequestPath) {
+        if (isRequestPath) {
+            const queueClient = ensureQueueRedisClient();
+            if (queueClient.status !== "ready") {
+                logger_1.default.info({ status: queueClient.status }, "Queue Redis not ready on request path, triggering background recovery");
+                (0, exports.ensureBackgroundQueueRecovery)();
+            }
+        }
         return {
             shared,
-            queue: null,
+            queue: input?.requireQueue === false ? null : ensureQueueRedisClient(),
         };
     }
     const queue = ensureQueueRedisClient();
-    try {
-        await waitForClientReady(queue, "queue", timeoutMs);
-    }
-    catch (error) {
-        if (isRequestPath) {
-            logger_1.default.warn({ error, timeoutMs }, "Redis queue client not ready on request path, failing open/stale and continuing async recovery");
-        }
-        else {
-            throw error;
-        }
-    }
+    await waitForClientReady(queue, "queue", timeoutMs);
     return {
         shared,
         queue,

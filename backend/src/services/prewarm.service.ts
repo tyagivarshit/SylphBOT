@@ -112,6 +112,9 @@ export const PrewarmService = {
 
         prewarmState.isCold = false;
         logger.info("Critical-only prewarm pipeline completed successfully.");
+        if (reason === "startup_boot") {
+          startInfrastructureHeartbeat();
+        }
       } catch (err) {
         logger.warn({ err }, "Error during prewarm pipeline execution");
       } finally {
@@ -119,4 +122,77 @@ export const PrewarmService = {
       }
     })();
   }
+};
+
+let heartbeatInterval: NodeJS.Timeout | null = null;
+
+export const startInfrastructureHeartbeat = () => {
+  if (heartbeatInterval || process.env.NODE_ENV === "test" || process.env.NODE_ENV === "testing") {
+    return;
+  }
+
+  logger.info("Starting lightweight infrastructure health heartbeat (60s interval)...");
+
+  heartbeatInterval = setInterval(async () => {
+    try {
+      const shared = getSharedRedisConnection();
+      const queue = getQueueRedisConnection();
+
+      // Shared Redis check
+      if (shared) {
+        if (shared.status === "ready") {
+          await Promise.race([
+            shared.ping(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Shared Ping timeout")), 1000))
+          ]).catch(async (err) => {
+            logger.warn({ err }, "Shared Redis protocol ping failed, triggering reconnection...");
+            if (shared.status === "end" || shared.status === "wait") {
+              await shared.connect().catch(() => undefined);
+            }
+          });
+        } else if (shared.status === "end" || shared.status === "wait") {
+          logger.info({ status: shared.status }, "Shared Redis in disconnected state, triggering background reconnect...");
+          await shared.connect().catch(() => undefined);
+        }
+      }
+
+      // Queue Redis check
+      if (queue) {
+        if (queue.status === "ready") {
+          await Promise.race([
+            queue.ping(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Queue Ping timeout")), 1000))
+          ]).catch(async (err) => {
+            logger.warn({ err }, "Queue Redis protocol ping failed, triggering reconnection...");
+            if (queue.status === "end" || queue.status === "wait") {
+              await queue.connect().catch(() => undefined);
+            }
+          });
+        } else if (queue.status === "end" || queue.status === "wait") {
+          logger.info({ status: queue.status }, "Queue Redis in disconnected state, triggering background reconnect...");
+          await queue.connect().catch(() => undefined);
+        }
+      }
+
+      // 2. Check DB connection health (Prisma)
+      await Promise.race([
+        prisma.user.findFirst({ select: { id: true } }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("DB ping timeout")), 1500))
+      ]).catch((err) => {
+        logger.warn({ err }, "Database heartbeat probe failed, triggering pool warmup...");
+        PrewarmService.triggerAsyncPrewarm("db_heartbeat_fail");
+      });
+
+    } catch (error) {
+      logger.error({ error }, "Error during infrastructure heartbeat check");
+    }
+  }, 60 * 1000);
+
+  // Run immediately in background to detect startup degradation
+  setImmediate(async () => {
+    const queue = getQueueRedisConnection();
+    if (queue && (queue.status === "end" || queue.status === "wait")) {
+      await queue.connect().catch(() => undefined);
+    }
+  });
 };

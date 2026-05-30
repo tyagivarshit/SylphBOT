@@ -78,6 +78,7 @@ import {
   markRequestLifecycleAborted,
   requestStorage,
 } from "./utils/requestLifecycle";
+import { ensureBackgroundQueueRecovery } from "./config/redis";
 
 const app = express();
 
@@ -418,6 +419,7 @@ app.use((req, res, next) => {
     startedAt,
     timeoutMs,
   });
+  ensureBackgroundQueueRecovery();
   console.info("REQUEST_START", {
     requestId: req.requestId || null,
     route,

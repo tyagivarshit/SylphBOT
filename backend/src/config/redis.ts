@@ -537,6 +537,22 @@ export const isQueueRedisWritable = () =>
 
 export const isRedisWritable = () => isSharedRedisWritable();
 
+export const ensureBackgroundQueueRecovery = () => {
+  const queueClient = globalForRedis.__sylphQueueRedis;
+  if (!queueClient) {
+    return;
+  }
+
+  if (queueClient.status === "end" || queueClient.status === "wait") {
+    logger.info({ status: queueClient.status }, "Background Queue Recovery: queue Redis in wait/end state, initiating reconnect...");
+    queueClient.connect().catch((err) => {
+      if (!isAlreadyConnectedError(err)) {
+        logger.warn({ err }, "Background Queue Recovery reconnect attempt failed");
+      }
+    });
+  }
+};
+
 export const waitForRedisReady = async (input?: {
   requireQueue?: boolean;
   timeoutMs?: number;
@@ -572,23 +588,22 @@ export const waitForRedisReady = async (input?: {
     }
   }
 
-  if (input?.requireQueue === false) {
+  if (input?.requireQueue === false || isRequestPath) {
+    if (isRequestPath) {
+      const queueClient = ensureQueueRedisClient();
+      if (queueClient.status !== "ready") {
+        logger.info({ status: queueClient.status }, "Queue Redis not ready on request path, triggering background recovery");
+        ensureBackgroundQueueRecovery();
+      }
+    }
     return {
       shared,
-      queue: null,
+      queue: input?.requireQueue === false ? null : ensureQueueRedisClient(),
     };
   }
 
   const queue = ensureQueueRedisClient();
-  try {
-    await waitForClientReady(queue, "queue", timeoutMs);
-  } catch (error) {
-    if (isRequestPath) {
-      logger.warn({ error, timeoutMs }, "Redis queue client not ready on request path, failing open/stale and continuing async recovery");
-    } else {
-      throw error;
-    }
-  }
+  await waitForClientReady(queue, "queue", timeoutMs);
 
   return {
     shared,

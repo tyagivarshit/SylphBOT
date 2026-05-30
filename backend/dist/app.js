@@ -62,6 +62,7 @@ const sentry_1 = require("./observability/sentry");
 const embedding_service_1 = require("./services/embedding.service");
 const startupIsolation_service_1 = require("./runtime/startupIsolation.service");
 const requestLifecycle_1 = require("./utils/requestLifecycle");
+const redis_1 = require("./config/redis");
 const app = (0, express_1.default)();
 const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
@@ -334,6 +335,7 @@ app.use((req, res, next) => {
         startedAt,
         timeoutMs,
     });
+    (0, redis_1.ensureBackgroundQueueRecovery)();
     console.info("REQUEST_START", {
         requestId: req.requestId || null,
         route,

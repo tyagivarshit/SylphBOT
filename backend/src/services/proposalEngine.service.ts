@@ -33,7 +33,14 @@ const computeAutoApprovalThreshold = (policy: any | null) => {
 };
 
 export const createProposalEngineService = () => {
+  const policyCache = new Map<string, { value: any; expiresAt: number }>();
+  const catalogCache = new Map<string, { value: any; expiresAt: number }>();
+
   const resolveCommercePolicy = async (businessId: string) => {
+    const cached = policyCache.get(businessId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
     const policy = await prisma.commercePolicy.findFirst({
       where: {
         businessId,
@@ -49,6 +56,7 @@ export const createProposalEngineService = () => {
       },
     });
 
+    policyCache.set(businessId, { value: policy || null, expiresAt: Date.now() + 15_000 });
     return policy || null;
   };
 
@@ -66,6 +74,12 @@ export const createProposalEngineService = () => {
     const normalizedPlanCode = String(planCode || "").trim().toUpperCase();
     const normalizedCurrency = normalizeCurrency(currency);
     const normalizedBillingCycle = normalizeBillingCycle(billingCycle);
+    const cacheKey = `${businessId}:${normalizedPlanCode}:${normalizedCurrency}:${normalizedBillingCycle}`;
+
+    const cached = catalogCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
 
     const businessSpecific = await prisma.pricingCatalog.findFirst({
       where: {
@@ -81,10 +95,11 @@ export const createProposalEngineService = () => {
     });
 
     if (businessSpecific) {
+      catalogCache.set(cacheKey, { value: businessSpecific, expiresAt: Date.now() + 15_000 });
       return businessSpecific;
     }
 
-    return prisma.pricingCatalog.findFirst({
+    const defaultCatalog = await prisma.pricingCatalog.findFirst({
       where: {
         businessId: null,
         planCode: normalizedPlanCode,
@@ -96,6 +111,9 @@ export const createProposalEngineService = () => {
         createdAt: "desc",
       },
     });
+
+    catalogCache.set(cacheKey, { value: defaultCatalog || null, expiresAt: Date.now() + 15_000 });
+    return defaultCatalog || null;
   };
 
   const createProposal = async ({

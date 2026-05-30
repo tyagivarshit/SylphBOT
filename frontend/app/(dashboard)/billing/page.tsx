@@ -858,7 +858,38 @@ function BillingPageContent() {
       setLoading(plan);
       setCheckoutProgressMessage("Redirecting to secure checkout...");
 
-      if (lockedCurrency && lockedCurrency !== currency) {
+      // 1. If entitlement is not yet known, wait for in-flight load or trigger one
+      if (!isEntitlementKnown) {
+        if (loadBillingInFlightRef.current) {
+          await loadBillingInFlightRef.current;
+        } else {
+          await loadBilling();
+        }
+      }
+
+      const latestBilling = billingBootstrapSnapshot?.billingData;
+      if (!latestBilling) {
+        throw new Error(
+          "We could not verify your current subscription state. Please check your connection and try again."
+        );
+      }
+
+      // 2. Resolve latest billing parameters to bypass stale closures
+      const latestPlanKey = latestBilling.billing?.planKey || "FREE_LOCKED";
+      const latestSubscription = latestBilling.subscription || null;
+      const isCurrent = isCurrentPlan(latestSubscription, plan, latestPlanKey);
+
+      // 3. Active-plan protection check
+      if (isCurrent) {
+        throw new Error(
+          `You are already subscribed to the ${plan.charAt(0) + plan.slice(1).toLowerCase()} plan.`
+        );
+      }
+
+      const latestLockedCurrency = latestSubscription?.currency || null;
+      const latestCurrency = latestSubscription?.currency || latestBilling.currency || "INR";
+
+      if (latestLockedCurrency && latestLockedCurrency !== latestCurrency) {
         throw new Error(
           "Your billing currency is already locked for this workspace."
         );

@@ -637,7 +637,10 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
   }
 };
 
-export const loadBillingContext = async (businessId: string) => {
+export const loadBillingContext = async (
+  businessId: string,
+  options?: { skipStripeFallback?: boolean }
+) => {
   const startedAt = Date.now();
   const now = new Date();
   
@@ -711,8 +714,9 @@ export const loadBillingContext = async (businessId: string) => {
 
   let stripeCheckTriggeredSync = false;
   const isFreeLockedOrMissing = !subscription || context.planKey === "FREE_LOCKED";
+  const skipStripeFallback = Boolean(options?.skipStripeFallback);
 
-  if (isFreeLockedOrMissing && isRequestPath) {
+  if (isFreeLockedOrMissing && isRequestPath && !skipStripeFallback) {
     const remainingMs = getRequestRemainingMs(null, 0);
     if (remainingMs >= 1500) {
       const requestSignal = getRequestAbortSignal({ req: store.req, res: store.res });
@@ -735,7 +739,7 @@ export const loadBillingContext = async (businessId: string) => {
     prewarmState.lastKnownValidBilling.set(businessId, context);
   }
 
-  if (context.planKey === "FREE_LOCKED" && !stripeCheckTriggeredSync) {
+  if (context.planKey === "FREE_LOCKED" && !stripeCheckTriggeredSync && !skipStripeFallback) {
     // Run direct Stripe fallback verification asynchronously to keep hot path latency low
     verifyStripeSubscriptionFallback(businessId).catch((err) => {
       console.warn("Async verifyStripeSubscriptionFallback error:", err);
@@ -782,8 +786,10 @@ export const attachBillingContext = async (
       });
     }
 
+    const isCheckoutPath = String(req.originalUrl || "").includes("/checkout");
     const { subscription, context } = await loadBillingContext(
-      businessId
+      businessId,
+      { skipStripeFallback: isCheckoutPath }
     );
 
     (req as any).subscription = subscription;

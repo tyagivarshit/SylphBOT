@@ -512,7 +512,7 @@ const getEarlyAccessSnapshot = async (subscription) => {
         };
     }
 };
-const loadBillingContext = async (businessId) => {
+const loadBillingContext = async (businessId, options) => {
     const startedAt = Date.now();
     const now = new Date();
     // 1. Check for authoritative LKV first (covers memory LKV, Redis cache, and DB ledger)
@@ -577,7 +577,8 @@ const loadBillingContext = async (businessId) => {
     }
     let stripeCheckTriggeredSync = false;
     const isFreeLockedOrMissing = !subscription || context.planKey === "FREE_LOCKED";
-    if (isFreeLockedOrMissing && isRequestPath) {
+    const skipStripeFallback = Boolean(options?.skipStripeFallback);
+    if (isFreeLockedOrMissing && isRequestPath && !skipStripeFallback) {
         const remainingMs = (0, requestLifecycle_1.getRequestRemainingMs)(null, 0);
         if (remainingMs >= 1500) {
             const requestSignal = (0, requestLifecycle_1.getRequestAbortSignal)({ req: store.req, res: store.res });
@@ -599,7 +600,7 @@ const loadBillingContext = async (businessId) => {
         prewarmState_1.prewarmState.lastKnownValidSubscription.set(businessId, subscription);
         prewarmState_1.prewarmState.lastKnownValidBilling.set(businessId, context);
     }
-    if (context.planKey === "FREE_LOCKED" && !stripeCheckTriggeredSync) {
+    if (context.planKey === "FREE_LOCKED" && !stripeCheckTriggeredSync && !skipStripeFallback) {
         // Run direct Stripe fallback verification asynchronously to keep hot path latency low
         (0, exports.verifyStripeSubscriptionFallback)(businessId).catch((err) => {
             console.warn("Async verifyStripeSubscriptionFallback error:", err);
@@ -636,7 +637,8 @@ const attachBillingContext = async (req, res, next) => {
                 message: "Unauthorized",
             });
         }
-        const { subscription, context } = await (0, exports.loadBillingContext)(businessId);
+        const isCheckoutPath = String(req.originalUrl || "").includes("/checkout");
+        const { subscription, context } = await (0, exports.loadBillingContext)(businessId, { skipStripeFallback: isCheckoutPath });
         req.subscription = subscription;
         req.billing = context;
         next();

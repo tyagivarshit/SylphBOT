@@ -102,6 +102,7 @@ export type ExternalCommerceClaimResult = {
 };
 
 export const createCommerceAuthorityService = () => {
+  const overrideCache = new Map<string, { value: any; expiresAt: number }>();
   const normalizeOverrideScope = (scope: string) =>
     String(scope || "").trim().toUpperCase() || "ALL";
 
@@ -437,8 +438,9 @@ export const createCommerceAuthorityService = () => {
     provider?: string;
     createdBy?: string | null;
     metadata?: Record<string, unknown> | null;
-  }) =>
-    prisma.manualCommerceOverride.create({
+  }) => {
+    overrideCache.clear();
+    return prisma.manualCommerceOverride.create({
       data: {
         businessId,
         scope: String(scope || "ALL").trim().toUpperCase() || "ALL",
@@ -458,6 +460,7 @@ export const createCommerceAuthorityService = () => {
         ) as Prisma.InputJsonValue,
       },
     });
+  };
 
   const getActiveManualOverride = async ({
     businessId,
@@ -472,6 +475,13 @@ export const createCommerceAuthorityService = () => {
   }) => {
     const normalizedScope = normalizeOverrideScope(scope);
     const normalizedProvider = normalizeOverrideProvider(provider);
+    const cacheKey = `${businessId}:${normalizedScope}:${normalizedProvider}`;
+
+    const cached = overrideCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     const providerCandidates = Array.from(
       new Set(["ALL", normalizedProvider])
     );
@@ -509,6 +519,7 @@ export const createCommerceAuthorityService = () => {
     });
 
     if (!fastCandidate) {
+      overrideCache.set(cacheKey, { value: null, expiresAt: Date.now() + 15_000 });
       return null;
     }
 
@@ -522,6 +533,7 @@ export const createCommerceAuthorityService = () => {
     );
 
     if (fastPathScopeMatch && fastPathProviderMatch) {
+      overrideCache.set(cacheKey, { value: fastCandidate, expiresAt: Date.now() + 15_000 });
       return fastCandidate;
     }
 
@@ -547,7 +559,7 @@ export const createCommerceAuthorityService = () => {
       },
     }).catch(() => undefined);
 
-    return prisma.manualCommerceOverride.findFirst({
+    const slowCandidate = await prisma.manualCommerceOverride.findFirst({
       where: {
         businessId,
         isActive: true,
@@ -581,6 +593,9 @@ export const createCommerceAuthorityService = () => {
         },
       ],
     });
+
+    overrideCache.set(cacheKey, { value: slowCandidate || null, expiresAt: Date.now() + 15_000 });
+    return slowCandidate || null;
   };
 
   const assertNoActiveManualOverride = async ({

@@ -149,8 +149,9 @@ export default function BillingSettings() {
           Manage your subscription and billing
         </p>
         {billingDegraded ? (
-          <p className="mt-2 text-xs text-amber-700">
-            Live billing sync is delayed. Safe fallback data is shown.
+          <p className="mt-2 text-xs text-slate-500 flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-pulse"></span>
+            Syncing delayed. Safe snapshot shown.
           </p>
         ) : null}
       </div>

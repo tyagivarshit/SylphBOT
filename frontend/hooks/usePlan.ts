@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/apiClient"
 import { normalizePlan } from "@/lib/featureGuard"
@@ -94,6 +95,20 @@ export function usePlan() {
 
   const queryClient = useQueryClient()
 
+  const [mounted, setMounted] = useState(false)
+  const [localPlan, setLocalPlan] = useState<string | null>(null)
+  const [localStatus, setLocalStatus] = useState<string | null>(null)
+
+  useEffect(() => {
+    setMounted(true)
+    if (typeof window !== "undefined") {
+      const savedPlan = localStorage.getItem("lkv-billing-plan")
+      const savedStatus = localStorage.getItem("lkv-billing-status")
+      if (savedPlan) setLocalPlan(savedPlan)
+      if (savedStatus) setLocalStatus(savedStatus)
+    }
+  }, [])
+
   const {
     data,
     isLoading,
@@ -111,7 +126,7 @@ export function usePlan() {
   })
 
   /* 🔥 SAFE FALLBACK */
-  const status =
+  const rawStatus =
     data?.billing?.status ||
     data?.subscription?.status ||
     "INACTIVE"
@@ -120,11 +135,36 @@ export function usePlan() {
     data?.subscription?.plan?.type ||
     data?.subscription?.plan?.name
   )
-  const plan =
-    (status === "ACTIVE" || status === "TRIAL") &&
+  const resolvedPlan =
+    (rawStatus === "ACTIVE" || rawStatus === "TRIAL") &&
     billingPlan === "FREE_LOCKED"
       ? subscriptionPlan
       : billingPlan
+
+  // Persist resolved values when data changes
+  useEffect(() => {
+    if (data && resolvedPlan) {
+      localStorage.setItem("lkv-billing-plan", resolvedPlan)
+      localStorage.setItem("lkv-billing-status", rawStatus)
+      setLocalPlan(resolvedPlan)
+      setLocalStatus(rawStatus)
+    }
+  }, [data, resolvedPlan, rawStatus])
+
+  // Determine final plan and status
+  const plan = data
+    ? resolvedPlan
+    : mounted && localPlan
+    ? localPlan
+    : "FREE_LOCKED"
+
+  const status = data
+    ? rawStatus
+    : mounted && localStatus
+    ? localStatus
+    : "INACTIVE"
+
+  const loading = isLoading && (!mounted || !localPlan)
 
   /* 🔥 FORCE REFRESH (AFTER CHECKOUT) */
   const refreshPlan = async () => {
@@ -135,7 +175,7 @@ export function usePlan() {
   return {
     plan,
     status,
-    loading: isLoading,
+    loading,
     error: isError,
     refreshPlan,
   }

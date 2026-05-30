@@ -225,12 +225,32 @@ const FALLBACK_PLANS_RESPONSE: PlansResponse = {
   ],
 };
 
+const isPaidSnapshot = (snapshot: BillingBootstrapSnapshot | null) => {
+  const plan = snapshot?.billingData?.billing?.planKey;
+  return plan && plan !== "FREE_LOCKED" && plan !== "LOCKED";
+};
+
 const readCachedBillingBootstrapSnapshot = () => {
+  if (!billingBootstrapSnapshot) {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("lkv-billing-bootstrap-snapshot");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed) {
+            billingBootstrapSnapshot = parsed;
+          }
+        }
+      } catch {}
+    }
+  }
+
   if (!billingBootstrapSnapshot) {
     return null;
   }
 
-  if (Date.now() - billingBootstrapSnapshot.updatedAt > BILLING_BOOTSTRAP_CACHE_TTL_MS) {
+  const isPaid = isPaidSnapshot(billingBootstrapSnapshot);
+  if (!isPaid && Date.now() - billingBootstrapSnapshot.updatedAt > BILLING_BOOTSTRAP_CACHE_TTL_MS) {
     return null;
   }
 
@@ -377,6 +397,11 @@ const refreshBillingBootstrapSnapshot = async (options?: { background?: boolean 
 
     if (nextSnapshot.billingData || nextSnapshot.plansData) {
       billingBootstrapSnapshot = nextSnapshot;
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("lkv-billing-bootstrap-snapshot", JSON.stringify(nextSnapshot));
+        } catch {}
+      }
     }
 
     return nextSnapshot;
@@ -810,6 +835,7 @@ function BillingPageContent() {
   }, [checkoutPending, loadBilling, loading]);
 
   const planKey = billingContext?.planKey || "FREE_LOCKED";
+  const isEntitlementKnown = billingContext !== null;
   const billingStatus = billingContext?.status || "INACTIVE";
   const allowEarly = Boolean(billingContext?.allowEarly);
   const remainingEarly = billingContext?.remainingEarly || 0;
@@ -923,19 +949,33 @@ function BillingPageContent() {
       {activeTab === "plans" ? (
         <>
           {loadWarning ? (
-            <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            planKey === "FREE_LOCKED" || planKey === "LOCKED" ? (
+              <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{loadWarning}</span>
+                  <button
+                    onClick={() => {
+                      void loadBilling();
+                    }}
+                    className="inline-flex w-fit items-center rounded-lg border border-amber-300 bg-white/80 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-white"
+                  >
+                    Retry now
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-600 flex items-center justify-between gap-3 max-w-xl">
                 <span>{loadWarning}</span>
                 <button
                   onClick={() => {
                     void loadBilling();
                   }}
-                  className="inline-flex w-fit items-center rounded-lg border border-amber-300 bg-white/80 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-white"
+                  className="underline text-slate-800 hover:text-slate-950 font-semibold transition"
                 >
-                  Retry now
+                  Retry
                 </button>
               </div>
-            </div>
+            )
           ) : null}
 
           {backgroundRefreshing && !checkoutProgressMessage ? (
@@ -1086,18 +1126,20 @@ function BillingPageContent() {
                     </ul>
                   </div>
 
-                  <LoadingButton
+                   <LoadingButton
                     onClick={() => void handleCheckout(plan.type)}
                     loading={loading === plan.type}
                     loadingLabel="Redirecting to secure checkout..."
-                    disabled={Boolean(loading) || current}
+                    disabled={Boolean(loading) || current || !isEntitlementKnown}
                     className={`mt-6 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                       current
                         ? "bg-gray-200 text-gray-600"
                         : "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white hover:shadow-lg"
                     }`}
                   >
-                    {current
+                    {!isEntitlementKnown
+                      ? "Loading Plan..."
+                      : current
                       ? "Current Plan"
                       : planKey === "FREE_LOCKED" || planKey === "LOCKED"
                         ? hasUsedTrial
@@ -1107,11 +1149,13 @@ function BillingPageContent() {
                   </LoadingButton>
 
                   <p className="mt-3 text-xs text-gray-500">
-                    {planKey === "FREE_LOCKED" || planKey === "LOCKED"
-                      ? hasUsedTrial
-                        ? "Need more flexibility? Buy extra AI credits anytime."
-                        : `${plansResponse.trialDays} day free trial applies on the first checkout only.`
-                      : "Need more headroom? Buy extra AI credits anytime."}
+                    {!isEntitlementKnown
+                      ? "Loading details..."
+                      : planKey === "FREE_LOCKED" || planKey === "LOCKED"
+                        ? hasUsedTrial
+                          ? "Need more flexibility? Buy extra AI credits anytime."
+                          : `${plansResponse.trialDays} day free trial applies on the first checkout only.`
+                        : "Need more headroom? Buy extra AI credits anytime."}
                   </p>
                 </div>
               );

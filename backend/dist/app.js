@@ -259,6 +259,10 @@ app.use((req, res, next) => {
 app.use(requestContext_middleware_1.requestContextMiddleware);
 app.use((0, compression_1.default)({
     filter: (req, res) => {
+        const routePath = String(req.path || req.originalUrl || "").trim();
+        if (isCheckoutTimeoutRoute(routePath)) {
+            return false;
+        }
         const statusCode = res.statusCode;
         if ((statusCode >= 300 && statusCode < 400) ||
             res.getHeader("Location")) {
@@ -297,8 +301,27 @@ app.use((req, res, next) => {
             });
             return res;
         }
+        const routePath = String(req.path || req.originalUrl || "").trim();
+        const isCheckout = isCheckoutTimeoutRoute(routePath);
+        if (isCheckout) {
+            res.setHeader("Connection", "close");
+            res.setHeader("Keep-Alive", "timeout=0");
+        }
         const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
         markExplicitFinalResponseWrite(res);
+        if (isCheckout) {
+            if (typeof res.flush === "function") {
+                res.flush();
+            }
+            if (typeof res.flushHeaders === "function") {
+                res.flushHeaders();
+            }
+            setImmediate(() => {
+                if (res.socket && !res.socket.destroyed) {
+                    res.socket.end();
+                }
+            });
+        }
         return response;
     });
     res.send = ((body) => {
@@ -310,8 +333,27 @@ app.use((req, res, next) => {
             });
             return res;
         }
+        const routePath = String(req.path || req.originalUrl || "").trim();
+        const isCheckout = isCheckoutTimeoutRoute(routePath);
+        if (isCheckout) {
+            res.setHeader("Connection", "close");
+            res.setHeader("Keep-Alive", "timeout=0");
+        }
         const response = originalSend(body);
         markExplicitFinalResponseWrite(res);
+        if (isCheckout) {
+            if (typeof res.flush === "function") {
+                res.flush();
+            }
+            if (typeof res.flushHeaders === "function") {
+                res.flushHeaders();
+            }
+            setImmediate(() => {
+                if (res.socket && !res.socket.destroyed) {
+                    res.socket.end();
+                }
+            });
+        }
         return response;
     });
     res.redirect = ((...args) => {
@@ -323,8 +365,27 @@ app.use((req, res, next) => {
             });
             return res;
         }
+        const routePath = String(req.path || req.originalUrl || "").trim();
+        const isCheckout = isCheckoutTimeoutRoute(routePath);
+        if (isCheckout) {
+            res.setHeader("Connection", "close");
+            res.setHeader("Keep-Alive", "timeout=0");
+        }
         const response = originalRedirect(...args);
         markExplicitFinalResponseWrite(res);
+        if (isCheckout) {
+            if (typeof res.flush === "function") {
+                res.flush();
+            }
+            if (typeof res.flushHeaders === "function") {
+                res.flushHeaders();
+            }
+            setImmediate(() => {
+                if (res.socket && !res.socket.destroyed) {
+                    res.socket.end();
+                }
+            });
+        }
         return response;
     });
     next();

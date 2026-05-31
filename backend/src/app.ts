@@ -334,6 +334,10 @@ app.use(requestContextMiddleware);
 app.use(
   compression({
     filter: (req, res) => {
+      const routePath = String(req.path || req.originalUrl || "").trim();
+      if (isCheckoutTimeoutRoute(routePath)) {
+        return false;
+      }
       const statusCode = res.statusCode;
       if (
         (statusCode >= 300 && statusCode < 400) ||
@@ -378,8 +382,30 @@ app.use((req, res, next) => {
       return res;
     }
 
+    const routePath = String(req.path || req.originalUrl || "").trim();
+    const isCheckout = isCheckoutTimeoutRoute(routePath);
+    if (isCheckout) {
+      res.setHeader("Connection", "close");
+      res.setHeader("Keep-Alive", "timeout=0");
+    }
+
     const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
     markExplicitFinalResponseWrite(res);
+
+    if (isCheckout) {
+      if (typeof (res as any).flush === "function") {
+        (res as any).flush();
+      }
+      if (typeof res.flushHeaders === "function") {
+        res.flushHeaders();
+      }
+      setImmediate(() => {
+        if (res.socket && !res.socket.destroyed) {
+          res.socket.end();
+        }
+      });
+    }
+
     return response;
   }) as typeof res.json;
   res.send = ((body?: unknown) => {
@@ -392,8 +418,30 @@ app.use((req, res, next) => {
       return res;
     }
 
+    const routePath = String(req.path || req.originalUrl || "").trim();
+    const isCheckout = isCheckoutTimeoutRoute(routePath);
+    if (isCheckout) {
+      res.setHeader("Connection", "close");
+      res.setHeader("Keep-Alive", "timeout=0");
+    }
+
     const response = originalSend(body as any);
     markExplicitFinalResponseWrite(res);
+
+    if (isCheckout) {
+      if (typeof (res as any).flush === "function") {
+        (res as any).flush();
+      }
+      if (typeof res.flushHeaders === "function") {
+        res.flushHeaders();
+      }
+      setImmediate(() => {
+        if (res.socket && !res.socket.destroyed) {
+          res.socket.end();
+        }
+      });
+    }
+
     return response;
   }) as typeof res.send;
   res.redirect = ((...args: unknown[]) => {
@@ -406,10 +454,32 @@ app.use((req, res, next) => {
       return res;
     }
 
+    const routePath = String(req.path || req.originalUrl || "").trim();
+    const isCheckout = isCheckoutTimeoutRoute(routePath);
+    if (isCheckout) {
+      res.setHeader("Connection", "close");
+      res.setHeader("Keep-Alive", "timeout=0");
+    }
+
     const response = (
       originalRedirect as (...redirectArgs: unknown[]) => typeof res
     )(...args);
     markExplicitFinalResponseWrite(res);
+
+    if (isCheckout) {
+      if (typeof (res as any).flush === "function") {
+        (res as any).flush();
+      }
+      if (typeof res.flushHeaders === "function") {
+        res.flushHeaders();
+      }
+      setImmediate(() => {
+        if (res.socket && !res.socket.destroyed) {
+          res.socket.end();
+        }
+      });
+    }
+
     return response;
   }) as typeof res.redirect;
 

@@ -239,6 +239,10 @@ const resolveRequestTimeoutMs = (path) => {
     return DEFAULT_REQUEST_TIMEOUT_MS;
 };
 const isCheckoutTimeoutRoute = (path) => CHECKOUT_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+const isStripeCheckoutRedirectRoute = (req) => {
+    const routePath = String(req.path || req.originalUrl || "").trim();
+    return req.method === "GET" && routePath.startsWith("/api/billing/checkout/start");
+};
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     referrerPolicy: {
@@ -259,8 +263,7 @@ app.use((req, res, next) => {
 app.use(requestContext_middleware_1.requestContextMiddleware);
 app.use((0, compression_1.default)({
     filter: (req, res) => {
-        const routePath = String(req.path || req.originalUrl || "").trim();
-        if (isCheckoutTimeoutRoute(routePath)) {
+        if (isStripeCheckoutRedirectRoute(req)) {
             return false;
         }
         const statusCode = res.statusCode;
@@ -301,15 +304,14 @@ app.use((req, res, next) => {
             });
             return res;
         }
-        const routePath = String(req.path || req.originalUrl || "").trim();
-        const isCheckout = isCheckoutTimeoutRoute(routePath);
-        if (isCheckout) {
+        const isCheckoutRedirect = isStripeCheckoutRedirectRoute(req);
+        if (isCheckoutRedirect) {
             res.setHeader("Connection", "close");
             res.setHeader("Keep-Alive", "timeout=0");
         }
         const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
         markExplicitFinalResponseWrite(res);
-        if (isCheckout) {
+        if (isCheckoutRedirect) {
             if (typeof res.flush === "function") {
                 res.flush();
             }
@@ -333,15 +335,14 @@ app.use((req, res, next) => {
             });
             return res;
         }
-        const routePath = String(req.path || req.originalUrl || "").trim();
-        const isCheckout = isCheckoutTimeoutRoute(routePath);
-        if (isCheckout) {
+        const isCheckoutRedirect = isStripeCheckoutRedirectRoute(req);
+        if (isCheckoutRedirect) {
             res.setHeader("Connection", "close");
             res.setHeader("Keep-Alive", "timeout=0");
         }
         const response = originalSend(body);
         markExplicitFinalResponseWrite(res);
-        if (isCheckout) {
+        if (isCheckoutRedirect) {
             if (typeof res.flush === "function") {
                 res.flush();
             }
@@ -365,15 +366,14 @@ app.use((req, res, next) => {
             });
             return res;
         }
-        const routePath = String(req.path || req.originalUrl || "").trim();
-        const isCheckout = isCheckoutTimeoutRoute(routePath);
-        if (isCheckout) {
+        const isCheckoutRedirect = isStripeCheckoutRedirectRoute(req);
+        if (isCheckoutRedirect) {
             res.setHeader("Connection", "close");
             res.setHeader("Keep-Alive", "timeout=0");
         }
         const response = originalRedirect(...args);
         markExplicitFinalResponseWrite(res);
-        if (isCheckout) {
+        if (isCheckoutRedirect) {
             if (typeof res.flush === "function") {
                 res.flush();
             }

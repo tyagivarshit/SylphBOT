@@ -309,6 +309,11 @@ const resolveRequestTimeoutMs = (path: string) => {
 const isCheckoutTimeoutRoute = (path: string) =>
   CHECKOUT_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 
+const isStripeCheckoutRedirectRoute = (req: express.Request) => {
+  const routePath = String(req.path || req.originalUrl || "").trim();
+  return req.method === "GET" && routePath.startsWith("/api/billing/checkout/start");
+};
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -334,8 +339,7 @@ app.use(requestContextMiddleware);
 app.use(
   compression({
     filter: (req, res) => {
-      const routePath = String(req.path || req.originalUrl || "").trim();
-      if (isCheckoutTimeoutRoute(routePath)) {
+      if (isStripeCheckoutRedirectRoute(req)) {
         return false;
       }
       const statusCode = res.statusCode;
@@ -382,9 +386,8 @@ app.use((req, res, next) => {
       return res;
     }
 
-    const routePath = String(req.path || req.originalUrl || "").trim();
-    const isCheckout = isCheckoutTimeoutRoute(routePath);
-    if (isCheckout) {
+    const isCheckoutRedirect = isStripeCheckoutRedirectRoute(req);
+    if (isCheckoutRedirect) {
       res.setHeader("Connection", "close");
       res.setHeader("Keep-Alive", "timeout=0");
     }
@@ -392,7 +395,7 @@ app.use((req, res, next) => {
     const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
     markExplicitFinalResponseWrite(res);
 
-    if (isCheckout) {
+    if (isCheckoutRedirect) {
       if (typeof (res as any).flush === "function") {
         (res as any).flush();
       }
@@ -418,9 +421,8 @@ app.use((req, res, next) => {
       return res;
     }
 
-    const routePath = String(req.path || req.originalUrl || "").trim();
-    const isCheckout = isCheckoutTimeoutRoute(routePath);
-    if (isCheckout) {
+    const isCheckoutRedirect = isStripeCheckoutRedirectRoute(req);
+    if (isCheckoutRedirect) {
       res.setHeader("Connection", "close");
       res.setHeader("Keep-Alive", "timeout=0");
     }
@@ -428,7 +430,7 @@ app.use((req, res, next) => {
     const response = originalSend(body as any);
     markExplicitFinalResponseWrite(res);
 
-    if (isCheckout) {
+    if (isCheckoutRedirect) {
       if (typeof (res as any).flush === "function") {
         (res as any).flush();
       }
@@ -454,9 +456,8 @@ app.use((req, res, next) => {
       return res;
     }
 
-    const routePath = String(req.path || req.originalUrl || "").trim();
-    const isCheckout = isCheckoutTimeoutRoute(routePath);
-    if (isCheckout) {
+    const isCheckoutRedirect = isStripeCheckoutRedirectRoute(req);
+    if (isCheckoutRedirect) {
       res.setHeader("Connection", "close");
       res.setHeader("Keep-Alive", "timeout=0");
     }
@@ -466,7 +467,7 @@ app.use((req, res, next) => {
     )(...args);
     markExplicitFinalResponseWrite(res);
 
-    if (isCheckout) {
+    if (isCheckoutRedirect) {
       if (typeof (res as any).flush === "function") {
         (res as any).flush();
       }

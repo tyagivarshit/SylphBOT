@@ -69,8 +69,23 @@ const handler = (_req: any, res: any) =>
     message: "Too many requests. Please try again later.",
   });
 
-const shouldSkipRedisRateLimit = () =>
-  isRedisCircuitOpen() || !isRedisHealthy() || !isRedisWritable();
+const isCheckoutOrBillingRoute = (req: any): boolean => {
+  if (!req) return false;
+  const path = String(req.originalUrl || req.path || req.url || "").trim().toLowerCase();
+  const isCheckoutPath =
+    path.startsWith("/api/billing") ||
+    path.includes("/checkout") ||
+    path.includes("/plans") ||
+    String(req.query?.surface || "").trim().toLowerCase() === "checkout";
+  return isCheckoutPath;
+};
+
+const shouldSkipRedisRateLimit = (req?: any) => {
+  if (req && isCheckoutOrBillingRoute(req)) {
+    return true;
+  }
+  return isRedisCircuitOpen() || !isRedisHealthy() || !isRedisWritable();
+};
 
 export const __rateLimitTestInternals = {
   shouldSkipRedisRateLimit,

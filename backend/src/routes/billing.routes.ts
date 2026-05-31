@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { BillingController } from "../controllers/billing.controller";
 import { protect } from "../middleware/auth.middleware";
-import { authLimiter } from "../middleware/rateLimit.middleware";
 import { attachBillingContext } from "../middleware/subscription.middleware";
 import { requireBusinessContext } from "../middleware/tenant.middleware";
 import { requirePermission } from "../middleware/rbac.middleware";
@@ -43,7 +42,6 @@ router.post(
   protect,
   requireBusinessContext,
   requirePermission("billing:manage"),
-  authLimiter,
   attachBillingContext,
   auditRequest("billing.checkout_requested"),
   BillingController.createCheckoutSession
@@ -53,7 +51,6 @@ router.get(
   protect,
   requireBusinessContext,
   requirePermission("billing:manage"),
-  authLimiter,
   attachBillingContext,
   auditRequest("billing.checkout_requested"),
   BillingController.startCheckoutRedirect
@@ -63,7 +60,6 @@ router.post(
   protect,
   requireBusinessContext,
   requirePermission("billing:manage"),
-  authLimiter,
   attachBillingContext,
   auditRequest("billing.checkout_requested"),
   BillingController.checkout
@@ -85,7 +81,6 @@ router.post(
   protect,
   requireBusinessContext,
   requirePermission("billing:manage"),
-  authLimiter,
   auditRequest("billing.upgrade_requested"),
   BillingController.upgradePlan
 );

@@ -323,7 +323,6 @@ app.use((req, res, next) => {
             });
             return res;
         }
-        res.setHeader("Connection", "close");
         const response = originalRedirect(...args);
         markExplicitFinalResponseWrite(res);
         return response;

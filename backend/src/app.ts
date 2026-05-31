@@ -406,8 +406,6 @@ app.use((req, res, next) => {
       return res;
     }
 
-    res.setHeader("Connection", "close");
-
     const response = (
       originalRedirect as (...redirectArgs: unknown[]) => typeof res
     )(...args);

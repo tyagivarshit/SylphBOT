@@ -1792,13 +1792,15 @@ class BillingController {
                 const cached = billingProjectionCache.get(cacheKey);
                 staleCacheValue = cached?.value;
                 staleCacheUpdatedAt = Number(cached?.updatedAt || 0);
-                if (cached?.value && cached.expiresAt > Date.now()) {
+                if (cached?.value && (cached.expiresAt > Date.now() || lightweight)) {
+                    const isStale = cached.expiresAt <= Date.now();
                     (0, performanceMetrics_1.emitPerformanceMetric)({
                         name: "CACHE_HIT",
                         businessId,
                         route: "billing_projection",
                         metadata: {
                             cache: "memory_billing_projection",
+                            stale: isStale,
                         },
                     });
                     emitProjectionTelemetry({
@@ -1807,7 +1809,7 @@ class BillingController {
                         businessId,
                         metadata: {
                             cache: "memory_billing_projection",
-                            stale: false,
+                            stale: isStale,
                         },
                     });
                     console.info("BILLING_STAGE_OK", {
@@ -1817,9 +1819,40 @@ class BillingController {
                             ? cached.value.invoices.length
                             : 0,
                         hasSubscription: Boolean(cached.value.subscription),
-                        source: "cache_hit",
+                        source: isStale ? "stale_cache_hit" : "cache_hit",
                     });
-                    return res.json(cached.value);
+                    // Kick off background computation if stale and not already computing
+                    if (isStale && !cached.promise) {
+                        const computeProjection = (0, projectionCoordinator_service_1.runProjectionComputeTask)({
+                            cacheKey,
+                            label: "billing_projection",
+                            businessId,
+                            computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                            task: () => BillingController.buildBillingResponse(businessId, req, { lightweight }),
+                        });
+                        const sharedProjectionPromise = computeProjection
+                            .then((value) => {
+                            const updatedAt = Date.now();
+                            billingProjectionCache.set(cacheKey, {
+                                value,
+                                updatedAt,
+                                expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                            });
+                            void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                            return value;
+                        })
+                            .catch((error) => {
+                            billingProjectionCache.delete(cacheKey);
+                            throw error;
+                        });
+                        billingProjectionCache.set(cacheKey, {
+                            expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                            value: cached.value,
+                            updatedAt: cached.updatedAt,
+                            promise: sharedProjectionPromise,
+                        });
+                    }
+                    return res.json(isStale ? markBillingSnapshotAsStale(cached.value, "stale_revalidate") : cached.value);
                 }
                 if (!staleCacheValue) {
                     const redisSnapshot = await readRedisBillingProjectionSnapshot(cacheKey);
@@ -1848,6 +1881,43 @@ class BillingController {
                                 stale: true,
                             },
                         });
+                        if (lightweight) {
+                            console.info("BILLING_STAGE_OK", {
+                                stage: "billing_projection.ready",
+                                businessId,
+                                source: "redis_stale_cache_hit",
+                            });
+                            // Trigger background compute task
+                            const computeProjection = (0, projectionCoordinator_service_1.runProjectionComputeTask)({
+                                cacheKey,
+                                label: "billing_projection",
+                                businessId,
+                                computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                                task: () => BillingController.buildBillingResponse(businessId, req, { lightweight }),
+                            });
+                            const sharedProjectionPromise = computeProjection
+                                .then((value) => {
+                                const updatedAt = Date.now();
+                                billingProjectionCache.set(cacheKey, {
+                                    value,
+                                    updatedAt,
+                                    expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                                });
+                                void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                                return value;
+                            })
+                                .catch((error) => {
+                                billingProjectionCache.delete(cacheKey);
+                                throw error;
+                            });
+                            billingProjectionCache.set(cacheKey, {
+                                expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                                value: redisSnapshot.data,
+                                updatedAt: redisSnapshot.updatedAt,
+                                promise: sharedProjectionPromise,
+                            });
+                            return res.json(markBillingSnapshotAsStale(redisSnapshot.data, "stale_revalidate"));
+                        }
                     }
                 }
                 if (cached?.promise) {
@@ -1925,6 +1995,60 @@ class BillingController {
                         },
                     });
                     return res.status(200).json(markBillingSnapshotAsStale(staleCacheValue, "stale_revalidate"));
+                }
+            }
+            if (lightweight) {
+                if (cacheKey) {
+                    // Since cache missed completely and lightweight is requested, run compute in background
+                    // and return the degraded fallback response immediately without blocking checkout launch.
+                    const computeProjection = (0, projectionCoordinator_service_1.runProjectionComputeTask)({
+                        cacheKey,
+                        label: "billing_projection",
+                        businessId,
+                        computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                        task: () => BillingController.buildBillingResponse(businessId, req, { lightweight }),
+                    });
+                    const sharedProjectionPromise = computeProjection
+                        .then((value) => {
+                        const updatedAt = Date.now();
+                        billingProjectionCache.set(cacheKey, {
+                            value,
+                            updatedAt,
+                            expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                        });
+                        void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                        return value;
+                    })
+                        .catch((error) => {
+                        billingProjectionCache.delete(cacheKey);
+                        throw error;
+                    });
+                    billingProjectionCache.set(cacheKey, {
+                        expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                        value: undefined,
+                        updatedAt: Date.now(),
+                        promise: sharedProjectionPromise,
+                    });
+                    const degradedResponse = await BillingController.buildDegradedBillingResponse({
+                        req,
+                        fallbackValue: undefined,
+                        reason: "lightweight_degraded_sync",
+                    });
+                    return res.status(200).json(degradedResponse);
+                }
+                else {
+                    return res.status(200).json({
+                        success: true,
+                        subscription: null,
+                        billing: EMPTY_BILLING_CONTEXT,
+                        usage: EMPTY_USAGE_SUMMARY,
+                        currency: (0, billingGeo_service_1.resolveBillingCurrency)(req),
+                        invoices: [],
+                        meta: {
+                            degraded: false,
+                            reason: null,
+                        },
+                    });
                 }
             }
             if (!projectionPromise) {

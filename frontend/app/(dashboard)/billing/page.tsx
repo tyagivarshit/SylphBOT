@@ -139,6 +139,7 @@ let lastBillingRequestAt = 0;
 let lastPlansRequestAt = 0;
 let billingFailureCooldownUntil = 0;
 let plansFailureCooldownUntil = 0;
+let billingAbortController: AbortController | null = null;
 
 const FALLBACK_PLANS_RESPONSE: PlansResponse = {
   trialDays: 7,
@@ -257,7 +258,7 @@ const readCachedBillingBootstrapSnapshot = () => {
   return billingBootstrapSnapshot;
 };
 
-const fetchBillingSummary = async (options?: { background?: boolean }) => {
+const fetchBillingSummary = async (options?: { background?: boolean; signal?: AbortSignal }) => {
   const isBackground = Boolean(options?.background);
   const now = Date.now();
 
@@ -294,7 +295,8 @@ const fetchBillingSummary = async (options?: { background?: boolean }) => {
   billingRequestInFlight = fetchJsonWithRetry<BillingApiResponse>(
     BILLING_SNAPSHOT_ENDPOINT,
     isBackground ? 0 : 1,
-    BILLING_API_TIMEOUT_MS
+    BILLING_API_TIMEOUT_MS,
+    options?.signal
   )
     .then((data) => {
       billingFailureCooldownUntil = 0;
@@ -311,7 +313,7 @@ const fetchBillingSummary = async (options?: { background?: boolean }) => {
   return billingRequestInFlight;
 };
 
-const fetchPlansCatalog = async (options?: { background?: boolean }) => {
+const fetchPlansCatalog = async (options?: { background?: boolean; signal?: AbortSignal }) => {
   const isBackground = Boolean(options?.background);
   const now = Date.now();
 
@@ -348,7 +350,8 @@ const fetchPlansCatalog = async (options?: { background?: boolean }) => {
   plansRequestInFlight = fetchJsonWithRetry<PlansResponse>(
     "/api/billing/plans",
     isBackground ? 0 : 1,
-    BILLING_API_TIMEOUT_MS
+    BILLING_API_TIMEOUT_MS,
+    options?.signal
   )
     .then((data) => {
       plansFailureCooldownUntil = 0;
@@ -365,7 +368,7 @@ const fetchPlansCatalog = async (options?: { background?: boolean }) => {
   return plansRequestInFlight;
 };
 
-const refreshBillingBootstrapSnapshot = async (options?: { background?: boolean }) => {
+const refreshBillingBootstrapSnapshot = async (options?: { background?: boolean; signal?: AbortSignal }) => {
   const isBackground = Boolean(options?.background);
   if (billingBootstrapInFlight) {
     recordBillingTelemetry("duplicate_fetch_blocked", {
@@ -415,15 +418,19 @@ const refreshBillingBootstrapSnapshot = async (options?: { background?: boolean 
 const fetchJsonWithRetry = async <T,>(
   url: string,
   retries = 1,
-  timeoutMs = BILLING_API_TIMEOUT_MS
+  timeoutMs = BILLING_API_TIMEOUT_MS,
+  signal?: AbortSignal
 ) => {
   let attempt = 0;
   let lastError: Error | null = null;
 
   while (attempt <= retries) {
     try {
-      return await fetchJson<T>(url, timeoutMs);
+      return await fetchJson<T>(url, timeoutMs, signal);
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
       lastError = error instanceof Error ? error : new Error("Request failed");
       attempt += 1;
 
@@ -498,11 +505,12 @@ const isCurrentPlan = (
   return currentType === planId || currentName === planId;
 };
 
-async function fetchJson<T>(url: string, timeoutMs = BILLING_API_TIMEOUT_MS) {
+async function fetchJson<T>(url: string, timeoutMs = BILLING_API_TIMEOUT_MS, signal?: AbortSignal) {
   const response = await apiFetch<T>(url, {
     credentials: "include",
     cache: "no-store",
     timeoutMs,
+    signal,
   });
 
   if (!response.success || !response.data) {
@@ -640,6 +648,12 @@ function BillingPageContent() {
     const run = async () => {
       let successfulRefresh = false;
 
+      if (billingAbortController) {
+        billingAbortController.abort();
+      }
+      billingAbortController = new AbortController();
+      const signal = billingAbortController.signal;
+
       try {
         if (!initialTelemetryRecordedRef.current) {
           initialTelemetryRecordedRef.current = true;
@@ -668,7 +682,13 @@ function BillingPageContent() {
 
         const snapshot = await refreshBillingBootstrapSnapshot({
           background: isBackground,
+          signal,
         });
+
+        if (signal.aborted) {
+          return false;
+        }
+
         const warnings: string[] = [];
 
         if (snapshot.billingData) {
@@ -708,6 +728,9 @@ function BillingPageContent() {
         setLoadWarning(warnings.length ? warnings.join(" ") : null);
         successfulRefresh = Boolean(snapshot.billingData || snapshot.plansData);
       } catch (loadError) {
+        if (signal.aborted) {
+          return false;
+        }
         if (!hasLoadedPlansRef.current) {
           setPlansRequestFailed(true);
         }
@@ -858,6 +881,10 @@ function BillingPageContent() {
     }
 
     try {
+      if (billingAbortController) {
+        billingAbortController.abort();
+        billingAbortController = null;
+      }
       checkoutLockRef.current = true;
       setCheckoutPending(true);
       setLoading(plan);

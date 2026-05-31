@@ -2195,6 +2195,225 @@ const emitCheckoutMetric = (
       const cacheKey = businessId
         ? getBillingProjectionCacheKey(businessId, currencyHint)
         : null;
+
+      if (lightweight) {
+        if (cacheKey) {
+          // 1. Memory Cache check
+          const cached = billingProjectionCache.get(cacheKey);
+          if (cached?.value) {
+            const isStale = cached.expiresAt <= Date.now();
+            
+            // Kick off background computation if stale and not already computing
+            if (isStale && !cached.promise) {
+              const computeProjection = runProjectionComputeTask({
+                cacheKey,
+                label: "billing_projection",
+                businessId,
+                computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                task: () =>
+                  BillingController.buildBillingResponse(
+                    businessId,
+                    req,
+                    { lightweight }
+                  ) as Promise<Record<string, unknown>>,
+              });
+              const sharedProjectionPromise = computeProjection
+                .then((value) => {
+                  const updatedAt = Date.now();
+                  billingProjectionCache.set(cacheKey, {
+                    value,
+                    updatedAt,
+                    expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                  });
+                  void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                  return value;
+                })
+                .catch((error) => {
+                  billingProjectionCache.delete(cacheKey);
+                  throw error;
+                });
+              billingProjectionCache.set(cacheKey, {
+                expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                value: cached.value,
+                updatedAt: cached.updatedAt,
+                promise: sharedProjectionPromise,
+              });
+            }
+
+            return res.status(200).json(
+              isStale ? markBillingSnapshotAsStale(cached.value, "stale_revalidate") : cached.value
+            );
+          }
+
+          // 2. Redis Cache check (non-blocking for checkout!)
+          const redisSnapshot = await readRedisBillingProjectionSnapshot(cacheKey).catch(() => null);
+          if (redisSnapshot?.data) {
+            billingProjectionCache.set(cacheKey, {
+              value: redisSnapshot.data,
+              updatedAt: redisSnapshot.updatedAt,
+              expiresAt: Date.now() + Math.floor(BILLING_PROJECTION_CACHE_TTL_MS / 2),
+            });
+
+            // Trigger background compute task if not already computing
+            const computeProjection = runProjectionComputeTask({
+              cacheKey,
+              label: "billing_projection",
+              businessId,
+              computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+              task: () =>
+                BillingController.buildBillingResponse(
+                  businessId,
+                  req,
+                  { lightweight }
+                ) as Promise<Record<string, unknown>>,
+            });
+            const sharedProjectionPromise = computeProjection
+              .then((value) => {
+                const updatedAt = Date.now();
+                billingProjectionCache.set(cacheKey, {
+                  value,
+                  updatedAt,
+                  expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                });
+                void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                return value;
+              })
+              .catch((error) => {
+                billingProjectionCache.delete(cacheKey);
+                throw error;
+              });
+            billingProjectionCache.set(cacheKey, {
+              expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+              value: redisSnapshot.data,
+              updatedAt: redisSnapshot.updatedAt,
+              promise: sharedProjectionPromise,
+            });
+
+            return res.status(200).json(
+              markBillingSnapshotAsStale(redisSnapshot.data, "stale_revalidate")
+            );
+          }
+
+          // 3. Prewarm LKV check (instant, memory-only)
+          const lkvSub = prewarmState.lastKnownValidSubscription.get(businessId);
+          const lkvBill = prewarmState.lastKnownValidBilling.get(businessId);
+          if (lkvSub && lkvBill) {
+            // Kick off background computation in background
+            const computeProjection = runProjectionComputeTask({
+              cacheKey,
+              label: "billing_projection",
+              businessId,
+              computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+              task: () =>
+                BillingController.buildBillingResponse(
+                  businessId,
+                  req,
+                  { lightweight }
+                ) as Promise<Record<string, unknown>>,
+            });
+            const sharedProjectionPromise = computeProjection
+              .then((value) => {
+                const updatedAt = Date.now();
+                billingProjectionCache.set(cacheKey, {
+                  value,
+                  updatedAt,
+                  expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                });
+                void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                return value;
+              })
+              .catch((error) => {
+                billingProjectionCache.delete(cacheKey);
+                throw error;
+              });
+            billingProjectionCache.set(cacheKey, {
+              expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+              value: undefined,
+              updatedAt: Date.now(),
+              promise: sharedProjectionPromise,
+            });
+
+            const prewarmFallback = {
+              success: true,
+              subscription: lkvSub,
+              billing: lkvBill,
+              usage: EMPTY_USAGE_SUMMARY,
+              currency: lkvSub.currency || resolveBillingCurrency(req),
+              invoices: [],
+              meta: {
+                degraded: true,
+                reason: "lightweight_prewarm_lkv",
+              },
+            };
+            return res.status(200).json(prewarmFallback);
+          }
+
+          // 4. Memory/Redis/LKV Cache Miss: serve default degraded immediately without blocking DB/Stripe calls!
+          // Kick off the background hydration to populate cache for subsequent requests
+          const computeProjection = runProjectionComputeTask({
+            cacheKey,
+            label: "billing_projection",
+            businessId,
+            computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+            task: () =>
+              BillingController.buildBillingResponse(
+                businessId,
+                req,
+                { lightweight }
+              ) as Promise<Record<string, unknown>>,
+          });
+          const sharedProjectionPromise = computeProjection
+            .then((value) => {
+              const updatedAt = Date.now();
+              billingProjectionCache.set(cacheKey, {
+                value,
+                updatedAt,
+                expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+              });
+              void writeRedisBillingProjectionSnapshot(cacheKey, value);
+              return value;
+            })
+            .catch((error) => {
+              billingProjectionCache.delete(cacheKey);
+              throw error;
+            });
+          billingProjectionCache.set(cacheKey, {
+            expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+            value: undefined,
+            updatedAt: Date.now(),
+            promise: sharedProjectionPromise,
+          });
+
+          // Serve degraded response instantly
+          const defaultResponse = {
+            success: true,
+            subscription: null,
+            billing: EMPTY_BILLING_CONTEXT,
+            usage: EMPTY_USAGE_SUMMARY,
+            currency: resolveBillingCurrency(req),
+            invoices: [],
+            meta: {
+              degraded: true,
+              reason: "lightweight_degraded_sync",
+            },
+          };
+          return res.status(200).json(defaultResponse);
+        } else {
+          return res.status(200).json({
+            success: true,
+            subscription: null,
+            billing: EMPTY_BILLING_CONTEXT,
+            usage: EMPTY_USAGE_SUMMARY,
+            currency: resolveBillingCurrency(req),
+            invoices: [],
+            meta: {
+              degraded: false,
+              reason: null,
+            },
+          });
+        }
+      }
+
       const waitBudgetMs = resolveBillingProjectionWaitBudgetMs(res);
       let staleCacheValue: Record<string, unknown> | undefined;
       let staleCacheUpdatedAt = 0;
@@ -2310,48 +2529,52 @@ const emitCheckoutMetric = (
                 source: "redis_stale_cache_hit",
               });
 
-              // Trigger background compute task
-              const computeProjection = runProjectionComputeTask({
-                cacheKey,
-                label: "billing_projection",
-                businessId,
-                computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
-                task: () =>
-                  BillingController.buildBillingResponse(
-                    businessId,
-                    req,
-                    { lightweight }
-                  ) as Promise<Record<string, unknown>>,
-              });
-              const sharedProjectionPromise = computeProjection
-                .then((value) => {
-                  const updatedAt = Date.now();
-                  billingProjectionCache.set(cacheKey, {
-                    value,
-                    updatedAt,
-                    expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
-                  });
-                  void writeRedisBillingProjectionSnapshot(cacheKey, value);
-                  return value;
-                })
-                .catch((error) => {
-                  billingProjectionCache.delete(cacheKey);
-                  throw error;
+              // Trigger background compute task if not already computing
+              const activeCached = billingProjectionCache.get(cacheKey);
+              if (!activeCached?.promise) {
+                const computeProjection = runProjectionComputeTask({
+                  cacheKey,
+                  label: "billing_projection",
+                  businessId,
+                  computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                  task: () =>
+                    BillingController.buildBillingResponse(
+                      businessId,
+                      req,
+                      { lightweight }
+                    ) as Promise<Record<string, unknown>>,
                 });
-              billingProjectionCache.set(cacheKey, {
-                expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
-                value: redisSnapshot.data,
-                updatedAt: redisSnapshot.updatedAt,
-                promise: sharedProjectionPromise,
-              });
+                const sharedProjectionPromise = computeProjection
+                  .then((value) => {
+                    const updatedAt = Date.now();
+                    billingProjectionCache.set(cacheKey, {
+                      value,
+                      updatedAt,
+                      expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                    });
+                    void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                    return value;
+                  })
+                  .catch((error) => {
+                    billingProjectionCache.delete(cacheKey);
+                    throw error;
+                  });
+                billingProjectionCache.set(cacheKey, {
+                  expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                  value: redisSnapshot.data,
+                  updatedAt: redisSnapshot.updatedAt,
+                  promise: sharedProjectionPromise,
+                });
+              }
 
               return res.json(markBillingSnapshotAsStale(redisSnapshot.data, "stale_revalidate"));
             }
           }
         }
 
-        if (cached?.promise) {
-          projectionPromise = cached.promise;
+        const activeCached = billingProjectionCache.get(cacheKey);
+        if (activeCached?.promise) {
+          projectionPromise = activeCached.promise;
           emitProjectionTelemetry({
             name: "projection_deduped",
             value: 1,
@@ -2407,6 +2630,12 @@ const emitCheckoutMetric = (
           projectionPromise = sharedProjectionPromise;
         }
 
+        if (lightweight && staleCacheValue) {
+          return res.status(200).json(
+            markBillingSnapshotAsStale(staleCacheValue, "stale_revalidate")
+          );
+        }
+
         const staleAgeMs =
           staleCacheUpdatedAt > 0 ? Date.now() - staleCacheUpdatedAt : Number.POSITIVE_INFINITY;
         if (
@@ -2442,41 +2671,23 @@ const emitCheckoutMetric = (
 
       if (lightweight) {
         if (cacheKey) {
-          // Since cache missed completely and lightweight is requested, run compute in background
-          // and return the degraded fallback response immediately without blocking checkout launch.
-          const computeProjection = runProjectionComputeTask({
-            cacheKey,
-            label: "billing_projection",
-            businessId,
-            computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
-            task: () =>
-              BillingController.buildBillingResponse(
-                businessId,
-                req,
-                { lightweight }
-              ) as Promise<Record<string, unknown>>,
-          });
-          const sharedProjectionPromise = computeProjection
-            .then((value) => {
-              const updatedAt = Date.now();
-              billingProjectionCache.set(cacheKey, {
-                value,
-                updatedAt,
-                expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
-              });
-              void writeRedisBillingProjectionSnapshot(cacheKey, value);
-              return value;
-            })
-            .catch((error) => {
-              billingProjectionCache.delete(cacheKey);
-              throw error;
-            });
-          billingProjectionCache.set(cacheKey, {
-            expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
-            value: undefined,
-            updatedAt: Date.now(),
-            promise: sharedProjectionPromise,
-          });
+          const lkvSub = prewarmState.lastKnownValidSubscription.get(businessId);
+          const lkvBill = prewarmState.lastKnownValidBilling.get(businessId);
+          if (lkvSub && lkvBill) {
+            const prewarmFallback = {
+              success: true,
+              subscription: lkvSub,
+              billing: lkvBill,
+              usage: EMPTY_USAGE_SUMMARY,
+              currency: lkvSub.currency || resolveBillingCurrency(req),
+              invoices: [],
+              meta: {
+                degraded: true,
+                reason: "lightweight_prewarm_lkv",
+              },
+            };
+            return res.status(200).json(prewarmFallback);
+          }
 
           const degradedResponse = await BillingController.buildDegradedBillingResponse({
             req,

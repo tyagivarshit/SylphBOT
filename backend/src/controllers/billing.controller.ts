@@ -1703,39 +1703,6 @@ const emitCheckoutMetric = (
 
       // Active-plan protection check (prevent duplicate checkouts on active plan)
       let activePlanCode: string | null = null;
-      if (preloadedSubscription && ["ACTIVE", "TRIAL", "TRIALING", "PAST_DUE", "PAUSED"].includes(preloadedSubscription.status)) {
-        activePlanCode = preloadedSubscription.plan?.name || preloadedSubscription.plan?.type || null;
-      }
-
-      if (!activePlanCode) {
-        const checkActive = await prisma.subscriptionLedger.findFirst({
-          where: {
-            businessId,
-            status: {
-              in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
-            },
-          },
-          select: {
-            planCode: true,
-          },
-          orderBy: {
-            updatedAt: "desc",
-          },
-        });
-        if (checkActive) {
-          activePlanCode = checkActive.planCode;
-        }
-      }
-
-      if (activePlanCode && String(activePlanCode).trim().toUpperCase() === normalizedPlan) {
-        return sendCheckoutError({
-          status: 409,
-          message: `You are already subscribed to the ${normalizedPlan.charAt(0) + normalizedPlan.slice(1).toLowerCase()} plan.`,
-          reason: "already_subscribed",
-          code: "ALREADY_SUBSCRIBED",
-        });
-      }
-
       let activeSubscription = preloadedSubscription && ["ACTIVE", "TRIAL", "TRIALING", "PAST_DUE", "PAUSED"].includes(preloadedSubscription.status)
         ? {
             metadata: preloadedSubscription.metadata || {},
@@ -1744,7 +1711,11 @@ const emitCheckoutMetric = (
           }
         : null;
 
-      if (!activeSubscription) {
+      if (preloadedSubscription && ["ACTIVE", "TRIAL", "TRIALING", "PAST_DUE", "PAUSED"].includes(preloadedSubscription.status)) {
+        activePlanCode = preloadedSubscription.plan?.name || preloadedSubscription.plan?.type || null;
+      }
+
+      if (!activePlanCode || !activeSubscription) {
         const foundActive = await prisma.subscriptionLedger.findFirst({
           where: {
             businessId,
@@ -1753,6 +1724,7 @@ const emitCheckoutMetric = (
             },
           },
           select: {
+            planCode: true,
             metadata: true,
             subscriptionKey: true,
             providerSubscriptionId: true,
@@ -1763,7 +1735,8 @@ const emitCheckoutMetric = (
         });
 
         if (foundActive) {
-          activeSubscription = {
+          activePlanCode = activePlanCode || foundActive.planCode;
+          activeSubscription = activeSubscription || {
             metadata: foundActive.metadata || {},
             subscriptionKey: foundActive.subscriptionKey,
             providerSubscriptionId: foundActive.providerSubscriptionId,
@@ -1793,6 +1766,15 @@ const emitCheckoutMetric = (
             };
           }
         }
+      }
+
+      if (activePlanCode && String(activePlanCode).trim().toUpperCase() === normalizedPlan) {
+        return sendCheckoutError({
+          status: 409,
+          message: `You are already subscribed to the ${normalizedPlan.charAt(0) + normalizedPlan.slice(1).toLowerCase()} plan.`,
+          reason: "already_subscribed",
+          code: "ALREADY_SUBSCRIBED",
+        });
       }
       throwIfRequestLifecycleAborted({
         req,
@@ -1921,6 +1903,7 @@ const emitCheckoutMetric = (
           paymentIntent = await paymentIntentService.createCheckout({
               businessId,
               proposalKey: readyProposal.proposalKey,
+              proposalPreloaded: readyProposal,
               provider: "STRIPE",
               source: "SELF",
               description: `${normalizedPlan} ${normalizedBilling} plan checkout`,

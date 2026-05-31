@@ -1,5 +1,8 @@
 import crypto from "crypto";
 import { execSync } from "child_process";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 export type IntegrationEnvironment = {
   runId: string;

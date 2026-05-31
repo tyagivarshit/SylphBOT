@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startWorkerRuntime = void 0;
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || "64";
 const logger_1 = __importDefault(require("../utils/logger"));
 const sentry_1 = require("../observability/sentry");
 const lifecycle_1 = require("../runtime/lifecycle");

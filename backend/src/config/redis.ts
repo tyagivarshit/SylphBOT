@@ -4,6 +4,7 @@ import {
   createEmptyRedisStream,
   isRedisTransientError,
   isRedisHealthy,
+  isRedisCircuitOpen,
   markRedisFailure,
   markRedisHealthy,
   safeRedisCall,
@@ -127,6 +128,14 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     retryStrategy(attempts) {
       if (attempts > MAX_RECONNECT_ATTEMPTS) {
         return null;
+      }
+
+      // If the Redis circuit is open or Redis is not healthy, back off aggressively
+      // to prevent DNS reconnect storms and threadpool starvation.
+      if (isRedisCircuitOpen() || !isRedisHealthy()) {
+        const backoffDelay = 15_000 + Math.floor(Math.random() * 5000); // 15-20 seconds jittered
+        noteRedisReconnectAttempt(connectionName, attempts, backoffDelay);
+        return backoffDelay;
       }
 
       const exponentialDelay = Math.min(
@@ -488,6 +497,11 @@ const waitForClientReady = async (
     return;
   }
 
+  // Fail fast immediately if the circuit breaker is open or Redis is down
+  if (isRedisCircuitOpen() || !isRedisHealthy()) {
+    throw new Error(`redis_not_ready:${label} (circuit open)`);
+  }
+
   let lastError: unknown = null;
   const onError = (error: unknown) => {
     lastError = error;
@@ -497,19 +511,21 @@ const waitForClientReady = async (
   const deadline = Date.now() + timeoutMs;
 
   try {
+    // Initiate connect once; do not loop client.connect() to prevent DNS spam
+    try {
+      await maybeConnectClient(client);
+    } catch (error) {
+      lastError = error;
+    }
+
     while (Date.now() <= deadline) {
       if (isRedisClientWritable(client)) {
         return;
       }
 
-      try {
-        await maybeConnectClient(client);
-      } catch (error) {
-        lastError = error;
-      }
-
-      if (isRedisClientWritable(client)) {
-        return;
+      // Check if circuit breaker opened during wait
+      if (isRedisCircuitOpen() || !isRedisHealthy()) {
+        throw new Error(`redis_not_ready:${label} (circuit opened during wait)`);
       }
 
       await sleep(REDIS_READY_POLL_MS);
@@ -537,13 +553,27 @@ export const isQueueRedisWritable = () =>
 
 export const isRedisWritable = () => isSharedRedisWritable();
 
+let lastQueueRecoveryAttemptAt = 0;
+const QUEUE_RECOVERY_COOLDOWN_MS = 30_000; // 30 seconds cooldown
+
 export const ensureBackgroundQueueRecovery = () => {
   const queueClient = globalForRedis.__sylphQueueRedis;
   if (!queueClient) {
     return;
   }
 
+  // Stop recovery attempts if circuit is open/unhealthy
+  if (isRedisCircuitOpen() || !isRedisHealthy()) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastQueueRecoveryAttemptAt < QUEUE_RECOVERY_COOLDOWN_MS) {
+    return;
+  }
+
   if (queueClient.status === "end" || queueClient.status === "wait") {
+    lastQueueRecoveryAttemptAt = now;
     logger.info({ status: queueClient.status }, "Background Queue Recovery: queue Redis in wait/end state, initiating reconnect...");
     queueClient.connect().catch((err) => {
       if (!isAlreadyConnectedError(err)) {

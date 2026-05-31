@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startServer = void 0;
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || "64";
 const http_1 = __importDefault(require("http"));
 const passport_1 = require("./config/passport");
 const env_1 = require("./config/env");

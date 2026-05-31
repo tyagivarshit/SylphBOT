@@ -1,3 +1,4 @@
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || "64";
 import http from "http";
 import { configurePassport } from "./config/passport";
 import { env } from "./config/env";

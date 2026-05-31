@@ -1768,6 +1768,153 @@ class BillingController {
             const cacheKey = businessId
                 ? getBillingProjectionCacheKey(businessId, currencyHint)
                 : null;
+            if (surface === "checkout") {
+                let cachedVal = null;
+                if (cacheKey) {
+                    const cached = billingProjectionCache.get(cacheKey);
+                    if (cached?.value) {
+                        cachedVal = cached.value;
+                    }
+                }
+                if (cachedVal) {
+                    // Spawn background projection repair if not already computing
+                    if (cacheKey) {
+                        const activeCached = billingProjectionCache.get(cacheKey);
+                        if (!activeCached?.promise) {
+                            const computeProjection = (0, projectionCoordinator_service_1.runProjectionComputeTask)({
+                                cacheKey,
+                                label: "billing_projection",
+                                businessId,
+                                computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                                task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true }),
+                            });
+                            const sharedProjectionPromise = computeProjection
+                                .then((value) => {
+                                const updatedAt = Date.now();
+                                billingProjectionCache.set(cacheKey, {
+                                    value,
+                                    updatedAt,
+                                    expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                                });
+                                void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                                return value;
+                            })
+                                .catch((error) => {
+                                billingProjectionCache.delete(cacheKey);
+                                throw error;
+                            });
+                            billingProjectionCache.set(cacheKey, {
+                                expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                                value: cachedVal,
+                                updatedAt: Date.now(),
+                                promise: sharedProjectionPromise,
+                            });
+                        }
+                    }
+                    const isStale = (billingProjectionCache.get(cacheKey)?.expiresAt || 0) <= Date.now();
+                    return res.status(200).json(isStale ? markBillingSnapshotAsStale(cachedVal, "stale_revalidate") : cachedVal);
+                }
+                // LKV fallback
+                const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(businessId);
+                const lkvBill = prewarmState_1.prewarmState.lastKnownValidBilling.get(businessId);
+                if (lkvSub && lkvBill) {
+                    const prewarmFallback = {
+                        success: true,
+                        subscription: lkvSub,
+                        billing: lkvBill,
+                        usage: EMPTY_USAGE_SUMMARY,
+                        currency: lkvSub.currency || (0, billingGeo_service_1.resolveBillingCurrency)(req),
+                        invoices: [],
+                        meta: {
+                            degraded: true,
+                            reason: "lightweight_prewarm_lkv",
+                        },
+                    };
+                    // Spawn background projection repair if not already computing
+                    if (cacheKey) {
+                        const activeCached = billingProjectionCache.get(cacheKey);
+                        if (!activeCached?.promise) {
+                            const computeProjection = (0, projectionCoordinator_service_1.runProjectionComputeTask)({
+                                cacheKey,
+                                label: "billing_projection",
+                                businessId,
+                                computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                                task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true }),
+                            });
+                            const sharedProjectionPromise = computeProjection
+                                .then((value) => {
+                                const updatedAt = Date.now();
+                                billingProjectionCache.set(cacheKey, {
+                                    value,
+                                    updatedAt,
+                                    expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                                });
+                                void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                                return value;
+                            })
+                                .catch((error) => {
+                                billingProjectionCache.delete(cacheKey);
+                                throw error;
+                            });
+                            billingProjectionCache.set(cacheKey, {
+                                expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                                value: undefined,
+                                updatedAt: Date.now(),
+                                promise: sharedProjectionPromise,
+                            });
+                        }
+                    }
+                    return res.status(200).json(prewarmFallback);
+                }
+                // Default degraded response
+                const defaultResponse = {
+                    success: true,
+                    subscription: null,
+                    billing: EMPTY_BILLING_CONTEXT,
+                    usage: EMPTY_USAGE_SUMMARY,
+                    currency: (0, billingGeo_service_1.resolveBillingCurrency)(req),
+                    invoices: [],
+                    meta: {
+                        degraded: true,
+                        reason: "lightweight_degraded_sync",
+                    },
+                };
+                // Spawn background projection repair if not already computing
+                if (cacheKey) {
+                    const activeCached = billingProjectionCache.get(cacheKey);
+                    if (!activeCached?.promise) {
+                        const computeProjection = (0, projectionCoordinator_service_1.runProjectionComputeTask)({
+                            cacheKey,
+                            label: "billing_projection",
+                            businessId,
+                            computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                            task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true }),
+                        });
+                        const sharedProjectionPromise = computeProjection
+                            .then((value) => {
+                            const updatedAt = Date.now();
+                            billingProjectionCache.set(cacheKey, {
+                                value,
+                                updatedAt,
+                                expiresAt: updatedAt + BILLING_PROJECTION_CACHE_TTL_MS,
+                            });
+                            void writeRedisBillingProjectionSnapshot(cacheKey, value);
+                            return value;
+                        })
+                            .catch((error) => {
+                            billingProjectionCache.delete(cacheKey);
+                            throw error;
+                        });
+                        billingProjectionCache.set(cacheKey, {
+                            expiresAt: Date.now() + BILLING_PROJECTION_CACHE_TTL_MS,
+                            value: undefined,
+                            updatedAt: Date.now(),
+                            promise: sharedProjectionPromise,
+                        });
+                    }
+                }
+                return res.status(200).json(defaultResponse);
+            }
             if (lightweight) {
                 if (cacheKey) {
                     // 1. Memory Cache check

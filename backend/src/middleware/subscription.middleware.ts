@@ -10,6 +10,7 @@ import { invalidateFeatureCache } from "../services/feature.service";
 import { prewarmState } from "../services/prewarmState";
 import { registerBillingPrewarmer } from "../services/prewarm.service";
 import { requestStorage, getRequestRemainingMs, getRequestAbortSignal } from "../utils/requestLifecycle";
+import { runProjectionComputeTask } from "../services/projectionCoordinator.service";
 
 registerBillingPrewarmer(async (businessId) => {
   await loadBillingContext(businessId).catch(() => null);
@@ -639,10 +640,89 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
 
 export const loadBillingContext = async (
   businessId: string,
-  options?: { skipStripeFallback?: boolean }
+  options?: { skipStripeFallback?: boolean; isCheckout?: boolean }
 ) => {
   const startedAt = Date.now();
   const now = new Date();
+
+  if (options?.isCheckout) {
+    const lkvSub = prewarmState.lastKnownValidSubscription.get(businessId);
+    const lkvBill = prewarmState.lastKnownValidBilling.get(businessId);
+    let subscription = lkvSub || null;
+    let context = lkvBill ? { ...lkvBill } : getBaseContext();
+
+    if (!lkvSub || !lkvBill) {
+      const memoryEntry = subscriptionMemoryCache.get(businessId);
+      if (memoryEntry?.value) {
+        subscription = memoryEntry.value;
+        context = evaluateBillingContext(memoryEntry.value, now);
+      }
+    }
+
+    const earlyAccessCacheKey = EARLY_ACCESS_CACHE_KEY;
+    const cachedEarly = earlyAccessCache.get(earlyAccessCacheKey);
+    if (cachedEarly && cachedEarly.expiresAt > Date.now()) {
+      context.allowEarly = cachedEarly.value.allowEarly;
+      context.remainingEarly = cachedEarly.value.remainingEarly;
+      emitPerformanceMetric({
+        name: "CACHE_HIT",
+        businessId,
+        route: "early_access_projection",
+        metadata: {
+          cache: "memory_early_access",
+        },
+      });
+    } else {
+      context.allowEarly = false;
+      context.remainingEarly = 0;
+      emitPerformanceMetric({
+        name: "CACHE_MISS",
+        businessId,
+        route: "early_access_projection",
+        metadata: {
+          cache: "memory_early_access",
+        },
+      });
+    }
+
+    // Spawn background projection/hydration repair asynchronously without awaiting
+    const billingCacheKey = getBillingCacheKey(businessId);
+    const memoryEntry = subscriptionMemoryCache.get(businessId);
+    if (!memoryEntry?.promise) {
+      void runProjectionComputeTask({
+        cacheKey: billingCacheKey,
+        label: "billing_projection",
+        businessId,
+        computeBudgetMs: 10000,
+        task: async () => {
+          const freshSub = await getCachedSubscription(businessId).catch(() => null);
+          if (freshSub) {
+            const freshCtx = evaluateBillingContext(freshSub, new Date());
+            prewarmState.lastKnownValidSubscription.set(businessId, freshSub);
+            prewarmState.lastKnownValidBilling.set(businessId, freshCtx);
+          }
+          return {};
+        }
+      }).catch(() => null);
+    }
+
+    emitPerformanceMetric({
+      name: "PROJECTION_MS",
+      value: Date.now() - startedAt,
+      businessId,
+      route: "billing_context",
+      metadata: {
+        planKey: context.planKey,
+        status: context.status,
+        checkoutHydrationMode: "stale_first_non_blocking",
+      },
+    });
+
+    return {
+      subscription,
+      context,
+    };
+  }
   
   // 1. Check for authoritative LKV first (covers memory LKV, Redis cache, and DB ledger)
   const authoritativeLkv = await getAuthoritativeSubscriptionLKV(businessId, now);
@@ -786,7 +866,9 @@ export const attachBillingContext = async (
       });
     }
 
-    const isCheckoutPath = String(req.originalUrl || "").includes("/checkout");
+    const isCheckout =
+      String(req.originalUrl || "").includes("/checkout") ||
+      String(req.query?.surface || "").trim().toLowerCase() === "checkout";
     
     let subscription = null;
     let context = getBaseContext();
@@ -794,7 +876,7 @@ export const attachBillingContext = async (
     try {
       const result = await loadBillingContext(
         businessId,
-        { skipStripeFallback: isCheckoutPath }
+        { skipStripeFallback: isCheckout, isCheckout: isCheckout }
       );
       subscription = result.subscription;
       context = result.context;

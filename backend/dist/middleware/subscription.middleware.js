@@ -15,6 +15,7 @@ const feature_service_1 = require("../services/feature.service");
 const prewarmState_1 = require("../services/prewarmState");
 const prewarm_service_1 = require("../services/prewarm.service");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
+const projectionCoordinator_service_1 = require("../services/projectionCoordinator.service");
 (0, prewarm_service_1.registerBillingPrewarmer)(async (businessId) => {
     await (0, exports.loadBillingContext)(businessId).catch(() => null);
 });
@@ -515,6 +516,80 @@ const getEarlyAccessSnapshot = async (subscription) => {
 const loadBillingContext = async (businessId, options) => {
     const startedAt = Date.now();
     const now = new Date();
+    if (options?.isCheckout) {
+        const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(businessId);
+        const lkvBill = prewarmState_1.prewarmState.lastKnownValidBilling.get(businessId);
+        let subscription = lkvSub || null;
+        let context = lkvBill ? { ...lkvBill } : getBaseContext();
+        if (!lkvSub || !lkvBill) {
+            const memoryEntry = subscriptionMemoryCache.get(businessId);
+            if (memoryEntry?.value) {
+                subscription = memoryEntry.value;
+                context = (0, exports.evaluateBillingContext)(memoryEntry.value, now);
+            }
+        }
+        const earlyAccessCacheKey = EARLY_ACCESS_CACHE_KEY;
+        const cachedEarly = earlyAccessCache.get(earlyAccessCacheKey);
+        if (cachedEarly && cachedEarly.expiresAt > Date.now()) {
+            context.allowEarly = cachedEarly.value.allowEarly;
+            context.remainingEarly = cachedEarly.value.remainingEarly;
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "CACHE_HIT",
+                businessId,
+                route: "early_access_projection",
+                metadata: {
+                    cache: "memory_early_access",
+                },
+            });
+        }
+        else {
+            context.allowEarly = false;
+            context.remainingEarly = 0;
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "CACHE_MISS",
+                businessId,
+                route: "early_access_projection",
+                metadata: {
+                    cache: "memory_early_access",
+                },
+            });
+        }
+        // Spawn background projection/hydration repair asynchronously without awaiting
+        const billingCacheKey = (0, exports.getBillingCacheKey)(businessId);
+        const memoryEntry = subscriptionMemoryCache.get(businessId);
+        if (!memoryEntry?.promise) {
+            void (0, projectionCoordinator_service_1.runProjectionComputeTask)({
+                cacheKey: billingCacheKey,
+                label: "billing_projection",
+                businessId,
+                computeBudgetMs: 10000,
+                task: async () => {
+                    const freshSub = await getCachedSubscription(businessId).catch(() => null);
+                    if (freshSub) {
+                        const freshCtx = (0, exports.evaluateBillingContext)(freshSub, new Date());
+                        prewarmState_1.prewarmState.lastKnownValidSubscription.set(businessId, freshSub);
+                        prewarmState_1.prewarmState.lastKnownValidBilling.set(businessId, freshCtx);
+                    }
+                    return {};
+                }
+            }).catch(() => null);
+        }
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "PROJECTION_MS",
+            value: Date.now() - startedAt,
+            businessId,
+            route: "billing_context",
+            metadata: {
+                planKey: context.planKey,
+                status: context.status,
+                checkoutHydrationMode: "stale_first_non_blocking",
+            },
+        });
+        return {
+            subscription,
+            context,
+        };
+    }
     // 1. Check for authoritative LKV first (covers memory LKV, Redis cache, and DB ledger)
     const authoritativeLkv = await (0, exports.getAuthoritativeSubscriptionLKV)(businessId, now);
     if (authoritativeLkv) {
@@ -637,11 +712,12 @@ const attachBillingContext = async (req, res, next) => {
                 message: "Unauthorized",
             });
         }
-        const isCheckoutPath = String(req.originalUrl || "").includes("/checkout");
+        const isCheckout = String(req.originalUrl || "").includes("/checkout") ||
+            String(req.query?.surface || "").trim().toLowerCase() === "checkout";
         let subscription = null;
         let context = getBaseContext();
         try {
-            const result = await (0, exports.loadBillingContext)(businessId, { skipStripeFallback: isCheckoutPath });
+            const result = await (0, exports.loadBillingContext)(businessId, { skipStripeFallback: isCheckout, isCheckout: isCheckout });
             subscription = result.subscription;
             context = result.context;
         }

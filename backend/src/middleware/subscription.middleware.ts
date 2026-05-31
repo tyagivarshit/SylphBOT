@@ -787,10 +787,20 @@ export const attachBillingContext = async (
     }
 
     const isCheckoutPath = String(req.originalUrl || "").includes("/checkout");
-    const { subscription, context } = await loadBillingContext(
-      businessId,
-      { skipStripeFallback: isCheckoutPath }
-    );
+    
+    let subscription = null;
+    let context = getBaseContext();
+
+    try {
+      const result = await loadBillingContext(
+        businessId,
+        { skipStripeFallback: isCheckoutPath }
+      );
+      subscription = result.subscription;
+      context = result.context;
+    } catch (loadError) {
+      console.warn("Non-critical loadBillingContext failed, continuing checkout in degraded mode:", loadError);
+    }
 
     (req as any).subscription = subscription;
     (req as any).billing = context;

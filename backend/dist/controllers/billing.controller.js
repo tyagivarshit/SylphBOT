@@ -817,7 +817,7 @@ class BillingController {
             };
         }
         const [billingContext, usage, invoicesRaw] = await Promise.all([
-            (0, subscription_middleware_1.loadBillingContext)(businessId),
+            (0, subscription_middleware_1.loadBillingContext)(businessId, { skipStripeFallback: lightweight }),
             lightweight ? Promise.resolve(null) : (0, usage_service_1.getUsageOverview)(businessId),
             prisma_1.default.invoiceLedger.findMany({
                 where: {

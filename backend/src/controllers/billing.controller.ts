@@ -1118,7 +1118,7 @@ export class BillingController {
     }
 
     const [billingContext, usage, invoicesRaw] = await Promise.all([
-      loadBillingContext(businessId),
+      loadBillingContext(businessId, { skipStripeFallback: lightweight }),
       lightweight ? Promise.resolve(null) : getUsageOverview(businessId),
       prisma.invoiceLedger.findMany({
         where: {

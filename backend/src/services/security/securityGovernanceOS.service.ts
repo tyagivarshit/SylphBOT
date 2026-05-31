@@ -1333,7 +1333,20 @@ export const upsertIdentityLedger = async (input: {
     tenantId || businessId || "global",
     userId || input.externalSubject || "anonymous",
   ]).slice(0, 24)}`;
-  const existing = getStore().identityLedger.get(identityKey);
+  
+  let existing = getStore().identityLedger.get(identityKey);
+  if (!existing && !shouldUseInMemory) {
+    const dbRow = await db.identityLedger.findUnique({
+      where: {
+        identityKey,
+      },
+    }).catch(() => null);
+    if (dbRow) {
+      existing = dbRow;
+      getStore().identityLedger.set(identityKey, dbRow);
+    }
+  }
+
   const timestamp = now();
   const requestedMfaState = String(input.mfaState || "").trim().toUpperCase();
   const resolvedMfaState =
@@ -1346,6 +1359,22 @@ export const upsertIdentityLedger = async (input: {
     input.encryptedRef === undefined
       ? existing?.encryptedRef || null
       : input.encryptedRef || null;
+
+  const deviceTrust = toRecord(input.deviceTrust);
+  const metadata = toRecord(input.metadata);
+
+  // Determine if any database writes are actually necessary
+  let isChanged = false;
+  if (!existing) {
+    isChanged = true;
+  } else {
+    if (String(input.roleKey || "").trim() !== String(existing.roleKey || "").trim()) isChanged = true;
+    if (resolvedMfaState !== existing.mfaState) isChanged = true;
+    if (resolvedEncryptedRef !== existing.encryptedRef) isChanged = true;
+    if (JSON.stringify(deviceTrust) !== JSON.stringify(existing.deviceTrust)) isChanged = true;
+    if (JSON.stringify(metadata) !== JSON.stringify(existing.metadata)) isChanged = true;
+  }
+
   const row = {
     identityKey,
     businessId,
@@ -1356,33 +1385,38 @@ export const upsertIdentityLedger = async (input: {
     roleKey: String(input.roleKey || "").trim() || null,
     status: "ACTIVE",
     mfaState: resolvedMfaState,
-    deviceTrust: toRecord(input.deviceTrust),
+    deviceTrust,
     riskScore: toNumber(existing?.riskScore, 0),
-    version: existing ? Number(existing.version || 1) + 1 : 1,
+    version: existing ? Number(existing.version || 1) + (isChanged ? 1 : 0) : 1,
     encryptedRef: resolvedEncryptedRef,
-    metadata: toRecord(input.metadata),
+    metadata,
     createdAt: existing?.createdAt || timestamp,
-    updatedAt: timestamp,
+    updatedAt: isChanged ? timestamp : (existing?.updatedAt || timestamp),
   };
+
   getStore().identityLedger.set(identityKey, row);
   bumpAuthority("IdentityLedger");
-  await withDbMirror(() =>
-    db.identityLedger.upsert({
-      where: {
-        identityKey,
-      },
-      update: {
-        roleKey: row.roleKey,
-        mfaState: row.mfaState,
-        deviceTrust: row.deviceTrust,
-        riskScore: row.riskScore,
-        version: row.version,
-        encryptedRef: row.encryptedRef,
-        metadata: row.metadata,
-      },
-      create: row,
-    })
-  );
+
+  if (isChanged) {
+    await withDbMirror(() =>
+      db.identityLedger.upsert({
+        where: {
+          identityKey,
+        },
+        update: {
+          roleKey: row.roleKey,
+          mfaState: row.mfaState,
+          deviceTrust: row.deviceTrust,
+          riskScore: row.riskScore,
+          version: row.version,
+          encryptedRef: row.encryptedRef,
+          metadata: row.metadata,
+        },
+        create: row,
+      })
+    );
+  }
+
   return row;
 };
 
@@ -2613,17 +2647,30 @@ export const trackSessionAnomaly = async (input: {
 
   assertActive("session_anomaly.start");
   const store = getStore();
-  const existing =
-    store.sessionLedger.get(input.sessionKey) ||
-    (await issueSessionLedger({
-      businessId: input.businessId || null,
-      tenantId: input.tenantId || null,
-      userId: input.userId || null,
-      sessionKey: input.sessionKey,
-      ip: input.ip || null,
-      userAgent: input.userAgent || null,
-      deviceId: input.deviceId || null,
-    }));
+  let existing = store.sessionLedger.get(input.sessionKey);
+  if (!existing) {
+    const dbRow = !shouldUseInMemory
+      ? await db.sessionLedger.findUnique({
+          where: {
+            sessionKey: input.sessionKey,
+          },
+        }).catch(() => null)
+      : null;
+    if (dbRow) {
+      existing = dbRow;
+      store.sessionLedger.set(input.sessionKey, dbRow);
+    } else {
+      existing = await issueSessionLedger({
+        businessId: input.businessId || null,
+        tenantId: input.tenantId || null,
+        userId: input.userId || null,
+        sessionKey: input.sessionKey,
+        ip: input.ip || null,
+        userAgent: input.userAgent || null,
+        deviceId: input.deviceId || null,
+      });
+    }
+  }
   assertActive("session_anomaly.issued");
 
   if (store.revokedSessionKeys.has(existing.sessionKey)) {

@@ -2196,7 +2196,12 @@ const emitCheckoutMetric = (
         ? getBillingProjectionCacheKey(businessId, currencyHint)
         : null;
 
-      if (surface === "checkout") {
+      const isCheckoutSurface =
+        surface === "checkout" ||
+        String(req.originalUrl || "").includes("/checkout") ||
+        String(req.originalUrl || "").includes("surface=checkout");
+
+      if (isCheckoutSurface) {
         let cachedVal: any = null;
         if (cacheKey) {
           const cached = billingProjectionCache.get(cacheKey);

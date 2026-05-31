@@ -516,7 +516,13 @@ const getEarlyAccessSnapshot = async (subscription) => {
 const loadBillingContext = async (businessId, options) => {
     const startedAt = Date.now();
     const now = new Date();
-    if (options?.isCheckout) {
+    const currentStore = requestLifecycle_1.requestStorage.getStore();
+    const currentReq = currentStore?.req;
+    const isCheckout = Boolean(options?.isCheckout) ||
+        Boolean(currentReq && (String(currentReq.originalUrl || "").includes("/checkout") ||
+            String(currentReq.originalUrl || "").includes("surface=checkout") ||
+            String(currentReq.query?.surface || "").trim().toLowerCase() === "checkout"));
+    if (isCheckout) {
         const lkvSub = prewarmState_1.prewarmState.lastKnownValidSubscription.get(businessId);
         const lkvBill = prewarmState_1.prewarmState.lastKnownValidBilling.get(businessId);
         let subscription = lkvSub || null;

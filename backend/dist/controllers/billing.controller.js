@@ -1768,7 +1768,10 @@ class BillingController {
             const cacheKey = businessId
                 ? getBillingProjectionCacheKey(businessId, currencyHint)
                 : null;
-            if (surface === "checkout") {
+            const isCheckoutSurface = surface === "checkout" ||
+                String(req.originalUrl || "").includes("/checkout") ||
+                String(req.originalUrl || "").includes("surface=checkout");
+            if (isCheckoutSurface) {
                 let cachedVal = null;
                 if (cacheKey) {
                     const cached = billingProjectionCache.get(cacheKey);

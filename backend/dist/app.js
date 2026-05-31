@@ -257,7 +257,16 @@ app.use((req, res, next) => {
     next();
 });
 app.use(requestContext_middleware_1.requestContextMiddleware);
-app.use((0, compression_1.default)());
+app.use((0, compression_1.default)({
+    filter: (req, res) => {
+        const statusCode = res.statusCode;
+        if ((statusCode >= 300 && statusCode < 400) ||
+            res.getHeader("Location")) {
+            return false;
+        }
+        return compression_1.default.filter(req, res);
+    },
+}));
 app.use((0, cors_1.default)(corsOptions));
 app.options(/.*/, (0, cors_1.default)(corsOptions));
 app.use(rateLimit_middleware_1.globalLimiter);
@@ -314,6 +323,7 @@ app.use((req, res, next) => {
             });
             return res;
         }
+        res.setHeader("Connection", "close");
         const response = originalRedirect(...args);
         markExplicitFinalResponseWrite(res);
         return response;
@@ -400,6 +410,7 @@ app.use((req, res, next) => {
         });
     });
     res.on("finish", () => {
+        res.setTimeout(0);
         (0, requestLifecycle_1.markRequestLifecycleAborted)({
             req,
             res,

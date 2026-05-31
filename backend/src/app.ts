@@ -331,7 +331,20 @@ app.use((req, res, next) => {
 });
 
 app.use(requestContextMiddleware);
-app.use(compression());
+app.use(
+  compression({
+    filter: (req, res) => {
+      const statusCode = res.statusCode;
+      if (
+        (statusCode >= 300 && statusCode < 400) ||
+        res.getHeader("Location")
+      ) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  })
+);
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(globalLimiter);
@@ -392,6 +405,8 @@ app.use((req, res, next) => {
       });
       return res;
     }
+
+    res.setHeader("Connection", "close");
 
     const response = (
       originalRedirect as (...redirectArgs: unknown[]) => typeof res
@@ -488,6 +503,7 @@ app.use((req, res, next) => {
   });
 
   res.on("finish", () => {
+    res.setTimeout(0);
     markRequestLifecycleAborted({
       req,
       res,

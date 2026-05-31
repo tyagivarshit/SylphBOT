@@ -23,19 +23,21 @@ export const auditRequest = (
         return;
       }
 
-      void createAuditLog({
-        action,
-        userId: req.user?.id || null,
-        businessId: getRequestBusinessId(req),
-        metadata: {
-          method: req.method,
-          path: req.originalUrl,
-          statusCode: res.statusCode,
-          ...(buildMetadata ? buildMetadata(req, res) : {}),
-        },
-        ip: getIpAddress(req),
-        userAgent: getUserAgent(req),
-        requestId: req.requestId || null,
+      setImmediate(() => {
+        void createAuditLog({
+          action,
+          userId: req.user?.id || null,
+          businessId: getRequestBusinessId(req),
+          metadata: {
+            method: req.method,
+            path: req.originalUrl,
+            statusCode: res.statusCode,
+            ...(buildMetadata ? buildMetadata(req, res) : {}),
+          },
+          ip: getIpAddress(req),
+          userAgent: getUserAgent(req),
+          requestId: req.requestId || null,
+        });
       });
     });
 

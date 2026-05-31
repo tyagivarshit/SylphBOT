@@ -91,53 +91,55 @@ export const monitoringMiddleware = (
     );
 
     if (shouldPersistDetailedObservability) {
-      void recordTraceLedger({
-        traceId,
-        correlationId: traceId,
-        businessId,
-        tenantId: businessId,
-        leadId:
-          typeof req.query?.leadId === "string"
-            ? req.query.leadId
-            : null,
-        stage: `http:${req.method}:${req.originalUrl}`,
-        status: statusCode >= 500 ? "FAILED" : "COMPLETED",
-        endedAt: new Date(),
-        metadata: {
-          statusCode,
-          durationMs,
-        },
-      }).catch(() => undefined);
-
-      void recordObservabilityEvent({
-        businessId,
-        tenantId: businessId,
-        eventType: "http.request.completed",
-        message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
-        severity:
-          statusCode >= 500
-            ? "error"
-            : statusCode >= 400
-            ? "warn"
-            : "info",
-        context: {
+      setImmediate(() => {
+        void recordTraceLedger({
           traceId,
           correlationId: traceId,
+          businessId,
           tenantId: businessId,
-          component: "http",
-          phase: "reception",
-        },
-        metadata: {
-          statusCode,
-          durationMs,
-          method: req.method,
-          route: req.originalUrl,
-          priorityClass,
-          queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
-          inflightRequestCount,
-          eventLoopLagMs,
-        },
-      }).catch(() => undefined);
+          leadId:
+            typeof req.query?.leadId === "string"
+              ? req.query.leadId
+              : null,
+          stage: `http:${req.method}:${req.originalUrl}`,
+          status: statusCode >= 500 ? "FAILED" : "COMPLETED",
+          endedAt: new Date(),
+          metadata: {
+            statusCode,
+            durationMs,
+          },
+        }).catch(() => undefined);
+
+        void recordObservabilityEvent({
+          businessId,
+          tenantId: businessId,
+          eventType: "http.request.completed",
+          message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
+          severity:
+            statusCode >= 500
+              ? "error"
+              : statusCode >= 400
+              ? "warn"
+              : "info",
+          context: {
+            traceId,
+            correlationId: traceId,
+            tenantId: businessId,
+            component: "http",
+            phase: "reception",
+          },
+          metadata: {
+            statusCode,
+            durationMs,
+            method: req.method,
+            route: req.originalUrl,
+            priorityClass,
+            queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
+            inflightRequestCount,
+            eventLoopLagMs,
+          },
+        }).catch(() => undefined);
+      });
     }
 
     emitPerformanceMetric({

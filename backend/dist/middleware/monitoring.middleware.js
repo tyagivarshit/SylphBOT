@@ -68,50 +68,52 @@ const monitoringMiddleware = (req, res, next) => {
             eventLoopLagMs,
         }, "Request completed");
         if (shouldPersistDetailedObservability) {
-            void (0, reliabilityOS_service_1.recordTraceLedger)({
-                traceId,
-                correlationId: traceId,
-                businessId,
-                tenantId: businessId,
-                leadId: typeof req.query?.leadId === "string"
-                    ? req.query.leadId
-                    : null,
-                stage: `http:${req.method}:${req.originalUrl}`,
-                status: statusCode >= 500 ? "FAILED" : "COMPLETED",
-                endedAt: new Date(),
-                metadata: {
-                    statusCode,
-                    durationMs,
-                },
-            }).catch(() => undefined);
-            void (0, reliabilityOS_service_1.recordObservabilityEvent)({
-                businessId,
-                tenantId: businessId,
-                eventType: "http.request.completed",
-                message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
-                severity: statusCode >= 500
-                    ? "error"
-                    : statusCode >= 400
-                        ? "warn"
-                        : "info",
-                context: {
+            setImmediate(() => {
+                void (0, reliabilityOS_service_1.recordTraceLedger)({
                     traceId,
                     correlationId: traceId,
+                    businessId,
                     tenantId: businessId,
-                    component: "http",
-                    phase: "reception",
-                },
-                metadata: {
-                    statusCode,
-                    durationMs,
-                    method: req.method,
-                    route: req.originalUrl,
-                    priorityClass,
-                    queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
-                    inflightRequestCount,
-                    eventLoopLagMs,
-                },
-            }).catch(() => undefined);
+                    leadId: typeof req.query?.leadId === "string"
+                        ? req.query.leadId
+                        : null,
+                    stage: `http:${req.method}:${req.originalUrl}`,
+                    status: statusCode >= 500 ? "FAILED" : "COMPLETED",
+                    endedAt: new Date(),
+                    metadata: {
+                        statusCode,
+                        durationMs,
+                    },
+                }).catch(() => undefined);
+                void (0, reliabilityOS_service_1.recordObservabilityEvent)({
+                    businessId,
+                    tenantId: businessId,
+                    eventType: "http.request.completed",
+                    message: `${req.method} ${req.originalUrl} -> ${statusCode}`,
+                    severity: statusCode >= 500
+                        ? "error"
+                        : statusCode >= 400
+                            ? "warn"
+                            : "info",
+                    context: {
+                        traceId,
+                        correlationId: traceId,
+                        tenantId: businessId,
+                        component: "http",
+                        phase: "reception",
+                    },
+                    metadata: {
+                        statusCode,
+                        durationMs,
+                        method: req.method,
+                        route: req.originalUrl,
+                        priorityClass,
+                        queueWaitMs: Number.isFinite(queueWaitMs) ? queueWaitMs : 0,
+                        inflightRequestCount,
+                        eventLoopLagMs,
+                    },
+                }).catch(() => undefined);
+            });
         }
         (0, performanceMetrics_1.emitPerformanceMetric)({
             name: "API_MS",

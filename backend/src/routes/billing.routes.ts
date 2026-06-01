@@ -55,6 +55,22 @@ router.get(
   auditRequest("billing.checkout_requested"),
   BillingController.startCheckoutRedirect
 );
+router.get(
+  "/checkout/instant",
+  protect,
+  requireBusinessContext,
+  requirePermission("billing:manage"),
+  auditRequest("billing.instant_checkout_requested"),
+  BillingController.instantCheckout
+);
+router.post(
+  "/checkout/instant",
+  protect,
+  requireBusinessContext,
+  requirePermission("billing:manage"),
+  auditRequest("billing.instant_checkout_requested"),
+  BillingController.instantCheckout
+);
 router.post(
   "/checkout",
   protect,

@@ -20,6 +20,12 @@ import {
   getPublicPricingPlans,
   TRIAL_DAYS,
 } from "../config/pricing.config";
+import {
+  getStripePriceId,
+  type BillingInterval,
+  type PlanType,
+  type PricingCurrency,
+} from "../config/stripe.price.map";
 import { getUsageOverview } from "../services/usage.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import { stripe } from "../services/stripe.service";
@@ -113,6 +119,7 @@ const BILLING_PROJECTION_COMPUTE_BUDGET_MS = 6_500;
 const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 const CHECKOUT_IN_FLIGHT_WINDOW_MS = 20_000;
 const CHECKOUT_CONFIRM_IN_FLIGHT_WINDOW_MS = 30_000;
+const INSTANT_CHECKOUT_IN_FLIGHT_WINDOW_MS = 10_000;
 
 const billingProjectionCache = new Map<
   string,
@@ -135,6 +142,13 @@ const checkoutConfirmInFlight = new Map<
   {
     startedAt: number;
     promise: Promise<void>;
+  }
+>();
+const instantCheckoutInFlight = new Map<
+  string,
+  {
+    startedAt: number;
+    requestId: string | null;
   }
 >();
 
@@ -1315,6 +1329,331 @@ export class BillingController {
     return `${appBaseUrl}/billing?${query.toString()}`;
   }
 
+  static async instantCheckout(req: Request, res: Response) {
+    const startedAt = Date.now();
+    const requestId = String(req.requestId || "").trim() || null;
+    const stageTimings: Array<{ stage: string; stageMs: number; elapsedMs: number }> = [];
+    let lastStageAt = startedAt;
+    let inFlightKey: string | null = null;
+    const normalizeStage = (value: string) =>
+      String(value || "stage")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 48) || "stage";
+    const markStage = (stage: string, details?: Record<string, unknown>) => {
+      const now = Date.now();
+      const timing = {
+        stage,
+        stageMs: now - lastStageAt,
+        elapsedMs: now - startedAt,
+      };
+      lastStageAt = now;
+      stageTimings.push(timing);
+      console.info("INSTANT_CHECKOUT_STAGE_OK", {
+        requestId,
+        stage,
+        stageMs: timing.stageMs,
+        elapsedMs: timing.elapsedMs,
+        ...(details || {}),
+      });
+    };
+    const setTimingHeaders = (outcome: "success" | "failed") => {
+      if (res.headersSent || res.writableEnded) {
+        return;
+      }
+
+      const totalMs = Date.now() - startedAt;
+      const slowestStage =
+        stageTimings.reduce<(typeof stageTimings)[number] | null>((slowest, stage) => {
+          if (!slowest || stage.stageMs > slowest.stageMs) {
+            return stage;
+          }
+          return slowest;
+        }, null) || null;
+
+      res.setHeader("X-Checkout-Mode", "instant");
+      res.setHeader("X-Checkout-Outcome", outcome);
+      res.setHeader("X-Checkout-Request-Id", requestId || "");
+      res.setHeader("X-Checkout-Total-Ms", String(Math.max(0, Math.floor(totalMs))));
+      res.setHeader(
+        "X-Checkout-Stage-Timings",
+        stageTimings
+          .map(
+            (timing) =>
+              `${normalizeStage(timing.stage)}=${Math.max(0, Math.floor(timing.stageMs))};e=${Math.max(
+                0,
+                Math.floor(timing.elapsedMs)
+              )}`
+          )
+          .join(",")
+          .slice(0, 3500)
+      );
+      if (slowestStage) {
+        res.setHeader(
+          "X-Checkout-Slowest-Stage",
+          `${normalizeStage(slowestStage.stage)}:${Math.max(0, Math.floor(slowestStage.stageMs))}`
+        );
+      }
+      res.setHeader(
+        "Server-Timing",
+        [
+          `instant_checkout_total;dur=${Math.max(0, Math.floor(totalMs))}`,
+          ...stageTimings.map(
+            (timing) =>
+              `instant_${normalizeStage(timing.stage)};dur=${Math.max(
+                0,
+                Math.floor(timing.stageMs)
+              )}`
+          ),
+        ]
+          .join(", ")
+          .slice(0, 3500)
+      );
+    };
+    const fail = (status: number, reason: string, message: string) => {
+      setTimingHeaders("failed");
+      console.error("INSTANT_CHECKOUT_FAIL", {
+        requestId,
+        status,
+        reason,
+        elapsedMs: Date.now() - startedAt,
+        stages: stageTimings,
+      });
+
+      if (String(req.method || "").toUpperCase() === "GET") {
+        return res.redirect(303, BillingController.buildCheckoutFailureRedirect(reason));
+      }
+
+      return res.status(status).json({
+        success: false,
+        message,
+        reason,
+      });
+    };
+
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+
+    const requestBody =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const requestQuery =
+      req.query && typeof req.query === "object" && !Array.isArray(req.query)
+        ? (req.query as Record<string, unknown>)
+        : {};
+    const readInput = (key: string) => {
+      const bodyValue = requestBody[key];
+      if (bodyValue !== undefined && bodyValue !== null && bodyValue !== "") {
+        return bodyValue;
+      }
+
+      const queryValue = requestQuery[key];
+      if (Array.isArray(queryValue)) {
+        return queryValue[0];
+      }
+
+      return queryValue;
+    };
+
+    try {
+      const businessId = BillingController.getBusinessIdFromRequest(req);
+      const userId = String(req.user?.id || "").trim();
+      const email = String(req.user?.email || "").trim().toLowerCase();
+      markStage("context.resolved", {
+        businessId: businessId || null,
+        userId: userId || null,
+      });
+
+      if (!businessId || !userId) {
+        return fail(403, "business_context_required", "Business context is required");
+      }
+
+      const normalizedPlan = String(readInput("plan") || "")
+        .trim()
+        .toUpperCase() as PlanType;
+      const normalizedBilling = String(readInput("billing") || "monthly")
+        .trim()
+        .toLowerCase() as BillingInterval;
+      const requestedQuantity = Number(readInput("seats") || readInput("quantity") || 1);
+      const quantity = Math.max(
+        1,
+        Math.min(500, Math.floor(Number.isFinite(requestedQuantity) ? requestedQuantity : 1))
+      );
+      const allowedPlans = new Set<PlanType>(["BASIC", "PRO", "ELITE"]);
+      const allowedBilling = new Set<BillingInterval>(["monthly", "yearly"]);
+
+      if (!allowedPlans.has(normalizedPlan)) {
+        return fail(400, "invalid_plan", "Invalid plan selected");
+      }
+
+      if (!allowedBilling.has(normalizedBilling)) {
+        return fail(400, "invalid_billing", "Invalid billing cycle");
+      }
+
+      const currency = resolveBillingCurrency(req) as PricingCurrency;
+      const priceId = getStripePriceId({
+        plan: normalizedPlan,
+        currency,
+        billing: normalizedBilling,
+        early: false,
+      });
+      markStage("pricing.resolved", {
+        businessId,
+        plan: normalizedPlan,
+        billingCycle: normalizedBilling,
+        currency,
+        priceIdConfigured: Boolean(priceId),
+      });
+
+      if (!priceId) {
+        return fail(503, "stripe_price_mapping_missing", "Stripe price is not configured");
+      }
+
+      const activeSubscription = await prisma.subscriptionLedger.findFirst({
+        where: {
+          businessId,
+          status: {
+            in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
+          },
+        },
+        select: {
+          planCode: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
+      markStage("subscription.checked", {
+        businessId,
+        activePlanCode: activeSubscription?.planCode || null,
+      });
+
+      if (
+        activeSubscription?.planCode &&
+        String(activeSubscription.planCode || "").trim().toUpperCase() === normalizedPlan
+      ) {
+        return fail(409, "already_subscribed", "You are already subscribed to this plan");
+      }
+
+      assertStripeConfigReady({
+        requireWebhookSecret: true,
+      });
+      markStage("stripe.config_ready", {
+        businessId,
+      });
+
+      const checkoutAttemptRaw = String(
+        readInput("attempt") || readInput("checkoutAttempt") || ""
+      ).trim();
+      const checkoutAttempt =
+        checkoutAttemptRaw
+          .replace(/[^a-zA-Z0-9._-]/g, "")
+          .slice(0, 80) || crypto.randomUUID().replace(/-/g, "");
+      inFlightKey = `${businessId}:${normalizedPlan}:${normalizedBilling}:instant`;
+      const currentInFlight = instantCheckoutInFlight.get(inFlightKey);
+      if (
+        currentInFlight &&
+        Date.now() - currentInFlight.startedAt <= INSTANT_CHECKOUT_IN_FLIGHT_WINDOW_MS
+      ) {
+        return fail(409, "checkout_in_progress", "Another checkout is already in progress");
+      }
+      instantCheckoutInFlight.set(inFlightKey, {
+        startedAt: Date.now(),
+        requestId,
+      });
+
+      const successUrl =
+        `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}` +
+        `&plan=${encodeURIComponent(normalizedPlan)}` +
+        `&billing=${encodeURIComponent(normalizedBilling)}` +
+        `&mode=instant&attempt=${encodeURIComponent(checkoutAttempt)}`;
+      const cancelUrl =
+        `${env.FRONTEND_URL}/billing/cancel?plan=${encodeURIComponent(normalizedPlan)}` +
+        `&billing=${encodeURIComponent(normalizedBilling)}&mode=instant`;
+      const metadata: Record<string, string> = {
+        businessId,
+        userId,
+        checkoutMode: "instant",
+        checkoutAttempt,
+        checkoutStartRequestId: requestId || "",
+        planCode: normalizedPlan,
+        billingCycle: normalizedBilling,
+        quantity: String(quantity),
+        currency,
+      };
+      const stripeStartedAt = Date.now();
+      const session = await stripe.checkout.sessions.create(
+        {
+          mode: "subscription",
+          client_reference_id: checkoutAttempt,
+          customer_email: email || undefined,
+          allow_promotion_codes: true,
+          metadata,
+          subscription_data: {
+            metadata,
+          },
+          line_items: [
+            {
+              price: priceId,
+              quantity,
+            },
+          ],
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+          after_expiration: {
+            recovery: {
+              enabled: true,
+              allow_promotion_codes: true,
+            },
+          },
+          expires_at: Math.floor(Date.now() / 1000) + 2 * 60 * 60,
+        },
+        {
+          idempotencyKey: `instant_checkout:${businessId}:${normalizedPlan}:${normalizedBilling}:${checkoutAttempt}`,
+        }
+      );
+      markStage("stripe.session_created", {
+        businessId,
+        sessionId: session.id,
+        stripeMs: Date.now() - stripeStartedAt,
+      });
+
+      const checkoutUrl = String(session.url || "").trim();
+      if (!checkoutUrl) {
+        return fail(503, "checkout_url_missing", "Stripe checkout link is temporarily unavailable");
+      }
+
+      setTimingHeaders("success");
+      console.info("INSTANT_CHECKOUT_SUCCESS", {
+        requestId,
+        businessId,
+        sessionId: session.id,
+        plan: normalizedPlan,
+        billingCycle: normalizedBilling,
+        elapsedMs: Date.now() - startedAt,
+        stages: stageTimings,
+      });
+      return res.redirect(303, checkoutUrl);
+    } catch (error: any) {
+      const reason = String(error?.message || "instant_checkout_failed");
+      return fail(
+        reason.includes("stripe_config_invalid") ? 503 : 500,
+        reason.includes("stripe_config_invalid") ? "provider_unavailable" : "instant_checkout_failed",
+        reason.includes("stripe_config_invalid")
+          ? "Billing provider is temporarily unavailable. Please retry shortly."
+          : "Instant checkout failed"
+      );
+    } finally {
+      if (inFlightKey) {
+        instantCheckoutInFlight.delete(inFlightKey);
+      }
+    }
+  }
+
   private static async handleCheckout(
     req: Request,
     res: Response,
@@ -1376,6 +1715,83 @@ const emitCheckoutMetric = (
       checkoutStageTimings.push(timing);
       return timing;
     };
+    const normalizeTimingHeaderName = (value: string) =>
+      String(value || "stage")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 48) || "stage";
+    const getCheckoutTimingSnapshot = () => {
+      const totalCheckoutMs = Date.now() - checkoutStartedAt;
+      const requestStartedAt = Number(
+        (res.locals as Record<string, unknown> | undefined)?.requestTimeoutStartedAt ||
+          0
+      );
+      const totalRequestMs =
+        Number.isFinite(requestStartedAt) && requestStartedAt > 0
+          ? Date.now() - requestStartedAt
+          : totalCheckoutMs;
+      const stages = checkoutStageTimings.map((timing) => ({
+        stage: timing.stage,
+        stageMs: Math.max(0, Math.floor(timing.stageMs)),
+        elapsedMs: Math.max(0, Math.floor(timing.elapsedMs)),
+      }));
+      const slowestStage =
+        stages.reduce<(typeof stages)[number] | null>((slowest, stage) => {
+          if (!slowest || stage.stageMs > slowest.stageMs) {
+            return stage;
+          }
+          return slowest;
+        }, null) || null;
+
+      return {
+        totalCheckoutMs,
+        totalRequestMs,
+        stages,
+        slowestStage,
+      };
+    };
+    const setCheckoutTimingHeaders = (outcome: "success" | "failed") => {
+      if (isResponseCommitted()) {
+        return;
+      }
+
+      const snapshot = getCheckoutTimingSnapshot();
+      const stageHeader = snapshot.stages
+        .map(
+          (timing) =>
+            `${normalizeTimingHeaderName(timing.stage)}=${timing.stageMs};e=${timing.elapsedMs}`
+        )
+        .join(",");
+      const serverTiming = [
+        `checkout_total;dur=${Math.max(0, Math.floor(snapshot.totalCheckoutMs))}`,
+        `request_total;dur=${Math.max(0, Math.floor(snapshot.totalRequestMs))}`,
+        ...snapshot.stages.map(
+          (timing) =>
+            `checkout_${normalizeTimingHeaderName(timing.stage)};dur=${timing.stageMs}`
+        ),
+      ].join(", ");
+
+      res.setHeader("X-Checkout-Outcome", outcome);
+      res.setHeader("X-Checkout-Request-Id", checkoutRequestId || "");
+      res.setHeader(
+        "X-Checkout-Total-Ms",
+        String(Math.max(0, Math.floor(snapshot.totalCheckoutMs)))
+      );
+      res.setHeader(
+        "X-Checkout-Request-Total-Ms",
+        String(Math.max(0, Math.floor(snapshot.totalRequestMs)))
+      );
+      res.setHeader("X-Checkout-Stage-Timings", stageHeader.slice(0, 3500));
+      if (snapshot.slowestStage) {
+        res.setHeader(
+          "X-Checkout-Slowest-Stage",
+          `${normalizeTimingHeaderName(snapshot.slowestStage.stage)}:${snapshot.slowestStage.stageMs}`
+        );
+      }
+      res.setHeader("Server-Timing", serverTiming.slice(0, 3500));
+    };
     const reportCheckoutTiming = (
       outcome: "success" | "failed",
       details?: Record<string, unknown>
@@ -1384,9 +1800,9 @@ const emitCheckoutMetric = (
         return;
       }
       checkoutTimingReported = true;
-      const totalCheckoutMs = Date.now() - checkoutStartedAt;
+      const timingSnapshot = getCheckoutTimingSnapshot();
       setImmediate(() => {
-        emitCheckoutMetric("total_checkout_ms", totalCheckoutMs, {
+        emitCheckoutMetric("total_checkout_ms", timingSnapshot.totalCheckoutMs, {
           outcome,
           ...(details || {}),
         });
@@ -1395,8 +1811,10 @@ const emitCheckoutMetric = (
           route: req.originalUrl,
           method: req.method,
           outcome,
-          totalMs: totalCheckoutMs,
-          stages: checkoutStageTimings,
+          totalMs: timingSnapshot.totalCheckoutMs,
+          requestTotalMs: timingSnapshot.totalRequestMs,
+          slowestStage: timingSnapshot.slowestStage,
+          stages: timingSnapshot.stages,
           ...(details || {}),
         });
       });
@@ -1528,9 +1946,11 @@ const emitCheckoutMetric = (
       }
 
       if (redirectOnSuccess) {
+        setCheckoutTimingHeaders("failed");
         return res.redirect(303, BillingController.buildCheckoutFailureRedirect(input.reason));
       }
 
+      setCheckoutTimingHeaders("failed");
       return res.status(input.status).json({
         success: false,
         ...(input.code ? { code: input.code } : {}),
@@ -2018,6 +2438,7 @@ const emitCheckoutMetric = (
             proposalKey: readyProposal.proposalKey,
             paymentIntentKey: paymentIntent.paymentIntentKey,
           });
+          setCheckoutTimingHeaders("success");
           return res.redirect(303, checkoutUrl);
         }
 
@@ -2043,6 +2464,7 @@ const emitCheckoutMetric = (
           proposalKey: readyProposal.proposalKey,
           paymentIntentKey: paymentIntent.paymentIntentKey,
         });
+        setCheckoutTimingHeaders("success");
         return res.json({
           success: true,
           url: checkoutUrl,

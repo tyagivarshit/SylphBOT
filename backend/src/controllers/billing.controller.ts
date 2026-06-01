@@ -1098,10 +1098,12 @@ export class BillingController {
     req: Request,
     options?: {
       lightweight?: boolean;
+      isCheckout?: boolean;
     }
   ) {
     const startedAt = Date.now();
     const lightweight = Boolean(options?.lightweight);
+    const isCheckout = Boolean(options?.isCheckout);
     if (!businessId) {
       return {
         success: true,
@@ -1118,7 +1120,7 @@ export class BillingController {
     }
 
     const [billingContext, usage, invoicesRaw] = await Promise.all([
-      loadBillingContext(businessId, { skipStripeFallback: lightweight }),
+      loadBillingContext(businessId, { skipStripeFallback: lightweight || isCheckout, isCheckout }),
       lightweight ? Promise.resolve(null) : getUsageOverview(businessId),
       prisma.invoiceLedger.findMany({
         where: {
@@ -2220,11 +2222,12 @@ const emitCheckoutMetric = (
                 label: "billing_projection",
                 businessId,
                 computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                bypassCoordination: true,
                 task: () =>
                   BillingController.buildBillingResponse(
                     businessId,
                     req,
-                    { lightweight: true }
+                    { lightweight: true, isCheckout: true }
                   ) as Promise<Record<string, unknown>>,
               });
               const sharedProjectionPromise = computeProjection
@@ -2283,11 +2286,12 @@ const emitCheckoutMetric = (
                 label: "billing_projection",
                 businessId,
                 computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+                bypassCoordination: true,
                 task: () =>
                   BillingController.buildBillingResponse(
                     businessId,
                     req,
-                    { lightweight: true }
+                    { lightweight: true, isCheckout: true }
                   ) as Promise<Record<string, unknown>>,
               });
               const sharedProjectionPromise = computeProjection
@@ -2340,11 +2344,12 @@ const emitCheckoutMetric = (
               label: "billing_projection",
               businessId,
               computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
+              bypassCoordination: true,
               task: () =>
                 BillingController.buildBillingResponse(
                   businessId,
                   req,
-                  { lightweight: true }
+                  { lightweight: true, isCheckout: true }
                 ) as Promise<Record<string, unknown>>,
             });
             const sharedProjectionPromise = computeProjection

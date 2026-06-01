@@ -802,6 +802,7 @@ class BillingController {
     static async buildBillingResponse(businessId, req, options) {
         const startedAt = Date.now();
         const lightweight = Boolean(options?.lightweight);
+        const isCheckout = Boolean(options?.isCheckout);
         if (!businessId) {
             return {
                 success: true,
@@ -817,7 +818,7 @@ class BillingController {
             };
         }
         const [billingContext, usage, invoicesRaw] = await Promise.all([
-            (0, subscription_middleware_1.loadBillingContext)(businessId, { skipStripeFallback: lightweight }),
+            (0, subscription_middleware_1.loadBillingContext)(businessId, { skipStripeFallback: lightweight || isCheckout, isCheckout }),
             lightweight ? Promise.resolve(null) : (0, usage_service_1.getUsageOverview)(businessId),
             prisma_1.default.invoiceLedger.findMany({
                 where: {
@@ -1789,7 +1790,8 @@ class BillingController {
                                 label: "billing_projection",
                                 businessId,
                                 computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
-                                task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true }),
+                                bypassCoordination: true,
+                                task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true, isCheckout: true }),
                             });
                             const sharedProjectionPromise = computeProjection
                                 .then((value) => {
@@ -1842,7 +1844,8 @@ class BillingController {
                                 label: "billing_projection",
                                 businessId,
                                 computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
-                                task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true }),
+                                bypassCoordination: true,
+                                task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true, isCheckout: true }),
                             });
                             const sharedProjectionPromise = computeProjection
                                 .then((value) => {
@@ -1891,7 +1894,8 @@ class BillingController {
                             label: "billing_projection",
                             businessId,
                             computeBudgetMs: BILLING_PROJECTION_COMPUTE_BUDGET_MS,
-                            task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true }),
+                            bypassCoordination: true,
+                            task: () => BillingController.buildBillingResponse(businessId, req, { lightweight: true, isCheckout: true }),
                         });
                         const sharedProjectionPromise = computeProjection
                             .then((value) => {

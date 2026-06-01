@@ -998,6 +998,7 @@ const resolveBusinessId = async (input: {
   userBusinessId: string | null;
   preferredBusinessId?: string | null;
   allowWorkspaceFallback?: boolean;
+  isCheckout?: boolean;
 }) => {
   const fastPathBusinessId =
     String(input.userBusinessId || "").trim() ||
@@ -1023,6 +1024,7 @@ const resolveBusinessId = async (input: {
     preferredBusinessId: input.preferredBusinessId || null,
     bootstrapWorkspaceIfMissing: false,
     persistResolvedBusinessId: false,
+    isCheckout: input.isCheckout,
   });
 
   businessResolutionCache.set(cacheKey, identity.businessId);
@@ -1444,6 +1446,10 @@ export const protect = async (
   next: NextFunction
 ) => {
   const startedAt = Date.now();
+  const isCheckout =
+    String(req.originalUrl || "").includes("/checkout") ||
+    String(req.originalUrl || "").includes("surface=checkout") ||
+    String(req.query?.surface || "").trim().toLowerCase() === "checkout";
   const directLookupRoute = shouldUseDirectAuthLookup(req);
   const degradedAuthAllowed = !directLookupRoute && shouldServeDegradedAuth(req);
   const routeCritical = !directLookupRoute && isAuthStabilizationCriticalRoute(req);
@@ -1945,11 +1951,13 @@ export const protect = async (
         }
 
         const localAccessLookupKey = `${accessTokenKey}:${decoded.tokenVersion}`;
-        const requestLocalLookup = readRequestLocalLookupPromise(
-          req,
-          "access",
-          localAccessLookupKey
-        );
+        const requestLocalLookup = !isCheckout
+          ? readRequestLocalLookupPromise(
+              req,
+              "access",
+              localAccessLookupKey
+            )
+          : null;
         if (requestLocalLookup) {
           bumpAuthStats({
             coalescedWait: 1,
@@ -2151,7 +2159,9 @@ export const protect = async (
           return;
         }
 
-        const existingLookup = authContextInFlight.get(accessTokenKey);
+        const existingLookup = !isCheckout
+          ? authContextInFlight.get(accessTokenKey)
+          : null;
         if (existingLookup) {
           bumpAuthStats({
             coalescedWait: 1,
@@ -2219,6 +2229,7 @@ export const protect = async (
                     userBusinessId: user.businessId || null,
                     preferredBusinessId: decoded.businessId || null,
                     allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
+                    isCheckout,
                   }),
               });
 
@@ -2426,13 +2437,17 @@ export const protect = async (
 
     const hashed = hashToken(refreshToken);
     const refreshLookupKey = `${hashed}:${decoded.id}:${decoded.tokenVersion}`;
-    const requestLocalRefreshLookup = readRequestLocalLookupPromise(
-      req,
-      "refresh",
-      refreshLookupKey
-    );
+    const requestLocalRefreshLookup = !isCheckout
+      ? readRequestLocalLookupPromise(
+          req,
+          "refresh",
+          refreshLookupKey
+        )
+      : null;
     const sharedRefreshLookup =
-      requestLocalRefreshLookup || refreshAuthInFlight.get(refreshLookupKey) || null;
+      requestLocalRefreshLookup ||
+      (!isCheckout ? refreshAuthInFlight.get(refreshLookupKey) : null) ||
+      null;
     if (!sharedRefreshLookup && getAuthBudgetMs(req, res) < AUTH_DB_MIN_BUDGET_MS) {
       bumpAuthStats({
         deniedByBudget: 1,
@@ -2528,6 +2543,7 @@ export const protect = async (
               userBusinessId: user.businessId || null,
               preferredBusinessId: null,
               allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
+              isCheckout,
             }),
         });
 

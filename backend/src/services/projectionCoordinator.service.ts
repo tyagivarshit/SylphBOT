@@ -209,39 +209,63 @@ const runWithComputeBudget = async <T>(input: {
   businessId?: string | null;
   computeBudgetMs: number;
   task: () => Promise<T>;
+  bypassCoordination?: boolean;
 }): Promise<ProjectionOutcome<T>> => {
   const startedAt = Date.now();
   const computeBudgetMs = Math.max(1, Math.floor(input.computeBudgetMs));
 
   try {
-    const value = await queueProjectionCompute({
-      label: input.label,
-      key: input.key,
-      businessId: input.businessId,
-      task: async () => {
-        const taskPromise = Promise.resolve().then(input.task);
-        let timeoutHandle: NodeJS.Timeout | null = null;
-
-        try {
-          return await Promise.race([
-            taskPromise,
-            new Promise<T>((_, reject) => {
-              timeoutHandle = setTimeout(() => {
-                reject(
-                  new Error(
-                    `projection_budget_exceeded:compute_timeout:${input.label}:${computeBudgetMs}`
-                  )
-                );
-              }, computeBudgetMs);
-            }),
-          ]);
-        } finally {
-          if (timeoutHandle) {
-            clearTimeout(timeoutHandle);
+    const value = input.bypassCoordination
+      ? await (async () => {
+          const taskPromise = Promise.resolve().then(input.task);
+          let timeoutHandle: NodeJS.Timeout | null = null;
+          try {
+            return await Promise.race([
+              taskPromise,
+              new Promise<T>((_, reject) => {
+                timeoutHandle = setTimeout(() => {
+                  reject(
+                    new Error(
+                      `projection_budget_exceeded:compute_timeout:${input.label}:${computeBudgetMs}`
+                    )
+                  );
+                }, computeBudgetMs);
+              }),
+            ]);
+          } finally {
+            if (timeoutHandle) {
+              clearTimeout(timeoutHandle);
+            }
           }
-        }
-      },
-    });
+        })()
+      : await queueProjectionCompute({
+          label: input.label,
+          key: input.key,
+          businessId: input.businessId,
+          task: async () => {
+            const taskPromise = Promise.resolve().then(input.task);
+            let timeoutHandle: NodeJS.Timeout | null = null;
+
+            try {
+              return await Promise.race([
+                taskPromise,
+                new Promise<T>((_, reject) => {
+                  timeoutHandle = setTimeout(() => {
+                    reject(
+                      new Error(
+                        `projection_budget_exceeded:compute_timeout:${input.label}:${computeBudgetMs}`
+                      )
+                    );
+                  }, computeBudgetMs);
+                }),
+              ]);
+            } finally {
+              if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+              }
+            }
+          },
+        });
 
     const computeMs = Date.now() - startedAt;
     emitProjectionMetric({
@@ -301,10 +325,13 @@ const primeProjection = <T>(input: {
   staleTtlMs: number;
   computeBudgetMs: number;
   compute: () => Promise<T>;
+  bypassCoordination?: boolean;
 }) => {
-  const inflight = projectionInflight.get(input.cacheKey) as
-    | InflightProjectionEntry<T>
-    | undefined;
+  const inflight = input.bypassCoordination
+    ? undefined
+    : (projectionInflight.get(input.cacheKey) as
+        | InflightProjectionEntry<T>
+        | undefined);
 
   if (inflight?.promise) {
     inflight.waiters += 1;
@@ -330,6 +357,7 @@ const primeProjection = <T>(input: {
     businessId: input.businessId,
     computeBudgetMs: input.computeBudgetMs,
     task: input.compute,
+    bypassCoordination: input.bypassCoordination,
   })
     .then((outcome) => {
       if (outcome.status === "ok") {
@@ -350,14 +378,16 @@ const primeProjection = <T>(input: {
       }
     });
 
-  projectionInflight.set(input.cacheKey, {
-    key: input.cacheKey,
-    label: input.label,
-    businessId: toNullableBusinessId(input.businessId),
-    startedAt: Date.now(),
-    waiters: 1,
-    promise: projectionPromise as Promise<ProjectionOutcome<unknown>>,
-  });
+  if (!input.bypassCoordination) {
+    projectionInflight.set(input.cacheKey, {
+      key: input.cacheKey,
+      label: input.label,
+      businessId: toNullableBusinessId(input.businessId),
+      startedAt: Date.now(),
+      waiters: 1,
+      promise: projectionPromise as Promise<ProjectionOutcome<unknown>>,
+    });
+  }
 
   return {
     promise: projectionPromise,
@@ -450,6 +480,7 @@ export const getProjectionSnapshot = async <T>(input: {
   requestSignal?: AbortSignal | null;
   fallback: T | (() => T | Promise<T>);
   compute: () => Promise<T>;
+  bypassCoordination?: boolean;
 }): Promise<ProjectionSnapshotReadResult<T>> => {
   const nowMs = Date.now();
   const cached = projectionCache.get(input.cacheKey) as
@@ -487,6 +518,7 @@ export const getProjectionSnapshot = async <T>(input: {
         staleTtlMs: input.staleTtlMs,
         computeBudgetMs: input.computeBudgetMs,
         compute: input.compute,
+        bypassCoordination: input.bypassCoordination,
       });
     }
 
@@ -514,6 +546,7 @@ export const getProjectionSnapshot = async <T>(input: {
         staleTtlMs: input.staleTtlMs,
         computeBudgetMs: input.computeBudgetMs,
         compute: input.compute,
+        bypassCoordination: input.bypassCoordination,
       })
     : {
         promise: Promise.resolve({
@@ -646,6 +679,7 @@ export const runProjectionComputeTask = async <T>(input: {
   businessId?: string | null;
   computeBudgetMs: number;
   task: () => Promise<T>;
+  bypassCoordination?: boolean;
 }) => {
   const outcome = await runWithComputeBudget({
     key: input.cacheKey,
@@ -653,6 +687,7 @@ export const runProjectionComputeTask = async <T>(input: {
     businessId: input.businessId,
     computeBudgetMs: input.computeBudgetMs,
     task: input.task,
+    bypassCoordination: input.bypassCoordination,
   });
 
   if (outcome.status === "ok") {

@@ -689,6 +689,7 @@ const resolveBusinessId = async (input) => {
         preferredBusinessId: input.preferredBusinessId || null,
         bootstrapWorkspaceIfMissing: false,
         persistResolvedBusinessId: false,
+        isCheckout: input.isCheckout,
     });
     businessResolutionCache.set(cacheKey, identity.businessId);
     return identity.businessId;
@@ -1010,6 +1011,9 @@ const validateRefreshTokenDbOrGrace = async (hashedToken, userId) => {
 };
 const protect = async (req, res, next) => {
     const startedAt = Date.now();
+    const isCheckout = String(req.originalUrl || "").includes("/checkout") ||
+        String(req.originalUrl || "").includes("surface=checkout") ||
+        String(req.query?.surface || "").trim().toLowerCase() === "checkout";
     const directLookupRoute = shouldUseDirectAuthLookup(req);
     const degradedAuthAllowed = !directLookupRoute && shouldServeDegradedAuth(req);
     const routeCritical = !directLookupRoute && isAuthStabilizationCriticalRoute(req);
@@ -1406,7 +1410,9 @@ const protect = async (req, res, next) => {
                     return next();
                 }
                 const localAccessLookupKey = `${accessTokenKey}:${decoded.tokenVersion}`;
-                const requestLocalLookup = readRequestLocalLookupPromise(req, "access", localAccessLookupKey);
+                const requestLocalLookup = !isCheckout
+                    ? readRequestLocalLookupPromise(req, "access", localAccessLookupKey)
+                    : null;
                 if (requestLocalLookup) {
                     bumpAuthStats({
                         coalescedWait: 1,
@@ -1576,7 +1582,9 @@ const protect = async (req, res, next) => {
                 if (isRequestClosed(req, res)) {
                     return;
                 }
-                const existingLookup = authContextInFlight.get(accessTokenKey);
+                const existingLookup = !isCheckout
+                    ? authContextInFlight.get(accessTokenKey)
+                    : null;
                 if (existingLookup) {
                     bumpAuthStats({
                         coalescedWait: 1,
@@ -1630,6 +1638,7 @@ const protect = async (req, res, next) => {
                                     userBusinessId: user.businessId || null,
                                     preferredBusinessId: decoded.businessId || null,
                                     allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
+                                    isCheckout,
                                 }),
                             });
                             const resolvedContext = {
@@ -1800,8 +1809,12 @@ const protect = async (req, res, next) => {
         }
         const hashed = hashToken(refreshToken);
         const refreshLookupKey = `${hashed}:${decoded.id}:${decoded.tokenVersion}`;
-        const requestLocalRefreshLookup = readRequestLocalLookupPromise(req, "refresh", refreshLookupKey);
-        const sharedRefreshLookup = requestLocalRefreshLookup || refreshAuthInFlight.get(refreshLookupKey) || null;
+        const requestLocalRefreshLookup = !isCheckout
+            ? readRequestLocalLookupPromise(req, "refresh", refreshLookupKey)
+            : null;
+        const sharedRefreshLookup = requestLocalRefreshLookup ||
+            (!isCheckout ? refreshAuthInFlight.get(refreshLookupKey) : null) ||
+            null;
         if (!sharedRefreshLookup && getAuthBudgetMs(req, res) < AUTH_DB_MIN_BUDGET_MS) {
             bumpAuthStats({
                 deniedByBudget: 1,
@@ -1885,6 +1898,7 @@ const protect = async (req, res, next) => {
                         userBusinessId: user.businessId || null,
                         preferredBusinessId: null,
                         allowWorkspaceFallback: !shouldUseShallowWorkspaceResolution(req),
+                        isCheckout,
                     }),
                 });
                 return {

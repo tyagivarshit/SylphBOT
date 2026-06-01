@@ -434,7 +434,7 @@ export const verifyStripeSubscriptionFallback = async (
   }
 };
 
-const getCachedSubscription = async (businessId: string) => {
+const getCachedSubscription = async (businessId: string, isCheckout?: boolean) => {
   const inMemory = subscriptionMemoryCache.get(businessId);
   if (inMemory && !inMemory.promise && inMemory.expiresAt > Date.now()) {
     emitPerformanceMetric({
@@ -448,7 +448,7 @@ const getCachedSubscription = async (businessId: string) => {
     return inMemory.value;
   }
 
-  if (inMemory?.promise) {
+  if (inMemory?.promise && !isCheckout) {
     return inMemory.promise;
   }
 
@@ -704,8 +704,9 @@ export const loadBillingContext = async (
         label: "billing_projection",
         businessId,
         computeBudgetMs: 10000,
+        bypassCoordination: true,
         task: async () => {
-          const freshSub = await getCachedSubscription(businessId).catch(() => null);
+          const freshSub = await getCachedSubscription(businessId, true).catch(() => null);
           if (freshSub) {
             const freshCtx = evaluateBillingContext(freshSub, new Date());
             prewarmState.lastKnownValidSubscription.set(businessId, freshSub);

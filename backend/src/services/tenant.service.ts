@@ -112,6 +112,7 @@ export const clearWorkspaceIdentityCache = () => {
 const createWorkspaceForUser = async (input: {
   userId: string;
   userName?: string | null;
+  isCheckout?: boolean;
 }) => {
   const readOwnerWorkspace = async () => {
     if (!isLikelyMongoObjectId(input.userId)) {
@@ -190,6 +191,10 @@ const createWorkspaceForUser = async (input: {
     return createdWorkspace as WorkspaceSnapshot;
   };
 
+  if (input.isCheckout) {
+    return ensureOwnerWorkspace();
+  }
+
   return withDistributedLock({
     key: `auth:workspace-bootstrap:${input.userId}`,
     ttlMs: 15_000,
@@ -205,6 +210,7 @@ export const resolveUserWorkspaceIdentity = async (input: {
   preferredBusinessId?: string | null;
   persistResolvedBusinessId?: boolean;
   bootstrapWorkspaceIfMissing?: boolean;
+  isCheckout?: boolean;
 }): Promise<UserWorkspaceIdentity> => {
   const userId = String(input.userId || "").trim();
 
@@ -303,6 +309,7 @@ export const resolveUserWorkspaceIdentity = async (input: {
       await createWorkspaceForUser({
         userId,
         userName: user.name,
+        isCheckout: input.isCheckout,
       })
     );
     source = resolvedWorkspace ? "bootstrapped" : "none";

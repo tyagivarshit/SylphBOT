@@ -159,6 +159,10 @@ function SuccessPageContent() {
   const searchParams = useSearchParams();
   const expectedPlan = normalizePlanKey(searchParams.get("plan"));
   const sessionId = searchParams.get("session_id");
+  const checkoutMode = String(searchParams.get("mode") || "")
+    .trim()
+    .toLowerCase();
+  const isInstantCheckout = checkoutMode === "instant";
   const [show, setShow] = useState(false);
   const [lifecycleState, setLifecycleState] =
     useState<CheckoutConfirmLifecycleState>("PENDING");
@@ -239,6 +243,11 @@ function SuccessPageContent() {
       }
 
       if (confirmResult.lifecycleState === "CONFIRMED") {
+        if (isInstantCheckout) {
+          applyConfirmedState(null, confirmResult.message);
+          return;
+        }
+
         const immediateBilling = await fetchBilling(signal);
         if (cancelled || signal.aborted) {
           return;
@@ -282,6 +291,11 @@ function SuccessPageContent() {
         }
 
         if (confirmResult.lifecycleState === "CONFIRMED") {
+          if (isInstantCheckout) {
+            applyConfirmedState(null, confirmResult.message);
+            return;
+          }
+
           const confirmed = await fetchBilling(signal);
           if (cancelled || signal.aborted) {
             return;
@@ -326,7 +340,7 @@ function SuccessPageContent() {
       cancelled = true;
       abortController.abort();
     };
-  }, [expectedPlan, retryTick, sessionId]);
+  }, [expectedPlan, isInstantCheckout, retryTick, sessionId]);
 
   const statusTitle =
     lifecycleState === "PENDING"

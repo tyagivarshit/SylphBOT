@@ -25,6 +25,7 @@ const performanceMetrics_1 = require("../observability/performanceMetrics");
 const projectionCoordinator_service_1 = require("../services/projectionCoordinator.service");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
 const plan_config_1 = require("../config/plan.config");
+const shared_1 = require("../services/commerce/shared");
 const EMPTY_USAGE_SUMMARY = {
     aiCallsUsed: 0,
     messagesUsed: 0,
@@ -993,6 +994,142 @@ class BillingController {
             reason: normalizedReason,
         });
         return `${appBaseUrl}/billing?${query.toString()}`;
+    }
+    static async activateInstantCheckoutSession(input) {
+        const metadata = toRecord(input.session.metadata);
+        const sessionBusinessId = String(metadata.businessId || "").trim();
+        const checkoutMode = String(metadata.checkoutMode || "").trim().toLowerCase();
+        if (checkoutMode !== "instant" || sessionBusinessId !== input.businessId) {
+            return {
+                activated: false,
+                terminal: true,
+                reason: "instant_session_metadata_mismatch",
+            };
+        }
+        const paymentStatus = String(input.session.payment_status || "")
+            .trim()
+            .toLowerCase();
+        if (paymentStatus !== "paid" && paymentStatus !== "no_payment_required") {
+            return {
+                activated: false,
+                terminal: false,
+                reason: `payment_status_${paymentStatus || "unknown"}`,
+            };
+        }
+        const planCode = String(metadata.planCode || "")
+            .trim()
+            .toUpperCase();
+        const billingCycle = String(metadata.billingCycle || "").trim().toLowerCase() === "yearly"
+            ? "yearly"
+            : "monthly";
+        if (!["BASIC", "PRO", "ELITE"].includes(planCode)) {
+            return {
+                activated: false,
+                terminal: true,
+                reason: "instant_plan_missing",
+            };
+        }
+        const providerSubscriptionId = typeof input.session.subscription === "string"
+            ? input.session.subscription
+            : input.session.subscription?.id || null;
+        let stripeSubscription = null;
+        if (providerSubscriptionId) {
+            stripeSubscription = await stripe_service_1.stripe.subscriptions
+                .retrieve(providerSubscriptionId)
+                .catch(() => null);
+        }
+        const firstItem = Array.isArray(stripeSubscription?.items?.data)
+            ? stripeSubscription.items.data[0]
+            : null;
+        const quantity = Math.max(1, Math.floor(Number(metadata.quantity || firstItem?.quantity || 1)));
+        const amountMinor = Math.max(0, Math.floor(Number(input.session.amount_total || firstItem?.price?.unit_amount || 0)));
+        const unitPriceMinor = Math.max(0, Math.floor(Number(firstItem?.price?.unit_amount || Math.floor(amountMinor / quantity) || 0)));
+        const currency = String(input.session.currency || stripeSubscription?.currency || metadata.currency || "INR")
+            .trim()
+            .toUpperCase();
+        const status = String(stripeSubscription?.status || "").trim().toLowerCase() === "trialing"
+            ? "TRIALING"
+            : "ACTIVE";
+        const toDate = (value) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) && parsed > 0 ? new Date(parsed * 1000) : null;
+        };
+        const currentPeriodStart = toDate(stripeSubscription?.current_period_start);
+        const currentPeriodEnd = toDate(stripeSubscription?.current_period_end);
+        const trialEndsAt = toDate(stripeSubscription?.trial_end);
+        const idempotencyKey = `instant:subscription:${input.session.id}`;
+        const existing = (providerSubscriptionId
+            ? await prisma_1.default.subscriptionLedger.findFirst({
+                where: {
+                    businessId: input.businessId,
+                    provider: "STRIPE",
+                    providerSubscriptionId,
+                },
+            })
+            : null) ||
+            (await prisma_1.default.subscriptionLedger.findFirst({
+                where: {
+                    businessId: input.businessId,
+                    idempotencyKey,
+                },
+            }));
+        const subscriptionMetadata = {
+            ...(existing ? toRecord(existing.metadata) : {}),
+            source: "instant_checkout_confirm",
+            stripeSessionId: input.session.id,
+            stripeCustomerId: typeof input.session.customer === "string"
+                ? input.session.customer
+                : input.session.customer?.id || null,
+            stripeSubscriptionId: providerSubscriptionId,
+            checkoutAttempt: String(metadata.checkoutAttempt || "").trim() || null,
+            checkoutStartRequestId: String(metadata.checkoutStartRequestId || "").trim() || null,
+            checkoutMode: "instant",
+            activatedAt: new Date().toISOString(),
+        };
+        const data = {
+            status: status,
+            provider: "STRIPE",
+            providerSubscriptionId,
+            planCode,
+            billingCycle: billingCycle,
+            currency: currency,
+            quantity,
+            unitPriceMinor,
+            amountMinor: Math.max(amountMinor, unitPriceMinor * quantity),
+            currentPeriodStart,
+            currentPeriodEnd,
+            renewAt: currentPeriodEnd,
+            trialEndsAt,
+            metadata: subscriptionMetadata,
+            version: existing
+                ? {
+                    increment: 1,
+                }
+                : undefined,
+        };
+        const subscription = existing
+            ? await prisma_1.default.subscriptionLedger.update({
+                where: {
+                    id: existing.id,
+                },
+                data,
+            })
+            : await prisma_1.default.subscriptionLedger.create({
+                data: {
+                    businessId: input.businessId,
+                    subscriptionKey: (0, shared_1.buildLedgerKey)("subscription"),
+                    idempotencyKey,
+                    ...data,
+                },
+            });
+        await (0, subscription_middleware_1.invalidateBillingContextCache)(input.businessId).catch(() => undefined);
+        return {
+            activated: true,
+            terminal: false,
+            reason: "instant_checkout_activated",
+            subscriptionId: subscription.id,
+            planCode: subscription.planCode,
+        };
     }
     static async instantCheckout(req, res) {
         const startedAt = Date.now();
@@ -2863,6 +3000,61 @@ class BillingController {
                 sessionId,
             });
             if (!paymentIntent) {
+                let instantSession = null;
+                try {
+                    (0, stripeConfig_service_1.assertStripeConfigReady)();
+                    instantSession = await stripe_service_1.stripe.checkout.sessions.retrieve(sessionId);
+                }
+                catch (error) {
+                    console.error("BILLING_STAGE_FAIL", {
+                        stage: "checkout_confirm.instant_session_retrieve",
+                        businessId,
+                        sessionId,
+                        reason: String(error?.message || "instant_session_unavailable"),
+                    });
+                }
+                if (instantSession) {
+                    const instantActivation = await BillingController.activateInstantCheckoutSession({
+                        businessId,
+                        session: instantSession,
+                    });
+                    if (instantActivation.activated) {
+                        console.info("BILLING_STAGE_OK", {
+                            stage: "checkout_confirm.instant_activated",
+                            businessId,
+                            sessionId,
+                            subscriptionId: instantActivation.subscriptionId || null,
+                            planCode: instantActivation.planCode || null,
+                        });
+                        return respond(BillingController.buildConfirmPayload({
+                            state: "SUCCESS",
+                            lifecycleState: "CONFIRMED",
+                            sessionId,
+                            message: "Payment confirmed and your subscription is active.",
+                            shouldPoll: false,
+                            reason: "instant_checkout_activated",
+                            code: "INSTANT_CHECKOUT_ACTIVATED",
+                        }));
+                    }
+                    if (!instantActivation.terminal) {
+                        console.info("BILLING_STAGE_OK", {
+                            stage: "checkout_confirm.instant_pending",
+                            businessId,
+                            sessionId,
+                            reason: instantActivation.reason,
+                        });
+                        return respond(BillingController.buildConfirmPayload({
+                            state: "PENDING",
+                            lifecycleState: "PROCESSING",
+                            sessionId,
+                            message: "Payment is still being confirmed by Stripe.",
+                            shouldPoll: true,
+                            retryAfterMs: 1200,
+                            reason: instantActivation.reason,
+                            code: "INSTANT_CHECKOUT_PENDING",
+                        }));
+                    }
+                }
                 console.error("BILLING_STAGE_FAIL", {
                     stage: "checkout_confirm.lookup",
                     businessId,

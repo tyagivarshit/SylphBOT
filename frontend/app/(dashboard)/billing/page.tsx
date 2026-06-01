@@ -97,7 +97,7 @@ const DEFAULT_BILLING_CONTEXT: BillingContext = {
   remainingEarly: 0,
 };
 
-const BILLING_SNAPSHOT_ENDPOINT = "/api/billing?surface=checkout";
+const BILLING_SNAPSHOT_ENDPOINT = "/api/billing?surface=billing";
 const BILLING_API_TIMEOUT_MS = 7_000;
 const BILLING_BOOTSTRAP_CACHE_TTL_MS = 30_000;
 const BILLING_BACKGROUND_REFRESH_BASE_MS = 90_000;

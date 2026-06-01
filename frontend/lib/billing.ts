@@ -1,7 +1,7 @@
 import { apiFetch } from "@/lib/apiClient";
 
 const CHECKOUT_CONFIRM_TIMEOUT_MS = 7_000;
-const CHECKOUT_REDIRECT_PATH = "/api/billing/checkout/start";
+const CHECKOUT_REDIRECT_PATH = "/api/billing/checkout/instant";
 const buildCheckoutAttemptToken = () =>
   `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 

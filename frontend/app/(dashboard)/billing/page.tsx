@@ -875,22 +875,12 @@ function BillingPageContent() {
     [plansResponse.plans]
   );
 
-  const handleCheckout = async (plan: PlanId) => {
-    if (loading || checkoutLockRef.current) {
+  const handleCheckout = (plan: PlanId) => {
+    if (checkoutLockRef.current) {
       return;
     }
 
     try {
-      if (billingAbortController) {
-        billingAbortController.abort();
-        billingAbortController = null;
-      }
-      checkoutLockRef.current = true;
-      setCheckoutPending(true);
-      setLoading(plan);
-      setCheckoutProgressMessage("Redirecting to secure checkout...");
-
-      // Perform optimistic validation only if billing data is already loaded in memory
       const latestBilling = billingBootstrapSnapshot?.billingData;
       if (latestBilling) {
         const latestPlanKey = latestBilling.billing?.planKey || "FREE_LOCKED";
@@ -913,13 +903,14 @@ function BillingPageContent() {
         }
       }
 
-      // Immediately launch redirect without waiting for any further database/network hydration
+      if (billingAbortController) {
+        billingAbortController.abort();
+        billingAbortController = null;
+      }
+      checkoutLockRef.current = true;
       redirectToCheckout(plan, billing);
     } catch (checkoutError) {
       checkoutLockRef.current = false;
-      setCheckoutPending(false);
-      setLoading(null);
-      setCheckoutProgressMessage(null);
       notify.error(
         checkoutError instanceof Error
           ? checkoutError.message
@@ -1173,7 +1164,7 @@ function BillingPageContent() {
                   </div>
 
                    <LoadingButton
-                    onClick={() => void handleCheckout(plan.type)}
+                    onClick={() => handleCheckout(plan.type)}
                     loading={loading === plan.type}
                     loadingLabel="Redirecting to secure checkout..."
                     disabled={Boolean(loading) || (isEntitlementKnown && current)}

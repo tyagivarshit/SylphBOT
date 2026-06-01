@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { X, Check } from "lucide-react"
 import { redirectToCheckout } from "@/lib/billing"
 
@@ -34,19 +33,15 @@ const plans = [
 
 export default function UpgradeModal({ open, setOpen }: Props){
 
-  const [loading,setLoading] = useState<string | null>(null)
-
   if(!open) return null
 
-  const handleUpgrade = async(plan: string)=>{
+  const handleUpgrade = (plan: string)=>{
 
     try{
-      setLoading(plan)
       redirectToCheckout(plan, "monthly")
 
     }catch(err){
       console.error("Upgrade error:", err)
-      setLoading(null)
     }
 
   }
@@ -117,10 +112,9 @@ export default function UpgradeModal({ open, setOpen }: Props){
               {/* CTA */}
               <button
                 onClick={()=>handleUpgrade(plan.name)}
-                disabled={loading === plan.name}
                 className="mt-5 w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
               >
-                {loading === plan.name ? "Redirecting..." : "Upgrade Now"}
+                Upgrade Now
               </button>
 
             </div>

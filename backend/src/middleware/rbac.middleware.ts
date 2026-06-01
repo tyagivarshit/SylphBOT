@@ -4,11 +4,33 @@ import {
   hasPermission,
   type PermissionAction,
 } from "../services/rbac.service";
-import { assertAuthorizedAccess } from "../services/security/securityGovernanceOS.service";
+import {
+  assertAuthorizedAccess,
+  evaluateReadOnlyAccessFastPath,
+} from "../services/security/securityGovernanceOS.service";
 import { getRequestBusinessId } from "../services/tenant.service";
+import { runDetachedBackgroundTask } from "../utils/backgroundTask";
 
 const getHeaderValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
+
+const isReadOnlyBillingFastPath = (req: Request, action: PermissionAction) => {
+  if (process.env.RBAC_READ_FAST_PATH_ENABLED === "false") {
+    return false;
+  }
+
+  const surface = String(req.query?.surface || "").trim().toLowerCase();
+  const route = String(req.originalUrl || req.path || req.url || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    action === "billing:view" &&
+    req.method === "GET" &&
+    surface === "billing" &&
+    route.startsWith("/api/billing")
+  );
+};
 
 export const requirePermission = (action: PermissionAction) =>
   async (req: Request, _res: Response, next: NextFunction) => {
@@ -40,7 +62,7 @@ export const requirePermission = (action: PermissionAction) =>
           ? ["true", "1", "yes", "on"].includes(mfaHeader.trim().toLowerCase())
           : false;
 
-      await assertAuthorizedAccess({
+      const accessRequest = {
         action,
         businessId,
         tenantId: businessId,
@@ -69,7 +91,28 @@ export const requirePermission = (action: PermissionAction) =>
           method: req.method,
           requestId: req.requestId || null,
         },
-      });
+      };
+
+      if (isReadOnlyBillingFastPath(req, action)) {
+        const fastPathVerdict = evaluateReadOnlyAccessFastPath(accessRequest);
+        if (!fastPathVerdict.allowed) {
+          return next(forbidden(`Access denied (${fastPathVerdict.reason})`));
+        }
+
+        runDetachedBackgroundTask("rbac_governance_audit", () =>
+          assertAuthorizedAccess({
+            ...accessRequest,
+            metadata: {
+              ...accessRequest.metadata,
+              async: true,
+            },
+          })
+        );
+
+        return next();
+      }
+
+      await assertAuthorizedAccess(accessRequest);
 
       next();
     } catch (error) {

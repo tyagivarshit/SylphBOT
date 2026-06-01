@@ -44,6 +44,9 @@ export const runWithRequestContext = <T>(
   callback: () => T
 ) => requestContextStorage.run(cleanContext(context) as RequestContext, callback);
 
+export const runOutsideRequestContext = <T>(callback: () => T) =>
+  requestContextStorage.exit(callback);
+
 export const getRequestContext = () => requestContextStorage.getStore();
 
 export const updateRequestContext = (context: Partial<RequestContext>) => {

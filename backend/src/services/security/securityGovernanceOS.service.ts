@@ -886,7 +886,7 @@ export const bootstrapSecurityGovernanceOS = async () => {
   }
 };
 
-type AccessRequest = {
+export type AccessRequest = {
   action: string;
   businessId?: string | null;
   tenantId?: string | null;
@@ -2528,6 +2528,40 @@ export const assertAuthorizedAccess = async (request: AccessRequest) => {
     throw forbidden(`Access denied (${result.reason})`);
   }
   return result;
+};
+
+export const evaluateReadOnlyAccessFastPath = (request: AccessRequest) => {
+  const store = getStore();
+  const businessId = normalizeBusinessId(request.businessId);
+  const tenantId = normalizeTenantId({
+    tenantId: request.tenantId,
+    businessId,
+  });
+  const action = String(request.action || "").trim();
+  const actorType = String(request.actorType || "USER").trim().toUpperCase();
+
+  const override = Array.from(store.securityOverrideLedger.values())
+    .filter((candidate) => matchesScopedOverride(candidate, action, businessId))
+    .sort((left, right) => Number(right.priority || 0) - Number(left.priority || 0))[0];
+
+  if (override && String(override.action || "").toUpperCase() === "DENY") {
+    return {
+      allowed: false,
+      reason: "security_override_deny",
+    };
+  }
+
+  if (tenantId && isTenantFrozen(tenantId) && actorType !== "SYSTEM") {
+    return {
+      allowed: false,
+      reason: "tenant_frozen",
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: "fast_path_allowed",
+  };
 };
 
 export const issueSessionLedger = async (input: {

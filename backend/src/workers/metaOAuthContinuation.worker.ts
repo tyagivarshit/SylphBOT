@@ -79,7 +79,7 @@ const processMetaOAuthContinuationJob = async (
 
   await runMetaOAuthContinuationFromQueueJob({
     ...job.data,
-    source: job.data.source || "queue_worker",
+    source: "queue_worker",
   });
 
   const durationMs = Date.now() - startedAtMs;

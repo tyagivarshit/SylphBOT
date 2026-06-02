@@ -28,6 +28,7 @@ import {
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { getRequestLifecycle } from "../utils/requestLifecycle";
 import {
+  acquireMetaOAuthReconciliationLease,
   createMetaOAuthLifecycleContext,
   getMetaOAuthLifecycleSnapshot,
   markMetaOAuthLifecycleCompleted,
@@ -3939,6 +3940,39 @@ const createMetaOAuthContinuationMockResponse = () => {
 export const runMetaOAuthContinuationFromQueueJob = async (
   input: MetaOAuthContinuationQueueInput
 ) => {
+  const lease = await acquireMetaOAuthReconciliationLease({
+    operationId: input.operationId,
+    replayToken: input.replayToken,
+    businessId: input.businessId,
+    platform: input.platform,
+    mode: input.mode,
+    source: input.source || "queue_worker",
+  });
+
+  if (!lease?.acquired) {
+    if (
+      lease?.reason === "locked" &&
+      normalizeOptionalString(input.source) === "queue_worker"
+    ) {
+      throw new Error("meta_oauth_reconciliation_in_progress");
+    }
+
+    return {
+      statusCode: 202,
+      body: {
+        success: true,
+        data: {
+          operationId: input.operationId,
+          replayToken: input.replayToken,
+          platform: input.platform,
+          mode: input.mode,
+          idempotent: true,
+        },
+        message: "Meta OAuth continuation already reconciled or in progress",
+      },
+    };
+  }
+
   const shortToken =
     normalizeOptionalString(input.shortTokenEncrypted) &&
     input.shortTokenEncrypted
@@ -3988,7 +4022,11 @@ export const runMetaOAuthContinuationFromQueueJob = async (
     longToken,
   };
 
-  await metaOAuthConnect(req, res);
+  try {
+    await metaOAuthConnect(req, res);
+  } finally {
+    lease.release();
+  }
 
   return {
     statusCode: res.statusCode,

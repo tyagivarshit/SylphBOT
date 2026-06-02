@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import prisma from "../config/prisma";
 import { recordObservabilityEvent } from "./reliability/reliabilityOS.service";
 
@@ -45,6 +46,97 @@ type LifecycleHistoryEntry = {
 const META_OAUTH_LIFECYCLE_VERSION = "phase_c1_meta_oauth_lifecycle_v1";
 const META_OAUTH_LIFECYCLE_FLOW = "META_OAUTH_LIFECYCLE";
 const HISTORY_WINDOW = 80;
+const RECONCILIATION_LEASE_TTL_MS = Math.max(
+  10_000,
+  Number(process.env.META_OAUTH_RECONCILIATION_LEASE_TTL_MS || 90_000)
+);
+
+const LIFECYCLE_STAGE_RANK: Record<MetaOAuthLifecycleStage, number> = {
+  CALLBACK_ACCEPTED: 10,
+  CONTINUATION_SCHEDULED: 20,
+  OAUTH_AUTHENTICATED: 30,
+  META_ACCOUNT_CONNECTED: 40,
+  PAIR_SELECTION: 45,
+  PHONE_SELECTION: 45,
+  WEBHOOK_ACTIVATION: 60,
+  CONNECTION_VERIFICATION: 70,
+  TOKEN_PERSISTENCE: 80,
+  FINAL_ONBOARDING: 90,
+  COMPLETED: 100,
+  FAILED: 100,
+};
+
+const globalForMetaOAuthLifecycle = globalThis as typeof globalThis & {
+  __sylphMetaOAuthReconciliationLeases?: Map<string, number>;
+};
+
+const getReconciliationLeases = () => {
+  if (!globalForMetaOAuthLifecycle.__sylphMetaOAuthReconciliationLeases) {
+    globalForMetaOAuthLifecycle.__sylphMetaOAuthReconciliationLeases = new Map();
+  }
+  return globalForMetaOAuthLifecycle.__sylphMetaOAuthReconciliationLeases;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableLifecycleWriteError = (error: unknown) => {
+  const code = String((error as { code?: unknown })?.code || "")
+    .trim()
+    .toUpperCase();
+  const message = String((error as Error)?.message || error || "").toLowerCase();
+  return (
+    code === "P2034" ||
+    message.includes("deadlock") ||
+    message.includes("write conflict") ||
+    message.includes("transaction conflict") ||
+    message.includes("temporarily unavailable")
+  );
+};
+
+const logOAuthReconciliation = (
+  event:
+    | "OAUTH_RECONCILIATION_RETRY"
+    | "OAUTH_RECONCILIATION_IDEMPOTENT_HIT"
+    | "OAUTH_RECONCILIATION_MUTEX_ACQUIRED"
+    | "OAUTH_RECONCILIATION_MUTEX_SKIPPED"
+    | "OAUTH_RECONCILIATION_DUPLICATE_IGNORED"
+    | "OAUTH_RECONCILIATION_CONNECTED",
+  metadata: Record<string, unknown>
+) => {
+  console.info(event, {
+    component: "meta-oauth-lifecycle",
+    ...metadata,
+  });
+};
+
+const withLifecycleWriteRetry = async <T>(
+  operation: () => Promise<T>,
+  metadata: Record<string, unknown>
+) => {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableLifecycleWriteError(error) || attempt === 3) {
+        throw error;
+      }
+      const delayMs = Math.min(
+        1_500,
+        50 * 2 ** attempt + Math.floor(Math.random() * 75)
+      );
+      logOAuthReconciliation("OAUTH_RECONCILIATION_RETRY", {
+        ...metadata,
+        attempt: attempt + 1,
+        delayMs,
+        reason: String((error as Error)?.message || error),
+      });
+      await sleep(delayMs);
+    }
+  }
+  throw lastError;
+};
 
 const normalizeOptionalString = (value?: unknown) => {
   const normalized = String(value || "").trim();
@@ -115,6 +207,44 @@ const mapAttemptStatusToLifecycleStatus = (
   }
 
   return "FAILED";
+};
+
+const isTerminalLifecycleStatus = (status: MetaOAuthLifecycleStatus | null) =>
+  status === "COMPLETED" || status === "FAILED" || status === "NEEDS_ACTION";
+
+const shouldSkipLifecycleWrite = (input: {
+  existingStatus: MetaOAuthLifecycleStatus | null;
+  existingStage: MetaOAuthLifecycleStage | null;
+  nextStatus: MetaOAuthLifecycleStatus;
+  nextStage: MetaOAuthLifecycleStage;
+}) => {
+  if (input.existingStatus === "COMPLETED") {
+    return true;
+  }
+
+  if (
+    input.existingStatus === "NEEDS_ACTION" &&
+    input.nextStatus === "PROCESSING" &&
+    input.existingStage &&
+    LIFECYCLE_STAGE_RANK[input.nextStage] <= LIFECYCLE_STAGE_RANK[input.existingStage]
+  ) {
+    return true;
+  }
+
+  if (
+    input.existingStatus === "FAILED" &&
+    input.nextStatus === "PROCESSING" &&
+    input.existingStage &&
+    LIFECYCLE_STAGE_RANK[input.nextStage] <= LIFECYCLE_STAGE_RANK[input.existingStage]
+  ) {
+    return true;
+  }
+
+  return (
+    input.existingStatus === input.nextStatus &&
+    input.existingStage === input.nextStage &&
+    isTerminalLifecycleStatus(input.existingStatus)
+  );
 };
 
 const mapFailureCodeToAttemptStatus = (code?: string | null) => {
@@ -219,6 +349,37 @@ const upsertMetaOAuthLifecycle = async (input: {
   });
 
   const previousMetadata = toObject(existing?.metadata);
+  const existingStage =
+    (normalizeOptionalString(previousMetadata.lifecycleStage) ||
+      normalizeOptionalString(existing?.step)) as MetaOAuthLifecycleStage | null;
+  const existingStatus =
+    toLifecycleStatus(previousMetadata.lifecycleStatus) ||
+    (existing
+      ? mapAttemptStatusToLifecycleStatus(normalizeOptionalString(existing.status))
+      : null);
+
+  if (
+    shouldSkipLifecycleWrite({
+      existingStatus,
+      existingStage,
+      nextStatus: input.lifecycleStatus,
+      nextStage: input.stage,
+    })
+  ) {
+    logOAuthReconciliation("OAUTH_RECONCILIATION_IDEMPOTENT_HIT", {
+      operationId: input.context.attemptKey,
+      replayToken: input.context.replayToken,
+      businessId: input.context.businessId,
+      platform: input.context.platform,
+      mode: input.context.mode,
+      existingStage,
+      existingStatus,
+      skippedStage: input.stage,
+      skippedStatus: input.lifecycleStatus,
+    });
+    return existing;
+  }
+
   const stageDurations = toObject(previousMetadata.stageDurationsMs);
   if (
     Number.isFinite(Number(input.stageDurationMs)) &&
@@ -254,44 +415,141 @@ const upsertMetaOAuthLifecycle = async (input: {
     updatedAtIso: nowIso,
   };
 
-  return prisma.connectionAttemptLedger.upsert({
-    where: {
-      attemptKey: input.context.attemptKey,
-    },
-    update: {
-      tenantKey: input.context.tenantKey,
-      provider: input.context.platform,
-      environment: "LIVE",
-      flow: META_OAUTH_LIFECYCLE_FLOW,
+  return withLifecycleWriteRetry(
+    () =>
+      prisma.connectionAttemptLedger.upsert({
+        where: {
+          attemptKey: input.context.attemptKey,
+        },
+        update: {
+          tenantKey: input.context.tenantKey,
+          provider: input.context.platform,
+          environment: "LIVE",
+          flow: META_OAUTH_LIFECYCLE_FLOW,
+          replayToken: input.context.replayToken,
+          status: normalizeOptionalString(
+            input.attemptStatus ||
+              mapLifecycleStatusToAttemptStatus(input.lifecycleStatus)
+          ),
+          step: input.stage,
+          statusDetail: normalizeOptionalString(input.statusDetail),
+          errorCode: normalizeOptionalString(input.errorCode),
+          errorMessage: normalizeOptionalString(input.errorMessage),
+          resolutionHint: normalizeOptionalString(input.resolutionHint),
+          metadata: nextMetadata as any,
+        },
+        create: {
+          attemptKey: input.context.attemptKey,
+          tenantKey: input.context.tenantKey,
+          provider: input.context.platform,
+          environment: "LIVE",
+          flow: META_OAUTH_LIFECYCLE_FLOW,
+          replayToken: input.context.replayToken,
+          status: normalizeOptionalString(
+            input.attemptStatus ||
+              mapLifecycleStatusToAttemptStatus(input.lifecycleStatus)
+          ) as string,
+          step: input.stage,
+          statusDetail: normalizeOptionalString(input.statusDetail),
+          errorCode: normalizeOptionalString(input.errorCode),
+          errorMessage: normalizeOptionalString(input.errorMessage),
+          resolutionHint: normalizeOptionalString(input.resolutionHint),
+          metadata: nextMetadata as any,
+        },
+      }),
+    {
+      operationId: input.context.attemptKey,
       replayToken: input.context.replayToken,
-      status: normalizeOptionalString(
-        input.attemptStatus || mapLifecycleStatusToAttemptStatus(input.lifecycleStatus)
-      ),
-      step: input.stage,
-      statusDetail: normalizeOptionalString(input.statusDetail),
-      errorCode: normalizeOptionalString(input.errorCode),
-      errorMessage: normalizeOptionalString(input.errorMessage),
-      resolutionHint: normalizeOptionalString(input.resolutionHint),
-      metadata: nextMetadata as any,
-    },
-    create: {
-      attemptKey: input.context.attemptKey,
-      tenantKey: input.context.tenantKey,
-      provider: input.context.platform,
-      environment: "LIVE",
-      flow: META_OAUTH_LIFECYCLE_FLOW,
-      replayToken: input.context.replayToken,
-      status: normalizeOptionalString(
-        input.attemptStatus || mapLifecycleStatusToAttemptStatus(input.lifecycleStatus)
-      ) as string,
-      step: input.stage,
-      statusDetail: normalizeOptionalString(input.statusDetail),
-      errorCode: normalizeOptionalString(input.errorCode),
-      errorMessage: normalizeOptionalString(input.errorMessage),
-      resolutionHint: normalizeOptionalString(input.resolutionHint),
-      metadata: nextMetadata as any,
-    },
+      businessId: input.context.businessId,
+      platform: input.context.platform,
+      mode: input.context.mode,
+      stage: input.stage,
+    }
+  );
+};
+
+export const acquireMetaOAuthReconciliationLease = async (input: {
+  operationId: string;
+  replayToken: string;
+  businessId: string;
+  platform: MetaOAuthLifecyclePlatform;
+  mode: MetaOAuthLifecycleMode;
+  source?: string | null;
+}) => {
+  const operationId = normalizeOptionalString(input.operationId);
+  if (!operationId) {
+    return null;
+  }
+
+  const existing = await getMetaOAuthLifecycleSnapshot({
+    attemptKey: operationId,
+    replayToken: input.replayToken,
+    platform: input.platform,
+  }).catch(() => null);
+  const existingMetadata = toObject(existing?.metadata);
+  const existingStatus =
+    toLifecycleStatus(existingMetadata.lifecycleStatus) ||
+    (existing ? mapAttemptStatusToLifecycleStatus(existing.status) : null);
+
+  if (existingStatus === "COMPLETED") {
+    logOAuthReconciliation("OAUTH_RECONCILIATION_IDEMPOTENT_HIT", {
+      operationId,
+      replayToken: input.replayToken,
+      businessId: input.businessId,
+      platform: input.platform,
+      mode: input.mode,
+      source: input.source || null,
+      existingStatus,
+    });
+    return {
+      acquired: false as const,
+      reason: "completed" as const,
+      release: () => undefined,
+    };
+  }
+
+  const leases = getReconciliationLeases();
+  const nowMs = Date.now();
+  const leasedUntilMs = leases.get(operationId) || 0;
+  if (leasedUntilMs > nowMs) {
+    logOAuthReconciliation("OAUTH_RECONCILIATION_MUTEX_SKIPPED", {
+      operationId,
+      replayToken: input.replayToken,
+      businessId: input.businessId,
+      platform: input.platform,
+      mode: input.mode,
+      source: input.source || null,
+      leasedForMs: leasedUntilMs - nowMs,
+    });
+    return {
+      acquired: false as const,
+      reason: "locked" as const,
+      release: () => undefined,
+    };
+  }
+
+  const token = `${operationId}:${crypto.randomUUID()}`;
+  leases.set(operationId, nowMs + RECONCILIATION_LEASE_TTL_MS);
+  logOAuthReconciliation("OAUTH_RECONCILIATION_MUTEX_ACQUIRED", {
+    operationId,
+    replayToken: input.replayToken,
+    businessId: input.businessId,
+    platform: input.platform,
+    mode: input.mode,
+    source: input.source || null,
+    ttlMs: RECONCILIATION_LEASE_TTL_MS,
   });
+
+  return {
+    acquired: true as const,
+    token,
+    release: () => {
+      const currentLeaseUntilMs = leases.get(operationId) || 0;
+      if (currentLeaseUntilMs > Date.now()) {
+        leases.delete(operationId);
+      }
+    },
+  };
 };
 
 export const buildMetaOAuthReplayToken = (nonce: string) =>
@@ -501,6 +759,14 @@ export const markMetaOAuthLifecycleCompleted = async (input: {
     attemptStatus: "CONNECTED",
     statusDetail: input.detail || "Connection completed",
     metadata: input.metadata,
+  });
+
+  logOAuthReconciliation("OAUTH_RECONCILIATION_CONNECTED", {
+    operationId: input.context.attemptKey,
+    replayToken: input.context.replayToken,
+    businessId: input.context.businessId,
+    platform: input.context.platform,
+    mode: input.context.mode,
   });
 
   await emitMetaLifecycleEvent({

@@ -77,6 +77,11 @@ const stableHash = (value: unknown) =>
 const buildKey = (prefix: string, value: unknown) =>
   `${prefix}:${stableHash(value)}`;
 
+const isUniqueConstraintError = (error: unknown) =>
+  String((error as { code?: unknown })?.code || "")
+    .trim()
+    .toUpperCase() === "P2002";
+
 type ReliabilityContext = {
   traceId?: string | null;
   correlationId?: string | null;
@@ -532,7 +537,7 @@ export const recordTraceLedger = async ({
     return next;
   }
 
-  const existing = await db.traceLedger
+  let existing = await db.traceLedger
     .findUnique({
       where: {
         traceId: normalizedTraceId,
@@ -541,28 +546,50 @@ export const recordTraceLedger = async ({
     .catch(() => null);
 
   if (!existing) {
-    return db.traceLedger.create({
-      data: {
-        traceId: normalizedTraceId,
-        correlationId: normalizedCorrelationId,
-        businessId: businessId || null,
-        tenantId: tenantId || null,
-        leadId: leadId || null,
-        interactionId: interactionId || null,
-        status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
-        lifecycle: [step],
-        lineage: {
-          steps: 1,
+    try {
+      return await db.traceLedger.create({
+        data: {
+          traceId: normalizedTraceId,
+          correlationId: normalizedCorrelationId,
+          businessId: businessId || null,
+          tenantId: tenantId || null,
+          leadId: leadId || null,
+          interactionId: interactionId || null,
+          status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
+          lifecycle: [step],
+          lineage: {
+            steps: 1,
+          },
+          replayable: true,
+          replayToken: normalizedTraceId,
+          version: 1,
+          startedAt: now(),
+          lastEventAt: now(),
+          endedAt: endedAt || null,
+          metadata: metadata || null,
         },
-        replayable: true,
-        replayToken: normalizedTraceId,
-        version: 1,
-        startedAt: now(),
-        lastEventAt: now(),
-        endedAt: endedAt || null,
-        metadata: metadata || null,
-      },
-    });
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      console.info("OAUTH_RECONCILIATION_DUPLICATE_IGNORED", {
+        component: "reliability-trace-ledger",
+        traceId: normalizedTraceId,
+        businessId: businessId || null,
+        stage,
+      });
+
+      existing = await db.traceLedger.findUnique({
+        where: {
+          traceId: normalizedTraceId,
+        },
+      });
+      if (!existing) {
+        throw error;
+      }
+    }
   }
 
   const lifecycle = Array.isArray(existing.lifecycle)

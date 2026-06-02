@@ -258,6 +258,59 @@ const mirrorCanonicalUpsert = async <T>(input: {
   }
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableLedgerWriteError = (error: unknown) => {
+  const code = String((error as { code?: unknown })?.code || "")
+    .trim()
+    .toUpperCase();
+  const message = String((error as Error)?.message || error || "").toLowerCase();
+  return (
+    code === "P2034" ||
+    message.includes("deadlock") ||
+    message.includes("write conflict") ||
+    message.includes("transaction conflict") ||
+    message.includes("temporarily unavailable")
+  );
+};
+
+const withBoundedLedgerRetry = async <T>(input: {
+  operation: () => Promise<T>;
+  ledger: string;
+  key: string;
+  businessId?: string | null;
+  tenantId?: string | null;
+}) => {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await input.operation();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableLedgerWriteError(error) || attempt === 3) {
+        throw error;
+      }
+
+      const delayMs = Math.min(
+        1_500,
+        50 * 2 ** attempt + Math.floor(Math.random() * 75)
+      );
+      console.info("OAUTH_RECONCILIATION_RETRY", {
+        component: "security-governance-ledger",
+        ledger: input.ledger,
+        key: input.key,
+        businessId: input.businessId || null,
+        tenantId: input.tenantId || null,
+        attempt: attempt + 1,
+        delayMs,
+        reason: String((error as Error)?.message || error),
+      });
+      await sleep(delayMs);
+    }
+  }
+  throw lastError;
+};
+
 type BaseLedgerRecord = {
   businessId?: string | null;
   tenantId?: string | null;
@@ -3089,17 +3142,25 @@ export const attestInfraIsolation = async (input: {
   bumpAuthority("IsolationAttestationLedger");
   const ledger = getDbLedger("isolationAttestationLedger");
   await withDbMirror(() =>
-    ledger?.upsert
-      ? ledger.upsert({
-          where: {
-            attestationKey,
-          },
-          update: {
-            attestationKey,
-          },
-          create: row,
-        })
-      : ledger?.create?.({ data: row })
+    withBoundedLedgerRetry({
+      ledger: "isolationAttestationLedger",
+      key: attestationKey,
+      businessId,
+      tenantId,
+      operation: () =>
+        ledger?.upsert
+          ? ledger.upsert({
+              where: {
+                attestationKey,
+              },
+              update: {
+                metadata: row.metadata,
+                updatedAt: now(),
+              },
+              create: row,
+            })
+          : ledger?.create?.({ data: row }),
+    })
   );
 
   if (breachedDomains.length) {

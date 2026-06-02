@@ -3117,6 +3117,34 @@ const createMetaOAuthContinuationMockResponse = () => {
     return response;
 };
 const runMetaOAuthContinuationFromQueueJob = async (input) => {
+    const lease = await (0, metaOAuthLifecycle_service_1.acquireMetaOAuthReconciliationLease)({
+        operationId: input.operationId,
+        replayToken: input.replayToken,
+        businessId: input.businessId,
+        platform: input.platform,
+        mode: input.mode,
+        source: input.source || "queue_worker",
+    });
+    if (!lease?.acquired) {
+        if (lease?.reason === "locked" &&
+            normalizeOptionalString(input.source) === "queue_worker") {
+            throw new Error("meta_oauth_reconciliation_in_progress");
+        }
+        return {
+            statusCode: 202,
+            body: {
+                success: true,
+                data: {
+                    operationId: input.operationId,
+                    replayToken: input.replayToken,
+                    platform: input.platform,
+                    mode: input.mode,
+                    idempotent: true,
+                },
+                message: "Meta OAuth continuation already reconciled or in progress",
+            },
+        };
+    }
     const shortToken = normalizeOptionalString(input.shortTokenEncrypted) &&
         input.shortTokenEncrypted
         ? (0, encrypt_1.decrypt)(input.shortTokenEncrypted)
@@ -3160,7 +3188,12 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
         shortToken,
         longToken,
     };
-    await (0, exports.metaOAuthConnect)(req, res);
+    try {
+        await (0, exports.metaOAuthConnect)(req, res);
+    }
+    finally {
+        lease.release();
+    }
     return {
         statusCode: res.statusCode,
         body: res.body,

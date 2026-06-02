@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react"
 import { X } from "lucide-react"
+import MetaOAuthPrecheckModal, {
+  getMetaOAuthPrecheckDismissed,
+  type MetaOAuthPlatform,
+} from "@/components/integrations/MetaOAuthPrecheckModal"
 import { apiFetch } from "@/lib/apiClient"
 import { fetchClientConnectionStatus } from "@/lib/userApi"
 
@@ -16,9 +20,19 @@ const defaultConnections = {
   },
 }
 
-export default function AddClientModal({ onClose, onConnected }: any) {
+type AddClientModalProps = {
+  onClose: () => void
+  onConnected?: () => void | Promise<void>
+}
+
+export default function AddClientModal({
+  onClose,
+  onConnected,
+}: AddClientModalProps) {
   const [connections, setConnections] = useState(defaultConnections)
   const [connecting, setConnecting] = useState<string | null>(null)
+  const [precheckPlatform, setPrecheckPlatform] =
+    useState<MetaOAuthPlatform | null>(null)
 
   const loadConnections = async () => {
     try {
@@ -81,12 +95,25 @@ export default function AddClientModal({ onClose, onConnected }: any) {
     }
   }
 
+  const startConnect = (platformKey: MetaOAuthPlatform) => {
+    if (getMetaOAuthPrecheckDismissed(platformKey)) {
+      void connectMeta(platformKey)
+      return
+    }
+
+    setPrecheckPlatform(platformKey)
+  }
+
+  const continueFromPrecheck = (platformKey: MetaOAuthPlatform) => {
+    void connectMeta(platformKey)
+  }
+
   const connectWhatsApp = () => {
-    void connectMeta("whatsapp")
+    startConnect("whatsapp")
   }
 
   const connectInstagram = () => {
-    void connectMeta("instagram")
+    startConnect("instagram")
   }
 
   const whatsappLabel = connections.whatsapp.connected
@@ -106,6 +133,7 @@ export default function AddClientModal({ onClose, onConnected }: any) {
       : "Connect"
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 px-4">
       <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl w-full max-w-md border border-blue-100">
         <div className="flex items-center justify-between px-5 py-4 border-b border-blue-100">
@@ -197,5 +225,19 @@ export default function AddClientModal({ onClose, onConnected }: any) {
         </div>
       </div>
     </div>
+    <MetaOAuthPrecheckModal
+      key={precheckPlatform || "meta-precheck-closed"}
+      platform={precheckPlatform}
+      loading={Boolean(connecting)}
+      onClose={() => setPrecheckPlatform(null)}
+      onContinue={() => {
+        if (!precheckPlatform) {
+          return
+        }
+
+        continueFromPrecheck(precheckPlatform)
+      }}
+    />
+    </>
   )
 }

@@ -5,6 +5,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { apiFetch } from "@/lib/apiClient";
+import MetaOAuthPrecheckModal, {
+  getMetaOAuthPrecheckDismissed,
+  type MetaOAuthPlatform,
+} from "@/components/integrations/MetaOAuthPrecheckModal";
 import {
   buildAppUrl,
   fetchClientConnectionStatus,
@@ -42,6 +46,8 @@ export default function IntegrationsSettings() {
   const queryClient = useQueryClient();
   const params = useSearchParams();
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [precheckPlatform, setPrecheckPlatform] =
+    useState<MetaOAuthPlatform | null>(null);
   const [connections, setConnections] = useState<ConnectionState>(unknownConnections);
   const [statusUnavailable, setStatusUnavailable] = useState(false);
   const hasResolvedConnectionStateRef = useRef(false);
@@ -183,11 +189,21 @@ export default function IntegrationsSettings() {
     }
   };
 
+  const startConnect = (platformKey: MetaOAuthPlatform) => {
+    if (getMetaOAuthPrecheckDismissed(platformKey)) {
+      void connectMeta(platformKey);
+      return;
+    }
+
+    setPrecheckPlatform(platformKey);
+  };
+
   if (isLoading) {
     return <div className="animate-pulse text-sm text-gray-500">Loading...</div>;
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div>
         <h3 className="text-base font-semibold text-gray-900">Connection status</h3>
@@ -207,7 +223,7 @@ export default function IntegrationsSettings() {
         connected={connections.whatsapp.connected}
         healthy={connections.whatsapp.healthy}
         loading={connecting === "whatsapp"}
-        onConnect={() => void connectMeta("whatsapp")}
+        onConnect={() => startConnect("whatsapp")}
         onReconnect={() => void reconnectPlatform("whatsapp", whatsapp?.id)}
         onDisconnect={() => whatsapp && disconnect.mutate(whatsapp.id)}
         onRefresh={() => void loadConnections()}
@@ -219,7 +235,7 @@ export default function IntegrationsSettings() {
         connected={connections.instagram.connected}
         healthy={connections.instagram.healthy}
         loading={connecting === "instagram"}
-        onConnect={() => void connectMeta("instagram")}
+        onConnect={() => startConnect("instagram")}
         onReconnect={() => void reconnectPlatform("instagram", instagram?.id)}
         onDisconnect={() => instagram && disconnect.mutate(instagram.id)}
         onRefresh={() => void loadConnections()}
@@ -227,6 +243,20 @@ export default function IntegrationsSettings() {
 
       <ApiKeySection />
     </div>
+    <MetaOAuthPrecheckModal
+      key={precheckPlatform || "meta-precheck-closed"}
+      platform={precheckPlatform}
+      loading={Boolean(connecting)}
+      onClose={() => setPrecheckPlatform(null)}
+      onContinue={() => {
+        if (!precheckPlatform) {
+          return;
+        }
+
+        void connectMeta(precheckPlatform);
+      }}
+    />
+    </>
   );
 }
 

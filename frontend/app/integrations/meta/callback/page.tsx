@@ -20,6 +20,9 @@ type WhatsAppPhoneOption = {
   phoneNumberId: string;
   displayPhoneNumber?: string | null;
   verifiedName?: string | null;
+  verificationStatus?: string | null;
+  qualityRating?: string | null;
+  connectedState?: string | null;
   businessManagerId?: string | null;
   businessManagerName?: string | null;
   wabaId?: string | null;
@@ -53,6 +56,8 @@ type ConnectDoctorReport = {
 };
 
 type FailurePayload = {
+  operationId?: string | null;
+  replayToken?: string | null;
   platform: "instagram" | "whatsapp";
   stage: string;
   reason: string;
@@ -63,6 +68,10 @@ type FailurePayload = {
   validPairs?: PairOption[];
   requiresPhoneSelection?: boolean;
   availablePhoneNumbers?: WhatsAppPhoneOption[];
+  setupRequired?: boolean;
+  setupGuideUrl?: string | null;
+  businessManagerUrl?: string | null;
+  requiresReconnect?: boolean;
 };
 
 type LifecycleStatus = "PROCESSING" | "NEEDS_ACTION" | "FAILED" | "COMPLETED";
@@ -232,6 +241,10 @@ const buildFallbackFailure = (
   validPairs: [],
   requiresPhoneSelection: false,
   availablePhoneNumbers: [],
+  setupRequired: false,
+  setupGuideUrl: null,
+  businessManagerUrl: null,
+  requiresReconnect: false,
 });
 
 const buildProviderDeniedFailure = (input: {
@@ -297,12 +310,18 @@ const readFailurePayload = (input: unknown): FailurePayload => {
     code: readString(data.code || root.code || "UNKNOWN"),
     actionable: actionable || fallback.actionable,
     connectDoctor: data.connectDoctor || null,
+    operationId: readString(data.operationId || root.operationId) || null,
+    replayToken: readString(data.replayToken || root.replayToken) || null,
     requiresPairSelection: Boolean(data.requiresPairSelection),
     validPairs: Array.isArray(data.validPairs) ? (data.validPairs as PairOption[]) : [],
     requiresPhoneSelection: Boolean(data.requiresPhoneSelection),
     availablePhoneNumbers: Array.isArray(data.availablePhoneNumbers)
       ? (data.availablePhoneNumbers as WhatsAppPhoneOption[])
       : [],
+    setupRequired: Boolean(data.setupRequired),
+    setupGuideUrl: readString(data.setupGuideUrl) || null,
+    businessManagerUrl: readString(data.businessManagerUrl) || null,
+    requiresReconnect: Boolean(data.requiresReconnect),
   };
 };
 
@@ -348,6 +367,8 @@ const failureFromLifecycle = (
       : [];
 
   return {
+    operationId: readString(lifecycle.operationId) || null,
+    replayToken: readString(lifecycle.replayToken) || null,
     platform,
     stage: readString(lifecycle.stage || "IG_CONNECT_FAILED"),
     reason,
@@ -366,12 +387,18 @@ const failureFromLifecycle = (
     requiresPhoneSelection:
       Boolean(lifecycle.requiresPhoneSelection) || availablePhoneNumbers.length > 0,
     availablePhoneNumbers,
+    setupRequired: Boolean(metadata.setupRequired),
+    setupGuideUrl: readString(metadata.setupGuideUrl) || null,
+    businessManagerUrl: readString(metadata.businessManagerUrl) || null,
+    requiresReconnect: Boolean(metadata.requiresReconnect),
   };
 };
 
 function MetaCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const callbackState = searchParams.get("state") || "";
+  const callbackMode = readString(searchParams.get("mode") || "connect");
   const connectStartedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<FailurePayload | null>(null);
@@ -709,6 +736,121 @@ function MetaCallbackContent() {
     });
   };
 
+  const pollLifecycleAfterRefresh = async (operationId?: string | null) => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const query = new URLSearchParams({
+        platform: "WHATSAPP",
+      });
+      if (callbackState) {
+        query.set("state", callbackState);
+      }
+      if (operationId) {
+        query.set("operationId", operationId);
+      }
+
+      const lifecycleResponse = await apiFetch<LifecyclePayload>(
+        `/api/clients/oauth/meta/lifecycle?${query.toString()}`,
+        {
+          method: "GET",
+          timeoutMs: 12000,
+        }
+      );
+      const snapshot = lifecycleResponse.success
+        ? toLifecyclePayload(lifecycleResponse.data)
+        : null;
+
+      if (snapshot) {
+        setLifecycle(snapshot);
+        const status = normalizeLifecycleStatus(snapshot.status);
+        if (status === "COMPLETED") {
+          await fetchClientConnectionStatus().catch(() => null);
+          router.replace(
+            buildSettingsRedirect({
+              integration: "success",
+              platform: "whatsapp",
+              mode: callbackMode,
+            }) as Route
+          );
+          return true;
+        }
+        if (status === "FAILED" || status === "NEEDS_ACTION") {
+          setFailure(failureFromLifecycle(snapshot, "whatsapp"));
+          setLoading(false);
+          return true;
+        }
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(5_000, 1_000 + attempt * 250))
+      );
+    }
+
+    setLoading(false);
+    return false;
+  };
+
+  const refreshWhatsAppNumbers = async (phoneNumberId?: string | null) => {
+    const response = await apiFetch<LifecyclePayload>(
+      "/api/clients/oauth/meta/whatsapp/phone-numbers/refresh",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          state: callbackState,
+          operationId: lifecycle?.operationId || failure?.operationId || null,
+          phoneNumberId: phoneNumberId || null,
+        }),
+        timeoutMs: 20000,
+      }
+    );
+
+    const responseData =
+      response.data && typeof response.data === "object"
+        ? (response.data as Record<string, unknown>)
+        : null;
+    const snapshot =
+      toLifecyclePayload(responseData?.lifecycle) || toLifecyclePayload(response.data);
+    if (snapshot) {
+      setLifecycle(snapshot);
+      const status = normalizeLifecycleStatus(snapshot.status);
+      if (status === "COMPLETED") {
+        await fetchClientConnectionStatus().catch(() => null);
+        router.replace(
+          buildSettingsRedirect({
+            integration: "success",
+            platform: "whatsapp",
+            mode: callbackMode,
+          }) as Route
+        );
+        return;
+      }
+
+      if (status === "PROCESSING") {
+        setLoading(true);
+        await pollLifecycleAfterRefresh(snapshot.operationId || null);
+        return;
+      }
+
+      setFailure(failureFromLifecycle(snapshot, "whatsapp"));
+      return;
+    }
+
+    if (response.success) {
+      await fetchClientConnectionStatus().catch(() => null);
+      router.replace(
+        buildSettingsRedirect({
+          integration: "success",
+          platform: "whatsapp",
+          mode: callbackMode,
+        }) as Route
+      );
+      return;
+    }
+
+    if (!response.success) {
+      throw new Error(response.message || "Unable to refresh WhatsApp numbers");
+    }
+  };
+
   const handlePrimaryAction = async () => {
     if (!failure) {
       return;
@@ -755,10 +897,12 @@ function MetaCallbackContent() {
           throw new Error("Select a WhatsApp mobile number to continue.");
         }
 
-        await startReconnect({
-          phoneNumberId: selectedPhoneNumberId,
-          platform: "whatsapp",
-        });
+        await refreshWhatsAppNumbers(selectedPhoneNumberId);
+        return;
+      }
+
+      if (action === "REFRESH_NUMBERS") {
+        await refreshWhatsAppNumbers();
         return;
       }
 
@@ -818,15 +962,44 @@ function MetaCallbackContent() {
   }
 
   const providerLabel = failure.platform === "whatsapp" ? "WhatsApp" : "Instagram";
+  const isWhatsAppSetupRequired =
+    failure.platform === "whatsapp" &&
+    (failure.setupRequired ||
+      failure.actionable.reasonCode === "WHATSAPP_SETUP_REQUIRED" ||
+      failure.code === "WA_SETUP_REQUIRED");
 
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-10">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-900">{providerLabel} Connect Needs Action</h1>
-        <p className="mt-2 text-sm text-slate-600">Problem: {failure.actionable.problem}</p>
-        <p className="mt-2 text-sm text-slate-700">Cause: {failure.actionable.cause}</p>
-        <p className="mt-2 text-sm text-slate-700">How to fix: {failure.actionable.fix}</p>
-        <p className="mt-2 text-xs text-slate-500">
+      <div className="mx-auto max-w-3xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900">
+              {isWhatsAppSetupRequired ? "Set Up WhatsApp Number" : `${providerLabel} Connect Needs Action`}
+            </h1>
+            <p className="mt-2 text-sm text-slate-600">{failure.actionable.problem}</p>
+          </div>
+          <span className="w-fit rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600">
+            {failure.stage.replaceAll("_", " ")}
+          </span>
+        </div>
+
+        {isWhatsAppSetupRequired ? (
+          <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-sm font-medium text-emerald-950">
+              No WhatsApp Business phone numbers were found.
+            </p>
+            <p className="mt-2 text-sm text-emerald-900">
+              Add or finish verifying a WhatsApp Business number in the connected WABA, then refresh detection here. Your OAuth connection is preserved.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="mt-4 text-sm text-slate-700">Cause: {failure.actionable.cause}</p>
+            <p className="mt-2 text-sm text-slate-700">How to fix: {failure.actionable.fix}</p>
+          </>
+        )}
+
+        <p className="mt-3 text-xs text-slate-500">
           Reason code: {failure.actionable.reasonCode} | Stage: {failure.stage}
         </p>
 
@@ -863,17 +1036,20 @@ function MetaCallbackContent() {
         ) : null}
 
         {failure.requiresPhoneSelection && failure.availablePhoneNumbers?.length ? (
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm font-medium text-slate-900">
-              Select WhatsApp mobile number
+              Select WhatsApp phone number
             </p>
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {failure.availablePhoneNumbers.map((phone) => {
                 const value = phone.phoneNumberId;
                 const line =
-                  phone.verifiedName ||
                   phone.displayPhoneNumber ||
+                  phone.verifiedName ||
                   phone.phoneNumberId;
+                const verification = readString(phone.verificationStatus) || "Verification pending";
+                const quality = readString(phone.qualityRating) || "Quality unavailable";
+                const connected = readString(phone.connectedState) || "Available";
                 const detail = [phone.businessManagerName, phone.wabaName]
                   .filter(Boolean)
                   .join(" - ");
@@ -881,19 +1057,40 @@ function MetaCallbackContent() {
                 return (
                   <label
                     key={value}
-                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm"
+                    className={`cursor-pointer rounded-lg border bg-white p-4 text-sm transition ${
+                      selectedPhoneNumberId === value
+                        ? "border-slate-900 ring-2 ring-slate-900/10"
+                        : "border-slate-200 hover:border-slate-300"
+                    }`}
                   >
-                    <input
-                      type="radio"
-                      name="phoneNumber"
-                      value={value}
-                      checked={selectedPhoneNumberId === value}
-                      onChange={(event) => setSelectedPhoneNumberId(event.target.value)}
-                    />
-                    <span className="text-slate-700">
-                      {line} ({phone.phoneNumberId})
-                      {detail ? ` - ${detail}` : ""}
-                    </span>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="phoneNumber"
+                        value={value}
+                        checked={selectedPhoneNumberId === value}
+                        onChange={(event) => setSelectedPhoneNumberId(event.target.value)}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-slate-900">{line}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">
+                            {verification.replaceAll("_", " ")}
+                          </span>
+                          <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-800">
+                            {quality.replaceAll("_", " ")}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                            {connected.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        {detail ? (
+                          <p className="mt-2 truncate text-xs text-slate-500">{detail}</p>
+                        ) : null}
+                        <p className="mt-1 truncate text-xs text-slate-400">{phone.phoneNumberId}</p>
+                      </div>
+                    </div>
                   </label>
                 );
               })}
@@ -922,8 +1119,51 @@ function MetaCallbackContent() {
           >
             {actionBusy ? "Working..." : failure.actionable.cta.label}
           </button>
+          {isWhatsAppSetupRequired || failure.platform === "whatsapp" ? (
+            <button
+              onClick={() => {
+                setActionBusy(true);
+                refreshWhatsAppNumbers()
+                  .catch((error) => {
+                    const reason =
+                      error instanceof Error ? error.message : "Unable to refresh numbers";
+                    setFailure((current) =>
+                      current
+                        ? {
+                            ...current,
+                            reason,
+                            actionable: {
+                              ...current.actionable,
+                              cause: reason,
+                            },
+                          }
+                        : current
+                    );
+                  })
+                  .finally(() => setActionBusy(false));
+              }}
+              disabled={actionBusy}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-60"
+            >
+              Refresh Numbers
+            </button>
+          ) : null}
+          {isWhatsAppSetupRequired && failure.businessManagerUrl ? (
+            <button
+              onClick={() => window.open(failure.businessManagerUrl || "", "_blank", "noopener,noreferrer")}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+            >
+              Open Meta Business Manager
+            </button>
+          ) : null}
           <button
-            onClick={() => window.open(failure.actionable.helpLink, "_blank", "noopener,noreferrer")}
+            onClick={() =>
+              window.open(
+                failure.setupGuideUrl || failure.actionable.helpLink,
+                "_blank",
+                "noopener,noreferrer"
+              )
+            }
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
           >
             Open Guide

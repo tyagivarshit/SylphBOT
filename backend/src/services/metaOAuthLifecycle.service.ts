@@ -209,6 +209,21 @@ const mapAttemptStatusToLifecycleStatus = (
   return "FAILED";
 };
 
+const redactLifecycleMetadata = (metadata: Record<string, unknown>) => {
+  const redacted = { ...metadata };
+  for (const key of Object.keys(redacted)) {
+    const normalized = key.toLowerCase();
+    if (
+      normalized.includes("token") ||
+      normalized.includes("secret") ||
+      normalized.includes("credential")
+    ) {
+      delete redacted[key];
+    }
+  }
+  return redacted;
+};
+
 const isTerminalLifecycleStatus = (status: MetaOAuthLifecycleStatus | null) =>
   status === "COMPLETED" || status === "FAILED" || status === "NEEDS_ACTION";
 
@@ -880,6 +895,7 @@ export const toMetaOAuthLifecycleResponse = (row: {
   updatedAt: Date;
 }) => {
   const metadata = toObject(row.metadata);
+  const responseMetadata = redactLifecycleMetadata(metadata);
   const explicitLifecycleStatus = toLifecycleStatus(metadata.lifecycleStatus);
   const lifecycleStatus =
     explicitLifecycleStatus || mapAttemptStatusToLifecycleStatus(row.status);
@@ -899,7 +915,7 @@ export const toMetaOAuthLifecycleResponse = (row: {
     errorCode: normalizeOptionalString(row.errorCode),
     errorMessage: normalizeOptionalString(row.errorMessage),
     resolutionHint: normalizeOptionalString(row.resolutionHint),
-    metadata,
+    metadata: responseMetadata,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

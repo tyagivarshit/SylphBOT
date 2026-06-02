@@ -7,6 +7,7 @@ import {
   deleteClient,
   metaOAuthConnect,
   getMetaOAuthLifecycle,
+  refreshWhatsAppOAuthPhoneNumbers,
   updateAITraining,
   startMetaOAuth,
 } from "../controllers/client.controller";
@@ -20,6 +21,7 @@ router.get("/", protect, getClients);
 router.get("/oauth/meta", protect, startMetaOAuth);
 router.post("/oauth/meta", protect, metaOAuthConnect);
 router.get("/oauth/meta/lifecycle", protect, getMetaOAuthLifecycle);
+router.post("/oauth/meta/whatsapp/phone-numbers/refresh", protect, refreshWhatsAppOAuthPhoneNumbers);
 
 router.get("/:id", protect, getSingleClient);
 router.put("/:id", protect, updateClient);

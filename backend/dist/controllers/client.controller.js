@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startMetaOAuth = exports.getSingleClient = exports.deleteClient = exports.updateClient = exports.getClients = exports.updateAITraining = exports.getClientStatus = exports.getMetaOAuthLifecycle = exports.runMetaOAuthContinuationFromQueueJob = exports.metaOAuthConnect = exports.createClient = void 0;
+exports.startMetaOAuth = exports.getSingleClient = exports.deleteClient = exports.updateClient = exports.getClients = exports.updateAITraining = exports.getClientStatus = exports.getMetaOAuthLifecycle = exports.refreshWhatsAppOAuthPhoneNumbers = exports.runMetaOAuthContinuationFromQueueJob = exports.metaOAuthConnect = exports.createClient = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const env_1 = require("../config/env");
 const encrypt_1 = require("../utils/encrypt");
@@ -200,6 +200,7 @@ const META_HELP_LINKS = {
     NO_LINKED_PAGE: "https://www.facebook.com/business/help/898752960195806",
     NO_LINKED_IG_ACCOUNT: "https://www.facebook.com/business/help/898752960195806",
     PHONE_SELECTION_REQUIRED: "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
+    WHATSAPP_SETUP_REQUIRED: "https://business.facebook.com/wa/manage/phone-numbers/",
     MISSING_PERMISSION: "https://developers.facebook.com/docs/permissions/reference",
     TOKEN_EXPIRED: "https://developers.facebook.com/docs/facebook-login/guides/access-tokens",
     TOKEN_REVOKED: "https://developers.facebook.com/docs/facebook-login/guides/access-tokens",
@@ -232,6 +233,11 @@ const resolveMetaActionCode = ({ code, reason, }) => {
         normalizedReason.includes("select whatsapp") ||
         normalizedReason.includes("select mobile number")) {
         return "PHONE_SELECTION_REQUIRED";
+    }
+    if (normalizedCode.includes("WA_SETUP_REQUIRED") ||
+        normalizedCode.includes("WA_PHONE_NUMBER_NOT_FOUND") ||
+        normalizedReason.includes("no whatsapp phone numbers")) {
+        return "WHATSAPP_SETUP_REQUIRED";
     }
     if (normalizedCode.includes("PERMISSION") ||
         normalizedReason.includes("permission")) {
@@ -329,6 +335,18 @@ const buildActionableFailurePayload = (input) => {
             cta: {
                 label: "Select Mobile Number",
                 action: "SELECT_PHONE_NUMBER",
+            },
+        };
+    }
+    if (reasonCode === "WHATSAPP_SETUP_REQUIRED") {
+        return {
+            ...shared,
+            problem: "No WhatsApp Business phone numbers were found.",
+            cause: "The connected Meta Business assets do not currently expose an eligible WhatsApp phone number.",
+            fix: "Create or finish setting up a WhatsApp Business number in the connected WABA, then refresh detection.",
+            cta: {
+                label: "Refresh Numbers",
+                action: "REFRESH_NUMBERS",
             },
         };
     }
@@ -488,6 +506,13 @@ const collectWhatsAppPhoneNumbers = (payload) => {
                 id,
                 displayPhoneNumber: normalizeOptionalString(phoneNumber?.display_phone_number) || null,
                 verifiedName: normalizeOptionalString(phoneNumber?.verified_name) || null,
+                verificationStatus: normalizeOptionalString(phoneNumber?.name_status) ||
+                    normalizeOptionalString(phoneNumber?.verification_status) ||
+                    null,
+                qualityRating: normalizeOptionalString(phoneNumber?.quality_rating) || null,
+                connectedState: normalizeOptionalString(phoneNumber?.status) ||
+                    normalizeOptionalString(phoneNumber?.code_verification_status) ||
+                    null,
             });
         }
         for (const child of Object.values(node)) {
@@ -538,6 +563,13 @@ const mapWhatsAppCandidatesFromBusinessNode = (business) => {
                 phoneNumberId,
                 displayPhoneNumber: normalizeOptionalString(phoneNumber?.display_phone_number) || null,
                 verifiedName: normalizeOptionalString(phoneNumber?.verified_name) || null,
+                verificationStatus: normalizeOptionalString(phoneNumber?.name_status) ||
+                    normalizeOptionalString(phoneNumber?.verification_status) ||
+                    null,
+                qualityRating: normalizeOptionalString(phoneNumber?.quality_rating) || null,
+                connectedState: normalizeOptionalString(phoneNumber?.status) ||
+                    normalizeOptionalString(phoneNumber?.code_verification_status) ||
+                    null,
                 businessManagerId,
                 businessManagerName,
                 wabaId,
@@ -559,6 +591,9 @@ const dedupeWhatsAppPhoneCandidates = (candidates) => {
             phoneNumberId: candidate.phoneNumberId,
             displayPhoneNumber: existing.displayPhoneNumber || candidate.displayPhoneNumber || null,
             verifiedName: existing.verifiedName || candidate.verifiedName || null,
+            verificationStatus: existing.verificationStatus || candidate.verificationStatus || null,
+            qualityRating: existing.qualityRating || candidate.qualityRating || null,
+            connectedState: existing.connectedState || candidate.connectedState || null,
             businessManagerId: existing.businessManagerId || candidate.businessManagerId || null,
             businessManagerName: existing.businessManagerName || candidate.businessManagerName || null,
             wabaId: existing.wabaId || candidate.wabaId || null,
@@ -573,7 +608,7 @@ const fetchWhatsAppPhoneCandidates = async (accessToken) => {
             label: "me/businesses",
             url: "https://graph.facebook.com/v19.0/me/businesses",
             params: {
-                fields: "id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}",
+                fields: "id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name,quality_rating,name_status,status,code_verification_status}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name,quality_rating,name_status,status,code_verification_status}}",
                 access_token: accessToken,
             },
         },
@@ -581,7 +616,7 @@ const fetchWhatsAppPhoneCandidates = async (accessToken) => {
             label: "me",
             url: "https://graph.facebook.com/v19.0/me",
             params: {
-                fields: "businesses{id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}}",
+                fields: "businesses{id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name,quality_rating,name_status,status,code_verification_status}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name,quality_rating,name_status,status,code_verification_status}}}",
                 access_token: accessToken,
             },
         },
@@ -603,6 +638,9 @@ const fetchWhatsAppPhoneCandidates = async (accessToken) => {
                     phoneNumberId: fallbackNumber.id,
                     displayPhoneNumber: fallbackNumber.displayPhoneNumber,
                     verifiedName: fallbackNumber.verifiedName,
+                    verificationStatus: fallbackNumber.verificationStatus,
+                    qualityRating: fallbackNumber.qualityRating,
+                    connectedState: fallbackNumber.connectedState,
                     businessManagerId: null,
                     businessManagerName: null,
                     wabaId: null,
@@ -806,6 +844,52 @@ const fetchWhatsAppPhoneNumberId = async (accessToken, preferredPhoneNumberId) =
         return phoneNumbers[0].phoneNumberId;
     }
     return null;
+};
+const getWhatsAppBusinessManagerUrl = (businessManagerId) => {
+    const businessId = normalizeOptionalString(businessManagerId);
+    return businessId
+        ? `https://business.facebook.com/wa/manage/phone-numbers/?business_id=${encodeURIComponent(businessId)}`
+        : "https://business.facebook.com/wa/manage/phone-numbers/";
+};
+const buildWhatsAppSetupRequiredMetadata = (input) => {
+    const actionable = buildActionableFailurePayload({
+        code: "WA_SETUP_REQUIRED",
+        reason: "No WhatsApp Business phone numbers were found.",
+    });
+    const businessManagerId = normalizeOptionalString(input.businessManagerId);
+    const wabaId = normalizeOptionalString(input.wabaId);
+    return {
+        code: "WA_SETUP_REQUIRED",
+        availablePhoneNumbers: input.availablePhoneNumbers,
+        setupRequired: true,
+        setupGuideUrl: META_HELP_LINKS.WHATSAPP_SETUP_REQUIRED,
+        businessManagerUrl: getWhatsAppBusinessManagerUrl(businessManagerId),
+        businessManagerId,
+        wabaId,
+        actionable,
+        ...(normalizeOptionalString(input.longToken)
+            ? { whatsappRefreshTokenEncrypted: (0, encrypt_1.encrypt)(input.longToken) }
+            : {}),
+    };
+};
+const markWhatsAppSetupRequired = async (input) => {
+    console.info("WHATSAPP_SETUP_REQUIRED", {
+        component: "whatsapp-onboarding",
+        businessId: input.businessId,
+        operationId: input.lifecycleContext?.attemptKey || null,
+        refreshed: Boolean(input.refreshed),
+    });
+    if (!input.lifecycleContext) {
+        return buildWhatsAppSetupRequiredMetadata(input);
+    }
+    const metadata = buildWhatsAppSetupRequiredMetadata(input);
+    await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleNeedsAction)({
+        context: input.lifecycleContext,
+        stage: "PHONE_SELECTION",
+        detail: "No WhatsApp Business phone numbers were found.",
+        metadata,
+    });
+    return metadata;
 };
 const upsertConnectedClient = async ({ businessId, platform, phoneNumberId, pageId, accessToken, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, }) => {
     const normalizedPlatform = normalizeOptionalString(platform)?.toUpperCase() || "SYSTEM";
@@ -1371,7 +1455,7 @@ const metaOAuthConnect = async (req, res) => {
             mode: oauthState.mode,
             nonce: oauthState.nonce,
         });
-        const selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
+        let selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
             normalizeOptionalString(oauthState.preferredPhoneNumberId);
         const requestedFacebookPageId = normalizeOptionalString(facebookPageId) ||
             normalizeOptionalString(oauthState.preferredFacebookPageId);
@@ -1782,7 +1866,7 @@ const metaOAuthConnect = async (req, res) => {
             return await triggerBullMQFallback("callback_short_token_exchanged", "short_token_exchanged_fast_path");
         }
         const discoveryPermissions = await fetchMetaGrantedPermissions(shortToken);
-        if (targetPlatform === "WHATSAPP" && !selectedPhoneNumberId) {
+        if (targetPlatform === "WHATSAPP" && !selectedPhoneNumberId && !internalContinuation) {
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
                     context: lifecycleContext,
@@ -1831,6 +1915,19 @@ const metaOAuthConnect = async (req, res) => {
             }
             const availablePhoneNumbers = await fetchWhatsAppPhoneCandidates(shortToken);
             const discoveredWabaCandidate = availablePhoneNumbers.find((candidate) => Boolean(candidate.wabaId)) || null;
+            console.info("WHATSAPP_WABA_FETCHED", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                wabaId: discoveredWabaCandidate?.wabaId || null,
+                businessManagerId: discoveredWabaCandidate?.businessManagerId || null,
+            });
+            console.info("WHATSAPP_PHONE_NUMBERS_FOUND", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                phoneNumberCount: availablePhoneNumbers.length,
+            });
             logWaCheckpoint("[WA STEP 5] accounts/pages discovered", {
                 candidateCount: availablePhoneNumbers.length,
             });
@@ -1865,69 +1962,73 @@ const metaOAuthConnect = async (req, res) => {
                         selectedPhoneNumberId: selectedPhoneNumberId || null,
                     },
                 });
-                if (lifecycleContext) {
-                    await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
-                        context: lifecycleContext,
-                        stage: "FAILED",
-                        code: "WA_PHONE_NUMBER_NOT_FOUND",
-                        reason: "No WhatsApp phone numbers were found in linked Meta assets.",
-                        resolutionHint: "RECONNECT",
-                    });
-                }
-                return res.status(400).json({
+                const setupMetadata = await markWhatsAppSetupRequired({
+                    businessId,
+                    lifecycleContext,
+                    availablePhoneNumbers,
+                    longToken: shortToken,
+                    businessManagerId: discoveredWabaCandidate?.businessManagerId || null,
+                    wabaId: discoveredWabaCandidate?.wabaId || null,
+                });
+                return res.status(409).json({
                     success: false,
                     data: {
                         platform: "WHATSAPP",
                         stage: "WA_PHONE_DISCOVERY",
                         reason: "No WhatsApp phone numbers were found in linked Meta assets.",
-                        code: "WA_PHONE_NUMBER_NOT_FOUND",
-                        actionable: buildActionableFailurePayload({
-                            code: "WA_PHONE_NUMBER_NOT_FOUND",
-                            reason: "No WhatsApp phone numbers were found in linked Meta assets.",
-                        }),
+                        code: "WA_SETUP_REQUIRED",
+                        actionable: setupMetadata.actionable,
                         requiresPhoneSelection: false,
+                        setupRequired: true,
+                        businessManagerUrl: setupMetadata.businessManagerUrl,
+                        setupGuideUrl: setupMetadata.setupGuideUrl,
                         availablePhoneNumbers: [],
                     },
-                    message: "Unable to resolve WhatsApp phone number",
-                    code: "WA_PHONE_NUMBER_NOT_FOUND",
+                    message: "WhatsApp setup required",
+                    code: "WA_SETUP_REQUIRED",
                 });
             }
-            logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
-                selectionRequired: true,
-                selectedPhoneNumberId: null,
-            });
-            if (lifecycleContext) {
-                await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleNeedsAction)({
-                    context: lifecycleContext,
-                    stage: "PHONE_SELECTION",
-                    detail: "Select the WhatsApp mobile number you want to connect.",
-                    metadata: {
+            if (availablePhoneNumbers.length === 1) {
+                selectedPhoneNumberId = availablePhoneNumbers[0].phoneNumberId;
+            }
+            if (!selectedPhoneNumberId) {
+                logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
+                    selectionRequired: true,
+                    selectedPhoneNumberId: null,
+                });
+                if (lifecycleContext) {
+                    await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleNeedsAction)({
+                        context: lifecycleContext,
+                        stage: "PHONE_SELECTION",
+                        detail: "Select the WhatsApp mobile number you want to connect.",
+                        metadata: {
+                            code: "PHONE_SELECTION_REQUIRED",
+                            availablePhoneNumbers,
+                            actionable: buildActionableFailurePayload({
+                                code: "PHONE_SELECTION_REQUIRED",
+                                reason: "Select the WhatsApp mobile number you want to connect.",
+                            }),
+                        },
+                    });
+                }
+                return res.status(409).json({
+                    success: false,
+                    data: {
+                        platform: "WHATSAPP",
+                        stage: "WA_PHONE_SELECTED",
+                        reason: "Select the WhatsApp mobile number you want to connect.",
                         code: "PHONE_SELECTION_REQUIRED",
-                        availablePhoneNumbers,
                         actionable: buildActionableFailurePayload({
                             code: "PHONE_SELECTION_REQUIRED",
                             reason: "Select the WhatsApp mobile number you want to connect.",
                         }),
+                        requiresPhoneSelection: true,
+                        availablePhoneNumbers,
                     },
+                    message: "Phone number selection required",
+                    code: "PHONE_SELECTION_REQUIRED",
                 });
             }
-            return res.status(409).json({
-                success: false,
-                data: {
-                    platform: "WHATSAPP",
-                    stage: "WA_PHONE_SELECTED",
-                    reason: "Select the WhatsApp mobile number you want to connect.",
-                    code: "PHONE_SELECTION_REQUIRED",
-                    actionable: buildActionableFailurePayload({
-                        code: "PHONE_SELECTION_REQUIRED",
-                        reason: "Select the WhatsApp mobile number you want to connect.",
-                    }),
-                    requiresPhoneSelection: true,
-                    availablePhoneNumbers,
-                },
-                message: "Phone number selection required",
-                code: "PHONE_SELECTION_REQUIRED",
-            });
         }
         if (targetPlatform === "INSTAGRAM" &&
             !requestedFacebookPageId &&
@@ -2536,6 +2637,19 @@ const metaOAuthConnect = async (req, res) => {
             }
             const availablePhoneNumbers = await fetchWhatsAppPhoneCandidates(longToken);
             const discoveredWabaCandidate = availablePhoneNumbers.find((candidate) => Boolean(candidate.wabaId)) || null;
+            console.info("WHATSAPP_WABA_FETCHED", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                wabaId: discoveredWabaCandidate?.wabaId || null,
+                businessManagerId: discoveredWabaCandidate?.businessManagerId || null,
+            });
+            console.info("WHATSAPP_PHONE_NUMBERS_FOUND", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                phoneNumberCount: availablePhoneNumbers.length,
+            });
             logWaCheckpoint("[WA STEP 5] accounts/pages discovered", {
                 candidateCount: availablePhoneNumbers.length,
             });
@@ -2548,32 +2662,34 @@ const metaOAuthConnect = async (req, res) => {
                 phoneNumberCount: availablePhoneNumbers.length,
             });
             if (!availablePhoneNumbers.length) {
-                if (lifecycleContext) {
-                    await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
-                        context: lifecycleContext,
-                        stage: "FAILED",
-                        code: "WA_PHONE_NUMBER_NOT_FOUND",
-                        reason: "No WhatsApp phone numbers were found in linked Meta assets.",
-                        resolutionHint: "RECONNECT",
-                    });
-                }
-                return res.status(400).json({
+                const setupMetadata = await markWhatsAppSetupRequired({
+                    businessId,
+                    lifecycleContext,
+                    availablePhoneNumbers,
+                    longToken,
+                    businessManagerId: discoveredWabaCandidate?.businessManagerId || null,
+                    wabaId: discoveredWabaCandidate?.wabaId || null,
+                });
+                return res.status(409).json({
                     success: false,
                     data: {
                         platform: "WHATSAPP",
                         stage: "WA_PHONE_DISCOVERY",
                         reason: "No WhatsApp phone numbers were found in linked Meta assets.",
-                        code: "WA_PHONE_NUMBER_NOT_FOUND",
-                        actionable: buildActionableFailurePayload({
-                            code: "WA_PHONE_NUMBER_NOT_FOUND",
-                            reason: "No WhatsApp phone numbers were found in linked Meta assets.",
-                        }),
+                        code: "WA_SETUP_REQUIRED",
+                        actionable: setupMetadata.actionable,
                         requiresPhoneSelection: false,
+                        setupRequired: true,
+                        businessManagerUrl: setupMetadata.businessManagerUrl,
+                        setupGuideUrl: setupMetadata.setupGuideUrl,
                         availablePhoneNumbers: [],
                     },
-                    message: "Unable to resolve WhatsApp phone number",
-                    code: "WA_PHONE_NUMBER_NOT_FOUND",
+                    message: "WhatsApp setup required",
+                    code: "WA_SETUP_REQUIRED",
                 });
+            }
+            if (!selectedPhoneNumberId && availablePhoneNumbers.length === 1) {
+                selectedPhoneNumberId = availablePhoneNumbers[0].phoneNumberId;
             }
             if (!selectedPhoneNumberId) {
                 emitOnboardingTraceEvent({
@@ -2677,6 +2793,13 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
             const resolvedPhoneNumberId = selectedPhone.phoneNumberId;
+            console.info("WHATSAPP_PHONE_SELECTED", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                phoneNumberId: resolvedPhoneNumberId,
+                wabaId: selectedPhone.wabaId || null,
+            });
             emitOnboardingTraceEvent({
                 businessId,
                 eventType: "phone_resolution_result",
@@ -2836,6 +2959,13 @@ const metaOAuthConnect = async (req, res) => {
                 phoneNumberId: whatsappClient.phoneNumberId || null,
             });
             connectedClients.push(whatsappClient);
+            console.info("WHATSAPP_INTEGRATION_CONNECTED", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                phoneNumberId: resolvedPhoneNumberId,
+                clientId: whatsappClient.id,
+            });
         }
         const clientsSnapshot = connectedClients.map((client) => ({
             platform: client.platform,
@@ -3200,6 +3330,285 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
     };
 };
 exports.runMetaOAuthContinuationFromQueueJob = runMetaOAuthContinuationFromQueueJob;
+const refreshWhatsAppOAuthPhoneNumbers = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const businessId = (0, tenant_service_1.getRequestBusinessId)(req);
+        const rawState = normalizeOptionalString(req.body?.state || req.query.state);
+        const rawOperationId = normalizeOptionalString(req.body?.operationId || req.query.operationId);
+        const requestedPhoneNumberId = normalizeOptionalString(req.body?.phoneNumberId);
+        if (!userId || !businessId) {
+            return res.status(401).json({
+                success: false,
+                data: null,
+                message: "Unauthorized",
+            });
+        }
+        if (!rawState) {
+            return res.status(400).json({
+                success: false,
+                data: null,
+                message: "state is required",
+            });
+        }
+        const oauthState = (0, metaOAuthState_1.verifyMetaOAuthState)(rawState);
+        if (!oauthState || oauthState.platform !== "WHATSAPP") {
+            return res.status(400).json({
+                success: false,
+                data: null,
+                message: "Invalid WhatsApp OAuth state",
+            });
+        }
+        if (oauthState.userId !== userId ||
+            oauthState.businessId !== businessId ||
+            oauthState.workspaceId !== businessId) {
+            return res.status(403).json({
+                success: false,
+                data: null,
+                message: "OAuth state mismatch",
+            });
+        }
+        const lifecycleContext = (0, metaOAuthLifecycle_service_1.createMetaOAuthLifecycleContext)({
+            businessId,
+            platform: "WHATSAPP",
+            mode: oauthState.mode,
+            nonce: oauthState.nonce,
+        });
+        const row = await (0, metaOAuthLifecycle_service_1.getMetaOAuthLifecycleSnapshot)({
+            attemptKey: rawOperationId || lifecycleContext.attemptKey,
+            replayToken: lifecycleContext.replayToken,
+            platform: "WHATSAPP",
+        });
+        const metadata = row?.metadata && typeof row.metadata === "object"
+            ? row.metadata
+            : {};
+        const refreshTokenEncrypted = normalizeOptionalString(metadata.whatsappRefreshTokenEncrypted);
+        if (!row || !refreshTokenEncrypted) {
+            const setupMetadata = await markWhatsAppSetupRequired({
+                businessId,
+                lifecycleContext,
+                availablePhoneNumbers: [],
+                refreshed: true,
+            });
+            return res.status(409).json({
+                success: false,
+                data: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    platform: "WHATSAPP",
+                    status: "NEEDS_ACTION",
+                    connectionState: "ACTION_REQUIRED",
+                    stage: "PHONE_SELECTION",
+                    code: "WA_SETUP_REQUIRED",
+                    actionable: setupMetadata.actionable,
+                    setupRequired: true,
+                    requiresReconnect: true,
+                    businessManagerUrl: setupMetadata.businessManagerUrl,
+                    setupGuideUrl: setupMetadata.setupGuideUrl,
+                    availablePhoneNumbers: [],
+                },
+                message: "Refresh requires reconnect because token material is unavailable",
+                code: "WA_SETUP_REQUIRED",
+            });
+        }
+        let accessToken;
+        try {
+            accessToken = (0, encrypt_1.decrypt)(refreshTokenEncrypted);
+        }
+        catch {
+            accessToken = "";
+        }
+        if (!accessToken) {
+            return res.status(409).json({
+                success: false,
+                data: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    platform: "WHATSAPP",
+                    status: "NEEDS_ACTION",
+                    connectionState: "ACTION_REQUIRED",
+                    stage: "PHONE_SELECTION",
+                    code: "WA_SETUP_REQUIRED",
+                    requiresReconnect: true,
+                },
+                message: "Refresh credentials are unavailable. Reconnect WhatsApp.",
+                code: "WA_SETUP_REQUIRED",
+            });
+        }
+        const availablePhoneNumbers = await fetchWhatsAppPhoneCandidates(accessToken);
+        const discoveredWabaCandidate = availablePhoneNumbers.find((candidate) => Boolean(candidate.wabaId)) || null;
+        console.info("WHATSAPP_NUMBERS_REFRESHED", {
+            component: "whatsapp-onboarding",
+            businessId,
+            operationId: lifecycleContext.attemptKey,
+            phoneNumberCount: availablePhoneNumbers.length,
+        });
+        if (!availablePhoneNumbers.length) {
+            const setupMetadata = await markWhatsAppSetupRequired({
+                businessId,
+                lifecycleContext,
+                availablePhoneNumbers,
+                longToken: accessToken,
+                businessManagerId: discoveredWabaCandidate?.businessManagerId || null,
+                wabaId: discoveredWabaCandidate?.wabaId || null,
+                refreshed: true,
+            });
+            return res.status(409).json({
+                success: false,
+                data: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    platform: "WHATSAPP",
+                    status: "NEEDS_ACTION",
+                    connectionState: "ACTION_REQUIRED",
+                    stage: "PHONE_SELECTION",
+                    code: "WA_SETUP_REQUIRED",
+                    actionable: setupMetadata.actionable,
+                    setupRequired: true,
+                    businessManagerUrl: setupMetadata.businessManagerUrl,
+                    setupGuideUrl: setupMetadata.setupGuideUrl,
+                    availablePhoneNumbers: [],
+                },
+                message: "No WhatsApp phone numbers found yet",
+                code: "WA_SETUP_REQUIRED",
+            });
+        }
+        const selectedPhoneNumberId = requestedPhoneNumberId ||
+            (availablePhoneNumbers.length === 1
+                ? availablePhoneNumbers[0].phoneNumberId
+                : null);
+        if (!selectedPhoneNumberId) {
+            const actionable = buildActionableFailurePayload({
+                code: "PHONE_SELECTION_REQUIRED",
+                reason: "Select the WhatsApp mobile number you want to connect.",
+            });
+            await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleNeedsAction)({
+                context: lifecycleContext,
+                stage: "PHONE_SELECTION",
+                detail: "Select the WhatsApp mobile number you want to connect.",
+                metadata: {
+                    code: "PHONE_SELECTION_REQUIRED",
+                    availablePhoneNumbers,
+                    actionable,
+                    whatsappRefreshTokenEncrypted: refreshTokenEncrypted,
+                },
+            });
+            return res.status(409).json({
+                success: false,
+                data: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    platform: "WHATSAPP",
+                    status: "NEEDS_ACTION",
+                    connectionState: "ACTION_REQUIRED",
+                    stage: "PHONE_SELECTION",
+                    code: "PHONE_SELECTION_REQUIRED",
+                    actionable,
+                    requiresPhoneSelection: true,
+                    availablePhoneNumbers,
+                },
+                message: "Phone number selection required",
+                code: "PHONE_SELECTION_REQUIRED",
+            });
+        }
+        const selectedPhone = availablePhoneNumbers.find((candidate) => candidate.phoneNumberId === selectedPhoneNumberId);
+        if (!selectedPhone) {
+            const actionable = buildActionableFailurePayload({
+                code: "PHONE_SELECTION_REQUIRED",
+                reason: "Selected WhatsApp number is not available under granted assets.",
+            });
+            await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleNeedsAction)({
+                context: lifecycleContext,
+                stage: "PHONE_SELECTION",
+                detail: "Selected WhatsApp number is not available under granted assets.",
+                metadata: {
+                    code: "WA_PHONE_SELECTION_INVALID",
+                    availablePhoneNumbers,
+                    selectedPhoneNumberId,
+                    actionable,
+                    whatsappRefreshTokenEncrypted: refreshTokenEncrypted,
+                },
+            });
+            return res.status(400).json({
+                success: false,
+                data: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    platform: "WHATSAPP",
+                    status: "NEEDS_ACTION",
+                    connectionState: "ACTION_REQUIRED",
+                    stage: "PHONE_SELECTION",
+                    code: "WA_PHONE_SELECTION_INVALID",
+                    actionable,
+                    requiresPhoneSelection: true,
+                    availablePhoneNumbers,
+                },
+                message: "Selected phone number is invalid",
+                code: "WA_PHONE_SELECTION_INVALID",
+            });
+        }
+        console.info("WHATSAPP_PHONE_SELECTED", {
+            component: "whatsapp-onboarding",
+            businessId,
+            operationId: lifecycleContext.attemptKey,
+            phoneNumberId: selectedPhone.phoneNumberId,
+            wabaId: selectedPhone.wabaId || null,
+        });
+        const continuationResult = await (0, exports.runMetaOAuthContinuationFromQueueJob)({
+            operationId: lifecycleContext.attemptKey,
+            replayToken: lifecycleContext.replayToken,
+            businessId,
+            userId,
+            platform: "WHATSAPP",
+            mode: oauthState.mode,
+            state: rawState,
+            code: null,
+            shortTokenEncrypted: null,
+            longTokenEncrypted: refreshTokenEncrypted,
+            phoneNumberId: selectedPhone.phoneNumberId,
+            facebookPageId: null,
+            instagramProfessionalAccountId: null,
+            traceId: buildInstagramTraceId(oauthState.nonce),
+            queuedAtIso: new Date().toISOString(),
+            source: "phone_refresh",
+        });
+        if (Number(continuationResult.statusCode || 0) === 202) {
+            return res.status(202).json({
+                success: true,
+                data: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    platform: "WHATSAPP",
+                    status: "PROCESSING",
+                    connectionState: "PROCESSING",
+                    stage: "FINAL_ONBOARDING",
+                    processing: true,
+                },
+                message: "WhatsApp connect continuation is processing",
+            });
+        }
+        return res.status(continuationResult.statusCode || 202).json(continuationResult.body || {
+            success: true,
+            data: {
+                operationId: lifecycleContext.attemptKey,
+                replayToken: lifecycleContext.replayToken,
+                platform: "WHATSAPP",
+                status: "PROCESSING",
+                stage: "FINAL_ONBOARDING",
+            },
+            message: "WhatsApp connect continuation started",
+        });
+    }
+    catch (error) {
+        console.error("WhatsApp phone refresh error:", error);
+        return res.status(500).json({
+            success: false,
+            data: null,
+            message: "Failed to refresh WhatsApp phone numbers",
+        });
+    }
+};
+exports.refreshWhatsAppOAuthPhoneNumbers = refreshWhatsAppOAuthPhoneNumbers;
 const getMetaOAuthLifecycle = async (req, res) => {
     try {
         const userId = req.user?.id;

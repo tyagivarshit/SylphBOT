@@ -113,10 +113,6 @@ const AUTH_CRITICAL_DEGRADED_ROUTE_PREFIXES = [
   "/api/clients/status",
   "/api/dashboard",
   "/api/billing",
-  "/api/clients/oauth/meta/lifecycle",
-  "/api/clients/oauth/meta",
-  "/api/oauth/meta",
-  "/api/oauth/meta/callback",
   "/api/user/api-key",
 ];
 const AUTH_DIRECT_LOOKUP_ROUTE_PREFIXES = [
@@ -128,7 +124,6 @@ const AUTH_DIRECT_LOOKUP_ROUTE_PREFIXES = [
   "/api/messages",
   "/api/dashboard",
   "/api/user/workspace",
-  "/api/clients/oauth/meta",
   "/api/clients/status",
   "/api/client/status",
 ];
@@ -136,7 +131,6 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
   "/api/billing/checkout",
   "/api/security",
   "/api/auth",
-  "/api/oauth",
   "/api/commerce",
 ];
 const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
@@ -1047,13 +1041,8 @@ const isAuthStabilizationCriticalRoute = (req: Request) => {
     .trim()
     .toLowerCase();
   const path = String(req.path || "").trim().toLowerCase();
-  const oauthBootstrapRoute =
-    normalized.startsWith("/api/clients/oauth/meta") ||
-    normalized.startsWith("/api/oauth/meta") ||
-    normalized.startsWith("/api/oauth/meta/callback");
 
   return (
-    oauthBootstrapRoute ||
     normalized.startsWith("/api/auth") ||
     normalized.startsWith("/api/user/me") ||
     normalized.startsWith("/api/user/workspace") ||
@@ -1192,16 +1181,11 @@ const runSessionAnomalyGuard = async (
 ) => {
   const route = String(req.originalUrl || req.url || "").trim();
   const normalizedRoute = route.toLowerCase();
-  const isMetaOAuthBootstrapRoute =
-    normalizedRoute.startsWith("/api/clients/oauth/meta") ||
-    normalizedRoute.startsWith("/api/oauth/meta") ||
-    normalizedRoute.startsWith("/api/oauth/meta/callback");
   const shouldEnforceSynchronously =
-    !isMetaOAuthBootstrapRoute &&
-    (req.method !== "GET" ||
+    req.method !== "GET" ||
       SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) =>
         normalizedRoute.startsWith(prefix)
-      ));
+      );
   const requestBudgetMs = getRequestRemainingMs({ req }, SESSION_ANOMALY_GUARD_TIMEOUT_MS);
   const minimumRequiredBudgetMs = shouldEnforceSynchronously ? 500 : 280;
 

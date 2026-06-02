@@ -2079,7 +2079,6 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     const businessId = oauthState.businessId;
     const targetPlatform = oauthState.platform;
-    (req as any).oauthContinuationTrusted = true;
     instagramBusinessId = businessId;
     lifecycleContext = createMetaOAuthLifecycleContext({
       businessId,
@@ -4070,6 +4069,10 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       data: null,
       message: "Integration connection failed",
     });
+  } finally {
+    delete (req as any).oauthContinuationTrusted;
+    delete (req as any).__metaContinuationInternal;
+    delete (req as any).__metaResolvedTokens;
   }
 };
 

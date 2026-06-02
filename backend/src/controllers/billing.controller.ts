@@ -121,6 +121,10 @@ const RESPONSE_FINAL_WRITE_LOCAL_KEY = "__runtimeFinalWriteInvoked";
 const CHECKOUT_IN_FLIGHT_WINDOW_MS = 20_000;
 const CHECKOUT_CONFIRM_IN_FLIGHT_WINDOW_MS = 30_000;
 const INSTANT_CHECKOUT_IN_FLIGHT_WINDOW_MS = 10_000;
+const INSTANT_CHECKOUT_ENTITLEMENT_DB_BUDGET_MS = 120;
+const INSTANT_CHECKOUT_ENTITLEMENT_ACTIVE_TTL_MS = 15_000;
+const INSTANT_CHECKOUT_ENTITLEMENT_EMPTY_TTL_MS = 3_000;
+const BILLING_CHECKOUT_WARMUP_TTL_MS = 30_000;
 
 const billingProjectionCache = new Map<
   string,
@@ -152,6 +156,417 @@ const instantCheckoutInFlight = new Map<
     requestId: string | null;
   }
 >();
+const instantCheckoutEntitlementCache = new Map<
+  string,
+  {
+    activePlanCode: string | null;
+    status: string | null;
+    stripeCustomerId: string | null;
+    expiresAt: number;
+    updatedAt: number;
+  }
+>();
+type BillingCheckoutWarmupSnapshot = {
+  businessId: string;
+  userId: string;
+  email: string | null;
+  currency: PricingCurrency;
+  allowedPlans: PlanType[];
+  allowedBilling: BillingInterval[];
+  priceIds: Partial<Record<PlanType, Partial<Record<BillingInterval, string>>>>;
+  entitlement: {
+    activePlanCode: string | null;
+    status: string | null;
+    source: string;
+    stale: boolean;
+    timedOut: boolean;
+  };
+  stripeCustomerId: string | null;
+  checkoutReady: boolean;
+  checkoutReadyReason: string | null;
+  createdAt: number;
+  expiresAt: number;
+};
+const billingCheckoutWarmupCache = new Map<string, BillingCheckoutWarmupSnapshot>();
+const billingCheckoutWarmupInFlight = new Set<string>();
+
+const getBillingCheckoutWarmupKey = (businessId: string, userId: string) =>
+  `${String(businessId || "").trim()}:${String(userId || "").trim()}`;
+
+const readBillingCheckoutWarmup = (businessId: string, userId: string) => {
+  const key = getBillingCheckoutWarmupKey(businessId, userId);
+  const snapshot = billingCheckoutWarmupCache.get(key);
+  if (!snapshot) {
+    return null;
+  }
+
+  if (snapshot.expiresAt <= Date.now()) {
+    billingCheckoutWarmupCache.delete(key);
+    return null;
+  }
+
+  return snapshot;
+};
+
+const buildStandardCheckoutPriceIds = (currency: PricingCurrency) => {
+  const allowedPlans: PlanType[] = ["BASIC", "PRO", "ELITE"];
+  const allowedBilling: BillingInterval[] = ["monthly", "yearly"];
+  const priceIds: BillingCheckoutWarmupSnapshot["priceIds"] = {};
+
+  for (const plan of allowedPlans) {
+    priceIds[plan] = {};
+    for (const billing of allowedBilling) {
+      const priceId = getStripePriceId({
+        plan,
+        currency,
+        billing,
+        early: false,
+      });
+      if (priceId) {
+        priceIds[plan]![billing] = priceId;
+      }
+    }
+  }
+
+  return {
+    allowedPlans,
+    allowedBilling,
+    priceIds,
+  };
+};
+
+const readStripeCustomerIdFromWarmupSources = (
+  businessId: string,
+  entitlementStripeCustomerId?: string | null
+) => {
+  const normalizedBusinessId = String(businessId || "").trim();
+  const fromEntitlement = String(entitlementStripeCustomerId || "").trim();
+  if (fromEntitlement) {
+    return fromEntitlement;
+  }
+
+  const lkvSubscription = prewarmState.lastKnownValidSubscription.get(normalizedBusinessId);
+  const metadata = toRecord(lkvSubscription?.metadata);
+  return (
+    String(metadata.stripeCustomerId || metadata.customerId || "").trim() ||
+    String((lkvSubscription as any)?.stripeCustomerId || "").trim() ||
+    null
+  );
+};
+
+const runBillingCheckoutWarmup = async (input: {
+  req: Request;
+  businessId: string;
+  userId: string;
+  email: string | null;
+  requestId: string | null;
+}) => {
+  const startedAt = Date.now();
+  const warmupKey = getBillingCheckoutWarmupKey(input.businessId, input.userId);
+
+  if (!input.businessId || !input.userId) {
+    console.info("BILLING_CHECKOUT_WARMUP_SKIPPED", {
+      requestId: input.requestId,
+      reason: "missing_context",
+      businessId: input.businessId || null,
+      userId: input.userId || null,
+    });
+    return;
+  }
+
+  const existing = readBillingCheckoutWarmup(input.businessId, input.userId);
+  if (existing) {
+    console.info("BILLING_CHECKOUT_WARMUP_SKIPPED", {
+      requestId: input.requestId,
+      reason: "cache_ready",
+      businessId: input.businessId,
+      userId: input.userId,
+      ageMs: Date.now() - existing.createdAt,
+    });
+    return;
+  }
+
+  if (billingCheckoutWarmupInFlight.has(warmupKey)) {
+    console.info("BILLING_CHECKOUT_WARMUP_SKIPPED", {
+      requestId: input.requestId,
+      reason: "in_flight",
+      businessId: input.businessId,
+      userId: input.userId,
+    });
+    return;
+  }
+
+  billingCheckoutWarmupInFlight.add(warmupKey);
+  console.info("BILLING_CHECKOUT_WARMUP_STARTED", {
+    requestId: input.requestId,
+    businessId: input.businessId,
+    userId: input.userId,
+  });
+
+  try {
+    const currency = resolveBillingCurrency(input.req) as PricingCurrency;
+    const pricing = buildStandardCheckoutPriceIds(currency);
+    const entitlement = await readInstantCheckoutEntitlementSnapshot(input.businessId);
+    let checkoutReady = true;
+    let checkoutReadyReason: string | null = null;
+
+    try {
+      assertStripeConfigReady({
+        requireWebhookSecret: true,
+      });
+    } catch (error: any) {
+      checkoutReady = false;
+      checkoutReadyReason = String(error?.message || "stripe_config_invalid");
+    }
+
+    const createdAt = Date.now();
+    const snapshot: BillingCheckoutWarmupSnapshot = {
+      businessId: input.businessId,
+      userId: input.userId,
+      email: input.email,
+      currency,
+      allowedPlans: pricing.allowedPlans,
+      allowedBilling: pricing.allowedBilling,
+      priceIds: pricing.priceIds,
+      entitlement: {
+        activePlanCode: entitlement.activePlanCode,
+        status: entitlement.status,
+        source: entitlement.source,
+        stale: entitlement.stale,
+        timedOut: entitlement.timedOut,
+      },
+      stripeCustomerId: readStripeCustomerIdFromWarmupSources(
+        input.businessId,
+        (entitlement as any).stripeCustomerId || null
+      ),
+      checkoutReady,
+      checkoutReadyReason,
+      createdAt,
+      expiresAt: createdAt + BILLING_CHECKOUT_WARMUP_TTL_MS,
+    };
+
+    billingCheckoutWarmupCache.set(warmupKey, snapshot);
+    console.info("BILLING_CHECKOUT_WARMUP_READY", {
+      requestId: input.requestId,
+      businessId: input.businessId,
+      userId: input.userId,
+      currency,
+      checkoutReady,
+      checkoutReadyReason,
+      entitlementSource: entitlement.source,
+      entitlementStale: entitlement.stale,
+      entitlementTimedOut: entitlement.timedOut,
+      hasStripeCustomerId: Boolean(snapshot.stripeCustomerId),
+      durationMs: Date.now() - startedAt,
+    });
+  } catch (error: any) {
+    console.info("BILLING_CHECKOUT_WARMUP_SKIPPED", {
+      requestId: input.requestId,
+      reason: String(error?.message || "warmup_failed"),
+      businessId: input.businessId,
+      userId: input.userId,
+      durationMs: Date.now() - startedAt,
+    });
+  } finally {
+    billingCheckoutWarmupInFlight.delete(warmupKey);
+  }
+};
+
+const triggerBillingCheckoutWarmupAfterResponse = (input: {
+  req: Request;
+  res: Response;
+  businessId: string | null;
+  userId: string | null;
+  email: string | null;
+  requestId: string | null;
+}) => {
+  const businessId = String(input.businessId || "").trim();
+  const userId = String(input.userId || "").trim();
+
+  if (!businessId || !userId) {
+    console.info("BILLING_CHECKOUT_WARMUP_SKIPPED", {
+      requestId: input.requestId,
+      reason: "missing_context",
+      businessId: businessId || null,
+      userId: userId || null,
+    });
+    return;
+  }
+
+  const start = () => {
+    void runBillingCheckoutWarmup({
+      req: input.req,
+      businessId,
+      userId,
+      email: input.email,
+      requestId: input.requestId,
+    });
+  };
+
+  if (input.res.writableEnded || input.res.headersSent) {
+    setImmediate(start);
+    return;
+  }
+
+  input.res.once("finish", () => {
+    setImmediate(start);
+  });
+};
+
+const withInstantCheckoutBudget = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<{ timedOut: false; value: T } | { timedOut: true; value: null }> =>
+  Promise.race([
+    promise.then((value) => ({
+      timedOut: false as const,
+      value,
+    })),
+    new Promise<{ timedOut: true; value: null }>((resolve) =>
+      setTimeout(
+        () =>
+          resolve({
+            timedOut: true,
+            value: null,
+          }),
+        Math.max(1, Math.floor(timeoutMs))
+      )
+    ),
+  ]);
+
+const readInstantCheckoutEntitlementSnapshot = async (businessId: string) => {
+  const normalizedBusinessId = String(businessId || "").trim();
+  const cached = instantCheckoutEntitlementCache.get(normalizedBusinessId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return {
+      activePlanCode: cached.activePlanCode,
+      status: cached.status,
+      stripeCustomerId: cached.stripeCustomerId,
+      source: "memory" as const,
+      stale: false,
+      timedOut: false,
+      ageMs: Date.now() - cached.updatedAt,
+    };
+  }
+
+  const lkvSubscription = prewarmState.lastKnownValidSubscription.get(normalizedBusinessId);
+  const lkvStatus = String(lkvSubscription?.status || "").trim().toUpperCase();
+  if (lkvSubscription && ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"].includes(lkvStatus)) {
+    const activePlanCode =
+      String(lkvSubscription.planCode || lkvSubscription.plan?.name || lkvSubscription.plan?.type || "")
+        .trim()
+        .toUpperCase() || null;
+    const stripeCustomerId = readStripeCustomerIdFromWarmupSources(normalizedBusinessId);
+    instantCheckoutEntitlementCache.set(normalizedBusinessId, {
+      activePlanCode,
+      status: lkvStatus,
+      stripeCustomerId,
+      expiresAt: Date.now() + INSTANT_CHECKOUT_ENTITLEMENT_ACTIVE_TTL_MS,
+      updatedAt: Date.now(),
+    });
+    return {
+      activePlanCode,
+      status: lkvStatus,
+      stripeCustomerId,
+      source: "last_known_valid" as const,
+      stale: false,
+      timedOut: false,
+      ageMs: 0,
+    };
+  }
+
+  const dbResult = await withInstantCheckoutBudget(
+    prisma.subscriptionLedger.findFirst({
+      where: {
+        businessId: normalizedBusinessId,
+        status: {
+          in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
+        },
+      },
+      select: {
+        planCode: true,
+        status: true,
+        metadata: true,
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    }),
+    INSTANT_CHECKOUT_ENTITLEMENT_DB_BUDGET_MS
+  ).catch(() => null);
+
+  if (!dbResult || dbResult.timedOut) {
+    const fallback = cached || null;
+    if (fallback) {
+      return {
+        activePlanCode: fallback.activePlanCode,
+        status: fallback.status,
+        stripeCustomerId: fallback.stripeCustomerId,
+        source: "memory_stale" as const,
+        stale: true,
+        timedOut: true,
+        ageMs: Date.now() - fallback.updatedAt,
+      };
+    }
+
+    return {
+      activePlanCode: null,
+      status: null,
+      stripeCustomerId: null,
+      source: "fail_open" as const,
+      stale: true,
+      timedOut: true,
+      ageMs: null,
+    };
+  }
+
+  const row = dbResult.value;
+  if (!row) {
+    instantCheckoutEntitlementCache.set(normalizedBusinessId, {
+      activePlanCode: null,
+      status: null,
+      stripeCustomerId: null,
+      expiresAt: Date.now() + INSTANT_CHECKOUT_ENTITLEMENT_EMPTY_TTL_MS,
+      updatedAt: Date.now(),
+    });
+
+    return {
+      activePlanCode: null,
+      status: null,
+      stripeCustomerId: null,
+      source: "db_budgeted" as const,
+      stale: false,
+      timedOut: false,
+      ageMs: 0,
+    };
+  }
+
+  const activePlanCode = String(row.planCode || "").trim().toUpperCase() || null;
+  const rowMetadata = toRecord(row.metadata);
+  const stripeCustomerId =
+    String(rowMetadata.stripeCustomerId || rowMetadata.customerId || "").trim() || null;
+  instantCheckoutEntitlementCache.set(normalizedBusinessId, {
+    activePlanCode,
+    status: String(row.status || "").trim().toUpperCase() || null,
+    stripeCustomerId,
+    expiresAt:
+      Date.now() +
+      (activePlanCode
+        ? INSTANT_CHECKOUT_ENTITLEMENT_ACTIVE_TTL_MS
+        : INSTANT_CHECKOUT_ENTITLEMENT_EMPTY_TTL_MS),
+    updatedAt: Date.now(),
+  });
+
+  return {
+    activePlanCode,
+    status: String(row.status || "").trim().toUpperCase() || null,
+    stripeCustomerId,
+    source: "db_budgeted" as const,
+    stale: false,
+    timedOut: false,
+    ageMs: 0,
+  };
+};
 
 const getBillingProjectionCacheKey = (
   businessId: string,
@@ -1501,6 +1916,8 @@ export class BillingController {
     const stageTimings: Array<{ stage: string; stageMs: number; elapsedMs: number }> = [];
     let lastStageAt = startedAt;
     let inFlightKey: string | null = null;
+    let checkoutWarmupStatus: "hit" | "miss" = "miss";
+    let checkoutWarmupAgeMs: number | null = null;
     const normalizeStage = (value: string) =>
       String(value || "stage")
         .trim()
@@ -1543,6 +1960,11 @@ export class BillingController {
       res.setHeader("X-Checkout-Outcome", outcome);
       res.setHeader("X-Checkout-Request-Id", requestId || "");
       res.setHeader("X-Checkout-Total-Ms", String(Math.max(0, Math.floor(totalMs))));
+      res.setHeader("X-Checkout-Warmup", checkoutWarmupStatus);
+      res.setHeader(
+        "X-Checkout-Warmup-Age-Ms",
+        checkoutWarmupAgeMs === null ? "" : String(Math.max(0, Math.floor(checkoutWarmupAgeMs)))
+      );
       res.setHeader(
         "X-Checkout-Stage-Timings",
         stageTimings
@@ -1577,6 +1999,14 @@ export class BillingController {
           .join(", ")
           .slice(0, 3500)
       );
+      console.info("CHECKOUT_TOTAL_MS", {
+        requestId,
+        mode: "instant",
+        outcome,
+        totalMs,
+        warmup: checkoutWarmupStatus,
+        warmupAgeMs: checkoutWarmupAgeMs,
+      });
     };
     const fail = (status: number, reason: string, message: string) => {
       setTimingHeaders("failed");
@@ -1637,6 +2067,25 @@ export class BillingController {
       if (!businessId || !userId) {
         return fail(403, "business_context_required", "Business context is required");
       }
+      const warmupSnapshot = readBillingCheckoutWarmup(businessId, userId);
+      checkoutWarmupStatus = warmupSnapshot ? "hit" : "miss";
+      checkoutWarmupAgeMs = warmupSnapshot ? Date.now() - warmupSnapshot.createdAt : null;
+      if (!res.headersSent && !res.writableEnded) {
+        res.setHeader("X-Checkout-Warmup", checkoutWarmupStatus);
+        res.setHeader(
+          "X-Checkout-Warmup-Age-Ms",
+          checkoutWarmupAgeMs === null
+            ? ""
+            : String(Math.max(0, Math.floor(checkoutWarmupAgeMs)))
+        );
+      }
+      console.info(warmupSnapshot ? "CHECKOUT_WARMUP_HIT" : "CHECKOUT_WARMUP_MISS", {
+        requestId,
+        businessId,
+        userId,
+        mode: "instant",
+        ageMs: checkoutWarmupAgeMs,
+      });
       console.info("CHECKOUT_AUTH_OK", {
         requestId,
         businessId,
@@ -1656,8 +2105,16 @@ export class BillingController {
         1,
         Math.min(500, Math.floor(Number.isFinite(requestedQuantity) ? requestedQuantity : 1))
       );
-      const allowedPlans = new Set<PlanType>(["BASIC", "PRO", "ELITE"]);
-      const allowedBilling = new Set<BillingInterval>(["monthly", "yearly"]);
+      const allowedPlans = new Set<PlanType>(
+        warmupSnapshot?.allowedPlans?.length
+          ? warmupSnapshot.allowedPlans
+          : ["BASIC", "PRO", "ELITE"]
+      );
+      const allowedBilling = new Set<BillingInterval>(
+        warmupSnapshot?.allowedBilling?.length
+          ? warmupSnapshot.allowedBilling
+          : ["monthly", "yearly"]
+      );
 
       if (!allowedPlans.has(normalizedPlan)) {
         return fail(400, "invalid_plan", "Invalid plan selected");
@@ -1667,47 +2124,74 @@ export class BillingController {
         return fail(400, "invalid_billing", "Invalid billing cycle");
       }
 
-      const currency = resolveBillingCurrency(req) as PricingCurrency;
-      const priceId = getStripePriceId({
-        plan: normalizedPlan,
-        currency,
-        billing: normalizedBilling,
-        early: false,
-      });
+      const currency = (warmupSnapshot?.currency || resolveBillingCurrency(req)) as PricingCurrency;
+      const priceId =
+        warmupSnapshot?.priceIds?.[normalizedPlan]?.[normalizedBilling] ||
+        getStripePriceId({
+          plan: normalizedPlan,
+          currency,
+          billing: normalizedBilling,
+          early: false,
+        });
       markStage("pricing.resolved", {
         businessId,
         plan: normalizedPlan,
         billingCycle: normalizedBilling,
         currency,
         priceIdConfigured: Boolean(priceId),
+        source: warmupSnapshot ? "warmup" : "inline",
       });
 
       if (!priceId) {
         return fail(503, "stripe_price_mapping_missing", "Stripe price is not configured");
       }
 
-      const activeSubscription = await prisma.subscriptionLedger.findFirst({
-        where: {
-          businessId,
-          status: {
-            in: ["ACTIVE", "TRIALING", "PAST_DUE", "PAUSED"],
-          },
-        },
-        select: {
-          planCode: true,
-        },
-        orderBy: {
-          updatedAt: "desc",
-        },
-      });
+      const entitlementStartedAt = Date.now();
+      const entitlementSnapshot = warmupSnapshot
+        ? {
+            ...warmupSnapshot.entitlement,
+            source: `warmup:${warmupSnapshot.entitlement.source}`,
+            ageMs: Date.now() - warmupSnapshot.createdAt,
+          }
+        : await readInstantCheckoutEntitlementSnapshot(businessId);
+      const entitlementMs = Date.now() - entitlementStartedAt;
+      if (!res.headersSent && !res.writableEnded) {
+        res.setHeader(
+          "X-Checkout-Entitlement-Ms",
+          String(Math.max(0, Math.floor(entitlementMs)))
+        );
+      }
       markStage("subscription.checked", {
         businessId,
-        activePlanCode: activeSubscription?.planCode || null,
+        activePlanCode: entitlementSnapshot.activePlanCode || null,
+        entitlementSource: entitlementSnapshot.source,
+        entitlementStale: entitlementSnapshot.stale,
+        entitlementTimedOut: entitlementSnapshot.timedOut,
       });
+      console.info(
+          entitlementSnapshot.source === "memory" ||
+          entitlementSnapshot.source === "last_known_valid" ||
+          String(entitlementSnapshot.source || "").startsWith("warmup:")
+          ? "CHECKOUT_ENTITLEMENT_SNAPSHOT_HIT"
+          : "CHECKOUT_ENTITLEMENT_SNAPSHOT_FALLBACK",
+        {
+          requestId,
+          businessId,
+          plan: normalizedPlan,
+          billingCycle: normalizedBilling,
+          activePlanCode: entitlementSnapshot.activePlanCode || null,
+          source: entitlementSnapshot.source,
+          stale: entitlementSnapshot.stale,
+          timedOut: entitlementSnapshot.timedOut,
+          ageMs: entitlementSnapshot.ageMs,
+          entitlementMs,
+          mode: "instant",
+        }
+      );
 
       if (
-        activeSubscription?.planCode &&
-        String(activeSubscription.planCode || "").trim().toUpperCase() === normalizedPlan
+        entitlementSnapshot.activePlanCode &&
+        String(entitlementSnapshot.activePlanCode || "").trim().toUpperCase() === normalizedPlan
       ) {
         return fail(409, "already_subscribed", "You are already subscribed to this plan");
       }
@@ -1716,16 +2200,28 @@ export class BillingController {
         businessId,
         plan: normalizedPlan,
         billingCycle: normalizedBilling,
-        activePlanCode: activeSubscription?.planCode || null,
+        activePlanCode: entitlementSnapshot.activePlanCode || null,
+        entitlementSource: entitlementSnapshot.source,
         mode: "instant",
         elapsedMs: Date.now() - startedAt,
       });
 
-      assertStripeConfigReady({
-        requireWebhookSecret: true,
-      });
+      if (warmupSnapshot) {
+        if (!warmupSnapshot.checkoutReady) {
+          return fail(
+            503,
+            "provider_unavailable",
+            "Billing provider is temporarily unavailable. Please retry shortly."
+          );
+        }
+      } else {
+        assertStripeConfigReady({
+          requireWebhookSecret: true,
+        });
+      }
       markStage("stripe.config_ready", {
         businessId,
+        source: warmupSnapshot ? "warmup" : "inline",
       });
 
       const checkoutAttemptRaw = String(
@@ -1772,7 +2268,9 @@ export class BillingController {
         {
           mode: "subscription",
           client_reference_id: checkoutAttempt,
-          customer_email: email || undefined,
+          ...(warmupSnapshot?.stripeCustomerId
+            ? { customer: warmupSnapshot.stripeCustomerId }
+            : { customer_email: email || warmupSnapshot?.email || undefined }),
           allow_promotion_codes: true,
           metadata,
           subscription_data: {
@@ -1803,6 +2301,12 @@ export class BillingController {
         sessionId: session.id,
         stripeMs: Date.now() - stripeStartedAt,
       });
+      if (!res.headersSent && !res.writableEnded) {
+        res.setHeader(
+          "X-Checkout-Stripe-Ms",
+          String(Math.max(0, Math.floor(Date.now() - stripeStartedAt)))
+        );
+      }
       console.info("CHECKOUT_STRIPE_SESSION_CREATED", {
         requestId,
         businessId,
@@ -1829,12 +2333,21 @@ export class BillingController {
         elapsedMs: Date.now() - startedAt,
         stages: stageTimings,
       });
+      const redirectStartedAt = Date.now();
+      if (!res.headersSent && !res.writableEnded) {
+        res.setHeader("X-Checkout-Redirect-Ms", "0");
+        res.setHeader(
+          "X-Checkout-Total-Ms",
+          String(Math.max(0, Math.floor(Date.now() - startedAt)))
+        );
+      }
       console.info("CHECKOUT_REDIRECT_SENT", {
         requestId,
         businessId,
         sessionId: session.id,
         status: 303,
         mode: "instant",
+        redirectMs: Date.now() - redirectStartedAt,
         elapsedMs: Date.now() - startedAt,
       });
       return res.redirect(303, checkoutUrl);
@@ -2824,6 +3337,23 @@ const emitCheckoutMetric = (
         surface === "checkout" ||
         String(req.originalUrl || "").includes("/checkout") ||
         String(req.originalUrl || "").includes("surface=checkout");
+      const sendBillingSurfaceResponse = (
+        status: number,
+        body: Record<string, unknown>
+      ) => {
+        if (surface === "billing" && status >= 200 && status < 300) {
+          triggerBillingCheckoutWarmupAfterResponse({
+            req,
+            res,
+            businessId,
+            userId: String(req.user?.id || "").trim() || null,
+            email: String(req.user?.email || "").trim().toLowerCase() || null,
+            requestId: String(req.requestId || "").trim() || null,
+          });
+        }
+
+        return res.status(status).json(body);
+      };
 
       if (isCheckoutSurface) {
         let cachedVal: any = null;
@@ -3045,7 +3575,8 @@ const emitCheckoutMetric = (
               });
             }
 
-            return res.status(200).json(
+            return sendBillingSurfaceResponse(
+              200,
               isStale ? markBillingSnapshotAsStale(cached.value, "stale_revalidate") : cached.value
             );
           }
@@ -3094,7 +3625,8 @@ const emitCheckoutMetric = (
               promise: sharedProjectionPromise,
             });
 
-            return res.status(200).json(
+            return sendBillingSurfaceResponse(
+              200,
               markBillingSnapshotAsStale(redisSnapshot.data, "stale_revalidate")
             );
           }
@@ -3150,7 +3682,7 @@ const emitCheckoutMetric = (
                 reason: "lightweight_prewarm_lkv",
               },
             };
-            return res.status(200).json(prewarmFallback);
+            return sendBillingSurfaceResponse(200, prewarmFallback);
           }
 
           // 4. Memory/Redis/LKV Cache Miss: serve default degraded immediately without blocking DB/Stripe calls!
@@ -3202,9 +3734,9 @@ const emitCheckoutMetric = (
               reason: "lightweight_degraded_sync",
             },
           };
-          return res.status(200).json(defaultResponse);
+          return sendBillingSurfaceResponse(200, defaultResponse);
         } else {
-          return res.status(200).json({
+          return sendBillingSurfaceResponse(200, {
             success: true,
             subscription: null,
             billing: EMPTY_BILLING_CONTEXT,

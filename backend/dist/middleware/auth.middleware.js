@@ -758,6 +758,15 @@ const shouldUseDirectAuthLookup = (req) => {
         route.includes("/onboarding") ||
         path.includes("/onboarding"));
 };
+const isInstantCheckoutRoute = (req) => {
+    const route = String(req.originalUrl || req.path || req.url || "")
+        .trim()
+        .toLowerCase();
+    const path = String(req.path || "").trim().toLowerCase();
+    return (route.startsWith("/api/billing/checkout/instant") ||
+        path === "/checkout/instant" ||
+        path.endsWith("/billing/checkout/instant"));
+};
 const markDegradedAuthHeaders = (res) => {
     if (!res || res.headersSent || res.writableEnded) {
         return;
@@ -1186,6 +1195,75 @@ const protect = async (req, res, next) => {
         if (!accessToken && !refreshToken) {
             throw (0, AppError_1.unauthorized)("Missing session");
         }
+        if (isInstantCheckoutRoute(req) && accessToken) {
+            const fastPathStartedAt = Date.now();
+            const decoded = (0, generateToken_1.verifyAccessToken)(accessToken);
+            decodedAccessToken = decoded;
+            const accessTokenKey = hashToken(accessToken);
+            const maybeContext = decoded?.id && typeof decoded.tokenVersion === "number"
+                ? readRequestLocalAuthContext(req, accessTokenKey, decoded.tokenVersion) ||
+                    readRecentlyVerifiedAuthContext({
+                        tokenKey: accessTokenKey,
+                        userId: decoded.id,
+                        tokenVersion: decoded.tokenVersion,
+                    }) ||
+                    readMemoryAuthContext(accessTokenKey, decoded.tokenVersion)
+                : null;
+            if (maybeContext) {
+                writeRequestLocalAuthContext(req, accessTokenKey, maybeContext.tokenVersion, maybeContext);
+                markRecentlyVerifiedAuthContext(accessTokenKey, maybeContext);
+                bindAuthenticatedContext(req, {
+                    id: maybeContext.userId,
+                    role: maybeContext.role,
+                    email: maybeContext.email,
+                    name: maybeContext.name,
+                    businessId: maybeContext.businessId,
+                });
+                await runSessionAnomalyGuard(req, {
+                    userId: maybeContext.userId,
+                    businessId: maybeContext.businessId,
+                });
+                bumpAuthStats({
+                    resolved: 1,
+                    memoryHit: 1,
+                });
+                const authMs = Date.now() - startedAt;
+                if (!res.headersSent && !res.writableEnded) {
+                    res.setHeader("X-Checkout-Auth-Ms", String(Math.max(0, Math.floor(authMs))));
+                }
+                console.info("CHECKOUT_AUTH_FAST_PATH", {
+                    requestId: req.requestId || null,
+                    route: req.originalUrl,
+                    method: req.method,
+                    businessId: maybeContext.businessId,
+                    userId: maybeContext.userId,
+                    authMs,
+                    fastPathMs: Date.now() - fastPathStartedAt,
+                    source: "memory_session",
+                });
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "AUTH_MS",
+                    value: authMs,
+                    businessId: maybeContext.businessId,
+                    route: req.originalUrl,
+                    metadata: {
+                        source: "checkout_instant_memory_session",
+                        inflightAuthLookups: authContextInFlight.size,
+                    },
+                });
+                if (isRequestClosed(req, res)) {
+                    return;
+                }
+                return next();
+            }
+            console.info("CHECKOUT_AUTH_FALLBACK", {
+                requestId: req.requestId || null,
+                route: req.originalUrl,
+                method: req.method,
+                reason: decoded?.id ? "memory_session_miss" : "access_token_invalid",
+                elapsedMs: Date.now() - fastPathStartedAt,
+            });
+        }
         if (directLookupRoute) {
             const lookupStartedAt = Date.now();
             req.logger?.info({
@@ -1285,6 +1363,9 @@ const protect = async (req, res, next) => {
                     dbFallback: 1,
                 });
                 const lookupDurationMs = Date.now() - lookupStartedAt;
+                if (isInstantCheckoutRoute(req) && !res.headersSent && !res.writableEnded) {
+                    res.setHeader("X-Checkout-Auth-Ms", String(Math.max(0, Math.floor(Date.now() - startedAt))));
+                }
                 req.logger?.info({
                     route: req.originalUrl,
                     method: req.method,

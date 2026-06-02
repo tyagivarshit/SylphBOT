@@ -70,6 +70,12 @@ const emitOnboardingTraceEvent = (input) => {
         metadata: input.metadata || null,
     }).catch(() => undefined);
 };
+const logMetaOAuthFastPath = (event, metadata = {}) => {
+    console.info(event, {
+        component: "meta-oauth-continuation",
+        ...metadata,
+    });
+};
 /*
 ---------------------------------------------------
 HELPER FUNCTIONS
@@ -1357,6 +1363,7 @@ const metaOAuthConnect = async (req, res) => {
         }
         const businessId = oauthState.businessId;
         const targetPlatform = oauthState.platform;
+        req.oauthContinuationTrusted = true;
         instagramBusinessId = businessId;
         lifecycleContext = (0, metaOAuthLifecycle_service_1.createMetaOAuthLifecycleContext)({
             businessId,
@@ -1370,8 +1377,18 @@ const metaOAuthConnect = async (req, res) => {
             normalizeOptionalString(oauthState.preferredFacebookPageId);
         const requestedInstagramProfessionalAccountId = normalizeOptionalString(instagramProfessionalAccountId) ||
             normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
+        if (!internalContinuation) {
+            logMetaOAuthFastPath("OAUTH_CONTINUATION_VERIFIED", {
+                businessId,
+                userId,
+                platform: targetPlatform,
+                mode: oauthState.mode,
+                operationId: lifecycleContext.attemptKey,
+                replayToken: lifecycleContext.replayToken,
+            });
+        }
         triggerBullMQFallback = async (source, reason) => {
-            console.info("Meta OAuth callback fast-path handoff started", {
+            logMetaOAuthFastPath("OAUTH_CALLBACK_FAST_PATH", {
                 source,
                 reason,
                 businessId,
@@ -1437,7 +1454,15 @@ const metaOAuthConnect = async (req, res) => {
             }
             catch (enqueueError) {
                 const enqueueTimedOut = enqueueError instanceof boundedTimeout_1.TimeoutExceededError;
-                console.error("Failed to enqueue Meta OAuth continuation to BullMQ, executing via setImmediate", enqueueError);
+                if (enqueueTimedOut) {
+                    logMetaOAuthFastPath("OAUTH_CALLBACK_TIMEOUT_PREVENTED", {
+                        businessId,
+                        platform: targetPlatform,
+                        operationId: lifecycleContext.attemptKey,
+                        phase: "queue_enqueue",
+                    });
+                }
+                console.error("Meta OAuth continuation enqueue failed; using local async fallback", enqueueError);
                 emitCallbackMetric({
                     name: enqueueTimedOut
                         ? "callback_timeout_prevented"
@@ -1459,6 +1484,12 @@ const metaOAuthConnect = async (req, res) => {
                     });
                 });
             }
+            logMetaOAuthFastPath("OAUTH_CALLBACK_ASYNC_AUDIT_QUEUED", {
+                businessId,
+                platform: targetPlatform,
+                operationId: lifecycleContext.attemptKey,
+                source,
+            });
             await (0, boundedTimeout_1.withTimeout)({
                 label: "meta_oauth_callback_lifecycle_handoff",
                 timeoutMs: META_OAUTH_CALLBACK_PERSISTENCE_BUDGET_MS,
@@ -1480,7 +1511,7 @@ const metaOAuthConnect = async (req, res) => {
                     operationId: lifecycleContext.attemptKey,
                 });
             });
-            console.info("Meta OAuth callback fast-path handoff completed", {
+            logMetaOAuthFastPath("OAUTH_CALLBACK_RESPONSE_SENT", {
                 source,
                 businessId,
                 platform: targetPlatform,
@@ -1517,15 +1548,35 @@ const metaOAuthConnect = async (req, res) => {
                 },
             });
         }
-        await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
+        const markAuthenticatedStage = (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
             context: lifecycleContext,
             stage: "OAUTH_AUTHENTICATED",
             detail: "OAuth callback verified",
             metadata: {
                 workspaceId: oauthState.workspaceId,
                 mode: oauthState.mode,
+                trustedContinuation: !internalContinuation,
             },
         });
+        if (internalContinuation) {
+            await markAuthenticatedStage;
+        }
+        else {
+            await (0, boundedTimeout_1.withTimeout)({
+                label: "meta_oauth_callback_authenticated_marker",
+                timeoutMs: META_OAUTH_CALLBACK_PERSISTENCE_BUDGET_MS,
+                task: markAuthenticatedStage,
+            }).catch((error) => {
+                if (error instanceof boundedTimeout_1.TimeoutExceededError) {
+                    logMetaOAuthFastPath("OAUTH_CALLBACK_TIMEOUT_PREVENTED", {
+                        businessId,
+                        platform: targetPlatform,
+                        operationId: lifecycleContext.attemptKey,
+                        phase: "lifecycle_authenticated_marker",
+                    });
+                }
+            });
+        }
         if (targetPlatform === "WHATSAPP") {
             logWaCheckpoint("[WA STEP 2] state verified", {
                 businessId,
@@ -1533,7 +1584,7 @@ const metaOAuthConnect = async (req, res) => {
             });
         }
         if (targetPlatform === "INSTAGRAM") {
-            await recordInstagramConnectStage({
+            const recordCallbackReceived = recordInstagramConnectStage({
                 traceId: instagramTraceId,
                 businessId,
                 stage: "IG_CALLBACK_RECEIVED",
@@ -1542,6 +1593,12 @@ const metaOAuthConnect = async (req, res) => {
                     mode: oauthState.mode,
                 },
             });
+            if (internalContinuation) {
+                await recordCallbackReceived;
+            }
+            else {
+                void recordCallbackReceived.catch(() => undefined);
+            }
         }
         const subscription = internalContinuation
             ? await getSubscription(businessId)
@@ -1600,7 +1657,7 @@ const metaOAuthConnect = async (req, res) => {
         }
         const redirectUri = `${metaRuntime.backendUrl}/api/oauth/meta/callback`;
         if (targetPlatform === "INSTAGRAM") {
-            await recordInstagramConnectStage({
+            const recordStateVerified = recordInstagramConnectStage({
                 traceId: instagramTraceId,
                 businessId,
                 stage: "IG_STATE_VERIFIED",
@@ -1611,6 +1668,12 @@ const metaOAuthConnect = async (req, res) => {
                     workspaceId: oauthState.workspaceId,
                 },
             });
+            if (internalContinuation) {
+                await recordStateVerified;
+            }
+            else {
+                void recordStateVerified.catch(() => undefined);
+            }
             if (internalContinuation) {
                 await recordInstagramConnectStage({
                     traceId: instagramTraceId,
@@ -1689,12 +1752,18 @@ const metaOAuthConnect = async (req, res) => {
             logWaCheckpoint("[WA STEP 3] short token exchanged");
         }
         if (targetPlatform === "INSTAGRAM") {
-            await recordInstagramConnectStage({
+            const recordCodeExchanged = recordInstagramConnectStage({
                 traceId: instagramTraceId,
                 businessId,
                 stage: "IG_CODE_EXCHANGED",
                 status: "COMPLETED",
             });
+            if (internalContinuation) {
+                await recordCodeExchanged;
+            }
+            else {
+                void recordCodeExchanged.catch(() => undefined);
+            }
         }
         if (!internalContinuation) {
             emitCallbackMetric({

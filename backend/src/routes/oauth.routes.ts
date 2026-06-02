@@ -109,6 +109,19 @@ const recordMetaCallbackStage = async (input: {
   }).catch(() => undefined);
 };
 
+const logMetaCallbackFastPath = (
+  event:
+    | "OAUTH_CONTINUATION_VERIFIED"
+    | "OAUTH_CALLBACK_FAST_PATH"
+    | "OAUTH_CALLBACK_RESPONSE_SENT",
+  metadata: Record<string, unknown> = {}
+) => {
+  console.info(event, {
+    component: "meta-oauth-callback",
+    ...metadata,
+  });
+};
+
 router.get("/meta/callback", async (req: Request, res: Response) => {
   try {
     const code = String(req.query.code || "").trim();
@@ -138,7 +151,14 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     const connectFailedStage = getProviderStage(provider, "CONNECT_FAILED");
     const codeExchangedStage = getProviderStage(provider, "CODE_EXCHANGED");
 
-    await recordMetaCallbackStage({
+    logMetaCallbackFastPath("OAUTH_CONTINUATION_VERIFIED", {
+      businessId: oauthState.businessId,
+      platform: provider,
+      mode: oauthState.mode,
+      traceId,
+    });
+
+    void recordMetaCallbackStage({
       businessId: oauthState.businessId,
       traceId,
       provider,
@@ -148,7 +168,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         mode: oauthState.mode,
       },
     });
-    await recordMetaCallbackStage({
+    void recordMetaCallbackStage({
       businessId: oauthState.businessId,
       traceId,
       provider,
@@ -157,7 +177,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     });
 
     if (providerError) {
-      await recordMetaCallbackStage({
+      void recordMetaCallbackStage({
         businessId: oauthState.businessId,
         traceId,
         provider,
@@ -191,7 +211,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     }
 
     if (!code) {
-      await recordMetaCallbackStage({
+      void recordMetaCallbackStage({
         businessId: oauthState.businessId,
         traceId,
         provider,
@@ -222,6 +242,20 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     callbackUrl.searchParams.set("state", rawState);
     callbackUrl.searchParams.set("platform", oauthState.platform.toLowerCase());
     callbackUrl.searchParams.set("mode", oauthState.mode);
+
+    logMetaCallbackFastPath("OAUTH_CALLBACK_FAST_PATH", {
+      businessId: oauthState.businessId,
+      platform: provider,
+      mode: oauthState.mode,
+      traceId,
+      hasCode: true,
+    });
+    logMetaCallbackFastPath("OAUTH_CALLBACK_RESPONSE_SENT", {
+      businessId: oauthState.businessId,
+      platform: provider,
+      traceId,
+      destination: "frontend_callback",
+    });
 
     return res.redirect(callbackUrl.toString());
   } catch (error) {

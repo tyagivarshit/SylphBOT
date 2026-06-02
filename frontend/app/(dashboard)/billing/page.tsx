@@ -105,6 +105,7 @@ const BILLING_BACKGROUND_REFRESH_HIDDEN_MS = 180_000;
 const BILLING_BACKGROUND_REFRESH_MAX_MS = 420_000;
 const BILLING_REQUEST_COOLDOWN_MS = 1_200;
 const BILLING_FAILURE_COOLDOWN_MS = 8_000;
+const CHECKOUT_NAVIGATION_RECOVERY_MS = 15_000;
 
 type BillingTelemetryName =
   | "billing_page_initial_requests"
@@ -881,6 +882,10 @@ function BillingPageContent() {
     }
 
     try {
+      setLoading(plan);
+      setCheckoutPending(true);
+      setCheckoutProgressMessage("Preparing secure Stripe checkout...");
+
       const latestBilling = billingBootstrapSnapshot?.billingData;
       if (latestBilling) {
         const latestPlanKey = latestBilling.billing?.planKey || "FREE_LOCKED";
@@ -909,8 +914,19 @@ function BillingPageContent() {
       }
       checkoutLockRef.current = true;
       redirectToCheckout(plan, billing);
+      window.setTimeout(() => {
+        if (checkoutLockRef.current) {
+          checkoutLockRef.current = false;
+          setLoading(null);
+          setCheckoutPending(false);
+          setCheckoutProgressMessage(null);
+        }
+      }, CHECKOUT_NAVIGATION_RECOVERY_MS);
     } catch (checkoutError) {
       checkoutLockRef.current = false;
+      setLoading(null);
+      setCheckoutPending(false);
+      setCheckoutProgressMessage(null);
       notify.error(
         checkoutError instanceof Error
           ? checkoutError.message

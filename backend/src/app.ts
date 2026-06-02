@@ -311,7 +311,11 @@ const isCheckoutTimeoutRoute = (path: string) =>
 
 const isStripeCheckoutRedirectRoute = (req: express.Request) => {
   const routePath = String(req.path || req.originalUrl || "").trim();
-  return req.method === "GET" && routePath.startsWith("/api/billing/checkout/start");
+  return (
+    req.method === "GET" &&
+    (routePath.startsWith("/api/billing/checkout/start") ||
+      routePath.startsWith("/api/billing/checkout/instant"))
+  );
 };
 
 app.use(

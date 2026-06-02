@@ -8,6 +8,7 @@ import {
 import { isRedisCircuitOpen } from "../redis/redisSafety";
 
 const isProd = process.env.NODE_ENV === "production";
+const buildFallbackRateLimitResult = () => [1, Date.now() + 60000] as const;
 
 const createStore = (prefix: string) =>
   new RedisStore({
@@ -19,7 +20,7 @@ const createStore = (prefix: string) =>
         if (command === "SCRIPT" && subcommand === "LOAD") {
           return "redis_not_writable_script_stub";
         }
-        return [0, Date.now() + 60000];
+        return [...buildFallbackRateLimitResult()];
       }
 
       try {
@@ -28,14 +29,14 @@ const createStore = (prefix: string) =>
           return result || "redis_not_writable_script_stub";
         }
         if (result === null || result === undefined || !Array.isArray(result)) {
-          return [0, Date.now() + 60000];
+          return [...buildFallbackRateLimitResult()];
         }
         return result;
       } catch (error) {
         if (command === "SCRIPT" && subcommand === "LOAD") {
           return "redis_not_writable_script_stub";
         }
-        return [0, Date.now() + 60000];
+        return [...buildFallbackRateLimitResult()];
       }
     },
     prefix,

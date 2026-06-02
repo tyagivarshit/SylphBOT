@@ -2823,7 +2823,7 @@ export const trackSessionAnomaly = async (input: {
   }
 
   assertActive("session_anomaly.persist");
-  await withDbMirror(() =>
+  void withDbMirror(() =>
     db.sessionLedger.updateMany({
       where: {
         sessionKey: existing.sessionKey,

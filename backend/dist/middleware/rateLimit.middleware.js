@@ -9,6 +9,7 @@ const rate_limit_redis_1 = __importDefault(require("rate-limit-redis"));
 const redis_1 = require("../config/redis");
 const redisSafety_1 = require("../redis/redisSafety");
 const isProd = process.env.NODE_ENV === "production";
+const buildFallbackRateLimitResult = () => [1, Date.now() + 60000];
 const createStore = (prefix) => new rate_limit_redis_1.default({
     sendCommand: async (...args) => {
         const command = String(args?.[0] || "").toUpperCase();
@@ -17,7 +18,7 @@ const createStore = (prefix) => new rate_limit_redis_1.default({
             if (command === "SCRIPT" && subcommand === "LOAD") {
                 return "redis_not_writable_script_stub";
             }
-            return [0, Date.now() + 60000];
+            return [...buildFallbackRateLimitResult()];
         }
         try {
             const result = await (0, redis_1.getResilientSharedRedisConnection)().call(...args);
@@ -25,7 +26,7 @@ const createStore = (prefix) => new rate_limit_redis_1.default({
                 return result || "redis_not_writable_script_stub";
             }
             if (result === null || result === undefined || !Array.isArray(result)) {
-                return [0, Date.now() + 60000];
+                return [...buildFallbackRateLimitResult()];
             }
             return result;
         }
@@ -33,7 +34,7 @@ const createStore = (prefix) => new rate_limit_redis_1.default({
             if (command === "SCRIPT" && subcommand === "LOAD") {
                 return "redis_not_writable_script_stub";
             }
-            return [0, Date.now() + 60000];
+            return [...buildFallbackRateLimitResult()];
         }
     },
     prefix,

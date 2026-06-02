@@ -241,7 +241,9 @@ const resolveRequestTimeoutMs = (path) => {
 const isCheckoutTimeoutRoute = (path) => CHECKOUT_TIMEOUT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 const isStripeCheckoutRedirectRoute = (req) => {
     const routePath = String(req.path || req.originalUrl || "").trim();
-    return req.method === "GET" && routePath.startsWith("/api/billing/checkout/start");
+    return (req.method === "GET" &&
+        (routePath.startsWith("/api/billing/checkout/start") ||
+            routePath.startsWith("/api/billing/checkout/instant")));
 };
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" },

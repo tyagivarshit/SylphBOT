@@ -75,7 +75,8 @@ const emitCallbackMetric = (input: {
     | "callback_response_before_finalize"
     | "continuation_async_only"
     | "callback_degraded_handoff"
-    | "callback_fast_exit_success";
+    | "callback_fast_exit_success"
+    | "callback_timeout_prevented";
   businessId?: string | null;
   value?: number;
   metadata?: Record<string, unknown>;
@@ -1955,7 +1956,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
 
     triggerBullMQFallback = async (source: string, reason: string) => {
-      console.info("Meta OAuth Connect: Triggering BullMQ fallback", { source, reason, businessId });
+      console.info("Meta OAuth callback fast-path handoff started", {
+        source,
+        reason,
+        businessId,
+        platform: targetPlatform,
+        operationId: lifecycleContext!.attemptKey,
+      });
       const asyncHandoffMs = Date.now() - callbackStartedAtMs;
       emitCallbackMetric({
         name: "oauth_callback_async_handoff_ms",
@@ -1993,7 +2000,11 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       };
 
       try {
-        const enqueueResult = await enqueueMetaOAuthContinuation(enqueuePayload);
+        const enqueueResult = await withTimeout({
+          label: "meta_oauth_callback_enqueue",
+          timeoutMs: META_OAUTH_CALLBACK_ENQUEUE_BUDGET_MS,
+          task: enqueueMetaOAuthContinuation(enqueuePayload),
+        });
         emitOnboardingTraceEvent({
           businessId,
           eventType: "callback_handoff_success",
@@ -2010,7 +2021,25 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           },
         });
       } catch (enqueueError) {
-        console.error("Failed to enqueue fallback continuation to BullMQ, executing via setImmediate", enqueueError);
+        const enqueueTimedOut = enqueueError instanceof TimeoutExceededError;
+        console.error(
+          "Failed to enqueue Meta OAuth continuation to BullMQ, executing via setImmediate",
+          enqueueError
+        );
+        emitCallbackMetric({
+          name: enqueueTimedOut
+            ? "callback_timeout_prevented"
+            : "callback_degraded_handoff",
+          businessId,
+          value: Date.now() - callbackStartedAtMs,
+          metadata: {
+            source,
+            reason,
+            platform: targetPlatform,
+            operationId: lifecycleContext!.attemptKey,
+            enqueueTimedOut,
+          },
+        });
         setImmediate(() => {
           const { type: _type, ...queueInput } = enqueuePayload;
           runMetaOAuthContinuationFromQueueJob(queueInput).catch((err) => {
@@ -2019,16 +2048,35 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         });
       }
 
-      await markMetaOAuthLifecycleStage({
-        context: lifecycleContext!,
-        stage: "CONTINUATION_SCHEDULED",
-        detail: `Provider delay detected. Onboarding continuation scheduled asynchronously. Reason: ${reason}`,
-        metadata: {
-          deferredWork: true,
-          deferredReason: reason,
-          source,
-        },
-      }).catch(() => undefined);
+      await withTimeout({
+        label: "meta_oauth_callback_lifecycle_handoff",
+        timeoutMs: META_OAUTH_CALLBACK_PERSISTENCE_BUDGET_MS,
+        task: markMetaOAuthLifecycleStage({
+          context: lifecycleContext!,
+          stage: "CONTINUATION_SCHEDULED",
+          detail: `Onboarding continuation scheduled asynchronously. Reason: ${reason}`,
+          metadata: {
+            deferredWork: true,
+            deferredReason: reason,
+            source,
+            shortTokenExchanged: Boolean(shortToken),
+            longTokenExchanged: Boolean(longToken),
+          },
+        }),
+      }).catch((error) => {
+        console.warn("Meta OAuth lifecycle handoff marker skipped", {
+          reason: error instanceof TimeoutExceededError ? "timeout" : "failed",
+          operationId: lifecycleContext!.attemptKey,
+        });
+      });
+
+      console.info("Meta OAuth callback fast-path handoff completed", {
+        source,
+        businessId,
+        platform: targetPlatform,
+        operationId: lifecycleContext!.attemptKey,
+        durationMs: Date.now() - callbackStartedAtMs,
+      });
 
       return res.status(202).json({
         success: true,
@@ -2042,10 +2090,10 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             replayToken: lifecycleContext!.replayToken,
             status: "PROCESSING",
             stage: "CONTINUATION_SCHEDULED",
-            statusDetail: `Provider delay detected (${reason}). Continuation queued asynchronously.`,
+            statusDetail: `Meta onboarding is continuing asynchronously (${reason}).`,
           },
         },
-        message: `${targetPlatform} connect processing (deferred)`,
+        message: `${targetPlatform} connect processing asynchronously`,
       });
     };
 
@@ -2091,10 +2139,14 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
     }
 
-    const subscription = await getSubscription(businessId);
-    const allowedPlatforms = await getAllowedPlatforms(businessId, subscription);
+    const subscription = internalContinuation
+      ? await getSubscription(businessId)
+      : null;
+    const allowedPlatforms = internalContinuation
+      ? await getAllowedPlatforms(businessId, subscription)
+      : [targetPlatform];
 
-    if (!allowedPlatforms.includes(targetPlatform)) {
+    if (internalContinuation && !allowedPlatforms.includes(targetPlatform)) {
       if (lifecycleContext) {
         await markMetaOAuthLifecycleFailure({
           context: lifecycleContext,
@@ -2162,15 +2214,17 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           workspaceId: oauthState.workspaceId,
         },
       });
-      await recordInstagramConnectStage({
-        traceId: instagramTraceId,
-        businessId,
-        stage: "IG_ENTITLEMENT_AUDITED",
-        status: "COMPLETED",
-        metadata: {
-          allowedPlatforms,
-        },
-      });
+      if (internalContinuation) {
+        await recordInstagramConnectStage({
+          traceId: instagramTraceId,
+          businessId,
+          stage: "IG_ENTITLEMENT_AUDITED",
+          status: "COMPLETED",
+          metadata: {
+            allowedPlatforms,
+          },
+        });
+      }
     }
 
     shortToken = providedShortToken;
@@ -2256,6 +2310,27 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         stage: "IG_CODE_EXCHANGED",
         status: "COMPLETED",
       });
+    }
+
+    if (!internalContinuation) {
+      emitCallbackMetric({
+        name: "oauth_callback_accept_ms",
+        businessId,
+        value: Date.now() - callbackStartedAtMs,
+        metadata: {
+          platform: targetPlatform,
+          mode: oauthState.mode,
+          operationId: lifecycleContext!.attemptKey,
+          replayToken: lifecycleContext!.replayToken,
+          shortTokenExchanged: true,
+          syncBudgetMs: META_OAUTH_CALLBACK_SYNC_BUDGET_MS,
+        },
+      });
+
+      return await triggerBullMQFallback!(
+        "callback_short_token_exchanged",
+        "short_token_exchanged_fast_path"
+      );
     }
 
     const discoveryPermissions = await fetchMetaGrantedPermissions(shortToken);

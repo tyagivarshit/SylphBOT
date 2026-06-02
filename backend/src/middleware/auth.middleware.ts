@@ -1191,9 +1191,17 @@ const runSessionAnomalyGuard = async (
   }
 ) => {
   const route = String(req.originalUrl || req.url || "").trim();
+  const normalizedRoute = route.toLowerCase();
+  const isMetaOAuthBootstrapRoute =
+    normalizedRoute.startsWith("/api/clients/oauth/meta") ||
+    normalizedRoute.startsWith("/api/oauth/meta") ||
+    normalizedRoute.startsWith("/api/oauth/meta/callback");
   const shouldEnforceSynchronously =
-    req.method !== "GET" ||
-    SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => route.startsWith(prefix));
+    !isMetaOAuthBootstrapRoute &&
+    (req.method !== "GET" ||
+      SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) =>
+        normalizedRoute.startsWith(prefix)
+      ));
   const requestBudgetMs = getRequestRemainingMs({ req }, SESSION_ANOMALY_GUARD_TIMEOUT_MS);
   const minimumRequiredBudgetMs = shouldEnforceSynchronously ? 500 : 280;
 

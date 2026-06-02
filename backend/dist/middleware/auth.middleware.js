@@ -805,8 +805,13 @@ const enforceSessionAnomalyGuard = async (req, input) => {
 };
 const runSessionAnomalyGuard = async (req, input) => {
     const route = String(req.originalUrl || req.url || "").trim();
-    const shouldEnforceSynchronously = req.method !== "GET" ||
-        SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => route.startsWith(prefix));
+    const normalizedRoute = route.toLowerCase();
+    const isMetaOAuthBootstrapRoute = normalizedRoute.startsWith("/api/clients/oauth/meta") ||
+        normalizedRoute.startsWith("/api/oauth/meta") ||
+        normalizedRoute.startsWith("/api/oauth/meta/callback");
+    const shouldEnforceSynchronously = !isMetaOAuthBootstrapRoute &&
+        (req.method !== "GET" ||
+            SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => normalizedRoute.startsWith(prefix)));
     const requestBudgetMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req }, SESSION_ANOMALY_GUARD_TIMEOUT_MS);
     const minimumRequiredBudgetMs = shouldEnforceSynchronously ? 500 : 280;
     if ((0, requestLifecycle_1.isRequestLifecycleAborted)({ req }) || requestBudgetMs <= minimumRequiredBudgetMs) {

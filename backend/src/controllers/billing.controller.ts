@@ -1637,6 +1637,13 @@ export class BillingController {
       if (!businessId || !userId) {
         return fail(403, "business_context_required", "Business context is required");
       }
+      console.info("CHECKOUT_AUTH_OK", {
+        requestId,
+        businessId,
+        userId,
+        mode: "instant",
+        elapsedMs: Date.now() - startedAt,
+      });
 
       const normalizedPlan = String(readInput("plan") || "")
         .trim()
@@ -1704,6 +1711,15 @@ export class BillingController {
       ) {
         return fail(409, "already_subscribed", "You are already subscribed to this plan");
       }
+      console.info("CHECKOUT_ENTITLEMENT_OK", {
+        requestId,
+        businessId,
+        plan: normalizedPlan,
+        billingCycle: normalizedBilling,
+        activePlanCode: activeSubscription?.planCode || null,
+        mode: "instant",
+        elapsedMs: Date.now() - startedAt,
+      });
 
       assertStripeConfigReady({
         requireWebhookSecret: true,
@@ -1787,6 +1803,16 @@ export class BillingController {
         sessionId: session.id,
         stripeMs: Date.now() - stripeStartedAt,
       });
+      console.info("CHECKOUT_STRIPE_SESSION_CREATED", {
+        requestId,
+        businessId,
+        sessionId: session.id,
+        plan: normalizedPlan,
+        billingCycle: normalizedBilling,
+        stripeMs: Date.now() - stripeStartedAt,
+        mode: "instant",
+        elapsedMs: Date.now() - startedAt,
+      });
 
       const checkoutUrl = String(session.url || "").trim();
       if (!checkoutUrl) {
@@ -1802,6 +1828,14 @@ export class BillingController {
         billingCycle: normalizedBilling,
         elapsedMs: Date.now() - startedAt,
         stages: stageTimings,
+      });
+      console.info("CHECKOUT_REDIRECT_SENT", {
+        requestId,
+        businessId,
+        sessionId: session.id,
+        status: 303,
+        mode: "instant",
+        elapsedMs: Date.now() - startedAt,
       });
       return res.redirect(303, checkoutUrl);
     } catch (error: any) {

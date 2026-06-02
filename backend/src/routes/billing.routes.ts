@@ -1,12 +1,65 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { BillingController } from "../controllers/billing.controller";
 import { protect } from "../middleware/auth.middleware";
 import { attachBillingContext } from "../middleware/subscription.middleware";
 import { requireBusinessContext } from "../middleware/tenant.middleware";
 import { requirePermission } from "../middleware/rbac.middleware";
 import { auditRequest } from "../middleware/audit.middleware";
+import { forbidden, unauthorized } from "../utils/AppError";
+import { hasPermission } from "../services/rbac.service";
+import { getRequestBusinessId } from "../services/tenant.service";
+import { evaluateReadOnlyAccessFastPath } from "../services/security/securityGovernanceOS.service";
 
 const router = Router();
+
+const requireInstantCheckoutAccess = (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+) => {
+  const principal = req.apiKey
+    ? {
+        permissions: req.apiKey.permissions,
+      }
+    : req.user
+      ? {
+          role: req.user.role,
+        }
+      : null;
+
+  if (!principal) {
+    return next(unauthorized("Unauthorized"));
+  }
+
+  if (!hasPermission(principal, "billing:manage")) {
+    return next(forbidden("Insufficient permissions"));
+  }
+
+  const businessId = getRequestBusinessId(req);
+  const fastPathVerdict = evaluateReadOnlyAccessFastPath({
+    action: "billing:manage",
+    businessId,
+    tenantId: businessId,
+    actorId: req.user?.id || req.apiKey?.id || null,
+    actorType: req.apiKey ? "API_KEY" : "USER",
+    role: req.user?.role || null,
+    permissions: req.apiKey?.permissions || null,
+    scopes: req.apiKey?.scopes || null,
+    resourceTenantId: businessId,
+    metadata: {
+      route: req.originalUrl,
+      method: req.method,
+      requestId: req.requestId || null,
+      hotPath: "billing.checkout.instant",
+    },
+  });
+
+  if (!fastPathVerdict.allowed) {
+    return next(forbidden(`Access denied (${fastPathVerdict.reason})`));
+  }
+
+  return next();
+};
 
 /* ======================================
 GET ALL PLANS
@@ -59,16 +112,14 @@ router.get(
   "/checkout/instant",
   protect,
   requireBusinessContext,
-  requirePermission("billing:manage"),
-  auditRequest("billing.instant_checkout_requested"),
+  requireInstantCheckoutAccess,
   BillingController.instantCheckout
 );
 router.post(
   "/checkout/instant",
   protect,
   requireBusinessContext,
-  requirePermission("billing:manage"),
-  auditRequest("billing.instant_checkout_requested"),
+  requireInstantCheckoutAccess,
   BillingController.instantCheckout
 );
 router.post(

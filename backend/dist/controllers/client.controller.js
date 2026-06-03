@@ -195,6 +195,79 @@ const recordInstagramConnectStage = async (input) => {
         },
     }).catch(() => undefined);
 };
+const normalizeWhatsAppEmbeddedSignupSession = (value) => {
+    const root = value && typeof value === "object" ? value : {};
+    const data = root.data && typeof root.data === "object"
+        ? root.data
+        : {};
+    const payload = {
+        ...root,
+        ...data,
+    };
+    const event = normalizeOptionalString(payload.event || root.event);
+    const currentStep = String(payload.current_step ||
+        payload.currentStep ||
+        payload.step ||
+        payload.status ||
+        payload.state ||
+        "")
+        .trim()
+        .toUpperCase();
+    const wabaId = normalizeOptionalString(payload.waba_id || payload.wabaId || payload.whatsapp_business_account_id);
+    const phoneNumberId = normalizeOptionalString(payload.phone_number_id || payload.phoneNumberId || payload.phone_number);
+    const businessManagerId = normalizeOptionalString(payload.business_id || payload.businessId || payload.business_manager_id);
+    let state = "UNKNOWN";
+    const normalizedEvent = String(event || "").toUpperCase();
+    if (normalizedEvent === "FINISH" ||
+        normalizedEvent === "FINISHED" ||
+        normalizedEvent === "COMPLETED" ||
+        normalizedEvent === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") {
+        state = "COMPLETED";
+    }
+    else if (normalizedEvent === "CANCEL" || normalizedEvent === "CANCELLED") {
+        state = "CANCELLED";
+    }
+    else if (normalizedEvent === "ERROR") {
+        state = "ERROR";
+    }
+    else if (currentStep.includes("OTP") || currentStep.includes("VERIFY")) {
+        state = "OTP_REQUIRED";
+    }
+    else if (currentStep.includes("PHONE") || currentStep.includes("NUMBER")) {
+        state = "NUMBER_REQUIRED";
+    }
+    else if (currentStep.includes("BUSINESS") && currentStep.includes("VERIFICATION")) {
+        state = "BUSINESS_VERIFICATION_PENDING";
+    }
+    else if (currentStep.includes("PROVISION") || currentStep.includes("CREATE")) {
+        state = "PROVISIONING_PENDING";
+    }
+    const completed = state === "COMPLETED" && Boolean(wabaId || phoneNumberId);
+    return {
+        raw: value && typeof value === "object" ? value : null,
+        event,
+        state: completed ? "COMPLETED" : state,
+        completed,
+        wabaId,
+        phoneNumberId,
+        businessManagerId,
+    };
+};
+const resolveWhatsAppEmbeddedSignupStage = (state) => {
+    if (state === "NUMBER_REQUIRED") {
+        return "NUMBER_REQUIRED";
+    }
+    if (state === "OTP_REQUIRED") {
+        return "OTP_REQUIRED";
+    }
+    if (state === "BUSINESS_VERIFICATION_PENDING") {
+        return "BUSINESS_VERIFICATION_PENDING";
+    }
+    if (state === "PROVISIONING_PENDING") {
+        return "PROVISIONING_PENDING";
+    }
+    return "PHONE_SELECTION";
+};
 const META_HELP_LINKS = {
     ACCOUNT_PERSONAL: "https://help.instagram.com/502981923235522",
     NO_LINKED_PAGE: "https://www.facebook.com/business/help/898752960195806",
@@ -343,10 +416,10 @@ const buildActionableFailurePayload = (input) => {
             ...shared,
             problem: "No WhatsApp Business phone numbers were found.",
             cause: "The connected Meta Business assets do not currently expose an eligible WhatsApp phone number.",
-            fix: "Create or finish setting up a WhatsApp Business number in the connected WABA, then refresh detection.",
+            fix: "Continue Meta Embedded Signup and complete phone number entry, OTP verification, and provisioning.",
             cta: {
-                label: "Refresh Numbers",
-                action: "REFRESH_NUMBERS",
+                label: "Continue Meta Onboarding",
+                action: "REOPEN_EMBEDDED_SIGNUP",
             },
         };
     }
@@ -1382,9 +1455,10 @@ const metaOAuthConnect = async (req, res) => {
         res.setTimeout(META_OAUTH_CONNECT_TIMEOUT_MS);
         const userId = req.user?.id;
         const requestBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
-        const { code: rawCode, state: rawState, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, phoneNumberId, facebookPageId, instagramProfessionalAccountId, } = req.body || {};
+        const { code: rawCode, state: rawState, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, phoneNumberId, facebookPageId, instagramProfessionalAccountId, embeddedSignupSession, } = req.body || {};
         const code = normalizeOptionalString(rawCode);
         const state = String(rawState || "").trim();
+        const whatsappEmbeddedSignupSession = normalizeWhatsAppEmbeddedSignupSession(embeddedSignupSession);
         const internalResolvedTokens = req.__metaResolvedTokens &&
             typeof req.__metaResolvedTokens === "object"
             ? req.__metaResolvedTokens
@@ -1392,7 +1466,11 @@ const metaOAuthConnect = async (req, res) => {
         const providedShortToken = normalizeOptionalString(internalResolvedTokens?.shortToken);
         const providedLongToken = normalizeOptionalString(internalResolvedTokens?.longToken);
         const oauthState = (0, metaOAuthState_1.verifyMetaOAuthState)(state);
-        waDiagEnabled = oauthState?.platform === "WHATSAPP";
+        waDiagEnabled =
+            oauthState?.platform === "WHATSAPP" &&
+                String(process.env.WA_META_FINALIZE_DIAG || "")
+                    .trim()
+                    .toLowerCase() === "true";
         if (waDiagEnabled) {
             logWaCheckpoint("[WA STEP 1] request entered", {
                 hasCode: Boolean(code),
@@ -1475,6 +1553,7 @@ const metaOAuthConnect = async (req, res) => {
             nonce: oauthState.nonce,
         });
         let selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
+            normalizeOptionalString(whatsappEmbeddedSignupSession.phoneNumberId) ||
             normalizeOptionalString(oauthState.preferredPhoneNumberId);
         const requestedFacebookPageId = normalizeOptionalString(facebookPageId) ||
             normalizeOptionalString(oauthState.preferredFacebookPageId);
@@ -2212,6 +2291,85 @@ const metaOAuthConnect = async (req, res) => {
         }
         if (targetPlatform === "WHATSAPP") {
             logWaCheckpoint("[WA STEP 4] long token exchanged");
+            console.info("WA_OAUTH_TOKEN_EXCHANGED", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                mode: oauthState.mode,
+            });
+        }
+        if (targetPlatform === "WHATSAPP" &&
+            !internalContinuation &&
+            !whatsappEmbeddedSignupSession.completed) {
+            const actionable = buildActionableFailurePayload({
+                code: "WA_SETUP_REQUIRED",
+                reason: "Complete Meta Embedded Signup, including phone number entry and OTP verification.",
+            });
+            const onboardingStage = resolveWhatsAppEmbeddedSignupStage(whatsappEmbeddedSignupSession.state);
+            await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleNeedsAction)({
+                context: lifecycleContext,
+                stage: onboardingStage,
+                detail: "Meta Embedded Signup is not complete. Reopen the Meta-managed onboarding session to continue.",
+                metadata: {
+                    code: "SETUP_IN_PROGRESS",
+                    onboardingState: whatsappEmbeddedSignupSession.state,
+                    setupRequired: true,
+                    setupInProgress: true,
+                    embeddedSignupAvailable: true,
+                    requiresReconnect: true,
+                    actionable,
+                },
+            });
+            return res.status(409).json({
+                success: false,
+                data: {
+                    operationId: lifecycleContext.attemptKey,
+                    replayToken: lifecycleContext.replayToken,
+                    platform: "WHATSAPP",
+                    status: "NEEDS_ACTION",
+                    connectionState: "ACTION_REQUIRED",
+                    stage: onboardingStage,
+                    reason: "SETUP_IN_PROGRESS: Meta Embedded Signup has not completed phone collection, OTP verification, and provisioning.",
+                    code: "SETUP_IN_PROGRESS",
+                    actionable: {
+                        ...actionable,
+                        cta: {
+                            label: "Continue Meta Onboarding",
+                            action: "REOPEN_EMBEDDED_SIGNUP",
+                        },
+                    },
+                    setupRequired: true,
+                    setupInProgress: true,
+                    embeddedSignupAvailable: true,
+                    requiresReconnect: true,
+                    availablePhoneNumbers: [],
+                },
+                message: "WhatsApp Embedded Signup is not complete",
+                code: "SETUP_IN_PROGRESS",
+            });
+        }
+        if (targetPlatform === "WHATSAPP" &&
+            !internalContinuation &&
+            whatsappEmbeddedSignupSession.completed) {
+            console.info("WA_EMBEDDED_SIGNUP_COMPLETED", {
+                component: "whatsapp-onboarding",
+                businessId,
+                operationId: lifecycleContext?.attemptKey || null,
+                mode: oauthState.mode,
+                wabaId: whatsappEmbeddedSignupSession.wabaId || null,
+                phoneNumberId: whatsappEmbeddedSignupSession.phoneNumberId || null,
+            });
+            await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
+                context: lifecycleContext,
+                stage: "WHATSAPP_EMBEDDED_SIGNUP",
+                detail: "Meta Embedded Signup finished; proceeding to WhatsApp asset discovery.",
+                metadata: {
+                    onboardingState: "COMPLETED",
+                    wabaId: whatsappEmbeddedSignupSession.wabaId,
+                    phoneNumberId: whatsappEmbeddedSignupSession.phoneNumberId,
+                    businessManagerId: whatsappEmbeddedSignupSession.businessManagerId,
+                },
+            });
         }
         if (targetPlatform === "INSTAGRAM") {
             await recordInstagramConnectStage({
@@ -2870,7 +3028,7 @@ const metaOAuthConnect = async (req, res) => {
                 selectedPhoneNumberId: resolvedPhoneNumberId,
             });
             const phoneProfile = await fetchWhatsAppPhoneProfile(resolvedPhoneNumberId, longToken);
-            console.info("WA_PHONE_VERIFIED", {
+            console.info("WA_PHONE_VERIFICATION_COMPLETED", {
                 component: "whatsapp-onboarding",
                 businessId,
                 operationId: lifecycleContext?.attemptKey || null,
@@ -3508,7 +3666,7 @@ const refreshWhatsAppOAuthPhoneNumbers = async (req, res) => {
         }
         const availablePhoneNumbers = await fetchWhatsAppPhoneCandidates(accessToken);
         const discoveredWabaCandidate = availablePhoneNumbers.find((candidate) => Boolean(candidate.wabaId)) || null;
-        console.info("WHATSAPP_NUMBERS_REFRESHED", {
+        console.info("WA_PHONE_PROVISIONED", {
             component: "whatsapp-onboarding",
             businessId,
             operationId: lifecycleContext.attemptKey,

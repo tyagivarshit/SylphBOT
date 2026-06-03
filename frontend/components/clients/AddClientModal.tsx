@@ -9,6 +9,7 @@ import MetaOAuthPrecheckModal, {
 import { apiFetch } from "@/lib/apiClient"
 import { apiClient } from "@/lib/apiClient"
 import { fetchClientConnectionStatus } from "@/lib/userApi"
+import { launchWhatsAppEmbeddedSignupSession } from "@/lib/metaEmbeddedSignup"
 
 const defaultConnections = {
   instagram: {
@@ -43,21 +44,6 @@ type MetaStartResponse = {
   embeddedSignup?: MetaEmbeddedSignupConfig | null
 }
 
-declare global {
-  interface Window {
-    FB?: {
-      init: (options: Record<string, unknown>) => void
-      login: (
-        callback: (response: {
-          authResponse?: { code?: string | null } | null
-          status?: string
-        }) => void,
-        options?: Record<string, unknown>
-      ) => void
-    }
-  }
-}
-
 export default function AddClientModal({
   onClose,
   onConnected,
@@ -90,16 +76,6 @@ export default function AddClientModal({
   useEffect(() => {
     void loadConnections()
   }, [])
-
-  const waitForFacebookSdk = async () => {
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      if (typeof window !== "undefined" && window.FB) {
-        return window.FB
-      }
-      await new Promise((resolve) => setTimeout(resolve, 120))
-    }
-    return null
-  }
 
   const getLifecycleOperationId = (payload: unknown) => {
     if (!payload || typeof payload !== "object") {
@@ -138,47 +114,7 @@ export default function AddClientModal({
   }
 
   const launchWhatsAppEmbeddedSignup = async (start: MetaStartResponse) => {
-    const embeddedSignup = start.embeddedSignup
-    if (!embeddedSignup?.appId || !embeddedSignup.configId || !start.state) {
-      return false
-    }
-
-    const facebookSdk = await waitForFacebookSdk()
-    if (!facebookSdk) {
-      return false
-    }
-
-    facebookSdk.init({
-      appId: embeddedSignup.appId,
-      autoLogAppEvents: true,
-      xfbml: false,
-      version: embeddedSignup.graphVersion || "v19.0",
-    })
-
-    const loginResponse = await new Promise<{
-      authResponse?: { code?: string | null } | null
-      status?: string
-    }>((resolve) => {
-      facebookSdk.login(resolve, {
-        config_id: embeddedSignup.configId,
-        response_type: embeddedSignup.responseType || "code",
-        override_default_response_type:
-          embeddedSignup.overrideDefaultResponseType ?? true,
-        extras:
-          embeddedSignup.extras || {
-            setup: {
-              feature: "whatsapp_embedded_signup",
-              sessionInfoVersion: "3",
-              featureType: "whatsapp_business_app_onboarding",
-            },
-          },
-      })
-    })
-
-    const code = String(loginResponse.authResponse?.code || "").trim()
-    if (!code) {
-      throw new Error("Meta Embedded Signup did not return an authorization code.")
-    }
+    const { code, session } = await launchWhatsAppEmbeddedSignupSession(start)
 
     const finalizeResponse = await apiClient.request({
       url: "/api/clients/oauth/meta",
@@ -186,6 +122,7 @@ export default function AddClientModal({
       data: {
         code,
         state: start.state,
+        embeddedSignupSession: session,
       },
       timeout: 9000,
       validateStatus: () => true,
@@ -193,7 +130,7 @@ export default function AddClientModal({
 
     const operationId = getLifecycleOperationId(finalizeResponse.data)
     openCallbackLifecycle({
-      state: start.state,
+      state: start.state || "",
       operationId,
       mode: start.mode,
     })

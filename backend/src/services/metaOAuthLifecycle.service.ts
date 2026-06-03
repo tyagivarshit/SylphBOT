@@ -10,6 +10,11 @@ export type MetaOAuthLifecycleStage =
   | "CONTINUATION_SCHEDULED"
   | "OAUTH_AUTHENTICATED"
   | "META_ACCOUNT_CONNECTED"
+  | "WHATSAPP_EMBEDDED_SIGNUP"
+  | "NUMBER_REQUIRED"
+  | "OTP_REQUIRED"
+  | "PROVISIONING_PENDING"
+  | "BUSINESS_VERIFICATION_PENDING"
   | "PAIR_SELECTION"
   | "PHONE_SELECTION"
   | "TOKEN_PERSISTENCE"
@@ -56,6 +61,11 @@ const LIFECYCLE_STAGE_RANK: Record<MetaOAuthLifecycleStage, number> = {
   CONTINUATION_SCHEDULED: 20,
   OAUTH_AUTHENTICATED: 30,
   META_ACCOUNT_CONNECTED: 40,
+  WHATSAPP_EMBEDDED_SIGNUP: 42,
+  NUMBER_REQUIRED: 43,
+  OTP_REQUIRED: 44,
+  PROVISIONING_PENDING: 45,
+  BUSINESS_VERIFICATION_PENDING: 46,
   PAIR_SELECTION: 45,
   PHONE_SELECTION: 45,
   WEBHOOK_ACTIVATION: 60,
@@ -684,7 +694,15 @@ export const markMetaOAuthLifecycleStage = async (input: {
 
 export const markMetaOAuthLifecycleNeedsAction = async (input: {
   context: MetaOAuthLifecycleContext;
-  stage: Extract<MetaOAuthLifecycleStage, "PAIR_SELECTION" | "PHONE_SELECTION">;
+  stage: Extract<
+    MetaOAuthLifecycleStage,
+    | "PAIR_SELECTION"
+    | "PHONE_SELECTION"
+    | "NUMBER_REQUIRED"
+    | "OTP_REQUIRED"
+    | "PROVISIONING_PENDING"
+    | "BUSINESS_VERIFICATION_PENDING"
+  >;
   detail: string;
   metadata?: Record<string, unknown>;
 }) => {

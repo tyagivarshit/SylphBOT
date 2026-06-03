@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { apiFetch } from "@/lib/apiClient";
+import { apiClient, apiFetch } from "@/lib/apiClient";
 import MetaOAuthPrecheckModal, {
   getMetaOAuthPrecheckDismissed,
   type MetaOAuthPlatform,
 } from "@/components/integrations/MetaOAuthPrecheckModal";
+import { launchWhatsAppEmbeddedSignupSession } from "@/lib/metaEmbeddedSignup";
 import {
   buildAppUrl,
   fetchClientConnectionStatus,
@@ -19,6 +20,20 @@ import { getClients } from "@/lib/clients";
 type ClientConnection = {
   id: string;
   platform: string;
+};
+
+type MetaStartResponse = {
+  url?: string;
+  state?: string;
+  mode?: string;
+  embeddedSignup?: {
+    appId: string;
+    configId: string;
+    graphVersion?: string;
+    responseType?: "code";
+    overrideDefaultResponseType?: boolean;
+    extras?: Record<string, unknown>;
+  } | null;
 };
 
 type PlatformConnectionState = {
@@ -146,6 +161,63 @@ export default function IntegrationsSettings() {
     },
   });
 
+  const getLifecycleOperationId = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    const root = payload as Record<string, unknown>;
+    const data =
+      root.data && typeof root.data === "object"
+        ? (root.data as Record<string, unknown>)
+        : root;
+    const lifecycle =
+      data.lifecycle && typeof data.lifecycle === "object"
+        ? (data.lifecycle as Record<string, unknown>)
+        : data;
+    return String(lifecycle.operationId || data.operationId || "").trim() || null;
+  };
+
+  const openWhatsAppCallbackLifecycle = ({
+    state,
+    operationId,
+    mode,
+  }: {
+    state: string;
+    operationId?: string | null;
+    mode?: string | null;
+  }) => {
+    const query = new URLSearchParams({
+      state,
+      platform: "whatsapp",
+      mode: mode || "connect",
+    });
+    if (operationId) {
+      query.set("operationId", operationId);
+    }
+    window.location.assign(`/integrations/meta/callback?${query.toString()}`);
+  };
+
+  const launchWhatsAppEmbeddedSignup = async (start: MetaStartResponse) => {
+    const { code, session } = await launchWhatsAppEmbeddedSignupSession(start);
+    const finalizeResponse = await apiClient.request({
+      url: "/api/clients/oauth/meta",
+      method: "POST",
+      data: {
+        code,
+        state: start.state,
+        embeddedSignupSession: session,
+      },
+      timeout: 9000,
+      validateStatus: () => true,
+    });
+
+    openWhatsAppCallbackLifecycle({
+      state: start.state || "",
+      operationId: getLifecycleOperationId(finalizeResponse.data),
+      mode: start.mode,
+    });
+  };
+
   const connectMeta = async (
     platformKey: "instagram" | "whatsapp",
     mode: "connect" | "reconnect" = "connect"
@@ -157,7 +229,7 @@ export default function IntegrationsSettings() {
         platform: platformKey.toUpperCase(),
         mode,
       });
-      const response = await apiFetch<{ url?: string }>(
+      const response = await apiFetch<MetaStartResponse>(
         `/api/clients/oauth/meta?${query.toString()}`,
         {
           credentials: "include",
@@ -166,6 +238,15 @@ export default function IntegrationsSettings() {
 
       if (!response.success || !response.data?.url) {
         throw new Error(response.message || "Failed to start connection");
+      }
+
+      if (platformKey === "whatsapp") {
+        if (!response.data.embeddedSignup || !response.data.state) {
+          throw new Error("Meta Embedded Signup is not configured for WhatsApp.");
+        }
+
+        await launchWhatsAppEmbeddedSignup(response.data);
+        return;
       }
 
       window.location.assign(response.data.url);

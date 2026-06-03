@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { apiClient, apiFetch } from "@/lib/apiClient";
 import { buildAppUrl, fetchClientConnectionStatus } from "@/lib/userApi";
 import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
+import { launchWhatsAppEmbeddedSignupSession } from "@/lib/metaEmbeddedSignup";
 
 type PairOption = {
   facebookPageId: string;
@@ -174,6 +175,21 @@ const lifecycleStageLabel = (stage?: string | null) => {
   if (normalized === "META_ACCOUNT_CONNECTED") {
     return "Meta account connected";
   }
+  if (normalized === "WHATSAPP_EMBEDDED_SIGNUP") {
+    return "WhatsApp Embedded Signup completed";
+  }
+  if (normalized === "NUMBER_REQUIRED") {
+    return "Phone number required";
+  }
+  if (normalized === "OTP_REQUIRED") {
+    return "OTP verification required";
+  }
+  if (normalized === "PROVISIONING_PENDING") {
+    return "Meta provisioning pending";
+  }
+  if (normalized === "BUSINESS_VERIFICATION_PENDING") {
+    return "Business verification pending";
+  }
   if (normalized === "PAIR_SELECTION") {
     return "Pair selection required";
   }
@@ -212,6 +228,18 @@ const resolveOnboardingPhase = (lifecycle?: LifecyclePayload | null) => {
     status === "FAILED" ||
     connectionState === "ACTION_REQUIRED"
   ) {
+    if (stage === "NUMBER_REQUIRED") {
+      return "NUMBER_REQUIRED";
+    }
+    if (stage === "OTP_REQUIRED") {
+      return "OTP_REQUIRED";
+    }
+    if (stage === "PROVISIONING_PENDING") {
+      return "PROVISIONING_PENDING";
+    }
+    if (stage === "BUSINESS_VERIFICATION_PENDING") {
+      return "BUSINESS_VERIFICATION_PENDING";
+    }
     return "ACTION_REQUIRED";
   }
 
@@ -785,16 +813,6 @@ function MetaCallbackContent() {
     window.location.assign(response.data.url);
   };
 
-  const waitForFacebookSdk = async () => {
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      if (typeof window !== "undefined" && window.FB) {
-        return window.FB;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    }
-    return null;
-  };
-
   const getLifecycleOperationId = (payload: unknown) => {
     if (!payload || typeof payload !== "object") {
       return null;
@@ -828,47 +846,7 @@ function MetaCallbackContent() {
   };
 
   const launchWhatsAppEmbeddedSignup = async (start: MetaStartResponse) => {
-    const embeddedSignup = start.embeddedSignup;
-    if (!embeddedSignup?.appId || !embeddedSignup.configId || !start.state) {
-      return false;
-    }
-
-    const facebookSdk = await waitForFacebookSdk();
-    if (!facebookSdk) {
-      return false;
-    }
-
-    facebookSdk.init({
-      appId: embeddedSignup.appId,
-      autoLogAppEvents: true,
-      xfbml: false,
-      version: embeddedSignup.graphVersion || "v19.0",
-    });
-
-    const loginResponse = await new Promise<{
-      authResponse?: { code?: string | null } | null;
-      status?: string;
-    }>((resolve) => {
-      facebookSdk.login(resolve, {
-        config_id: embeddedSignup.configId,
-        response_type: embeddedSignup.responseType || "code",
-        override_default_response_type:
-          embeddedSignup.overrideDefaultResponseType ?? true,
-        extras:
-          embeddedSignup.extras || {
-            setup: {
-              feature: "whatsapp_embedded_signup",
-              sessionInfoVersion: "3",
-              featureType: "whatsapp_business_app_onboarding",
-            },
-          },
-      });
-    });
-
-    const code = readString(loginResponse.authResponse?.code);
-    if (!code) {
-      throw new Error("Meta Embedded Signup did not return an authorization code.");
-    }
+    const { code, session } = await launchWhatsAppEmbeddedSignupSession(start);
 
     const finalizeResponse = await apiClient.request({
       url: "/api/clients/oauth/meta",
@@ -876,13 +854,14 @@ function MetaCallbackContent() {
       data: {
         code,
         state: start.state,
+        embeddedSignupSession: session,
       },
       timeout: 9000,
       validateStatus: () => true,
     });
 
     openCallbackLifecycle({
-      state: start.state,
+      state: start.state || "",
       operationId: getLifecycleOperationId(finalizeResponse.data),
       mode: start.mode,
     });
@@ -1285,7 +1264,7 @@ function MetaCallbackContent() {
           >
             {actionBusy ? "Working..." : failure.actionable.cta.label}
           </button>
-          {isWhatsAppSetupRequired || failure.platform === "whatsapp" ? (
+          {!isWhatsAppSetupRequired && failure.platform === "whatsapp" ? (
             <button
               onClick={() => {
                 setActionBusy(true);

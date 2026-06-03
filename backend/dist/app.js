@@ -207,7 +207,6 @@ const BILLING_REQUEST_TIMEOUT_MS = 24000;
 const CHECKOUT_REQUEST_TIMEOUT_MS = 30000;
 const OAUTH_FAST_LANE_TIMEOUT_PATH_PREFIXES = [
     "/api/oauth/meta/callback",
-    "/api/clients/oauth/meta",
 ];
 const WEBHOOK_TIMEOUT_PATH_PREFIXES = [
     "/api/webhooks/commerce",

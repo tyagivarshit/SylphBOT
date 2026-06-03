@@ -7,6 +7,7 @@ import MetaOAuthPrecheckModal, {
   type MetaOAuthPlatform,
 } from "@/components/integrations/MetaOAuthPrecheckModal"
 import { apiFetch } from "@/lib/apiClient"
+import { apiClient } from "@/lib/apiClient"
 import { fetchClientConnectionStatus } from "@/lib/userApi"
 
 const defaultConnections = {
@@ -23,6 +24,38 @@ const defaultConnections = {
 type AddClientModalProps = {
   onClose: () => void
   onConnected?: () => void | Promise<void>
+}
+
+type MetaEmbeddedSignupConfig = {
+  appId: string
+  configId: string
+  graphVersion?: string
+  responseType?: "code"
+  overrideDefaultResponseType?: boolean
+  extras?: Record<string, unknown>
+}
+
+type MetaStartResponse = {
+  url?: string
+  state?: string
+  platform?: string
+  mode?: string
+  embeddedSignup?: MetaEmbeddedSignupConfig | null
+}
+
+declare global {
+  interface Window {
+    FB?: {
+      init: (options: Record<string, unknown>) => void
+      login: (
+        callback: (response: {
+          authResponse?: { code?: string | null } | null
+          status?: string
+        }) => void,
+        options?: Record<string, unknown>
+      ) => void
+    }
+  }
 }
 
 export default function AddClientModal({
@@ -58,6 +91,115 @@ export default function AddClientModal({
     void loadConnections()
   }, [])
 
+  const waitForFacebookSdk = async () => {
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      if (typeof window !== "undefined" && window.FB) {
+        return window.FB
+      }
+      await new Promise((resolve) => setTimeout(resolve, 120))
+    }
+    return null
+  }
+
+  const getLifecycleOperationId = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") {
+      return null
+    }
+    const root = payload as Record<string, unknown>
+    const data =
+      root.data && typeof root.data === "object"
+        ? (root.data as Record<string, unknown>)
+        : root
+    const lifecycle =
+      data.lifecycle && typeof data.lifecycle === "object"
+        ? (data.lifecycle as Record<string, unknown>)
+        : data
+    return String(lifecycle.operationId || data.operationId || "").trim() || null
+  }
+
+  const openCallbackLifecycle = ({
+    state,
+    operationId,
+    mode,
+  }: {
+    state: string
+    operationId?: string | null
+    mode?: string | null
+  }) => {
+    const query = new URLSearchParams({
+      state,
+      platform: "whatsapp",
+      mode: mode || "connect",
+    })
+    if (operationId) {
+      query.set("operationId", operationId)
+    }
+    window.location.assign(`/integrations/meta/callback?${query.toString()}`)
+  }
+
+  const launchWhatsAppEmbeddedSignup = async (start: MetaStartResponse) => {
+    const embeddedSignup = start.embeddedSignup
+    if (!embeddedSignup?.appId || !embeddedSignup.configId || !start.state) {
+      return false
+    }
+
+    const facebookSdk = await waitForFacebookSdk()
+    if (!facebookSdk) {
+      return false
+    }
+
+    facebookSdk.init({
+      appId: embeddedSignup.appId,
+      autoLogAppEvents: true,
+      xfbml: false,
+      version: embeddedSignup.graphVersion || "v19.0",
+    })
+
+    const loginResponse = await new Promise<{
+      authResponse?: { code?: string | null } | null
+      status?: string
+    }>((resolve) => {
+      facebookSdk.login(resolve, {
+        config_id: embeddedSignup.configId,
+        response_type: embeddedSignup.responseType || "code",
+        override_default_response_type:
+          embeddedSignup.overrideDefaultResponseType ?? true,
+        extras:
+          embeddedSignup.extras || {
+            setup: {
+              feature: "whatsapp_embedded_signup",
+              sessionInfoVersion: "3",
+              featureType: "whatsapp_business_app_onboarding",
+            },
+          },
+      })
+    })
+
+    const code = String(loginResponse.authResponse?.code || "").trim()
+    if (!code) {
+      throw new Error("Meta Embedded Signup did not return an authorization code.")
+    }
+
+    const finalizeResponse = await apiClient.request({
+      url: "/api/clients/oauth/meta",
+      method: "POST",
+      data: {
+        code,
+        state: start.state,
+      },
+      timeout: 9000,
+      validateStatus: () => true,
+    })
+
+    const operationId = getLifecycleOperationId(finalizeResponse.data)
+    openCallbackLifecycle({
+      state: start.state,
+      operationId,
+      mode: start.mode,
+    })
+    return true
+  }
+
   const connectMeta = async (platformKey: "instagram" | "whatsapp") => {
     if (
       (platformKey === "instagram" &&
@@ -76,7 +218,7 @@ export default function AddClientModal({
         platform: platformKey.toUpperCase(),
         mode: "connect",
       })
-      const response = await apiFetch<{ url?: string }>(
+      const response = await apiFetch<MetaStartResponse>(
         `/api/clients/oauth/meta?${query.toString()}`,
         {
           credentials: "include",
@@ -88,6 +230,14 @@ export default function AddClientModal({
       }
 
       await onConnected?.()
+      if (
+        platformKey === "whatsapp" &&
+        response.data.embeddedSignup &&
+        (await launchWhatsAppEmbeddedSignup(response.data))
+      ) {
+        return
+      }
+
       window.location.assign(response.data.url)
     } catch (err) {
       console.error(`${platformKey} connect error`, err)

@@ -104,6 +104,37 @@ type LifecyclePayload = {
   metadata?: Record<string, unknown> | null;
 };
 
+type MetaEmbeddedSignupConfig = {
+  appId: string;
+  configId: string;
+  graphVersion?: string;
+  responseType?: "code";
+  overrideDefaultResponseType?: boolean;
+  extras?: Record<string, unknown>;
+};
+
+type MetaStartResponse = {
+  url?: string;
+  state?: string;
+  mode?: string;
+  embeddedSignup?: MetaEmbeddedSignupConfig | null;
+};
+
+declare global {
+  interface Window {
+    FB?: {
+      init: (options: Record<string, unknown>) => void;
+      login: (
+        callback: (response: {
+          authResponse?: { code?: string | null } | null;
+          status?: string;
+        }) => void,
+        options?: Record<string, unknown>
+      ) => void;
+    };
+  }
+}
+
 const normalizeLifecycleStatus = (value: unknown): LifecycleStatus => {
   const normalized = readString(value).toUpperCase();
   if (normalized === "COMPLETED") {
@@ -417,6 +448,7 @@ function MetaCallbackContent() {
 
     const code = searchParams.get("code") || "";
     const state = searchParams.get("state") || "";
+    const operationId = searchParams.get("operationId") || "";
     const platformParam = (searchParams.get("platform") || "").toLowerCase();
     const platform: "instagram" | "whatsapp" =
       platformParam === "whatsapp" ? "whatsapp" : "instagram";
@@ -532,6 +564,28 @@ function MetaCallbackContent() {
           errorCode: "MISSING_PERMISSION",
         })
       );
+      return;
+    }
+
+    if (!code && state) {
+      setLifecycle({
+        operationId: operationId || null,
+        status: "PROCESSING",
+        stage: "CONTINUATION_SCHEDULED",
+        statusDetail: "Meta Embedded Signup completed. Refreshing WhatsApp assets...",
+      });
+      void pollLifecycle(operationId || null).then((recovered) => {
+        if (!recovered && !cancelled) {
+          applyFailure(
+            buildFallbackFailure(
+              "Meta connect is still processing. Retry in a moment.",
+              "FINAL_ONBOARDING",
+              "ONBOARDING_PROCESSING",
+              platform
+            )
+          );
+        }
+      });
       return;
     }
 
@@ -711,9 +765,7 @@ function MetaCallbackContent() {
       query.set("phoneNumberId", options.phoneNumberId);
     }
 
-    const response = await apiFetch<{
-      url?: string;
-    }>(`/api/clients/oauth/meta?${query.toString()}`, {
+    const response = await apiFetch<MetaStartResponse>(`/api/clients/oauth/meta?${query.toString()}`, {
       method: "GET",
     });
 
@@ -721,7 +773,122 @@ function MetaCallbackContent() {
       throw new Error(response.message || "Unable to start reconnect flow");
     }
 
+    if (
+      reconnectPlatform === "whatsapp" &&
+      response.data.embeddedSignup &&
+      response.data.state
+    ) {
+      const launched = await launchWhatsAppEmbeddedSignup(response.data);
+      if (launched) {
+        return;
+      }
+    }
+
     window.location.assign(response.data.url);
+  };
+
+  const waitForFacebookSdk = async () => {
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      if (typeof window !== "undefined" && window.FB) {
+        return window.FB;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    return null;
+  };
+
+  const getLifecycleOperationId = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    const root = payload as Record<string, unknown>;
+    const data =
+      root.data && typeof root.data === "object"
+        ? (root.data as Record<string, unknown>)
+        : root;
+    const lifecycle =
+      data.lifecycle && typeof data.lifecycle === "object"
+        ? (data.lifecycle as Record<string, unknown>)
+        : data;
+    return readString(lifecycle.operationId || data.operationId) || null;
+  };
+
+  const openCallbackLifecycle = (input: {
+    state: string;
+    operationId?: string | null;
+    mode?: string | null;
+  }) => {
+    const query = new URLSearchParams({
+      state: input.state,
+      platform: "whatsapp",
+      mode: input.mode || callbackMode || "connect",
+    });
+    if (input.operationId) {
+      query.set("operationId", input.operationId);
+    }
+    window.location.assign(`/integrations/meta/callback?${query.toString()}`);
+  };
+
+  const launchWhatsAppEmbeddedSignup = async (start: MetaStartResponse) => {
+    const embeddedSignup = start.embeddedSignup;
+    if (!embeddedSignup?.appId || !embeddedSignup.configId || !start.state) {
+      return false;
+    }
+
+    const facebookSdk = await waitForFacebookSdk();
+    if (!facebookSdk) {
+      return false;
+    }
+
+    facebookSdk.init({
+      appId: embeddedSignup.appId,
+      autoLogAppEvents: true,
+      xfbml: false,
+      version: embeddedSignup.graphVersion || "v19.0",
+    });
+
+    const loginResponse = await new Promise<{
+      authResponse?: { code?: string | null } | null;
+      status?: string;
+    }>((resolve) => {
+      facebookSdk.login(resolve, {
+        config_id: embeddedSignup.configId,
+        response_type: embeddedSignup.responseType || "code",
+        override_default_response_type:
+          embeddedSignup.overrideDefaultResponseType ?? true,
+        extras:
+          embeddedSignup.extras || {
+            setup: {
+              feature: "whatsapp_embedded_signup",
+              sessionInfoVersion: "3",
+              featureType: "whatsapp_business_app_onboarding",
+            },
+          },
+      });
+    });
+
+    const code = readString(loginResponse.authResponse?.code);
+    if (!code) {
+      throw new Error("Meta Embedded Signup did not return an authorization code.");
+    }
+
+    const finalizeResponse = await apiClient.request({
+      url: "/api/clients/oauth/meta",
+      method: "POST",
+      data: {
+        code,
+        state: start.state,
+      },
+      timeout: 9000,
+      validateStatus: () => true,
+    });
+
+    openCallbackLifecycle({
+      state: start.state,
+      operationId: getLifecycleOperationId(finalizeResponse.data),
+      mode: start.mode,
+    });
+    return true;
   };
 
   const runAutoRepair = async () => {
@@ -966,7 +1133,8 @@ function MetaCallbackContent() {
     failure.platform === "whatsapp" &&
     (failure.setupRequired ||
       failure.actionable.reasonCode === "WHATSAPP_SETUP_REQUIRED" ||
-      failure.code === "WA_SETUP_REQUIRED");
+      failure.code === "WA_SETUP_REQUIRED" ||
+      failure.code === "SETUP_IN_PROGRESS");
 
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-10">
@@ -986,10 +1154,10 @@ function MetaCallbackContent() {
         {isWhatsAppSetupRequired ? (
           <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
             <p className="text-sm font-medium text-emerald-950">
-              No WhatsApp Business phone numbers were found.
+              SETUP_IN_PROGRESS
             </p>
             <p className="mt-2 text-sm text-emerald-900">
-              Add or finish verifying a WhatsApp Business number in the connected WABA, then refresh detection here. Your OAuth connection is preserved.
+              Meta is still creating, linking, or verifying the WhatsApp Business number. Finish the Meta-managed OTP/setup step, then refresh detection here.
             </p>
           </div>
         ) : (
@@ -1146,6 +1314,35 @@ function MetaCallbackContent() {
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-60"
             >
               Refresh Numbers
+            </button>
+          ) : null}
+          {isWhatsAppSetupRequired ? (
+            <button
+              onClick={() => {
+                setActionBusy(true);
+                startReconnect({ platform: "whatsapp" })
+                  .catch((error) => {
+                    const reason =
+                      error instanceof Error ? error.message : "Unable to reopen Meta onboarding";
+                    setFailure((current) =>
+                      current
+                        ? {
+                            ...current,
+                            reason,
+                            actionable: {
+                              ...current.actionable,
+                              cause: reason,
+                            },
+                          }
+                        : current
+                    );
+                  })
+                  .finally(() => setActionBusy(false));
+              }}
+              disabled={actionBusy}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-60"
+            >
+              Continue Meta Onboarding
             </button>
           ) : null}
           {isWhatsAppSetupRequired && failure.businessManagerUrl ? (

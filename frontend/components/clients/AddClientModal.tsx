@@ -230,11 +230,12 @@ export default function AddClientModal({
       }
 
       await onConnected?.()
-      if (
-        platformKey === "whatsapp" &&
-        response.data.embeddedSignup &&
-        (await launchWhatsAppEmbeddedSignup(response.data))
-      ) {
+      if (platformKey === "whatsapp") {
+        if (!response.data.embeddedSignup) {
+          throw new Error("Meta Embedded Signup is not configured for WhatsApp.")
+        }
+
+        await launchWhatsAppEmbeddedSignup(response.data)
         return
       }
 

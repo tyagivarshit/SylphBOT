@@ -39,13 +39,13 @@ const platformContent: Record<
       "Meta Embedded Signup will open next so you can authorize your business account.",
     checks: [
       "Meta/Facebook login required",
-      "Business Manager access required",
-      "WhatsApp Business Account (WABA) required",
-      "Phone number must not already be connected elsewhere",
-      "Permissions will be requested by Meta",
+      "WhatsApp Business setup required",
+      "Meta handles SMS or call OTP verification",
+      "Business verification may be required",
+      "Fresh, non-personal number recommended",
     ],
     learnMore:
-      "You can continue and complete any missing setup steps in Meta.",
+      "Meta will handle business selection, WABA linking, phone entry, OTP, and display name setup.",
   },
 };
 
@@ -92,6 +92,14 @@ export default function MetaOAuthPrecheckModal({
     }
 
     onContinue({ dontShowAgain });
+  };
+
+  const handleLearnMore = () => {
+    const url =
+      platform === "whatsapp"
+        ? "https://developers.facebook.com/docs/whatsapp/embedded-signup"
+        : "https://developers.facebook.com/docs/instagram-platform";
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -174,6 +182,15 @@ export default function MetaOAuthPrecheckModal({
             className="brand-button-secondary w-full sm:w-auto"
           >
             Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleLearnMore}
+            disabled={loading}
+            className="brand-button-secondary w-full sm:w-auto"
+          >
+            Learn More
+            <ExternalLink size={16} />
           </button>
           <button
             type="button"

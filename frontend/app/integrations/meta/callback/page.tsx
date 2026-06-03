@@ -773,15 +773,13 @@ function MetaCallbackContent() {
       throw new Error(response.message || "Unable to start reconnect flow");
     }
 
-    if (
-      reconnectPlatform === "whatsapp" &&
-      response.data.embeddedSignup &&
-      response.data.state
-    ) {
-      const launched = await launchWhatsAppEmbeddedSignup(response.data);
-      if (launched) {
-        return;
+    if (reconnectPlatform === "whatsapp") {
+      if (!response.data.embeddedSignup || !response.data.state) {
+        throw new Error("Meta Embedded Signup is not configured for WhatsApp.");
       }
+
+      await launchWhatsAppEmbeddedSignup(response.data);
+      return;
     }
 
     window.location.assign(response.data.url);

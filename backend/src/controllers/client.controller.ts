@@ -2018,7 +2018,11 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     );
 
     const oauthState = verifyMetaOAuthState(state);
-    waDiagEnabled = oauthState?.platform === "WHATSAPP";
+    waDiagEnabled =
+      oauthState?.platform === "WHATSAPP" &&
+      String(process.env.WA_META_FINALIZE_DIAG || "")
+        .trim()
+        .toLowerCase() === "true";
 
     if (waDiagEnabled) {
       logWaCheckpoint("[WA STEP 1] request entered", {
@@ -2931,6 +2935,12 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     if (targetPlatform === "WHATSAPP") {
       logWaCheckpoint("[WA STEP 4] long token exchanged");
+      console.info("WA_EMBEDDED_SIGNUP_COMPLETED", {
+        component: "whatsapp-onboarding",
+        businessId,
+        operationId: lifecycleContext?.attemptKey || null,
+        mode: oauthState.mode,
+      });
     }
 
     if (targetPlatform === "INSTAGRAM") {
@@ -3683,7 +3693,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         resolvedPhoneNumberId,
         longToken
       );
-      console.info("WA_PHONE_VERIFIED", {
+      console.info("WA_PHONE_VERIFICATION_COMPLETED", {
         component: "whatsapp-onboarding",
         businessId,
         operationId: lifecycleContext?.attemptKey || null,
@@ -4410,7 +4420,7 @@ export const refreshWhatsAppOAuthPhoneNumbers = async (req: Request, res: Respon
     const discoveredWabaCandidate =
       availablePhoneNumbers.find((candidate) => Boolean(candidate.wabaId)) || null;
 
-    console.info("WHATSAPP_NUMBERS_REFRESHED", {
+    console.info("WA_PHONE_PROVISIONED", {
       component: "whatsapp-onboarding",
       businessId,
       operationId: lifecycleContext.attemptKey,

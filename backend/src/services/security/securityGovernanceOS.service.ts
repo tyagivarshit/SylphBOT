@@ -311,6 +311,125 @@ const withBoundedLedgerRetry = async <T>(input: {
   throw lastError;
 };
 
+const SESSION_LEDGER_WRITE_DEDUP_TTL_MS = Math.max(
+  500,
+  Number(process.env.SESSION_LEDGER_WRITE_DEDUP_TTL_MS || 1_500)
+);
+const SESSION_LEDGER_ASYNC_RETRY_ATTEMPTS = Math.max(
+  1,
+  Number(process.env.SESSION_LEDGER_ASYNC_RETRY_ATTEMPTS || 3)
+);
+
+const logSessionLedgerMetric = (
+  event:
+    | "SESSION_LEDGER_DEDUP_HIT"
+    | "SESSION_LEDGER_ASYNC_WRITE"
+    | "SESSION_LEDGER_RETRY"
+    | "SESSION_LEDGER_DEADLOCK_AVOIDED",
+  metadata: Record<string, unknown> = {}
+) => {
+  console.info(event, {
+    component: "security-session-ledger",
+    ...metadata,
+  });
+};
+
+const scheduleSessionLedgerAsyncUpdate = (input: {
+  sessionKey: string;
+  businessId?: string | null;
+  tenantId?: string | null;
+  data: JsonRecord;
+}) => {
+  const sessionKey = String(input.sessionKey || "").trim();
+  if (!sessionKey || shouldUseInMemory) {
+    return Promise.resolve(null);
+  }
+
+  const writeStatus = String(input.data.status || "ACTIVE").trim().toUpperCase();
+  const writeClass = ["LOCKED", "REVOKED", "CHALLENGE_REQUIRED"].includes(writeStatus)
+    ? `state:${writeStatus}:${stableHash(input.data)}`
+    : "touch";
+  const writeKey = `session-ledger:update:${sessionKey}:${writeClass}`;
+  const store = getStore();
+  const nowMs = Date.now();
+  const existing = store.sessionLedgerInflightWrites.get(writeKey);
+  if (existing && existing.expiresAt > nowMs) {
+    logSessionLedgerMetric("SESSION_LEDGER_DEDUP_HIT", {
+      sessionKey,
+      businessId: input.businessId || null,
+      tenantId: input.tenantId || null,
+    });
+    return existing.promise;
+  }
+
+  const writePromise = new Promise((resolve) => {
+    setImmediate(async () => {
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < SESSION_LEDGER_ASYNC_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+          if (attempt > 0) {
+            logSessionLedgerMetric("SESSION_LEDGER_RETRY", {
+              sessionKey,
+              businessId: input.businessId || null,
+              tenantId: input.tenantId || null,
+              attempt: attempt + 1,
+            });
+          }
+
+          await db.sessionLedger.updateMany({
+            where: {
+              sessionKey,
+            },
+            data: input.data,
+          });
+
+          logSessionLedgerMetric("SESSION_LEDGER_ASYNC_WRITE", {
+            sessionKey,
+            businessId: input.businessId || null,
+            tenantId: input.tenantId || null,
+            attempt: attempt + 1,
+          });
+          resolve(null);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (!isRetryableLedgerWriteError(error)) {
+            break;
+          }
+
+          logSessionLedgerMetric("SESSION_LEDGER_DEADLOCK_AVOIDED", {
+            sessionKey,
+            businessId: input.businessId || null,
+            tenantId: input.tenantId || null,
+            attempt: attempt + 1,
+            reason: String((error as Error)?.message || error),
+          });
+
+          const delayMs = Math.min(
+            650,
+            40 * 2 ** attempt + Math.floor(Math.random() * 90)
+          );
+          await sleep(delayMs);
+        }
+      }
+
+      resolve(lastError);
+    });
+  }).finally(() => {
+    const current = store.sessionLedgerInflightWrites.get(writeKey);
+    if (current?.promise === writePromise) {
+      store.sessionLedgerInflightWrites.delete(writeKey);
+    }
+  });
+
+  store.sessionLedgerInflightWrites.set(writeKey, {
+    expiresAt: nowMs + SESSION_LEDGER_WRITE_DEDUP_TTL_MS,
+    promise: writePromise,
+  });
+
+  return writePromise;
+};
+
 type BaseLedgerRecord = {
   businessId?: string | null;
   tenantId?: string | null;
@@ -357,6 +476,7 @@ type SecurityStore = {
   consumedMfaChallenges: Set<string>;
   frozenTenants: Set<string>;
   failpoints: Set<string>;
+  sessionLedgerInflightWrites: Map<string, { expiresAt: number; promise: Promise<unknown> }>;
 };
 
 const globalForSecurity = globalThis as typeof globalThis & {
@@ -406,6 +526,7 @@ const createStore = (): SecurityStore => ({
   consumedMfaChallenges: new Set(),
   frozenTenants: new Set(),
   failpoints: new Set(),
+  sessionLedgerInflightWrites: new Map(),
 });
 
 const getStore = () => {
@@ -2876,37 +2997,38 @@ export const trackSessionAnomaly = async (input: {
   }
 
   assertActive("session_anomaly.persist");
-  void withDbMirror(() =>
-    db.sessionLedger.updateMany({
-      where: {
-        sessionKey: existing.sessionKey,
-      },
-      data: {
-        ipHash: existing.ipHash,
-        userAgentHash: existing.userAgentHash,
-        deviceId: existing.deviceId,
-        trustLevel: existing.trustLevel,
-        anomalyScore: existing.anomalyScore,
-        status: existing.status,
-        lastSeenAt: existing.lastSeenAt,
-        revokedAt: existing.revokedAt,
-      },
-    })
-  );
-
-  assertActive("session_anomaly.append_event");
-  await appendAuthEvent({
+  void scheduleSessionLedgerAsyncUpdate({
+    sessionKey: existing.sessionKey,
     businessId: existing.businessId,
     tenantId: existing.tenantId,
-    sessionKey: existing.sessionKey,
-    actorId: existing.userId || null,
-    actorType: "USER",
-    action: "session.touch",
-    outcome: existing.status === "LOCKED" ? "DENIED" : "ALLOWED",
-    reason: existing.status === "LOCKED" ? "session_anomaly_lock" : "session_ok",
-    metadata: {
+    data: {
+      ipHash: existing.ipHash,
+      userAgentHash: existing.userAgentHash,
+      deviceId: existing.deviceId,
+      trustLevel: existing.trustLevel,
       anomalyScore: existing.anomalyScore,
+      status: existing.status,
+      lastSeenAt: existing.lastSeenAt,
+      revokedAt: existing.revokedAt,
     },
+  }).catch(() => undefined);
+
+  assertActive("session_anomaly.append_event");
+  setImmediate(() => {
+    appendAuthEvent({
+      businessId: existing.businessId,
+      tenantId: existing.tenantId,
+      sessionKey: existing.sessionKey,
+      actorId: existing.userId || null,
+      actorType: "USER",
+      action: "session.touch",
+      outcome: existing.status === "LOCKED" ? "DENIED" : "ALLOWED",
+      reason: existing.status === "LOCKED" ? "session_anomaly_lock" : "session_ok",
+      metadata: {
+        anomalyScore: existing.anomalyScore,
+        async: true,
+      },
+    }).catch(() => undefined);
   });
 
   return {

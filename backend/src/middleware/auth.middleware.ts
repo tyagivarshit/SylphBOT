@@ -135,6 +135,11 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
 ];
 const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
 
+const SESSION_LEDGER_QUIET_ROUTE_PREFIXES = [
+  "/api/clients/oauth/meta/lifecycle",
+  "/api/user/api-key",
+];
+
 type CachedAuthContext = {
   userId: string;
   role: string;
@@ -1124,6 +1129,17 @@ const isInstantCheckoutRoute = (req: Request) => {
   );
 };
 
+const isSessionLedgerQuietRoute = (req: Request) => {
+  const route = String(req.originalUrl || req.path || req.url || "")
+    .trim()
+    .toLowerCase();
+  const path = String(req.path || "").trim().toLowerCase();
+
+  return SESSION_LEDGER_QUIET_ROUTE_PREFIXES.some(
+    (prefix) => route.startsWith(prefix) || path.startsWith(prefix)
+  );
+};
+
 const markDegradedAuthHeaders = (res?: Response | null) => {
   if (!res || res.headersSent || res.writableEnded) {
     return;
@@ -1181,6 +1197,25 @@ const runSessionAnomalyGuard = async (
 ) => {
   const route = String(req.originalUrl || req.url || "").trim();
   const normalizedRoute = route.toLowerCase();
+  if (isSessionLedgerQuietRoute(req)) {
+    const sessionKey = getSessionKeyFromRequest(req);
+    if (sessionKey && isSessionRevoked(sessionKey)) {
+      throw unauthorized("Session locked due to anomaly");
+    }
+
+    emitPerformanceMetric({
+      name: "SESSION_LEDGER_DEADLOCK_AVOIDED",
+      value: 1,
+      businessId: input.businessId,
+      route,
+      metadata: {
+        method: req.method,
+        reason: "read_only_route_session_ledger_quiet",
+      },
+    });
+    return;
+  }
+
   const shouldEnforceSynchronously =
     req.method !== "GET" ||
       SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) =>

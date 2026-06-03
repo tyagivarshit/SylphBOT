@@ -114,6 +114,10 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
     "/api/commerce",
 ];
 const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
+const SESSION_LEDGER_QUIET_ROUTE_PREFIXES = [
+    "/api/clients/oauth/meta/lifecycle",
+    "/api/user/api-key",
+];
 const authContextCache = new LightweightMemoryCache(3000, AUTH_CONTEXT_CACHE_TTL_MS);
 const userBusinessCache = new LightweightMemoryCache(2000, 5000);
 const businessResolutionCache = new LightweightMemoryCache(2000, 15000);
@@ -757,6 +761,13 @@ const isInstantCheckoutRoute = (req) => {
         path === "/checkout/instant" ||
         path.endsWith("/billing/checkout/instant"));
 };
+const isSessionLedgerQuietRoute = (req) => {
+    const route = String(req.originalUrl || req.path || req.url || "")
+        .trim()
+        .toLowerCase();
+    const path = String(req.path || "").trim().toLowerCase();
+    return SESSION_LEDGER_QUIET_ROUTE_PREFIXES.some((prefix) => route.startsWith(prefix) || path.startsWith(prefix));
+};
 const markDegradedAuthHeaders = (res) => {
     if (!res || res.headersSent || res.writableEnded) {
         return;
@@ -796,6 +807,23 @@ const enforceSessionAnomalyGuard = async (req, input) => {
 const runSessionAnomalyGuard = async (req, input) => {
     const route = String(req.originalUrl || req.url || "").trim();
     const normalizedRoute = route.toLowerCase();
+    if (isSessionLedgerQuietRoute(req)) {
+        const sessionKey = getSessionKeyFromRequest(req);
+        if (sessionKey && (0, securityGovernanceOS_service_1.isSessionRevoked)(sessionKey)) {
+            throw (0, AppError_1.unauthorized)("Session locked due to anomaly");
+        }
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "SESSION_LEDGER_DEADLOCK_AVOIDED",
+            value: 1,
+            businessId: input.businessId,
+            route,
+            metadata: {
+                method: req.method,
+                reason: "read_only_route_session_ledger_quiet",
+            },
+        });
+        return;
+    }
     const shouldEnforceSynchronously = req.method !== "GET" ||
         SESSION_ANOMALY_SYNC_PATH_PREFIXES.some((prefix) => normalizedRoute.startsWith(prefix));
     const requestBudgetMs = (0, requestLifecycle_1.getRequestRemainingMs)({ req }, SESSION_ANOMALY_GUARD_TIMEOUT_MS);

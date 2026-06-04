@@ -70,7 +70,34 @@ export default function DashboardPage() {
   const router = useRouter();
   const deferredTriggerRef = useRef<HTMLDivElement | null>(null);
 
-  const authStable = Boolean(user);
+  const isHydrated = lifecycleState === "hydrated" || lifecycleState === "authenticated";
+  const authStable = Boolean(user) && isHydrated;
+
+  const blockedLoggedRef = useRef(false);
+  const releasedLoggedRef = useRef(false);
+
+  useEffect(() => {
+    if (user && !isHydrated) {
+      if (!blockedLoggedRef.current) {
+        console.info("DASHBOARD_QUERY_BLOCKED_BY_HYDRATION", {
+          userId: user.id,
+          lifecycleState,
+        });
+        blockedLoggedRef.current = true;
+        releasedLoggedRef.current = false;
+      }
+    } else if (user && isHydrated) {
+      if (blockedLoggedRef.current && !releasedLoggedRef.current) {
+        console.info("DASHBOARD_QUERY_RELEASED_AFTER_HYDRATION", {
+          userId: user.id,
+          lifecycleState,
+        });
+        releasedLoggedRef.current = true;
+        blockedLoggedRef.current = false;
+      }
+    }
+  }, [user, isHydrated, lifecycleState]);
+
   const workspaceKey = user?.businessId || user?.workspace?.id || user?.id || "none";
 
   const statsQuery = useQuery({

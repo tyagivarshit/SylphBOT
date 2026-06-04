@@ -220,13 +220,17 @@ const makeAbortable = (promise, signal) => {
     });
 };
 const verifyStripeSubscriptionFallback = async (businessId, requestSignal) => {
+    const startedAt = Date.now();
     const normalizedBusinessId = String(businessId || "").trim();
     if (!normalizedBusinessId)
         return null;
     const rateLimitKey = `fb_chk:${normalizedBusinessId}`;
+    let outcome = "unknown";
+    let customerLookupMs = null;
     try {
         const isRateLimited = await safeRedisGet(rateLimitKey).catch(() => null);
         if (isRateLimited) {
+            outcome = "rate_limited";
             console.info("Stripe direct fallback skipped due to 30s rate-limit", { businessId: normalizedBusinessId });
             return null;
         }
@@ -261,14 +265,48 @@ const verifyStripeSubscriptionFallback = async (businessId, requestSignal) => {
             });
             const email = business?.owner?.email;
             if (!email) {
+                outcome = "missing_owner_email";
                 console.info("Stripe direct fallback: No owner email found", { businessId: normalizedBusinessId });
                 return null;
             }
-            const customers = await makeAbortable(stripe_service_1.stripe.customers.list({
-                email,
-                limit: 1,
-            }, { timeout: stripeTimeout }), requestSignal);
+            const customerLookupStartedAt = Date.now();
+            let customers;
+            try {
+                customers = await makeAbortable(stripe_service_1.stripe.customers.list({
+                    email,
+                    limit: 1,
+                }, { timeout: stripeTimeout }), requestSignal);
+                customerLookupMs = Date.now() - customerLookupStartedAt;
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "stripe_customers_list_ms",
+                    value: customerLookupMs,
+                    businessId: normalizedBusinessId,
+                    route: "auth.bootstrap",
+                    metadata: {
+                        source: "verify_stripe_subscription_fallback",
+                        outcome: "ok",
+                        stripeTimeout,
+                    },
+                });
+            }
+            catch (error) {
+                customerLookupMs = Date.now() - customerLookupStartedAt;
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "stripe_customers_list_ms",
+                    value: customerLookupMs,
+                    businessId: normalizedBusinessId,
+                    route: "auth.bootstrap",
+                    metadata: {
+                        source: "verify_stripe_subscription_fallback",
+                        outcome: "error",
+                        stripeTimeout,
+                        reason: String(error?.message || "stripe_customers_list_failed"),
+                    },
+                });
+                throw error;
+            }
             if (!customers.data || customers.data.length === 0) {
+                outcome = "missing_customer";
                 console.info("Stripe direct fallback: No Stripe customer found", { email });
                 return null;
             }
@@ -280,22 +318,26 @@ const verifyStripeSubscriptionFallback = async (businessId, requestSignal) => {
             limit: 10,
         }, { timeout: stripeTimeout }), requestSignal);
         if (!stripeSubs.data || stripeSubs.data.length === 0) {
+            outcome = "missing_subscription";
             console.info("Stripe direct fallback: No subscriptions found for customer", { customerId });
             return null;
         }
         const activeSub = stripeSubs.data.find(sub => ["active", "trialing", "past_due", "paused"].includes(sub.status));
         if (!activeSub) {
+            outcome = "missing_active_subscription";
             console.info("Stripe direct fallback: No active subscription in Stripe", { customerId });
             return null;
         }
         const item = activeSub.items.data[0];
         const priceId = item?.price?.id;
         if (!priceId) {
+            outcome = "missing_price";
             console.warn("Stripe direct fallback: active subscription has no price ID", { activeSubId: activeSub.id });
             return null;
         }
         const planCode = (0, stripe_price_map_1.getPlanFromPrice)(priceId);
         if (!planCode) {
+            outcome = "unknown_price";
             console.warn("Stripe direct fallback: could not map price ID to planCode", { priceId });
             return null;
         }
@@ -334,11 +376,25 @@ const verifyStripeSubscriptionFallback = async (businessId, requestSignal) => {
             planCode,
             subId: activeSub.id
         });
+        outcome = "resolved";
         return mappedSub;
     }
     catch (error) {
+        outcome = "error";
         console.error("Error in verifyStripeSubscriptionFallback:", error);
         return null;
+    }
+    finally {
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "verify_stripe_subscription_fallback_ms",
+            value: Date.now() - startedAt,
+            businessId: normalizedBusinessId,
+            route: "auth.bootstrap",
+            metadata: {
+                outcome,
+                customerLookupMs,
+            },
+        });
     }
 };
 exports.verifyStripeSubscriptionFallback = verifyStripeSubscriptionFallback;

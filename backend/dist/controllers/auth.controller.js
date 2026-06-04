@@ -477,19 +477,39 @@ const login = async (req, res, next) => {
             await withFastTimeout(pruneRefreshTokens(resolvedUser.id, 4), LOGIN_BACKGROUND_TASK_TIMEOUT_MS);
         });
         runDetachedAuthTask("auth.login.session_ledger", async () => {
-            await withFastTimeout((0, securityGovernanceOS_service_1.issueSessionLedger)({
-                businessId,
-                tenantId: businessId,
-                userId: resolvedUser.id,
-                sessionKey: hashedRefreshToken,
-                ip,
-                userAgent,
-                deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                metadata: {
-                    source: "auth.login",
-                },
-            }), Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS));
+            const sessionLedgerStartedAt = Date.now();
+            let outcome = "ok";
+            try {
+                await withFastTimeout((0, securityGovernanceOS_service_1.issueSessionLedger)({
+                    businessId,
+                    tenantId: businessId,
+                    userId: resolvedUser.id,
+                    sessionKey: hashedRefreshToken,
+                    ip,
+                    userAgent,
+                    deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                    metadata: {
+                        source: "auth.login",
+                    },
+                }), Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS));
+            }
+            catch (error) {
+                outcome = "error";
+                throw error;
+            }
+            finally {
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "session_ledger_ms",
+                    value: Date.now() - sessionLedgerStartedAt,
+                    businessId,
+                    route: "auth.login",
+                    metadata: {
+                        source: "auth.login.session_ledger",
+                        outcome,
+                    },
+                });
+            }
         });
         (0, authBootstrap_service_1.primeAuthBootstrapContext)({
             userId: resolvedUser.id,

@@ -715,22 +715,40 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     });
 
     runDetachedAuthTask("auth.login.session_ledger", async () => {
-      await withFastTimeout(
-        issueSessionLedger({
+      const sessionLedgerStartedAt = Date.now();
+      let outcome = "ok";
+      try {
+        await withFastTimeout(
+          issueSessionLedger({
+            businessId,
+            tenantId: businessId,
+            userId: resolvedUser.id,
+            sessionKey: hashedRefreshToken,
+            ip,
+            userAgent,
+            deviceId: String(req.headers["x-device-id"] || "").trim() || null,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            metadata: {
+              source: "auth.login",
+            },
+          }),
+          Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS)
+        );
+      } catch (error) {
+        outcome = "error";
+        throw error;
+      } finally {
+        emitPerformanceMetric({
+          name: "session_ledger_ms",
+          value: Date.now() - sessionLedgerStartedAt,
           businessId,
-          tenantId: businessId,
-          userId: resolvedUser.id,
-          sessionKey: hashedRefreshToken,
-          ip,
-          userAgent,
-          deviceId: String(req.headers["x-device-id"] || "").trim() || null,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          route: "auth.login",
           metadata: {
-            source: "auth.login",
+            source: "auth.login.session_ledger",
+            outcome,
           },
-        }),
-        Math.max(LOGIN_SESSION_LEDGER_TIMEOUT_MS, LOGIN_BACKGROUND_TASK_TIMEOUT_MS)
-      );
+        });
+      }
     });
 
     primeAuthBootstrapContext(

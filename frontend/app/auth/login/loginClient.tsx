@@ -152,7 +152,11 @@ export default function LoginClient({
         throw new Error(res.message || "Login failed");
       }
 
-      await refreshUser({ mode: "default", source: "password_login" });
+      const stabilizedUser = await finalizeLoginStabilization("password_login");
+      if (!stabilizedUser) {
+        throw new Error("Session is still starting. Please try again in a moment.");
+      }
+
       toast.success("Login successful");
       router.replace("/dashboard");
     } catch (err: unknown) {

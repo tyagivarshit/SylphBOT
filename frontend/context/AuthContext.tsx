@@ -541,6 +541,14 @@ export const AuthProvider = ({
             result.state === "RETRYING" ||
             result.state === "STABILIZING")
         ) {
+          if (result.user) {
+            const stabilizingUser = result.user;
+            setUser(stabilizingUser);
+            currentUserRef.current = stabilizingUser;
+            persistAuthState(stabilizingUser);
+            queryClient.setQueryData(["me"], stabilizingUser);
+          }
+
           recordMetric("bootstrap_failed_transient", performance.now() - startedAt, {
             source,
             mode,

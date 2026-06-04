@@ -504,6 +504,17 @@ export const ensureAuthReadyMinimalContext = async (
     throw new Error("workspace_bootstrap_failed");
   }
 
+  emitPerformanceMetric({
+    name: "identity_resolve_ms",
+    value: stageDurationsMs.identityResolve,
+    businessId: identity.businessId,
+    route: "auth.bootstrap",
+    metadata: {
+      source: "ready_minimal",
+      identitySource: identity.source,
+    },
+  });
+
   const result = {
     user: {
       id: user.id,

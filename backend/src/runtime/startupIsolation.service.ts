@@ -1,4 +1,5 @@
 import { getRequestPriorityRuntimeSnapshot } from "../middleware/requestPriority.middleware";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 
 let _redisReady = false;
 let _dbReady = false;
@@ -21,6 +22,7 @@ const authLatencies: any[] = [];
 let lastTick = Date.now();
 let maxLag = 0;
 let currentLag = 0;
+let tickCount = 0;
 const lagInterval = setInterval(() => {
   const now = Date.now();
   currentLag = Math.max(0, now - lastTick - 100); // 100ms interval
@@ -28,6 +30,18 @@ const lagInterval = setInterval(() => {
     maxLag = currentLag;
   }
   lastTick = now;
+
+  tickCount++;
+  if (tickCount % 10 === 0) {
+    const ageMs = Date.now() - _startedAt.getTime();
+    if (ageMs < 60000) {
+      emitPerformanceMetric({
+        name: "startup_event_loop_lag",
+        value: currentLag,
+        route: "startup_isolation",
+      });
+    }
+  }
 }, 100);
 
 if (lagInterval.unref) {
@@ -111,10 +125,33 @@ export const recordStartupAuthLatency = (latency: any) => {
       ...latency,
       timestamp: new Date().toISOString()
     });
+    emitPerformanceMetric({
+      name: "startup_auth_latency",
+      value: latency.latencyMs,
+      route: latency.route || "auth.bootstrap",
+      metadata: {
+        method: latency.method,
+        statusCode: latency.statusCode,
+        priorityClass: latency.priorityClass,
+      },
+    });
   }
 };
 
 export const shouldDeferLowPriorityWarmup = (...args: any[]) => {
+  if (process.env.STARTUP_ISOLATION_ENABLED === "false") {
+    return {
+      defer: false,
+      reasons: [],
+      pressure: {
+        sampledAtIso: new Date().toISOString(),
+        eventLoopLagMs: 0,
+        cpuPressurePercent: 0,
+      },
+      prioritySnapshot: getRequestPriorityRuntimeSnapshot(),
+    };
+  }
+
   const ageMs = Date.now() - _startedAt.getTime();
   // Defer if lag is high (> 150ms) or within 10 seconds of boot (startup grace period)
   const defer = currentLag > 150 || ageMs < 10_000;

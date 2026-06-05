@@ -65,13 +65,18 @@ const emitWebhookWorkerMetric = (
 const processWebhookIngestJob = async (job: Job<WebhookIngestJobPayload>) =>
   runWithRequestContext(
     {
-      requestId: String(job.id || `${WEBHOOK_INGEST_QUEUE_NAME}:job`),
+      requestId: String((job.data as any)?.requestId || job.id || `${WEBHOOK_INGEST_QUEUE_NAME}:job`),
       traceId:
-        String((job.data as { webhookTraceId?: unknown })?.webhookTraceId || "").trim() ||
+        String((job.data as any)?.correlationId || "").trim() ||
+        String((job.data as any)?.webhookTraceId || "").trim() ||
+        String((job.data as any)?.traceId || "").trim() ||
         String(job.id || `${WEBHOOK_INGEST_QUEUE_NAME}:job`),
       correlationId:
-        String((job.data as { webhookTraceId?: unknown })?.webhookTraceId || "").trim() ||
+        String((job.data as any)?.correlationId || "").trim() ||
+        String((job.data as any)?.webhookTraceId || "").trim() ||
+        String((job.data as any)?.traceId || "").trim() ||
         String(job.id || `${WEBHOOK_INGEST_QUEUE_NAME}:job`),
+      tenantId: String((job.data as any)?.tenantId || "").trim() || null,
       source: "worker",
       route: `queue:${WEBHOOK_INGEST_QUEUE_NAME}`,
       queueName: WEBHOOK_INGEST_QUEUE_NAME,
@@ -102,13 +107,18 @@ const processWebhookReconcileJob = async (
 ) =>
   runWithRequestContext(
     {
-      requestId: String(job.id || `${WEBHOOK_RECONCILE_QUEUE_NAME}:job`),
+      requestId: String((job.data as any)?.requestId || job.id || `${WEBHOOK_RECONCILE_QUEUE_NAME}:job`),
       traceId:
-        String((job.data as { traceId?: unknown })?.traceId || "").trim() ||
+        String((job.data as any)?.correlationId || "").trim() ||
+        String((job.data as any)?.traceId || "").trim() ||
+        String((job.data as any)?.webhookTraceId || "").trim() ||
         String(job.id || `${WEBHOOK_RECONCILE_QUEUE_NAME}:job`),
       correlationId:
-        String((job.data as { traceId?: unknown })?.traceId || "").trim() ||
+        String((job.data as any)?.correlationId || "").trim() ||
+        String((job.data as any)?.traceId || "").trim() ||
+        String((job.data as any)?.webhookTraceId || "").trim() ||
         String(job.id || `${WEBHOOK_RECONCILE_QUEUE_NAME}:job`),
+      tenantId: String((job.data as any)?.tenantId || "").trim() || null,
       source: "worker",
       route: `queue:${WEBHOOK_RECONCILE_QUEUE_NAME}`,
       queueName: WEBHOOK_RECONCILE_QUEUE_NAME,

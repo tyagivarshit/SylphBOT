@@ -14,7 +14,9 @@ import {
   guardWebhookReplay,
   isWebhookTimestampFresh,
   verifyMetaWebhookSignature,
+  deleteReplayKey,
 } from "../services/webhookSecurity.service";
+import prisma from "../config/prisma";
 
 const router = Router();
 const WEBHOOK_RUNTIME_BUDGET_MS = Math.max(
@@ -33,7 +35,10 @@ const emitWebhookMetric = (
     | "webhook_degraded"
     | "webhook_dedup_hit"
     | "webhook_dedup_miss"
-    | "webhook_queue_failure",
+    | "webhook_queue_failure"
+    | "webhook_replay_detected"
+    | "webhook_replay_rejected"
+    | "webhook_replay_allowed",
   value: number,
   metadata?: Record<string, unknown>
 ) => {
@@ -83,7 +88,30 @@ const getWhatsAppDeliveryStatuses = (body: any) =>
       )
     : [];
 
-const enforceWebhookSecurity = async (req: Request, body: any) => {
+const resolveWhatsAppTenantId = async (phoneNumberIds: string[]): Promise<string | null> => {
+  if (!phoneNumberIds.length) return null;
+  try {
+    const client = await prisma.client.findFirst({
+      where: {
+        OR: phoneNumberIds.map((id) => ({ phoneNumberId: id })),
+        isActive: true,
+      },
+      select: { businessId: true },
+    });
+    return client?.businessId || null;
+  } catch (error) {
+    console.error("[RESOLVE TENANT ERROR]", error);
+    return null;
+  }
+};
+
+const enforceWebhookSecurity = async (
+  req: Request,
+  body: any,
+  correlationId: string,
+  tenantId: string | null,
+  emitRequestWebhookMetric: (name: string, value: number, metadata?: Record<string, unknown>) => void
+) => {
   const rawBody = Buffer.isBuffer((req as any).body)
     ? ((req as any).body as Buffer)
     : req.rawBody;
@@ -103,22 +131,49 @@ const enforceWebhookSecurity = async (req: Request, body: any) => {
   }
 
   const timestampMs = extractMetaWebhookTimestamp(body);
-
-  if (!isWebhookTimestampFresh(timestampMs)) {
-    return false;
-  }
-
   const replaySignature = Array.isArray(signature) ? signature[0] : signature;
 
-  if (timestampMs && replaySignature) {
-    const accepted = await guardWebhookReplay({
-      platform: "WHATSAPP",
-      signature: String(replaySignature),
-      timestampMs,
-    });
+  if (timestampMs) {
+    const isFresh = isWebhookTimestampFresh(timestampMs);
+    let isUnique = true;
 
-    if (!accepted) {
-      return false;
+    if (isFresh && replaySignature) {
+      isUnique = await guardWebhookReplay({
+        platform: "WHATSAPP",
+        signature: String(replaySignature),
+        timestampMs,
+      });
+    }
+
+    const replayDetected = !isFresh || !isUnique;
+
+    if (replayDetected) {
+      emitRequestWebhookMetric("webhook_replay_detected", 1, {
+        isFresh,
+        isUnique,
+        timestampMs,
+        replaySignature,
+      });
+
+      const isReplayProtectionEnabled =
+        process.env.WEBHOOK_REPLAY_PROTECTION_ENABLED !== "false";
+
+      if (isReplayProtectionEnabled) {
+        emitRequestWebhookMetric("webhook_replay_rejected", 1, {
+          isFresh,
+          isUnique,
+          timestampMs,
+          replaySignature,
+        });
+        return false;
+      } else {
+        emitRequestWebhookMetric("webhook_replay_allowed", 1, {
+          isFresh,
+          isUnique,
+          timestampMs,
+          replaySignature,
+        });
+      }
     }
   }
 
@@ -143,19 +198,71 @@ router.post("/", async (req: any, res: Response) => {
   let enqueuedJobs = 0;
   let dedupedEvents = 0;
 
+  let body: any;
+  try {
+    body = parseBody(req);
+  } catch (error) {
+    req.logger?.error({ error }, "WhatsApp webhook body parse failed");
+    return res.sendStatus(400);
+  }
+
+  const correlationId = String(
+    req.headers["x-correlation-id"] ||
+      req.correlationId ||
+      req.requestId ||
+      crypto.randomUUID()
+  );
+  const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  const eventId = normalizeIdentifier(message?.id);
+  const traceId = `webhook_whatsapp_${eventId || correlationId}`;
+
+  const phoneNumberId = normalizeIdentifier(
+    body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
+  );
+  const phoneNumberIds = [phoneNumberId].filter(
+    (value): value is string => Boolean(value)
+  );
+
+  const tenantId = await resolveWhatsAppTenantId(phoneNumberIds);
+
+  const requestLogger = req.logger
+    ? req.logger.child({ correlationId, traceId, tenantId, eventId })
+    : null;
+
+  const emitRequestWebhookMetric = (
+    name: string,
+    value: number,
+    metadata?: Record<string, unknown>
+  ) => {
+    emitPerformanceMetric({
+      name: name as any,
+      value,
+      businessId: tenantId,
+      route: "whatsapp_webhook",
+      metadata: {
+        provider: "WHATSAPP",
+        correlationId,
+        traceId,
+        tenantId,
+        eventId,
+        ...(metadata || {}),
+      },
+    });
+  };
+
   const sendWebhookResponse = (statusCode: number, reason?: string) => {
     const ingestMs = Math.max(0, Date.now() - startedAt);
-    emitWebhookMetric("webhook_ingest_ms", ingestMs, {
+    emitRequestWebhookMetric("webhook_ingest_ms", ingestMs, {
       statusCode,
       enqueuedJobs,
       dedupedEvents,
       reason: reason || null,
     });
-    emitWebhookMetric("webhook_post_response_work", 0, {
+    emitRequestWebhookMetric("webhook_post_response_work", 0, {
       statusCode,
     });
     if (ingestMs > WEBHOOK_RUNTIME_BUDGET_MS) {
-      emitWebhookMetric("webhook_runtime_budget_exceeded", ingestMs, {
+      emitRequestWebhookMetric("webhook_runtime_budget_exceeded", ingestMs, {
         thresholdMs: WEBHOOK_RUNTIME_BUDGET_MS,
         statusCode,
       });
@@ -164,13 +271,18 @@ router.post("/", async (req: any, res: Response) => {
   };
 
   try {
-    const body = parseBody(req);
-
-    if (!(await enforceWebhookSecurity(req, body))) {
+    if (
+      !(await enforceWebhookSecurity(
+        req,
+        body,
+        correlationId,
+        tenantId,
+        emitRequestWebhookMetric
+      ))
+    ) {
       return sendWebhookResponse(403, "security_rejected");
     }
 
-    const requestId = String(req.requestId || "").trim() || null;
     const deliveryStatuses = getWhatsAppDeliveryStatuses(body);
     const deliveryProviderMessageIds = deliveryStatuses
       .map((status) => ({
@@ -184,22 +296,22 @@ router.post("/", async (req: any, res: Response) => {
       )
       .map((status) => status.providerMessageId);
 
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    const eventId = normalizeIdentifier(message?.id);
     if (eventId) {
       const shouldProcess = await processWebhookEvent({
         eventId,
         platform: "WHATSAPP",
+        correlationId,
+        tenantId,
       });
 
       if (!shouldProcess) {
         dedupedEvents += 1;
-        emitWebhookMetric("webhook_deduped", 1, {
+        emitRequestWebhookMetric("webhook_deduped", 1, {
           webhookTask: "message_intake",
           eventId,
         });
         if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
-          emitWebhookMetric("webhook_dedup_hit", 1, {
+          emitRequestWebhookMetric("webhook_dedup_hit", 1, {
             webhookTask: "message_intake",
             eventId,
           });
@@ -207,7 +319,7 @@ router.post("/", async (req: any, res: Response) => {
         return sendWebhookResponse(200, "duplicate_message");
       } else {
         if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
-          emitWebhookMetric("webhook_dedup_miss", 1, {
+          emitRequestWebhookMetric("webhook_dedup_miss", 1, {
             webhookTask: "message_intake",
             eventId,
           });
@@ -216,12 +328,6 @@ router.post("/", async (req: any, res: Response) => {
     }
 
     const from = normalizeIdentifier(message?.from);
-    const phoneNumberId = normalizeIdentifier(
-      body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
-    );
-    const phoneNumberIds = [phoneNumberId].filter(
-      (value): value is string => Boolean(value)
-    );
     const intakePayload = {
       ...body.entry?.[0]?.changes?.[0]?.value,
       receivedAt: new Date().toISOString(),
@@ -232,12 +338,14 @@ router.post("/", async (req: any, res: Response) => {
       try {
         await enqueueProviderDeliveryReconcileJob({
           provider: "WHATSAPP",
-          traceId: requestId,
-          requestId,
+          traceId: traceId,
+          requestId: correlationId,
           providerMessageIds: deliveryProviderMessageIds,
           deliveredAtIso: new Date().toISOString(),
-        });
-        emitWebhookMetric(
+          correlationId,
+          tenantId,
+        } as any);
+        emitRequestWebhookMetric(
           "enqueue_ms",
           Math.max(0, Date.now() - enqueueStartedAt),
           {
@@ -247,14 +355,14 @@ router.post("/", async (req: any, res: Response) => {
         );
         enqueuedJobs += 1;
       } catch (error) {
-        emitWebhookMetric("webhook_degraded", 1, {
+        emitRequestWebhookMetric("webhook_degraded", 1, {
           webhookTask: "delivery_reconcile",
           reason: "enqueue_failed",
           error: String(
             (error as { message?: unknown })?.message || error || "enqueue_failed"
           ),
         });
-        emitWebhookMetric("webhook_queue_failure", 1, {
+        emitRequestWebhookMetric("webhook_queue_failure", 1, {
           webhookTask: "delivery_reconcile",
         });
       }
@@ -264,22 +372,37 @@ router.post("/", async (req: any, res: Response) => {
       const enqueueStartedAt = Date.now();
       try {
         await enqueueWhatsAppMessageIngestJob({
-          requestId,
+          requestId: correlationId,
           eventId,
           from,
           phoneNumberIds,
           eventTimestampMs: toEpochMs(message?.timestamp || body?.entry?.[0]?.time),
           intakePayload,
-        });
+          correlationId,
+          tenantId,
+        } as any);
       } catch (error) {
         if (eventId) {
           await rollbackWebhookEvent({
             eventId,
             platform: "WHATSAPP",
+            correlationId,
+            tenantId,
           }).catch(() => undefined);
         }
 
-        emitWebhookMetric("webhook_degraded", 1, {
+        const timestampMs = extractMetaWebhookTimestamp(body);
+        const signature = getSignatureHeader(req);
+        const replaySignature = Array.isArray(signature) ? signature[0] : signature;
+        if (timestampMs && replaySignature) {
+          await deleteReplayKey({
+            platform: "WHATSAPP",
+            signature: String(replaySignature),
+            timestampMs,
+          }).catch(() => undefined);
+        }
+
+        emitRequestWebhookMetric("webhook_degraded", 1, {
           webhookTask: "message_intake",
           reason: "enqueue_failed",
           eventId: eventId || null,
@@ -287,14 +410,14 @@ router.post("/", async (req: any, res: Response) => {
             (error as { message?: unknown })?.message || error || "enqueue_failed"
           ),
         });
-        emitWebhookMetric("webhook_queue_failure", 1, {
+        emitRequestWebhookMetric("webhook_queue_failure", 1, {
           webhookTask: "message_intake",
           eventId: eventId || null,
         });
         return sendWebhookResponse(503, "message_enqueue_failed");
       }
 
-      emitWebhookMetric(
+      emitRequestWebhookMetric(
         "enqueue_ms",
         Math.max(0, Date.now() - enqueueStartedAt),
         {
@@ -307,10 +430,18 @@ router.post("/", async (req: any, res: Response) => {
 
     return sendWebhookResponse(200, "accepted");
   } catch (error) {
-    req.logger?.error({ error }, "WhatsApp webhook error");
+    if (requestLogger) {
+      requestLogger.error({ error }, "WhatsApp webhook error");
+    } else {
+      console.error(
+        `[WhatsApp Webhook Error] [correlationId=${correlationId}]`,
+        error
+      );
+    }
     captureExceptionWithContext(error, {
       tags: {
         webhook: "whatsapp",
+        correlationId,
       },
     });
 

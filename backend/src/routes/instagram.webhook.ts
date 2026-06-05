@@ -23,7 +23,9 @@ import {
   guardWebhookReplay,
   isWebhookTimestampFresh,
   verifyMetaWebhookSignature,
+  deleteReplayKey,
 } from "../services/webhookSecurity.service";
+import prisma from "../config/prisma";
 
 const router = Router();
 const WEBHOOK_DEBUG = process.env.LOG_WEBHOOK_DEBUG === "true";
@@ -47,7 +49,10 @@ const emitWebhookMetric = (
     | "webhook_degraded"
     | "webhook_dedup_hit"
     | "webhook_dedup_miss"
-    | "webhook_queue_failure",
+    | "webhook_queue_failure"
+    | "webhook_replay_detected"
+    | "webhook_replay_rejected"
+    | "webhook_replay_allowed",
   value: number,
   metadata?: Record<string, unknown>
 ) => {
@@ -60,6 +65,23 @@ const emitWebhookMetric = (
       ...(metadata || {}),
     },
   });
+};
+
+const resolveInstagramTenantId = async (pageIds: string[]): Promise<string | null> => {
+  if (!pageIds.length) return null;
+  try {
+    const client = await prisma.client.findFirst({
+      where: {
+        OR: pageIds.map((id) => ({ pageId: id })),
+        isActive: true,
+      },
+      select: { businessId: true },
+    });
+    return client?.businessId || null;
+  } catch (error) {
+    console.error("[RESOLVE TENANT ERROR]", error);
+    return null;
+  }
 };
 
 const normalizeIdentifier = (value?: unknown) => {
@@ -93,7 +115,13 @@ const parseWebhookBody = (req: any) => {
 const getSignatureHeader = (req: Request) =>
   req.headers["x-hub-signature-256"] || req.headers["x-hub-signature"];
 
-const enforceWebhookSecurity = async (req: Request, body: any) => {
+const enforceWebhookSecurity = async (
+  req: Request,
+  body: any,
+  correlationId: string,
+  tenantId: string | null,
+  emitRequestWebhookMetric: (name: string, value: number, metadata?: Record<string, unknown>) => void
+) => {
   const rawBody = Buffer.isBuffer((req as any).body)
     ? ((req as any).body as Buffer)
     : req.rawBody;
@@ -117,50 +145,70 @@ const enforceWebhookSecurity = async (req: Request, body: any) => {
       reason: "signature_invalid",
       metadata: {
         requestId: req.requestId || null,
+        correlationId,
       },
     }).catch(() => undefined);
     return false;
   }
 
   const timestampMs = extractMetaWebhookTimestamp(body);
-
-  if (!isWebhookTimestampFresh(timestampMs)) {
-    await recordWebhookSpoofAttempt({
-      businessId: null,
-      tenantId: null,
-      provider: "INSTAGRAM",
-      signature: Array.isArray(signature) ? signature[0] : signature,
-      reason: "timestamp_stale",
-      metadata: {
-        requestId: req.requestId || null,
-        timestampMs,
-      },
-    }).catch(() => undefined);
-    return false;
-  }
-
   const replaySignature = Array.isArray(signature) ? signature[0] : signature;
 
-  if (timestampMs && replaySignature) {
-    const accepted = await guardWebhookReplay({
-      platform: "INSTAGRAM",
-      signature: String(replaySignature),
-      timestampMs,
-    });
+  if (timestampMs) {
+    const isFresh = isWebhookTimestampFresh(timestampMs);
+    let isUnique = true;
 
-    if (!accepted) {
-      await recordWebhookSpoofAttempt({
-        businessId: null,
-        tenantId: null,
-        provider: "INSTAGRAM",
-        signature: replaySignature,
-        reason: "replay_rejected",
-        metadata: {
-          requestId: req.requestId || null,
+    if (isFresh && replaySignature) {
+      isUnique = await guardWebhookReplay({
+        platform: "INSTAGRAM",
+        signature: String(replaySignature),
+        timestampMs,
+      });
+    }
+
+    const replayDetected = !isFresh || !isUnique;
+
+    if (replayDetected) {
+      emitRequestWebhookMetric("webhook_replay_detected", 1, {
+        isFresh,
+        isUnique,
+        timestampMs,
+        replaySignature,
+      });
+
+      const isReplayProtectionEnabled =
+        process.env.WEBHOOK_REPLAY_PROTECTION_ENABLED !== "false";
+
+      if (isReplayProtectionEnabled) {
+        emitRequestWebhookMetric("webhook_replay_rejected", 1, {
+          isFresh,
+          isUnique,
           timestampMs,
-        },
-      }).catch(() => undefined);
-      return false;
+          replaySignature,
+        });
+
+        await recordWebhookSpoofAttempt({
+          businessId: null,
+          tenantId: null,
+          provider: "INSTAGRAM",
+          signature: replaySignature,
+          reason: !isFresh ? "timestamp_stale" : "replay_rejected",
+          metadata: {
+            requestId: req.requestId || null,
+            correlationId,
+            timestampMs,
+          },
+        }).catch(() => undefined);
+
+        return false;
+      } else {
+        emitRequestWebhookMetric("webhook_replay_allowed", 1, {
+          isFresh,
+          isUnique,
+          timestampMs,
+          replaySignature,
+        });
+      }
     }
   }
 
@@ -244,33 +292,9 @@ router.get("/", (req: Request, res: Response) => {
 
 router.post("/", async (req: any, res: Response) => {
   const startedAt = Date.now();
-  const webhookTraceId = `ig_webhook_${req.requestId || crypto.randomUUID()}`;
   let enqueuedJobs = 0;
   let dedupedEvents = 0;
   let body: any;
-
-  const sendWebhookResponse = (statusCode: number, reason?: string) => {
-    const ingestMs = Math.max(0, Date.now() - startedAt);
-    emitWebhookMetric("webhook_ingest_ms", ingestMs, {
-      statusCode,
-      enqueuedJobs,
-      dedupedEvents,
-      traceId: webhookTraceId,
-      reason: reason || null,
-    });
-    emitWebhookMetric("webhook_post_response_work", 0, {
-      statusCode,
-      traceId: webhookTraceId,
-    });
-    if (ingestMs > WEBHOOK_RUNTIME_BUDGET_MS) {
-      emitWebhookMetric("webhook_runtime_budget_exceeded", ingestMs, {
-        thresholdMs: WEBHOOK_RUNTIME_BUDGET_MS,
-        statusCode,
-        traceId: webhookTraceId,
-      });
-    }
-    return res.sendStatus(statusCode);
-  };
 
   try {
     body = parseWebhookBody(req);
@@ -282,52 +306,113 @@ router.post("/", async (req: any, res: Response) => {
         stage: "body_parse",
       },
     });
-    await recordObservabilityEvent({
-      eventType: "webhook.instagram.body_parse_failed",
-      message: "Instagram webhook body parse failed",
-      severity: "error",
-      context: {
-        traceId: webhookTraceId,
-        correlationId: webhookTraceId,
-        provider: "INSTAGRAM",
-        component: "webhook",
-        phase: "reception",
-      },
-      metadata: {
-        error: String(
-          (error as { message?: unknown })?.message ||
-            error ||
-            "body_parse_failed"
-        ),
-      },
-    }).catch(() => undefined);
-    return sendWebhookResponse(400, "body_parse_failed");
+    return res.sendStatus(400);
   }
+
+  const correlationId = String(
+    req.headers["x-correlation-id"] ||
+      req.correlationId ||
+      req.requestId ||
+      crypto.randomUUID()
+  );
+  const webhookTraceId = `ig_webhook_${correlationId}`;
+
+  const entry = body.entry?.[0];
+  const pageIds = entry
+    ? getUniqueIdentifiers([
+        entry?.id,
+        entry?.changes?.[0]?.value?.instagram_business_account?.id,
+        entry?.changes?.[0]?.value?.instagram_business_account_id,
+        entry?.messaging?.[0]?.recipient?.id,
+      ])
+    : [];
+
+  const tenantId = await resolveInstagramTenantId(pageIds);
+
+  const requestLogger = req.logger
+    ? req.logger.child({ correlationId, traceId: webhookTraceId, tenantId })
+    : null;
+
+  const requestLog = (...args: any[]) => {
+    console.log(`[INSTAGRAM WEBHOOK] [correlationId=${correlationId}]`, ...args);
+  };
+
+  const emitRequestWebhookMetric = (
+    name: string,
+    value: number,
+    metadata?: Record<string, unknown>
+  ) => {
+    emitPerformanceMetric({
+      name: name as any,
+      value,
+      businessId: tenantId,
+      route: "instagram_webhook",
+      metadata: {
+        provider: "INSTAGRAM",
+        correlationId,
+        traceId: webhookTraceId,
+        tenantId,
+        ...(metadata || {}),
+      },
+    });
+  };
+
+  const sendWebhookResponse = (statusCode: number, reason?: string) => {
+    const ingestMs = Math.max(0, Date.now() - startedAt);
+    emitRequestWebhookMetric("webhook_ingest_ms", ingestMs, {
+      statusCode,
+      enqueuedJobs,
+      dedupedEvents,
+      traceId: webhookTraceId,
+      reason: reason || null,
+    });
+    emitRequestWebhookMetric("webhook_post_response_work", 0, {
+      statusCode,
+      traceId: webhookTraceId,
+    });
+    if (ingestMs > WEBHOOK_RUNTIME_BUDGET_MS) {
+      emitRequestWebhookMetric("webhook_runtime_budget_exceeded", ingestMs, {
+        thresholdMs: WEBHOOK_RUNTIME_BUDGET_MS,
+        statusCode,
+        traceId: webhookTraceId,
+      });
+    }
+    return res.sendStatus(statusCode);
+  };
 
   try {
     if (WEBHOOK_DEBUG) {
-      log("Webhook received", {
+      requestLog("Webhook received", {
         entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
       });
     }
 
-    if (!(await enforceWebhookSecurity(req, body))) {
+    if (
+      !(await enforceWebhookSecurity(
+        req,
+        body,
+        correlationId,
+        tenantId,
+        emitRequestWebhookMetric
+      ))
+    ) {
       await recordObservabilityEvent({
+        businessId: tenantId,
+        tenantId,
         eventType: "webhook.instagram.security_rejected",
-        message: "Instagram webhook rejected by security guard",
+        message: `[correlationId=${correlationId}] Instagram webhook rejected by security guard`,
         severity: "warn",
         context: {
           traceId: webhookTraceId,
-          correlationId: webhookTraceId,
+          correlationId,
           provider: "INSTAGRAM",
           component: "webhook",
           phase: "reception",
+          tenantId,
         },
       }).catch(() => undefined);
       return sendWebhookResponse(403, "security_rejected");
     }
-
-    const entry = body.entry?.[0];
 
     if (!entry) {
       return sendWebhookResponse(200, "entry_missing");
@@ -335,11 +420,14 @@ router.post("/", async (req: any, res: Response) => {
 
     await recordTraceLedger({
       traceId: webhookTraceId,
-      correlationId: webhookTraceId,
+      correlationId,
+      businessId: tenantId,
+      tenantId,
       stage: "webhook:instagram:accepted",
       status: "IN_PROGRESS",
       metadata: {
         entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+        correlationId,
       },
     }).catch(() => undefined);
 
@@ -350,11 +438,13 @@ router.post("/", async (req: any, res: Response) => {
         await enqueueProviderDeliveryReconcileJob({
           provider: "INSTAGRAM",
           traceId: webhookTraceId,
-          requestId: req.requestId || null,
+          requestId: correlationId,
           providerMessageIds: deliveryMessageIds,
           deliveredAtIso: new Date().toISOString(),
-        });
-        emitWebhookMetric(
+          correlationId,
+          tenantId,
+        } as any);
+        emitRequestWebhookMetric(
           "enqueue_ms",
           Math.max(0, Date.now() - enqueueStartedAt),
           {
@@ -365,25 +455,28 @@ router.post("/", async (req: any, res: Response) => {
         );
         enqueuedJobs += 1;
       } catch (error) {
-        emitWebhookMetric("webhook_degraded", 1, {
+        emitRequestWebhookMetric("webhook_degraded", 1, {
           webhookTask: "delivery_reconcile",
           reason: "enqueue_failed",
           traceId: webhookTraceId,
         });
-        emitWebhookMetric("webhook_queue_failure", 1, {
+        emitRequestWebhookMetric("webhook_queue_failure", 1, {
           webhookTask: "delivery_reconcile",
           traceId: webhookTraceId,
         });
         await recordObservabilityEvent({
+          businessId: tenantId,
+          tenantId,
           eventType: "webhook.instagram.delivery_reconcile_enqueue_failed",
-          message: "Instagram delivery reconciliation enqueue failed",
+          message: `[correlationId=${correlationId}] Instagram delivery reconciliation enqueue failed`,
           severity: "warn",
           context: {
             traceId: webhookTraceId,
-            correlationId: webhookTraceId,
+            correlationId,
             provider: "INSTAGRAM",
             component: "webhook",
             phase: "enqueue",
+            tenantId,
           },
           metadata: {
             error: String(
@@ -392,6 +485,7 @@ router.post("/", async (req: any, res: Response) => {
                 "enqueue_failed"
             ),
             deliveryCount: deliveryMessageIds.length,
+            correlationId,
           },
         }).catch(() => undefined);
       }
@@ -407,14 +501,14 @@ router.post("/", async (req: any, res: Response) => {
         commentText,
         mediaId,
         senderId,
-        pageIds,
+        pageIds: commentPageIds,
       } = parseInstagramCommentChange({
         entry,
         change,
       });
       const commentEventId =
         commentId ||
-        `${pageIds[0] || "unknown"}:${senderId || "unknown"}:${mediaId || "unknown"}:${String(commentText || "").trim()}`;
+        `${commentPageIds[0] || "unknown"}:${senderId || "unknown"}:${mediaId || "unknown"}:${String(commentText || "").trim()}`;
 
       if (!commentText || !senderId || !mediaId || !commentEventId) {
         continue;
@@ -423,17 +517,19 @@ router.post("/", async (req: any, res: Response) => {
       const shouldProcessComment = await processWebhookEvent({
         eventId: String(commentEventId),
         platform: "INSTAGRAM",
+        correlationId,
+        tenantId,
       });
 
       if (!shouldProcessComment) {
         dedupedEvents += 1;
-        emitWebhookMetric("webhook_deduped", 1, {
+        emitRequestWebhookMetric("webhook_deduped", 1, {
           webhookTask: "comment_intake",
           eventId: commentEventId,
           traceId: webhookTraceId,
         });
         if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
-          emitWebhookMetric("webhook_dedup_hit", 1, {
+          emitRequestWebhookMetric("webhook_dedup_hit", 1, {
             webhookTask: "comment_intake",
             eventId: commentEventId,
             traceId: webhookTraceId,
@@ -442,7 +538,7 @@ router.post("/", async (req: any, res: Response) => {
         continue;
       } else {
         if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
-          emitWebhookMetric("webhook_dedup_miss", 1, {
+          emitRequestWebhookMetric("webhook_dedup_miss", 1, {
             webhookTask: "comment_intake",
             eventId: commentEventId,
             traceId: webhookTraceId,
@@ -454,41 +550,59 @@ router.post("/", async (req: any, res: Response) => {
       try {
         await enqueueInstagramCommentIngestJob({
           webhookTraceId,
-          requestId: req.requestId || null,
+          requestId: correlationId,
           commentEventId: String(commentEventId),
           commentId,
           commentText,
           mediaId,
           senderId,
-          pageIds,
-        });
+          pageIds: commentPageIds,
+          correlationId,
+          tenantId,
+        } as any);
       } catch (error) {
         await rollbackWebhookEvent({
           eventId: String(commentEventId),
           platform: "INSTAGRAM",
+          correlationId,
+          tenantId,
         }).catch(() => undefined);
 
-        emitWebhookMetric("webhook_degraded", 1, {
+        const timestampMs = extractMetaWebhookTimestamp(body);
+        const signature = getSignatureHeader(req);
+        const replaySignature = Array.isArray(signature) ? signature[0] : signature;
+        if (timestampMs && replaySignature) {
+          await deleteReplayKey({
+            platform: "INSTAGRAM",
+            signature: String(replaySignature),
+            timestampMs,
+          }).catch(() => undefined);
+        }
+
+        emitRequestWebhookMetric("webhook_degraded", 1, {
           webhookTask: "comment_intake",
           reason: "enqueue_failed",
           traceId: webhookTraceId,
         });
-        emitWebhookMetric("webhook_queue_failure", 1, {
+        emitRequestWebhookMetric("webhook_queue_failure", 1, {
           webhookTask: "comment_intake",
           eventId: commentEventId,
           traceId: webhookTraceId,
         });
 
         await recordObservabilityEvent({
+          businessId: tenantId,
+          tenantId,
           eventType: "webhook.instagram.comment_enqueue_failed",
-          message: "Instagram comment ingestion enqueue failed",
+          message: `[correlationId=${correlationId}] Instagram comment ingestion enqueue failed`,
           severity: "error",
           context: {
             traceId: webhookTraceId,
-            correlationId: webhookTraceId,
+            correlationId,
             provider: "INSTAGRAM",
             component: "webhook",
             phase: "enqueue",
+            tenantId,
           },
           metadata: {
             eventId: commentEventId,
@@ -497,13 +611,14 @@ router.post("/", async (req: any, res: Response) => {
                 error ||
                 "enqueue_failed"
             ),
+            correlationId,
           },
         }).catch(() => undefined);
 
         return sendWebhookResponse(503, "comment_enqueue_failed");
       }
 
-      emitWebhookMetric(
+      emitRequestWebhookMetric(
         "enqueue_ms",
         Math.max(0, Date.now() - enqueueStartedAt),
         {
@@ -518,13 +633,13 @@ router.post("/", async (req: any, res: Response) => {
     let senderId: string | undefined;
     let text: string | undefined;
     let eventId: string | undefined;
-    let pageIds: string[] = [];
+    let msgPageIds: string[] = [];
 
     const messaging = entry?.messaging?.[0];
     if (messaging?.message?.text && !messaging?.message?.is_echo) {
       senderId = messaging.sender?.id;
       text = messaging.message.text;
-      pageIds = getUniqueIdentifiers([messaging.recipient?.id, entry.id]);
+      msgPageIds = getUniqueIdentifiers([messaging.recipient?.id, entry.id]);
       eventId = messaging.message.mid;
     }
 
@@ -532,15 +647,15 @@ router.post("/", async (req: any, res: Response) => {
     if (!text && changeMessage?.text?.body) {
       senderId = changeMessage.from;
       text = changeMessage.text.body;
-      pageIds = getUniqueIdentifiers([entry.id]);
+      msgPageIds = getUniqueIdentifiers([entry.id]);
       eventId = changeMessage.id;
     }
 
-    if (!senderId || !text || !pageIds.length) {
+    if (!senderId || !text || !msgPageIds.length) {
       return sendWebhookResponse(200, "message_identifiers_missing");
     }
 
-    if (pageIds.includes(senderId)) {
+    if (msgPageIds.includes(senderId)) {
       return sendWebhookResponse(200, "self_event");
     }
 
@@ -559,17 +674,19 @@ router.post("/", async (req: any, res: Response) => {
     const shouldProcess = await processWebhookEvent({
       eventId,
       platform: "INSTAGRAM",
+      correlationId,
+      tenantId,
     });
 
     if (!shouldProcess) {
       dedupedEvents += 1;
-      emitWebhookMetric("webhook_deduped", 1, {
+      emitRequestWebhookMetric("webhook_deduped", 1, {
         webhookTask: "message_intake",
         eventId,
         traceId: webhookTraceId,
       });
       if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
-        emitWebhookMetric("webhook_dedup_hit", 1, {
+        emitRequestWebhookMetric("webhook_dedup_hit", 1, {
           webhookTask: "message_intake",
           eventId,
           traceId: webhookTraceId,
@@ -578,7 +695,7 @@ router.post("/", async (req: any, res: Response) => {
       return sendWebhookResponse(200, "duplicate_message");
     } else {
       if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
-        emitWebhookMetric("webhook_dedup_miss", 1, {
+        emitRequestWebhookMetric("webhook_dedup_miss", 1, {
           webhookTask: "message_intake",
           eventId,
           traceId: webhookTraceId,
@@ -590,40 +707,58 @@ router.post("/", async (req: any, res: Response) => {
     try {
       await enqueueInstagramMessageIngestJob({
         webhookTraceId,
-        requestId: req.requestId || null,
+        requestId: correlationId,
         eventId,
         senderId,
         text,
-        pageIds,
+        pageIds: msgPageIds,
         diagnosticSenderId: normalizeIdentifier(senderId),
-      });
+        correlationId,
+        tenantId,
+      } as any);
     } catch (error) {
       await rollbackWebhookEvent({
         eventId,
         platform: "INSTAGRAM",
+        correlationId,
+        tenantId,
       }).catch(() => undefined);
 
-      emitWebhookMetric("webhook_degraded", 1, {
+      const timestampMs = extractMetaWebhookTimestamp(body);
+      const signature = getSignatureHeader(req);
+      const replaySignature = Array.isArray(signature) ? signature[0] : signature;
+      if (timestampMs && replaySignature) {
+        await deleteReplayKey({
+          platform: "INSTAGRAM",
+          signature: String(replaySignature),
+          timestampMs,
+        }).catch(() => undefined);
+      }
+
+      emitRequestWebhookMetric("webhook_degraded", 1, {
         webhookTask: "message_intake",
         reason: "enqueue_failed",
         traceId: webhookTraceId,
       });
-      emitWebhookMetric("webhook_queue_failure", 1, {
+      emitRequestWebhookMetric("webhook_queue_failure", 1, {
         webhookTask: "message_intake",
         eventId,
         traceId: webhookTraceId,
       });
 
       await recordObservabilityEvent({
+        businessId: tenantId,
+        tenantId,
         eventType: "webhook.instagram.message_enqueue_failed",
-        message: "Instagram message ingestion enqueue failed",
+        message: `[correlationId=${correlationId}] Instagram message ingestion enqueue failed`,
         severity: "error",
         context: {
           traceId: webhookTraceId,
-          correlationId: webhookTraceId,
+          correlationId,
           provider: "INSTAGRAM",
           component: "webhook",
           phase: "enqueue",
+          tenantId,
         },
         metadata: {
           eventId,
@@ -632,13 +767,14 @@ router.post("/", async (req: any, res: Response) => {
               error ||
               "enqueue_failed"
           ),
+          correlationId,
         },
       }).catch(() => undefined);
 
       return sendWebhookResponse(503, "message_enqueue_failed");
     }
 
-    emitWebhookMetric("enqueue_ms", Math.max(0, Date.now() - enqueueStartedAt), {
+    emitRequestWebhookMetric("enqueue_ms", Math.max(0, Date.now() - enqueueStartedAt), {
       webhookTask: "message_intake",
       eventId,
       traceId: webhookTraceId,
@@ -647,15 +783,22 @@ router.post("/", async (req: any, res: Response) => {
 
     return sendWebhookResponse(200, "accepted");
   } catch (error) {
-    req.logger?.error({ error }, "Instagram webhook error");
+    if (requestLogger) {
+      requestLogger.error({ error }, "Instagram webhook error");
+    } else {
+      console.error(`[Instagram Webhook Error] [correlationId=${correlationId}]`, error);
+    }
     captureExceptionWithContext(error, {
       tags: {
         webhook: "instagram",
+        correlationId,
       },
     });
     await recordTraceLedger({
       traceId: webhookTraceId,
-      correlationId: webhookTraceId,
+      correlationId,
+      businessId: tenantId,
+      tenantId,
       stage: "webhook:instagram:failed",
       status: "FAILED",
       endedAt: new Date(),
@@ -665,18 +808,22 @@ router.post("/", async (req: any, res: Response) => {
             error ||
             "webhook_failed"
         ),
+        correlationId,
       },
     }).catch(() => undefined);
     await recordObservabilityEvent({
+      businessId: tenantId,
+      tenantId,
       eventType: "webhook.instagram.failed",
-      message: "Instagram webhook processing failed",
+      message: `[correlationId=${correlationId}] Instagram webhook processing failed`,
       severity: "error",
       context: {
         traceId: webhookTraceId,
-        correlationId: webhookTraceId,
+        correlationId,
         provider: "INSTAGRAM",
         component: "webhook",
         phase: "reception",
+        tenantId,
       },
       metadata: {
         error: String(
@@ -684,6 +831,7 @@ router.post("/", async (req: any, res: Response) => {
             error ||
             "webhook_failed"
         ),
+        correlationId,
       },
     }).catch(() => undefined);
     return sendWebhookResponse(500, "unhandled_error");

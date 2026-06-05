@@ -101,3 +101,16 @@ export const guardWebhookReplay = async (input: {
 
   return result === "OK";
 };
+
+export const deleteReplayKey = async (input: {
+  platform: string;
+  signature: string;
+  timestampMs: number;
+}) => {
+  const key = crypto
+    .createHash("sha1")
+    .update(`${input.platform}:${input.signature}:${input.timestampMs}`)
+    .digest("hex");
+
+  await redis.del(`webhook:replay:${key}`);
+};

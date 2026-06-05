@@ -188,6 +188,17 @@ const scheduleDeferredEmbeddingWarmup = () => {
         const timer = setTimeout(() => {
             const deferDecision = (0, startupIsolation_service_1.shouldDeferLowPriorityWarmup)();
             if (deferDecision.defer && attempts < STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS) {
+                (0, performanceMetrics_1.emitPerformanceMetric)({
+                    name: "startup_priority_deferral_count",
+                    value: 1,
+                    route: "startup_isolation",
+                    metadata: {
+                        task: "embedding_runtime",
+                        attempts,
+                        reasons: deferDecision.reasons,
+                        pressure: deferDecision.pressure,
+                    },
+                });
                 (0, startupIsolation_service_1.recordStartupBackgroundTask)({
                     name: "embedding_runtime",
                     status: "deferred",
@@ -363,6 +374,7 @@ const startPostListenBootstrap = () => {
 const startServer = async () => {
     (0, sentry_1.initializeSentry)();
     (0, passport_1.configurePassport)();
+    const isIsolationEnabled = process.env.STARTUP_ISOLATION_ENABLED !== "false";
     // 1. Minimal Env Validation
     if (!env_1.env.PORT || !env_1.env.REDIS_URL || !process.env.DATABASE_URL) {
         logger_1.default.error("Critical environment variables missing during startup validation");
@@ -370,26 +382,59 @@ const startServer = async () => {
     }
     // 2. Initialize DB pool
     logger_1.default.info("Initializing database connection pool...");
+    const startWarmup = Date.now();
     try {
         await prisma_1.default.$connect();
+        // Warm up the pool and run a lightweight validation query
+        await prisma_1.default.user.findFirst({ select: { id: true } });
         (0, startupIsolation_service_1.markDbReady)(true);
-        logger_1.default.info("Database connection pool initialized successfully");
+        const warmupMs = Date.now() - startWarmup;
+        (0, performanceMetrics_1.emitPerformanceMetric)({
+            name: "startup_pool_warmup_ms",
+            value: warmupMs,
+            route: "startup_isolation",
+        });
+        logger_1.default.info(`Database connection pool warmed up in ${warmupMs}ms`);
     }
     catch (error) {
-        logger_1.default.warn({ err: error }, "Database connection failed or deferred during startup");
+        logger_1.default.error({ err: error }, "Database connection failed or deferred during startup");
         (0, startupIsolation_service_1.markDbReady)(false);
+        if (isIsolationEnabled) {
+            logger_1.default.error("Critical: Database pool warmup failed and startup isolation is enabled. Exiting.");
+            process.exit(1);
+        }
     }
     // 3. Queue / Redis initialization within budget before HTTP listen
-    const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
-    if (!runtimeInfrastructure.readyWithinBudget) {
-        logger_1.default.warn({
-            startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
-            startupQueueInitElapsedMs: runtimeInfrastructure.durationMs,
-        }, "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization");
-        (0, startupIsolation_service_1.markRedisReady)(false);
+    let readyWithinBudget = false;
+    let durationMs = 0;
+    if (isIsolationEnabled) {
+        logger_1.default.info("Initializing runtime queues (blocking Redis readiness)...");
+        const queueStart = Date.now();
+        try {
+            await (0, lifecycle_1.initQueues)();
+            readyWithinBudget = true;
+            (0, startupIsolation_service_1.markRedisReady)(true);
+            logger_1.default.info(`Runtime queues initialized in ${Date.now() - queueStart}ms`);
+        }
+        catch (error) {
+            logger_1.default.error({ err: error }, "Critical: Queue/Redis initialization failed during startup. Exiting.");
+            process.exit(1);
+        }
     }
     else {
-        (0, startupIsolation_service_1.markRedisReady)(true);
+        const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
+        readyWithinBudget = runtimeInfrastructure.readyWithinBudget;
+        durationMs = runtimeInfrastructure.durationMs;
+        if (!readyWithinBudget) {
+            logger_1.default.warn({
+                startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
+                startupQueueInitElapsedMs: durationMs,
+            }, "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization");
+            (0, startupIsolation_service_1.markRedisReady)(false);
+        }
+        else {
+            (0, startupIsolation_service_1.markRedisReady)(true);
+        }
     }
     const { default: app } = await Promise.resolve().then(() => __importStar(require("./app")));
     const server = http_1.default.createServer(app);
@@ -459,7 +504,7 @@ const startServer = async () => {
             startPostListenBootstrap();
             // Mark app boot ready
             (0, startupIsolation_service_1.markAppBootReady)();
-            if (!runtimeInfrastructure.readyWithinBudget) {
+            if (!readyWithinBudget) {
                 scheduleBackgroundStartupTask("runtime_queue_init_recovery", async () => {
                     await (0, lifecycle_1.initQueues)();
                     (0, startupIsolation_service_1.markRedisReady)((0, redis_1.isRedisWritable)());

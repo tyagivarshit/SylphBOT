@@ -86,6 +86,7 @@ export type PerformanceMetricName =
   | "startup_auth_latency"
   | "startup_priority_deferral_count"
   | "startup_background_warmup"
+  | "startup_pool_warmup_ms"
   | "integration_projection_ms"
   | "projection_cache_hit_rate"
   | "onboarding_projection_stale_age"

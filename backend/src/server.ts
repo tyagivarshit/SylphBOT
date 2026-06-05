@@ -225,6 +225,17 @@ const scheduleDeferredEmbeddingWarmup = () => {
       const deferDecision = shouldDeferLowPriorityWarmup();
 
       if (deferDecision.defer && attempts < STARTUP_EMBEDDING_WARMUP_MAX_ATTEMPTS) {
+        emitPerformanceMetric({
+          name: "startup_priority_deferral_count",
+          value: 1,
+          route: "startup_isolation",
+          metadata: {
+            task: "embedding_runtime",
+            attempts,
+            reasons: deferDecision.reasons,
+            pressure: deferDecision.pressure,
+          },
+        });
         recordStartupBackgroundTask({
           name: "embedding_runtime",
           status: "deferred",
@@ -448,6 +459,8 @@ export const startServer = async () => {
   initializeSentry();
   configurePassport();
 
+  const isIsolationEnabled = process.env.STARTUP_ISOLATION_ENABLED !== "false";
+
   // 1. Minimal Env Validation
   if (!env.PORT || !env.REDIS_URL || !process.env.DATABASE_URL) {
     logger.error("Critical environment variables missing during startup validation");
@@ -456,28 +469,59 @@ export const startServer = async () => {
 
   // 2. Initialize DB pool
   logger.info("Initializing database connection pool...");
+  const startWarmup = Date.now();
   try {
     await prisma.$connect();
+    // Warm up the pool and run a lightweight validation query
+    await prisma.user.findFirst({ select: { id: true } });
     markDbReady(true);
-    logger.info("Database connection pool initialized successfully");
+    const warmupMs = Date.now() - startWarmup;
+    emitPerformanceMetric({
+      name: "startup_pool_warmup_ms",
+      value: warmupMs,
+      route: "startup_isolation",
+    });
+    logger.info(`Database connection pool warmed up in ${warmupMs}ms`);
   } catch (error) {
-    logger.warn({ err: error }, "Database connection failed or deferred during startup");
+    logger.error({ err: error }, "Database connection failed or deferred during startup");
     markDbReady(false);
+    if (isIsolationEnabled) {
+      logger.error("Critical: Database pool warmup failed and startup isolation is enabled. Exiting.");
+      process.exit(1);
+    }
   }
 
   // 3. Queue / Redis initialization within budget before HTTP listen
-  const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
-  if (!runtimeInfrastructure.readyWithinBudget) {
-    logger.warn(
-      {
-        startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
-        startupQueueInitElapsedMs: runtimeInfrastructure.durationMs,
-      },
-      "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization"
-    );
-    markRedisReady(false);
+  let readyWithinBudget = false;
+  let durationMs = 0;
+  if (isIsolationEnabled) {
+    logger.info("Initializing runtime queues (blocking Redis readiness)...");
+    const queueStart = Date.now();
+    try {
+      await initQueues();
+      readyWithinBudget = true;
+      markRedisReady(true);
+      logger.info(`Runtime queues initialized in ${Date.now() - queueStart}ms`);
+    } catch (error) {
+      logger.error({ err: error }, "Critical: Queue/Redis initialization failed during startup. Exiting.");
+      process.exit(1);
+    }
   } else {
-    markRedisReady(true);
+    const runtimeInfrastructure = await waitForRuntimeInfrastructureWithinBudget();
+    readyWithinBudget = runtimeInfrastructure.readyWithinBudget;
+    durationMs = runtimeInfrastructure.durationMs;
+    if (!readyWithinBudget) {
+      logger.warn(
+        {
+          startupQueueInitBudgetMs: STARTUP_QUEUE_INIT_CRITICAL_BUDGET_MS,
+          startupQueueInitElapsedMs: durationMs,
+        },
+        "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization"
+      );
+      markRedisReady(false);
+    } else {
+      markRedisReady(true);
+    }
   }
 
   const { default: app } = await import("./app");
@@ -566,7 +610,7 @@ export const startServer = async () => {
       // Mark app boot ready
       markAppBootReady();
 
-      if (!runtimeInfrastructure.readyWithinBudget) {
+      if (!readyWithinBudget) {
         scheduleBackgroundStartupTask(
           "runtime_queue_init_recovery",
           async () => {

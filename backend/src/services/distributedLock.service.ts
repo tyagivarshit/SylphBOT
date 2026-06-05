@@ -91,10 +91,18 @@ export const acquireDistributedLock = async ({
     effectiveWaitMs = Math.min(effectiveWaitMs, remainingMs);
   }
 
+  const startTime = Date.now();
+  let attempts = 0;
+
   const deadline = Date.now() + effectiveWaitMs;
   const effectivePollMs = Math.max(10, pollMs);
 
+  const initialBackoffMs = effectivePollMs;
+  const backoffFactor = 1.5;
+  const maxBackoffMs = Math.min(1000, ttlMs);
+
   do {
+    attempts++;
     const remainingWaitMs = Math.max(0, deadline - Date.now());
     const commandTimeoutMs = Math.max(
       50,
@@ -181,8 +189,28 @@ export const acquireDistributedLock = async ({
       break;
     }
 
-    await sleep(effectivePollMs);
+    // Exponential Backoff with Jitter
+    const currentBackoff = Math.min(
+      maxBackoffMs,
+      initialBackoffMs * Math.pow(backoffFactor, attempts - 1)
+    );
+
+    // Full Jitter
+    const sleepMs = Math.min(
+      Math.max(10, Math.floor(Math.random() * currentBackoff)),
+      Math.max(0, deadline - Date.now())
+    );
+
+    if (sleepMs <= 0) {
+      break;
+    }
+
+    await sleep(sleepMs);
   } while (Date.now() <= deadline);
+
+  const lock_wait_ms = Date.now() - startTime;
+  const retry_count = attempts - 1;
+  const lock_starvation_rate = 1.0;
 
   await recordMetricSnapshot({
     subsystem: "LOCKS",
@@ -198,6 +226,9 @@ export const acquireDistributedLock = async ({
       waitMs,
       pollMs,
       event: "lock_unavailable",
+      lock_wait_ms,
+      retry_count,
+      lock_starvation_rate,
     },
   }).catch(() => undefined);
 
@@ -214,6 +245,9 @@ export const acquireDistributedLock = async ({
       ttlMs,
       waitMs,
       pollMs,
+      lock_wait_ms,
+      retry_count,
+      lock_starvation_rate,
     },
   }).catch(() => undefined);
 

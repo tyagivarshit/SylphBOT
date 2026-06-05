@@ -11,7 +11,7 @@ const WEBHOOK_RUNTIME_BUDGET_MS = Math.max(250, Number(process.env.WEBHOOK_RUNTI
 const isProduction = process.env.NODE_ENV === "production";
 const emitWebhookMetric = (name, value, metadata) => {
     (0, performanceMetrics_1.emitPerformanceMetric)({
-        name,
+        name: name,
         value,
         route: "whatsapp_webhook",
         metadata: {
@@ -136,7 +136,21 @@ router.post("/", async (req, res) => {
                     webhookTask: "message_intake",
                     eventId,
                 });
+                if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+                    emitWebhookMetric("webhook_dedup_hit", 1, {
+                        webhookTask: "message_intake",
+                        eventId,
+                    });
+                }
                 return sendWebhookResponse(200, "duplicate_message");
+            }
+            else {
+                if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+                    emitWebhookMetric("webhook_dedup_miss", 1, {
+                        webhookTask: "message_intake",
+                        eventId,
+                    });
+                }
             }
         }
         const from = normalizeIdentifier(message?.from);
@@ -168,6 +182,9 @@ router.post("/", async (req, res) => {
                     reason: "enqueue_failed",
                     error: String(error?.message || error || "enqueue_failed"),
                 });
+                emitWebhookMetric("webhook_queue_failure", 1, {
+                    webhookTask: "delivery_reconcile",
+                });
             }
         }
         if (from && phoneNumberIds.length && message) {
@@ -194,6 +211,10 @@ router.post("/", async (req, res) => {
                     reason: "enqueue_failed",
                     eventId: eventId || null,
                     error: String(error?.message || error || "enqueue_failed"),
+                });
+                emitWebhookMetric("webhook_queue_failure", 1, {
+                    webhookTask: "message_intake",
+                    eventId: eventId || null,
                 });
                 return sendWebhookResponse(503, "message_enqueue_failed");
             }

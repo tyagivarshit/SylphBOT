@@ -41,15 +41,20 @@ const saveWebhookEvent = async (eventId, platform) => {
                 platform,
             },
         });
+        return true;
     }
     catch (error) {
         if (error?.code === "P2002") {
-            return;
+            return false;
         }
         console.error("[WEBHOOK SAVE ERROR]", error);
+        throw error;
     }
 };
 const processWebhookEvent = async ({ eventId, platform, }) => {
+    if (process.env.WEBHOOK_DEDUP_ENABLED === "false") {
+        return true;
+    }
     if (!eventId)
         return true;
     const traceId = `webhook_${platform}_${eventId}`;
@@ -99,10 +104,27 @@ const processWebhookEvent = async ({ eventId, platform, }) => {
             }).catch(() => undefined);
             return false;
         }
-        // Save webhook event asynchronously in the background (non-blocking)
-        void saveWebhookEvent(eventId, platform).catch((err) => {
-            console.error("[WEBHOOK SAVE BACKGROUND ERROR]", err);
-        });
+        // Save webhook event in a blocking manner
+        const saved = await saveWebhookEvent(eventId, platform);
+        if (!saved) {
+            await (0, reliabilityOS_service_1.recordObservabilityEvent)({
+                eventType: "webhook.dedupe.duplicate",
+                message: `Webhook duplicate skipped for ${platform}`,
+                severity: "info",
+                context: {
+                    traceId,
+                    correlationId: traceId,
+                    provider: platform,
+                    component: "webhook-reconciliation",
+                    phase: "providers",
+                },
+                metadata: {
+                    eventId,
+                    reason: "db_unique_constraint",
+                },
+            }).catch(() => undefined);
+            return false;
+        }
         await (0, reliabilityOS_service_1.recordTraceLedger)({
             traceId,
             correlationId: traceId,
@@ -138,6 +160,9 @@ const processWebhookEvent = async ({ eventId, platform, }) => {
 };
 exports.processWebhookEvent = processWebhookEvent;
 const rollbackWebhookEvent = async ({ eventId, platform, }) => {
+    if (process.env.WEBHOOK_DEDUP_ENABLED === "false") {
+        return;
+    }
     if (!eventId) {
         return;
     }

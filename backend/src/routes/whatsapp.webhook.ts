@@ -30,12 +30,15 @@ const emitWebhookMetric = (
     | "webhook_post_response_work"
     | "webhook_runtime_budget_exceeded"
     | "webhook_deduped"
-    | "webhook_degraded",
+    | "webhook_degraded"
+    | "webhook_dedup_hit"
+    | "webhook_dedup_miss"
+    | "webhook_queue_failure",
   value: number,
   metadata?: Record<string, unknown>
 ) => {
   emitPerformanceMetric({
-    name,
+    name: name as any,
     value,
     route: "whatsapp_webhook",
     metadata: {
@@ -195,7 +198,20 @@ router.post("/", async (req: any, res: Response) => {
           webhookTask: "message_intake",
           eventId,
         });
+        if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+          emitWebhookMetric("webhook_dedup_hit", 1, {
+            webhookTask: "message_intake",
+            eventId,
+          });
+        }
         return sendWebhookResponse(200, "duplicate_message");
+      } else {
+        if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+          emitWebhookMetric("webhook_dedup_miss", 1, {
+            webhookTask: "message_intake",
+            eventId,
+          });
+        }
       }
     }
 
@@ -238,6 +254,9 @@ router.post("/", async (req: any, res: Response) => {
             (error as { message?: unknown })?.message || error || "enqueue_failed"
           ),
         });
+        emitWebhookMetric("webhook_queue_failure", 1, {
+          webhookTask: "delivery_reconcile",
+        });
       }
     }
 
@@ -267,6 +286,10 @@ router.post("/", async (req: any, res: Response) => {
           error: String(
             (error as { message?: unknown })?.message || error || "enqueue_failed"
           ),
+        });
+        emitWebhookMetric("webhook_queue_failure", 1, {
+          webhookTask: "message_intake",
+          eventId: eventId || null,
         });
         return sendWebhookResponse(503, "message_enqueue_failed");
       }

@@ -44,12 +44,15 @@ const emitWebhookMetric = (
     | "webhook_post_response_work"
     | "webhook_runtime_budget_exceeded"
     | "webhook_deduped"
-    | "webhook_degraded",
+    | "webhook_degraded"
+    | "webhook_dedup_hit"
+    | "webhook_dedup_miss"
+    | "webhook_queue_failure",
   value: number,
   metadata?: Record<string, unknown>
 ) => {
   emitPerformanceMetric({
-    name,
+    name: name as any,
     value,
     route: "instagram_webhook",
     metadata: {
@@ -367,6 +370,10 @@ router.post("/", async (req: any, res: Response) => {
           reason: "enqueue_failed",
           traceId: webhookTraceId,
         });
+        emitWebhookMetric("webhook_queue_failure", 1, {
+          webhookTask: "delivery_reconcile",
+          traceId: webhookTraceId,
+        });
         await recordObservabilityEvent({
           eventType: "webhook.instagram.delivery_reconcile_enqueue_failed",
           message: "Instagram delivery reconciliation enqueue failed",
@@ -425,7 +432,22 @@ router.post("/", async (req: any, res: Response) => {
           eventId: commentEventId,
           traceId: webhookTraceId,
         });
+        if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+          emitWebhookMetric("webhook_dedup_hit", 1, {
+            webhookTask: "comment_intake",
+            eventId: commentEventId,
+            traceId: webhookTraceId,
+          });
+        }
         continue;
+      } else {
+        if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+          emitWebhookMetric("webhook_dedup_miss", 1, {
+            webhookTask: "comment_intake",
+            eventId: commentEventId,
+            traceId: webhookTraceId,
+          });
+        }
       }
 
       const enqueueStartedAt = Date.now();
@@ -449,6 +471,11 @@ router.post("/", async (req: any, res: Response) => {
         emitWebhookMetric("webhook_degraded", 1, {
           webhookTask: "comment_intake",
           reason: "enqueue_failed",
+          traceId: webhookTraceId,
+        });
+        emitWebhookMetric("webhook_queue_failure", 1, {
+          webhookTask: "comment_intake",
+          eventId: commentEventId,
           traceId: webhookTraceId,
         });
 
@@ -541,7 +568,22 @@ router.post("/", async (req: any, res: Response) => {
         eventId,
         traceId: webhookTraceId,
       });
+      if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+        emitWebhookMetric("webhook_dedup_hit", 1, {
+          webhookTask: "message_intake",
+          eventId,
+          traceId: webhookTraceId,
+        });
+      }
       return sendWebhookResponse(200, "duplicate_message");
+    } else {
+      if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+        emitWebhookMetric("webhook_dedup_miss", 1, {
+          webhookTask: "message_intake",
+          eventId,
+          traceId: webhookTraceId,
+        });
+      }
     }
 
     const enqueueStartedAt = Date.now();
@@ -564,6 +606,11 @@ router.post("/", async (req: any, res: Response) => {
       emitWebhookMetric("webhook_degraded", 1, {
         webhookTask: "message_intake",
         reason: "enqueue_failed",
+        traceId: webhookTraceId,
+      });
+      emitWebhookMetric("webhook_queue_failure", 1, {
+        webhookTask: "message_intake",
+        eventId,
         traceId: webhookTraceId,
       });
 

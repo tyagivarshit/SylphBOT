@@ -21,7 +21,7 @@ const log = (...args) => {
 };
 const emitWebhookMetric = (name, value, metadata) => {
     (0, performanceMetrics_1.emitPerformanceMetric)({
-        name,
+        name: name,
         value,
         route: "instagram_webhook",
         metadata: {
@@ -277,6 +277,10 @@ router.post("/", async (req, res) => {
                     reason: "enqueue_failed",
                     traceId: webhookTraceId,
                 });
+                emitWebhookMetric("webhook_queue_failure", 1, {
+                    webhookTask: "delivery_reconcile",
+                    traceId: webhookTraceId,
+                });
                 await (0, reliabilityOS_service_1.recordObservabilityEvent)({
                     eventType: "webhook.instagram.delivery_reconcile_enqueue_failed",
                     message: "Instagram delivery reconciliation enqueue failed",
@@ -321,7 +325,23 @@ router.post("/", async (req, res) => {
                     eventId: commentEventId,
                     traceId: webhookTraceId,
                 });
+                if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+                    emitWebhookMetric("webhook_dedup_hit", 1, {
+                        webhookTask: "comment_intake",
+                        eventId: commentEventId,
+                        traceId: webhookTraceId,
+                    });
+                }
                 continue;
+            }
+            else {
+                if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+                    emitWebhookMetric("webhook_dedup_miss", 1, {
+                        webhookTask: "comment_intake",
+                        eventId: commentEventId,
+                        traceId: webhookTraceId,
+                    });
+                }
             }
             const enqueueStartedAt = Date.now();
             try {
@@ -344,6 +364,11 @@ router.post("/", async (req, res) => {
                 emitWebhookMetric("webhook_degraded", 1, {
                     webhookTask: "comment_intake",
                     reason: "enqueue_failed",
+                    traceId: webhookTraceId,
+                });
+                emitWebhookMetric("webhook_queue_failure", 1, {
+                    webhookTask: "comment_intake",
+                    eventId: commentEventId,
                     traceId: webhookTraceId,
                 });
                 await (0, reliabilityOS_service_1.recordObservabilityEvent)({
@@ -416,7 +441,23 @@ router.post("/", async (req, res) => {
                 eventId,
                 traceId: webhookTraceId,
             });
+            if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+                emitWebhookMetric("webhook_dedup_hit", 1, {
+                    webhookTask: "message_intake",
+                    eventId,
+                    traceId: webhookTraceId,
+                });
+            }
             return sendWebhookResponse(200, "duplicate_message");
+        }
+        else {
+            if (process.env.WEBHOOK_DEDUP_ENABLED !== "false") {
+                emitWebhookMetric("webhook_dedup_miss", 1, {
+                    webhookTask: "message_intake",
+                    eventId,
+                    traceId: webhookTraceId,
+                });
+            }
         }
         const enqueueStartedAt = Date.now();
         try {
@@ -438,6 +479,11 @@ router.post("/", async (req, res) => {
             emitWebhookMetric("webhook_degraded", 1, {
                 webhookTask: "message_intake",
                 reason: "enqueue_failed",
+                traceId: webhookTraceId,
+            });
+            emitWebhookMetric("webhook_queue_failure", 1, {
+                webhookTask: "message_intake",
+                eventId,
                 traceId: webhookTraceId,
             });
             await (0, reliabilityOS_service_1.recordObservabilityEvent)({

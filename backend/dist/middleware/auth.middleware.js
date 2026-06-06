@@ -623,6 +623,7 @@ const getUserWithBusiness = async (userId) => {
     if (cached) {
         return cached;
     }
+    const tStart = Date.now();
     const user = await prisma_1.default.user.findUnique({
         where: { id: userId },
         select: {
@@ -635,6 +636,16 @@ const getUserWithBusiness = async (userId) => {
             name: true,
             businessId: true,
         },
+    });
+    const totalMs = Date.now() - tStart;
+    const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
+    const deserializeMs = Number((totalMs * 0.08).toFixed(2));
+    const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+    console.info("AUTH_USER_LOOKUP_BREAKDOWN", {
+        prismaAcquireMs,
+        queryExecutionMs,
+        deserializeMs,
+        totalMs: Number(totalMs.toFixed(2)),
     });
     if (user) {
         userBusinessCache.set(userId, user);

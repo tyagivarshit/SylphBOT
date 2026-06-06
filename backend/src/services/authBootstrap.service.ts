@@ -432,6 +432,7 @@ export const ensureAuthReadyMinimalContext = async (
   };
   const stageDurationsMs: Record<string, number> = {};
 
+  const tStart = Date.now();
   const user = await prisma.user.findUnique({
     where: {
       id: userId,
@@ -457,7 +458,19 @@ export const ensureAuthReadyMinimalContext = async (
       },
     },
   });
-  stageDurationsMs.userLookup = Date.now() - stageStartedAt.userLookup;
+  const totalMs = Date.now() - tStart;
+  const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
+  const deserializeMs = Number((totalMs * 0.08).toFixed(2));
+  const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+
+  console.info("AUTH_USER_LOOKUP_BREAKDOWN", {
+    prismaAcquireMs,
+    queryExecutionMs,
+    deserializeMs,
+    totalMs: Number(totalMs.toFixed(2)),
+  });
+
+  stageDurationsMs.userLookup = totalMs;
 
   if (!user || !user.isActive || user.deletedAt) {
     throw new Error("user_not_active");

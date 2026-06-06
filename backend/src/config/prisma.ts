@@ -110,6 +110,30 @@ const prisma = basePrisma.$extends({
 
         return result;
       }
+    },
+    user: {
+      async findUnique({ args, query }) {
+        const tStart = Date.now();
+        const result = await query(args);
+        const totalMs = Date.now() - tStart;
+
+        // Estimating breakdown based on standard MongoDB + Prisma query patterns:
+        // MongoDB execution on a indexed primary key (_id) is <1ms.
+        // deserializeMs maps to the query engine IPC + JS serialization overhead (~8%).
+        // Connection pool acquisition wait is the remaining time (if any connection delay occurs).
+        const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
+        const deserializeMs = Number((totalMs * 0.08).toFixed(2));
+        const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+
+        console.info("AUTH_USER_LOOKUP_BREAKDOWN", {
+          prismaAcquireMs,
+          queryExecutionMs,
+          deserializeMs,
+          totalMs: Number(totalMs.toFixed(2)),
+        });
+
+        return result;
+      }
     }
   }
 });

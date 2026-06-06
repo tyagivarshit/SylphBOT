@@ -403,6 +403,13 @@ export const env = {
       defaultValue: false,
     }
   ) as boolean,
+  MESSAGE_BUSINESSID_DUALWRITE_ENABLED: readBoolean(
+    "MESSAGE_BUSINESSID_DUALWRITE_ENABLED",
+    {
+      required: false,
+      defaultValue: false,
+    }
+  ) as boolean,
   REDIS_CONNECT_TIMEOUT_MS: readNumber("REDIS_CONNECT_TIMEOUT_MS", {
     required: false,
     defaultValue: 10000,

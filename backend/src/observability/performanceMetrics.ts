@@ -150,7 +150,9 @@ export type PerformanceMetricName =
   | "webhook_degraded"
   | "reconcile_ms"
   | "subscription_activation_ms"
-  | "total_checkout_ms";
+  | "total_checkout_ms"
+  | "message_businessid_dualwrite_success"
+  | "message_businessid_dualwrite_failure";
 
 type EmitPerformanceMetricInput = {
   name: PerformanceMetricName;

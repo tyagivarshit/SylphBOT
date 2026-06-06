@@ -664,6 +664,8 @@ model Message {
   leadId    String   @db.ObjectId
   lead      Lead     @relation(fields: [leadId], references: [id])
 
+  businessId String? @db.ObjectId
+
   content   String
   sender    String
 
@@ -676,6 +678,8 @@ model Message {
 
   @@index([leadId])
   @@index([createdAt])
+  @@index([businessId, createdAt])
+  @@index([businessId])
 }
 
 /* =====================================================

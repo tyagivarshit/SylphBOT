@@ -84,4 +84,37 @@ export const bcryptMigrationTests: TestCase[] = [
       }
     },
   },
+  {
+    name: "worker thread fallback path verification",
+    run: async () => {
+      const originalFlag = process.env.AUTH_NATIVE_BCRYPT_ENABLED;
+      const workerThreads = require("worker_threads");
+      const originalWorker = workerThreads.Worker;
+
+      // Force worker thread creation to throw, simulating environments where Worker is restricted or fails
+      workerThreads.Worker = class FailingWorker {
+        constructor() {
+          throw new Error("Simulated worker thread spawn failure");
+        }
+      } as any;
+
+      try {
+        const password = "FallbackPassword123!";
+        
+        // 1. Verify hashing still works using fallback
+        const hash = await hashPasswordWorker(password, 10);
+        assert.ok(hash.startsWith("$2b$") || hash.startsWith("$2a$"));
+
+        // 2. Verify verification still works using fallback
+        const isMatch = await verifyPasswordWorker(password, hash);
+        assert.equal(isMatch, true, "Expected verification to succeed via fallback path");
+
+        const isWrongMatch = await verifyPasswordWorker("Wrong!", hash);
+        assert.equal(isWrongMatch, false, "Expected wrong password to fail via fallback path");
+      } finally {
+        workerThreads.Worker = originalWorker;
+        process.env.AUTH_NATIVE_BCRYPT_ENABLED = originalFlag;
+      }
+    },
+  },
 ];

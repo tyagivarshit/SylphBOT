@@ -4,6 +4,7 @@ import { configurePassport } from "./config/passport";
 import { env } from "./config/env";
 import { initSocket } from "./sockets/socket.server";
 import logger from "./utils/logger";
+import { getBcryptLibraryName } from "./utils/bcryptWorker";
 import {
   captureExceptionWithContext,
   initializeSentry,
@@ -603,6 +604,9 @@ export const startServer = async () => {
   return await new Promise<http.Server>((resolve) => {
     server.listen(env.PORT, () => {
       logger.info({ port: env.PORT }, "Server listening");
+      
+      const libName = getBcryptLibraryName();
+      console.log(`AUTH_BCRYPT_RUNTIME {\n  library: ${libName}\n}`);
       
       // Projection recovery initialization before runtime ready
       startPostListenBootstrap();

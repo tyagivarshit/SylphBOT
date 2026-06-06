@@ -43,6 +43,7 @@ const passport_1 = require("./config/passport");
 const env_1 = require("./config/env");
 const socket_server_1 = require("./sockets/socket.server");
 const logger_1 = __importDefault(require("./utils/logger"));
+const bcryptWorker_1 = require("./utils/bcryptWorker");
 const sentry_1 = require("./observability/sentry");
 const performanceMetrics_1 = require("./observability/performanceMetrics");
 const stripeConfig_service_1 = require("./services/commerce/providers/stripeConfig.service");
@@ -500,6 +501,8 @@ const startServer = async () => {
     return await new Promise((resolve) => {
         server.listen(env_1.env.PORT, () => {
             logger_1.default.info({ port: env_1.env.PORT }, "Server listening");
+            const libName = (0, bcryptWorker_1.getBcryptLibraryName)();
+            console.log(`AUTH_BCRYPT_RUNTIME {\n  library: ${libName}\n}`);
             // Projection recovery initialization before runtime ready
             startPostListenBootstrap();
             // Mark app boot ready

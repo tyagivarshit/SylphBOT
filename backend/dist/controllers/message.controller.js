@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markConversationRead = exports.deleteMessage = exports.sendManualMessage = exports.getMessages = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
+const env_1 = require("../config/env");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 const socket_server_1 = require("../sockets/socket.server");
 const sendMessage_service_1 = require("../services/sendMessage.service");
@@ -56,16 +58,35 @@ const getMessages = async (req, res) => {
                 message: "Lead not found",
             });
         }
-        const messages = await prisma_1.default.message.findMany({
-            where: {
-                leadId: lead.id,
-                lead: {
-                    businessId,
-                    deletedAt: null,
+        const cutoverEnabled = env_1.env.MESSAGE_READ_CUTOVER_A_ENABLED === true || process.env.MESSAGE_READ_CUTOVER_A_ENABLED === "true";
+        let messages;
+        if (cutoverEnabled) {
+            // Telemetry
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "message_read_cutover_category_a",
+                businessId,
+                route: "getMessages",
+                metadata: { leadId: lead.id }
+            });
+            messages = await prisma_1.default.message.findMany({
+                where: {
+                    leadId: lead.id,
                 },
-            },
-            orderBy: { createdAt: "asc" },
-        });
+                orderBy: { createdAt: "asc" },
+            });
+        }
+        else {
+            messages = await prisma_1.default.message.findMany({
+                where: {
+                    leadId: lead.id,
+                    lead: {
+                        businessId,
+                        deletedAt: null,
+                    },
+                },
+                orderBy: { createdAt: "asc" },
+            });
+        }
         return res.json({
             success: true,
             data: {

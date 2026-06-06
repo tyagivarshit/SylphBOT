@@ -285,6 +285,10 @@ exports.env = {
         required: false,
         defaultValue: false,
     }),
+    MESSAGE_READ_CUTOVER_A_ENABLED: readBoolean("MESSAGE_READ_CUTOVER_A_ENABLED", {
+        required: false,
+        defaultValue: false,
+    }),
     REDIS_CONNECT_TIMEOUT_MS: readNumber("REDIS_CONNECT_TIMEOUT_MS", {
         required: false,
         defaultValue: 10000,

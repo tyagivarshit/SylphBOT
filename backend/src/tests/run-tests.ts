@@ -77,6 +77,7 @@ import { authHydrationBootstrapTests } from "./authHydrationBootstrap.test";
 import { clearWorkspaceIdentityCache } from "../services/tenant.service";
 import { bcryptMigrationTests } from "./bcryptMigration.test";
 import { messageDualWriteTests } from "./messageDualWrite.test";
+import { messageReadCutoverATests } from "./messageReadCutoverA.test";
 
 type TestCase = {
   name: string;
@@ -898,6 +899,7 @@ const tests: TestCase[] = [
   ...authHydrationBootstrapTests,
   ...bcryptMigrationTests,
   ...messageDualWriteTests,
+  ...messageReadCutoverATests,
 ];
 
 let failures = 0;

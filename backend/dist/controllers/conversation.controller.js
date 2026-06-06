@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markAsRead = exports.sendMessage = exports.getMessagesByLead = exports.getConversations = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
+const env_1 = require("../config/env");
+const performanceMetrics_1 = require("../observability/performanceMetrics");
 const subscriptionGuard_middleware_1 = require("../middleware/subscriptionGuard.middleware");
 const sendMessage_service_1 = require("../services/sendMessage.service");
 const DEFAULT_CONVERSATION_PAGE_SIZE = 40;
@@ -166,26 +168,55 @@ const getMessagesByLead = async (req, res) => {
                 message: "Lead not found",
             });
         }
-        const messagesDesc = await prisma_1.default.message.findMany({
-            where: {
-                leadId: lead.id,
-                lead: {
-                    businessId,
-                    deletedAt: null,
+        const cutoverEnabled = env_1.env.MESSAGE_READ_CUTOVER_A_ENABLED === true || process.env.MESSAGE_READ_CUTOVER_A_ENABLED === "true";
+        let messagesDesc;
+        if (cutoverEnabled) {
+            // Telemetry
+            (0, performanceMetrics_1.emitPerformanceMetric)({
+                name: "message_read_cutover_category_a",
+                businessId,
+                route: "getMessagesByLead",
+                metadata: { leadId: lead.id }
+            });
+            messagesDesc = await prisma_1.default.message.findMany({
+                where: {
+                    leadId: lead.id,
+                    ...(hasValidBefore
+                        ? {
+                            createdAt: {
+                                lt: beforeDate,
+                            },
+                        }
+                        : {}),
                 },
-                ...(hasValidBefore
-                    ? {
-                        createdAt: {
-                            lt: beforeDate,
-                        },
-                    }
-                    : {}),
-            },
-            orderBy: {
-                createdAt: "desc",
-            },
-            take: limit,
-        });
+                orderBy: {
+                    createdAt: "desc",
+                },
+                take: limit,
+            });
+        }
+        else {
+            messagesDesc = await prisma_1.default.message.findMany({
+                where: {
+                    leadId: lead.id,
+                    lead: {
+                        businessId,
+                        deletedAt: null,
+                    },
+                    ...(hasValidBefore
+                        ? {
+                            createdAt: {
+                                lt: beforeDate,
+                            },
+                        }
+                        : {}),
+                },
+                orderBy: {
+                    createdAt: "desc",
+                },
+                take: limit,
+            });
+        }
         const messages = messagesDesc.slice().reverse();
         const nextBefore = messagesDesc.length === limit
             ? messagesDesc[messagesDesc.length - 1]?.createdAt?.toISOString() || null

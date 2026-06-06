@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const client_1 = require("@prisma/client");
 const env_1 = require("./env");
+const businessIdResolver_1 = require("../utils/businessIdResolver");
 const globalForPrisma = global;
 const basePrisma = globalForPrisma.prisma ||
     new client_1.PrismaClient({
@@ -28,13 +29,10 @@ const prisma = basePrisma.$extends({
                                 leadId = data.lead.connect.id;
                             }
                             if (leadId) {
-                                // Resolve businessId from Lead context using basePrisma
-                                const lead = await basePrisma.lead.findUnique({
-                                    where: { id: leadId },
-                                    select: { businessId: true },
-                                });
-                                if (lead?.businessId) {
-                                    data.businessId = lead.businessId;
+                                // Resolve businessId from Lead context using shared resolver
+                                const businessId = await (0, businessIdResolver_1.resolveBusinessIdForLead)(basePrisma, leadId);
+                                if (businessId) {
+                                    data.businessId = businessId;
                                 }
                                 else {
                                     console.warn("MESSAGE_BUSINESSID_DUALWRITE_WARNING: Lead not found or has no businessId", { leadId });

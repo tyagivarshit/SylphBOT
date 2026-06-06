@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import { env } from "../config/env";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   getSubscriptionAccess,
   logSubscriptionLockedAction,
@@ -210,26 +212,56 @@ export const getMessagesByLead = async (
       });
     }
 
-    const messagesDesc = await prisma.message.findMany({
-      where: {
-        leadId: lead.id,
-        lead: {
-          businessId,
-          deletedAt: null,
+    const cutoverEnabled = env.MESSAGE_READ_CUTOVER_A_ENABLED === true || process.env.MESSAGE_READ_CUTOVER_A_ENABLED === "true";
+
+    let messagesDesc;
+    if (cutoverEnabled) {
+      // Telemetry
+      emitPerformanceMetric({
+        name: "message_read_cutover_category_a",
+        businessId,
+        route: "getMessagesByLead",
+        metadata: { leadId: lead.id }
+      });
+
+      messagesDesc = await prisma.message.findMany({
+        where: {
+          leadId: lead.id,
+          ...(hasValidBefore
+            ? {
+                createdAt: {
+                  lt: beforeDate as Date,
+                },
+              }
+            : {}),
         },
-        ...(hasValidBefore
-          ? {
-              createdAt: {
-                lt: beforeDate as Date,
-              },
-            }
-          : {}),
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: limit,
-    });
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: limit,
+      });
+    } else {
+      messagesDesc = await prisma.message.findMany({
+        where: {
+          leadId: lead.id,
+          lead: {
+            businessId,
+            deletedAt: null,
+          },
+          ...(hasValidBefore
+            ? {
+                createdAt: {
+                  lt: beforeDate as Date,
+                },
+              }
+            : {}),
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: limit,
+      });
+    }
     const messages = messagesDesc.slice().reverse();
     const nextBefore =
       messagesDesc.length === limit

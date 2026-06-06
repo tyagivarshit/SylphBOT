@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { env } from "./env";
+import { resolveBusinessIdForLead } from "../utils/businessIdResolver";
 
 const globalForPrisma = global as unknown as {
   prisma: any;
@@ -33,14 +34,11 @@ const prisma = basePrisma.$extends({
               }
 
               if (leadId) {
-                // Resolve businessId from Lead context using basePrisma
-                const lead = await basePrisma.lead.findUnique({
-                  where: { id: leadId },
-                  select: { businessId: true },
-                });
+                // Resolve businessId from Lead context using shared resolver
+                const businessId = await resolveBusinessIdForLead(basePrisma, leadId);
 
-                if (lead?.businessId) {
-                  data.businessId = lead.businessId;
+                if (businessId) {
+                  data.businessId = businessId;
                 } else {
                   console.warn("MESSAGE_BUSINESSID_DUALWRITE_WARNING: Lead not found or has no businessId", { leadId });
                   try {

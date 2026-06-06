@@ -152,7 +152,8 @@ export type PerformanceMetricName =
   | "subscription_activation_ms"
   | "total_checkout_ms"
   | "message_businessid_dualwrite_success"
-  | "message_businessid_dualwrite_failure";
+  | "message_businessid_dualwrite_failure"
+  | "message_read_cutover_category_a";
 
 type EmitPerformanceMetricInput = {
   name: PerformanceMetricName;

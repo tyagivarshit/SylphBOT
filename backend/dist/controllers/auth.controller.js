@@ -373,6 +373,7 @@ exports.register = register;
 LOGIN
 ====================================== */
 const login = async (req, res, next) => {
+    const loginTraceStart = Date.now();
     const startedAt = Date.now();
     try {
         const ip = getIP(req);
@@ -380,10 +381,14 @@ const login = async (req, res, next) => {
         await checkGlobalLimit(ip);
         const email = normalizeEmail(String(req.body.email || ""));
         const password = String(req.body.password || "");
+        const tUserLookup = Date.now();
         const user = await prisma_1.default.user.findUnique({ where: { email } });
+        console.log("[LOGIN_TRACE] user_lookup_ms=", Date.now() - tUserLookup);
+        const tPasswordVerify = Date.now();
         const passwordVerified = user
             ? await verifyPassword(password, user.password)
             : false;
+        console.log("[LOGIN_TRACE] password_verify_ms=", Date.now() - tPasswordVerify);
         if (!user ||
             user.deletedAt ||
             !user.isActive ||
@@ -425,9 +430,14 @@ const login = async (req, res, next) => {
             name: user.name,
         };
         const businessId = user.businessId || null;
+        const tAccessToken = Date.now();
         const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
+        console.log("[LOGIN_TRACE] access_token_ms=", Date.now() - tAccessToken);
+        const tRefreshToken = Date.now();
         const refreshRaw = (0, generateToken_1.generateRefreshToken)(resolvedUser.id, resolvedUser.tokenVersion);
+        console.log("[LOGIN_TRACE] refresh_token_ms=", Date.now() - tRefreshToken);
         const hashedRefreshToken = hashToken(refreshRaw);
+        const tRefreshWrite = Date.now();
         await prisma_1.default.refreshToken.create({
             data: {
                 token: hashedRefreshToken,
@@ -437,6 +447,7 @@ const login = async (req, res, next) => {
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },
         });
+        console.log("[LOGIN_TRACE] refresh_write_ms=", Date.now() - tRefreshWrite);
         (0, auth_middleware_1.primeAuthContextCacheForToken)({
             accessToken,
             userId: resolvedUser.id,
@@ -454,7 +465,10 @@ const login = async (req, res, next) => {
                 role: resolvedUser.role,
             },
         });
+        const tCookieWrite = Date.now();
         setCookies(req, res, accessToken, refreshRaw);
+        console.log("[LOGIN_TRACE] cookie_write_ms=", Date.now() - tCookieWrite);
+        const tResponse = Date.now();
         res.json({
             success: true,
             user: {
@@ -464,6 +478,7 @@ const login = async (req, res, next) => {
                 businessId,
             },
         });
+        console.log("[LOGIN_TRACE] response_send_ms=", Date.now() - tResponse);
         (0, performanceMetrics_1.emitPerformanceMetric)({
             name: "AUTH_MS",
             value: Date.now() - startedAt,
@@ -522,8 +537,10 @@ const login = async (req, res, next) => {
         }, {
             shouldRun: () => true,
         });
+        console.log("[LOGIN_TRACE] TOTAL_LOGIN_MS=", Date.now() - loginTraceStart);
     }
     catch (err) {
+        console.error("[LOGIN_TRACE] LOGIN_FAILED_AFTER_MS=", Date.now() - loginTraceStart);
         next(err);
     }
 };

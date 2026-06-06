@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
+import { env } from "../config/env";
+import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import {
   getSubscriptionAccess,
   logSubscriptionLockedAction,
@@ -75,16 +77,36 @@ export const getMessages = async (
       });
     }
 
-    const messages = await prisma.message.findMany({
-      where: {
-        leadId: lead.id,
-        lead: {
-          businessId,
-          deletedAt: null,
+    const cutoverEnabled = env.MESSAGE_READ_CUTOVER_A_ENABLED === true || process.env.MESSAGE_READ_CUTOVER_A_ENABLED === "true";
+
+    let messages;
+    if (cutoverEnabled) {
+      // Telemetry
+      emitPerformanceMetric({
+        name: "message_read_cutover_category_a",
+        businessId,
+        route: "getMessages",
+        metadata: { leadId: lead.id }
+      });
+
+      messages = await prisma.message.findMany({
+        where: {
+          leadId: lead.id,
         },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+        orderBy: { createdAt: "asc" },
+      });
+    } else {
+      messages = await prisma.message.findMany({
+        where: {
+          leadId: lead.id,
+          lead: {
+            businessId,
+            deletedAt: null,
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+    }
 
     return res.json({
       success: true,

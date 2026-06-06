@@ -343,14 +343,44 @@ const ensureWorkspaceBootstrapRows = async (businessId: string) => {
 
   // 2. Heavy usage/addon table initialization is deferred (runs background/decoupled).
   const runHeavyInitialization = async () => {
+    if (!/^[a-fA-F0-9]{24}$/.test(normalizedBusinessId)) {
+      return;
+    }
     try {
-      await prisma.$transaction(async (tx) => {
-        const existingUsage = await tx.usage.findUnique({
+      const existingUsage = await prisma.usage.findUnique({
+        where: {
+          businessId_month_year: {
+            businessId: normalizedBusinessId,
+            month,
+            year,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!existingUsage) {
+        await prisma.usage.create({
+          data: {
+            businessId: normalizedBusinessId,
+            month,
+            year,
+            aiCallsUsed: 0,
+            messagesUsed: 0,
+            followupsUsed: 0,
+          },
+        });
+        usageSeeded = true;
+      }
+
+      const addonTypes = ["ai_credits", "contacts"];
+      for (const type of addonTypes) {
+        const existingAddon = await prisma.addonBalance.findUnique({
           where: {
-            businessId_month_year: {
+            businessId_type: {
               businessId: normalizedBusinessId,
-              month,
-              year,
+              type,
             },
           },
           select: {
@@ -358,46 +388,17 @@ const ensureWorkspaceBootstrapRows = async (businessId: string) => {
           },
         });
 
-        if (!existingUsage) {
-          await tx.usage.create({
+        if (!existingAddon) {
+          await prisma.addonBalance.create({
             data: {
               businessId: normalizedBusinessId,
-              month,
-              year,
-              aiCallsUsed: 0,
-              messagesUsed: 0,
-              followupsUsed: 0,
+              type,
+              balance: 0,
             },
           });
-          usageSeeded = true;
+          addonSeeded = true;
         }
-
-        const addonTypes = ["ai_credits", "contacts"];
-        for (const type of addonTypes) {
-          const existingAddon = await tx.addonBalance.findUnique({
-            where: {
-              businessId_type: {
-                businessId: normalizedBusinessId,
-                type,
-              },
-            },
-            select: {
-              id: true,
-            },
-          });
-
-          if (!existingAddon) {
-            await tx.addonBalance.create({
-              data: {
-                businessId: normalizedBusinessId,
-                type,
-                balance: 0,
-              },
-            });
-            addonSeeded = true;
-          }
-        }
-      });
+      }
     } catch (err) {
       console.error("Deferred heavy workspace seeding failed:", err);
     }

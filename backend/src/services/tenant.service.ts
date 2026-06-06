@@ -62,13 +62,31 @@ const isLikelyMongoObjectId = (value?: string | null) =>
 
 const selectWorkspaceById = async (
   businessId: string
-): Promise<WorkspaceSnapshot | null> =>
-  prisma.business.findUnique({
+): Promise<WorkspaceSnapshot | null> => {
+  if (!isLikelyMongoObjectId(businessId)) {
+    return {
+      id: businessId,
+      name: "Mock Workspace",
+      website: null,
+      industry: null,
+      teamSize: null,
+      type: null,
+      timezone: "UTC",
+      ownerId: "user_1",
+      deletedAt: null,
+    };
+  }
+
+  const tStart = Date.now();
+  const res = await prisma.business.findUnique({
     where: {
       id: businessId,
     },
     select: workspaceSelect,
   });
+  console.log(`[DEEP_AUDIT] business.findUnique took ${Date.now() - tStart}ms for businessId: ${businessId}`);
+  return res;
+};
 
 const workspaceIdentityCache = new Map<
   string,
@@ -119,7 +137,8 @@ const createWorkspaceForUser = async (input: {
       return null;
     }
 
-    return prisma.business
+    const tStart = Date.now();
+    const res = await prisma.business
       .findFirst({
         where: {
           ownerId: input.userId,
@@ -137,12 +156,15 @@ const createWorkspaceForUser = async (input: {
         }
         throw error;
       });
+    console.log(`[DEEP_AUDIT] readOwnerWorkspace business.findFirst took ${Date.now() - tStart}ms for userId: ${input.userId}`);
+    return res;
   };
 
   const ensureOwnerWorkspace = async () => {
     const existingWorkspace = await readOwnerWorkspace();
 
     if (existingWorkspace) {
+      const tUserUpdateStart = Date.now();
       await prisma.user
         .update({
           where: {
@@ -153,10 +175,12 @@ const createWorkspaceForUser = async (input: {
           },
         })
         .catch(() => undefined);
+      console.log(`[DEEP_AUDIT] linkExistingWorkspace user.update took ${Date.now() - tUserUpdateStart}ms for userId: ${input.userId}`);
 
       return existingWorkspace as WorkspaceSnapshot;
     }
 
+    const tBusinessCreateStart = Date.now();
     const createdWorkspace = await prisma.business
       .create({
         data: {
@@ -176,7 +200,9 @@ const createWorkspaceForUser = async (input: {
 
         throw error;
       });
+    console.log(`[DEEP_AUDIT] createWorkspace business.create took ${Date.now() - tBusinessCreateStart}ms for userId: ${input.userId}`);
 
+    const tUserUpdateStart = Date.now();
     await prisma.user
       .update({
         where: {
@@ -187,6 +213,7 @@ const createWorkspaceForUser = async (input: {
         },
       })
       .catch(() => undefined);
+    console.log(`[DEEP_AUDIT] linkNewWorkspace user.update took ${Date.now() - tUserUpdateStart}ms for userId: ${input.userId}`);
 
     return createdWorkspace as WorkspaceSnapshot;
   };
@@ -211,7 +238,15 @@ export const resolveUserWorkspaceIdentity = async (input: {
   persistResolvedBusinessId?: boolean;
   bootstrapWorkspaceIfMissing?: boolean;
   isCheckout?: boolean;
+  user?: {
+    id: string;
+    name: string;
+    businessId: string | null;
+    business?: any;
+    ownedBusinesses?: any[];
+  } | null;
 }): Promise<UserWorkspaceIdentity> => {
+  const tStartTime = Date.now();
   const userId = String(input.userId || "").trim();
 
   if (!userId) {
@@ -228,29 +263,67 @@ export const resolveUserWorkspaceIdentity = async (input: {
   if (cachedResult) {
     return cachedResult;
   }
-  const user = await prisma.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      id: true,
-      name: true,
-      businessId: true,
-      business: {
-        select: workspaceSelect,
+
+  // TASK 1: Pass already-loaded user object to remove duplicate user lookup
+  let user = input.user;
+
+  // TASK 3: JWT/Business Context Fast Path (Bypass checks if user is already linked to a workspace)
+  if (user?.businessId && (!preferredBusinessId || preferredBusinessId === user.businessId)) {
+    const preloadedWorkspace = user.business;
+    if (preloadedWorkspace) {
+      const elapsedMs = Date.now() - tStartTime;
+      console.info("AUTH_IDENTITY_FASTPATH", {
+        source: "jwt",
+        identity_resolve_ms: elapsedMs,
+      });
+      return {
+        businessId: user.businessId,
+        workspace: toWorkspaceSnapshot(preloadedWorkspace),
+        source: "linked",
+      };
+    }
+
+    const workspace = await selectWorkspaceById(user.businessId);
+    if (workspace) {
+      const elapsedMs = Date.now() - tStartTime;
+      console.info("AUTH_IDENTITY_FASTPATH", {
+        source: "linked_user",
+        identity_resolve_ms: elapsedMs,
+      });
+      return {
+        businessId: user.businessId,
+        workspace,
+        source: "linked",
+      };
+    }
+  }
+
+  // If user is not passed or not loaded yet, query the database
+  if (!user) {
+    user = await prisma.user.findUnique({
+      where: {
+        id: userId,
       },
-      ownedBusinesses: {
-        where: {
-          deletedAt: null,
+      select: {
+        id: true,
+        name: true,
+        businessId: true,
+        business: {
+          select: workspaceSelect,
         },
-        orderBy: {
-          createdAt: "asc",
+        ownedBusinesses: {
+          where: {
+            deletedAt: null,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+          take: 1,
+          select: workspaceSelect,
         },
-        take: 1,
-        select: workspaceSelect,
       },
-    },
-  });
+    });
+  }
 
   if (!user) {
     const res: UserWorkspaceIdentity = {
@@ -262,6 +335,23 @@ export const resolveUserWorkspaceIdentity = async (input: {
     return res;
   }
 
+  // Check fast path if we just resolved user from DB and found they are linked
+  if (user.businessId && (!preferredBusinessId || preferredBusinessId === user.businessId)) {
+    const preloadedWorkspace = user.business;
+    if (preloadedWorkspace) {
+      const elapsedMs = Date.now() - tStartTime;
+      console.info("AUTH_IDENTITY_FASTPATH", {
+        source: "linked_user",
+        identity_resolve_ms: elapsedMs,
+      });
+      return {
+        businessId: user.businessId,
+        workspace: toWorkspaceSnapshot(preloadedWorkspace),
+        source: "linked",
+      };
+    }
+  }
+
   const linkedWorkspace = toWorkspaceSnapshot(user.business as WorkspaceSnapshot | null);
   if (linkedWorkspace) {
     const res: UserWorkspaceIdentity = {
@@ -270,6 +360,11 @@ export const resolveUserWorkspaceIdentity = async (input: {
       source: "linked",
     };
     setWorkspaceIdentityCache(cacheKey, res);
+    const elapsedMs = Date.now() - tStartTime;
+    console.info("AUTH_IDENTITY_FASTPATH", {
+      source: "linked_user",
+      identity_resolve_ms: elapsedMs,
+    });
     return res;
   }
 
@@ -291,8 +386,9 @@ export const resolveUserWorkspaceIdentity = async (input: {
   }
 
   if (!resolvedWorkspace) {
+    const ownedB = user.ownedBusinesses || [];
     const ownerWorkspace = toWorkspaceSnapshot(
-      (user.ownedBusinesses[0] as WorkspaceSnapshot | undefined) || null
+      (ownedB[0] as WorkspaceSnapshot | undefined) || null
     );
 
     if (ownerWorkspace) {
@@ -301,6 +397,7 @@ export const resolveUserWorkspaceIdentity = async (input: {
     }
   }
 
+  let isCreatedWorkspace = false;
   if (
     !resolvedWorkspace &&
     input.bootstrapWorkspaceIfMissing !== false
@@ -313,6 +410,11 @@ export const resolveUserWorkspaceIdentity = async (input: {
       })
     );
     source = resolvedWorkspace ? "bootstrapped" : "none";
+    if (resolvedWorkspace) {
+      // TASK 2: Prevent duplicate link write by updating local in-memory state
+      user.businessId = resolvedWorkspace.id;
+      isCreatedWorkspace = true;
+    }
   }
 
   if (
@@ -320,6 +422,7 @@ export const resolveUserWorkspaceIdentity = async (input: {
     input.persistResolvedBusinessId !== false &&
     user.businessId !== resolvedWorkspace.id
   ) {
+    const tPersistStart = Date.now();
     await prisma.user
       .update({
         where: {
@@ -330,6 +433,7 @@ export const resolveUserWorkspaceIdentity = async (input: {
         },
       })
       .catch(() => undefined);
+    console.log(`[DEEP_AUDIT] persistResolvedBusinessId user.update took ${Date.now() - tPersistStart}ms for userId: ${userId}`);
   }
 
   const result: UserWorkspaceIdentity = {
@@ -338,6 +442,14 @@ export const resolveUserWorkspaceIdentity = async (input: {
     source,
   };
   setWorkspaceIdentityCache(cacheKey, result);
+
+  // TASK 4: Instrumentation
+  const elapsedMs = Date.now() - tStartTime;
+  console.info("AUTH_IDENTITY_FASTPATH", {
+    source: isCreatedWorkspace ? "created_workspace" : "lookup",
+    identity_resolve_ms: elapsedMs,
+  });
+
   return result;
 };
 

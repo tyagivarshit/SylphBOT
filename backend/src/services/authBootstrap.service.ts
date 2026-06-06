@@ -446,6 +446,15 @@ export const ensureAuthReadyMinimalContext = async (
       businessId: true,
       isActive: true,
       deletedAt: true,
+      business: {
+        select: {
+          id: true,
+          name: true,
+          timezone: true,
+          ownerId: true,
+          deletedAt: true,
+        },
+      },
     },
   });
   stageDurationsMs.userLookup = Date.now() - stageStartedAt.userLookup;
@@ -498,6 +507,7 @@ export const ensureAuthReadyMinimalContext = async (
     preferredBusinessId: input.preferredBusinessId || user.businessId || null,
     persistResolvedBusinessId: true,
     bootstrapWorkspaceIfMissing: true,
+    user,
   });
   stageDurationsMs.identityResolve = Date.now() - stageStartedAt.identityResolve;
 

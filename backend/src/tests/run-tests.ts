@@ -75,6 +75,7 @@ import { metaOAuthStateTests } from "./metaOAuthState.test";
 import { tenantWorkspaceIdentityTests } from "./tenantWorkspaceIdentity.test";
 import { authHydrationBootstrapTests } from "./authHydrationBootstrap.test";
 import { clearWorkspaceIdentityCache } from "../services/tenant.service";
+import { bcryptMigrationTests } from "./bcryptMigration.test";
 
 type TestCase = {
   name: string;
@@ -894,6 +895,7 @@ const tests: TestCase[] = [
   ...metaOAuthStateTests,
   ...tenantWorkspaceIdentityTests,
   ...authHydrationBootstrapTests,
+  ...bcryptMigrationTests,
 ];
 
 let failures = 0;

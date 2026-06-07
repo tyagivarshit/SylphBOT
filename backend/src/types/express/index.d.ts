@@ -24,6 +24,8 @@ declare module "express-serve-static-core" {
       role: string;
       email?: string;
       name?: string;
+      phone?: string | null;
+      avatar?: string | null;
       businessId: string | null;
     };
   }

@@ -635,6 +635,8 @@ const getUserWithBusiness = async (userId) => {
             tokenVersion: true,
             email: true,
             name: true,
+            phone: true,
+            avatar: true,
             businessId: true,
         },
     });
@@ -887,6 +889,9 @@ const serveDegradedAuthenticatedState = async (input) => {
         id: input.userId,
         role: input.role,
         email: input.email,
+        name: input.name,
+        phone: input.phone,
+        avatar: input.avatar,
         businessId: input.businessId,
     });
     await runSessionAnomalyGuard(input.req, {
@@ -1010,24 +1015,49 @@ const rotateRefreshToken = async (req, res, userId, oldRefreshToken, tokenVersio
     const newHashed = hashToken(newRefreshRaw);
     const ip = getIpAddress(req);
     const userAgent = req.headers["user-agent"] || null;
-    await prisma_1.default.refreshToken.create({
-        data: {
-            token: newHashed,
-            userId,
-            userAgent,
-            ip,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
-    });
+    // 1. Preserve Redis grace-period safety behavior
     const graceKey = `auth:rotated:${oldHashed}`;
     const graceValue = JSON.stringify({ userId, tokenVersion, newHashed });
     await safeRedisSet(graceKey, graceValue, "EX", 60).catch(() => undefined);
-    await prisma_1.default.refreshToken.deleteMany({
-        where: { token: oldHashed },
-    }).catch(() => undefined);
+    // 2. Set the cookie immediately
     res.cookie("refreshToken", newRefreshRaw, {
         ...(0, authCookies_1.getAuthCookieOptions)(req),
         maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+    // 3. Defer DB writes in background task
+    setImmediate(async () => {
+        try {
+            await prisma_1.default.refreshToken.create({
+                data: {
+                    token: newHashed,
+                    userId,
+                    userAgent,
+                    ip,
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                },
+            });
+        }
+        catch (error) {
+            console.error("[DEFERRED_WRITE_FAILURE] Failed to create new refresh token in database:", error);
+            req.logger?.error({
+                error: error?.message || String(error || "unknown"),
+                userId,
+                tokenHash: newHashed,
+            }, "Failed to create new refresh token in background");
+        }
+        try {
+            await prisma_1.default.refreshToken.deleteMany({
+                where: { token: oldHashed },
+            });
+        }
+        catch (error) {
+            console.error("[DEFERRED_WRITE_FAILURE] Failed to delete old refresh token in database:", error);
+            req.logger?.error({
+                error: error?.message || String(error || "unknown"),
+                userId,
+                tokenHash: oldHashed,
+            }, "Failed to delete old refresh token in background");
+        }
     });
     return newRefreshRaw;
 };
@@ -1081,6 +1111,8 @@ const protect = async (req, res, next) => {
             role: input.context.role,
             email: input.context.email,
             name: input.context.name,
+            phone: input.context.phone,
+            avatar: input.context.avatar,
             businessId: input.context.businessId,
         });
         await runSessionAnomalyGuard(req, {
@@ -1171,6 +1203,8 @@ const protect = async (req, res, next) => {
                 role: req.user.role,
                 email: req.user.email,
                 name: req.user.name,
+                phone: req.user.phone,
+                avatar: req.user.avatar,
                 businessId: req.user.businessId || null,
             });
             (0, performanceMetrics_1.emitPerformanceMetric)({
@@ -1252,6 +1286,8 @@ const protect = async (req, res, next) => {
                     role: maybeContext.role,
                     email: maybeContext.email,
                     name: maybeContext.name,
+                    phone: maybeContext.phone,
+                    avatar: maybeContext.avatar,
                     businessId: maybeContext.businessId,
                 });
                 await runSessionAnomalyGuard(req, {
@@ -1323,6 +1359,8 @@ const protect = async (req, res, next) => {
                                 role: accessUser.role,
                                 email: accessUser.email || undefined,
                                 name: accessUser.name || undefined,
+                                phone: accessUser.phone || undefined,
+                                avatar: accessUser.avatar || undefined,
                                 businessId: String(accessUser.businessId || decoded.businessId || "").trim() || null,
                                 tokenVersion: accessUser.tokenVersion,
                                 expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
@@ -1359,6 +1397,8 @@ const protect = async (req, res, next) => {
                         role: refreshUser.role,
                         email: refreshUser.email || undefined,
                         name: refreshUser.name || undefined,
+                        phone: refreshUser.phone || undefined,
+                        avatar: refreshUser.avatar || undefined,
                         businessId: String(refreshUser.businessId || "").trim() || null,
                         tokenVersion: refreshUser.tokenVersion,
                         expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
@@ -1387,6 +1427,8 @@ const protect = async (req, res, next) => {
                     role: resolvedContext.role,
                     email: resolvedContext.email,
                     name: resolvedContext.name,
+                    phone: resolvedContext.phone,
+                    avatar: resolvedContext.avatar,
                     businessId: resolvedContext.businessId,
                 });
                 await runSessionAnomalyGuard(req, {
@@ -1472,6 +1514,9 @@ const protect = async (req, res, next) => {
                         id: requestLocalContext.userId,
                         role: requestLocalContext.role,
                         email: requestLocalContext.email,
+                        name: requestLocalContext.name,
+                        phone: requestLocalContext.phone,
+                        avatar: requestLocalContext.avatar,
                         businessId: requestLocalContext.businessId,
                     });
                     markRecentlyVerifiedAuthContext(accessTokenKey, requestLocalContext);
@@ -1556,6 +1601,9 @@ const protect = async (req, res, next) => {
                             id: resolvedFromRequestLocalLookup.userId,
                             role: resolvedFromRequestLocalLookup.role,
                             email: resolvedFromRequestLocalLookup.email,
+                            name: resolvedFromRequestLocalLookup.name,
+                            phone: resolvedFromRequestLocalLookup.phone,
+                            avatar: resolvedFromRequestLocalLookup.avatar,
                             businessId: resolvedFromRequestLocalLookup.businessId,
                         });
                         await runSessionAnomalyGuard(req, {
@@ -1589,6 +1637,9 @@ const protect = async (req, res, next) => {
                         id: cachedContext.userId,
                         role: cachedContext.role,
                         email: cachedContext.email,
+                        name: cachedContext.name,
+                        phone: cachedContext.phone,
+                        avatar: cachedContext.avatar,
                         businessId: cachedContext.businessId,
                     });
                     await runSessionAnomalyGuard(req, {
@@ -1662,6 +1713,8 @@ const protect = async (req, res, next) => {
                         role: redisContext.role,
                         email: redisContext.email,
                         name: redisContext.name,
+                        phone: redisContext.phone,
+                        avatar: redisContext.avatar,
                         businessId: redisContext.businessId,
                     });
                     await runSessionAnomalyGuard(req, {
@@ -1762,6 +1815,8 @@ const protect = async (req, res, next) => {
                                 role: user.role,
                                 email: user.email || undefined,
                                 name: user.name || undefined,
+                                phone: user.phone || undefined,
+                                avatar: user.avatar || undefined,
                                 businessId,
                                 tokenVersion: user.tokenVersion,
                                 expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
@@ -1817,6 +1872,8 @@ const protect = async (req, res, next) => {
                             role: resolvedContext.role,
                             email: resolvedContext.email,
                             name: resolvedContext.name,
+                            phone: resolvedContext.phone,
+                            avatar: resolvedContext.avatar,
                             businessId: resolvedContext.businessId,
                         });
                         await runSessionAnomalyGuard(req, {
@@ -1901,6 +1958,9 @@ const protect = async (req, res, next) => {
                 userId: decodedAccessToken.id,
                 role: String(staleContext?.role || decodedAccessToken.role || "").trim() || "AGENT",
                 email: staleContext?.email,
+                name: staleContext?.name,
+                phone: staleContext?.phone,
+                avatar: staleContext?.avatar,
                 businessId: fallbackBusinessId,
                 reason: accessLookupTransientReason,
                 stage: accessLookupTransientStage || "access_lookup",
@@ -1948,6 +2008,9 @@ const protect = async (req, res, next) => {
                         userId: staleContext.userId,
                         role: staleContext.role,
                         email: staleContext.email,
+                        name: staleContext.name,
+                        phone: staleContext.phone,
+                        avatar: staleContext.avatar,
                         businessId: staleContext.businessId,
                         reason: "refresh_lookup_budget_exhausted",
                         stage: "refresh_lookup_budget",
@@ -2022,6 +2085,8 @@ const protect = async (req, res, next) => {
                     role: user.role,
                     email: user.email || undefined,
                     name: user.name || undefined,
+                    phone: user.phone || undefined,
+                    avatar: user.avatar || undefined,
                     businessId,
                     tokenVersion: user.tokenVersion,
                     expiresAt: Date.now() + AUTH_SESSION_VALIDITY_MS,
@@ -2060,6 +2125,9 @@ const protect = async (req, res, next) => {
                             userId: staleContext.userId,
                             role: staleContext.role,
                             email: staleContext.email,
+                            name: staleContext.name,
+                            phone: staleContext.phone,
+                            avatar: staleContext.avatar,
                             businessId: staleContext.businessId,
                             reason: String(error?.message || "").trim() ||
                                 "refresh_lookup_timeout",
@@ -2099,6 +2167,8 @@ const protect = async (req, res, next) => {
             role: refreshedContext.role,
             email: refreshedContext.email,
             name: refreshedContext.name,
+            phone: refreshedContext.phone,
+            avatar: refreshedContext.avatar,
             businessId: refreshedContext.businessId,
         });
         writeRequestLocalAuthContext(req, hashToken(newAccessToken), refreshedContext.tokenVersion, {

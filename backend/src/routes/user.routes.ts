@@ -482,11 +482,15 @@ router.get("/me", protect, async (req: any, res) => {
       return res.json(cached.value);
     }
 
-    const baseUser = await getUserRecord(userId);
-
-    if (!baseUser) {
-      return res.status(404).json({ error: "User not found" });
-    }
+    const baseUser: SafeUserRecord = {
+      id: req.user.id,
+      name: req.user.name || "",
+      email: req.user.email || "",
+      role: req.user.role,
+      phone: req.user.phone || null,
+      avatar: req.user.avatar || null,
+      businessId: req.user.businessId || null,
+    };
 
     const preferredBusinessId = req.user?.businessId || baseUser.businessId || null;
 

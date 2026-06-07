@@ -2,6 +2,47 @@ import { PrismaClient } from "@prisma/client";
 import { env } from "./env";
 import { resolveBusinessIdForLead } from "../utils/businessIdResolver";
 import { requestStorage } from "../utils/requestLifecycle";
+import { MongoClient, ObjectId } from "mongodb";
+
+let nativeMongoClient: MongoClient | null = null;
+
+const getNativeMongoDb = async () => {
+  if (nativeMongoClient) {
+    return nativeMongoClient.db();
+  }
+  try {
+    const uri = env.DATABASE_URL;
+    nativeMongoClient = new MongoClient(uri);
+    await nativeMongoClient.connect();
+    return nativeMongoClient.db();
+  } catch (error) {
+    console.error("Failed to connect native MongoDB client:", error);
+    throw error;
+  }
+};
+
+const getMongoRegion = () => {
+  try {
+    const url = new URL(env.DATABASE_URL);
+    const host = url.hostname;
+    const parts = host.split('.');
+    if (parts.length >= 3) {
+      return parts[parts.length - 3];
+    }
+    return host;
+  } catch {
+    return "unknown";
+  }
+};
+
+const getReadPreference = () => {
+  try {
+    const url = new URL(env.DATABASE_URL);
+    return url.searchParams.get("readPreference") || "primary";
+  } catch {
+    return "primary";
+  }
+};
 
 const globalForPrisma = global as unknown as {
   prisma: any;
@@ -149,9 +190,6 @@ const prisma = basePrisma.$extends({
         }
 
         const totalMs = Date.now() - tStart;
-        const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
-        const deserializeMs = Number((totalMs * 0.08).toFixed(2));
-        const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
 
         const isAuthQuery = Boolean(requestStorage?.getStore()?.req);
         if (isAuthQuery) {
@@ -161,6 +199,69 @@ const prisma = basePrisma.$extends({
           dbUsageMetrics.workerQueryCount++;
           dbUsageMetrics.workerQueryDurationMs += totalMs;
         }
+
+        // Instrument user.findUnique to compare with native MongoDB driver
+        setImmediate(async () => {
+          try {
+            // 1. Map query filter for native Mongo operations
+            let filter: any = {};
+            if (args?.where) {
+              for (const key of Object.keys(args.where)) {
+                const value = args.where[key];
+                if (key === "id") {
+                  if (typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value)) {
+                    filter["_id"] = new ObjectId(value);
+                  } else {
+                    filter["_id"] = value;
+                  }
+                } else {
+                  filter[key] = value;
+                }
+              }
+            }
+
+            // Run query directly using MongoDB native driver
+            const db = await getNativeMongoDb();
+            const collection = db.collection("User");
+
+            const tNativeStart = Date.now();
+            const nativeResult = await collection.findOne(filter);
+            const nativeMongoMs = Date.now() - tNativeStart;
+
+            const selectFields = args?.select ? Object.keys(args.select) : ["*"];
+            const includeRelations = args?.include ? Object.keys(args.include) : [];
+            const payloadString = result ? JSON.stringify(result) : "";
+            const payloadBytes = payloadString ? Buffer.byteLength(payloadString, "utf8") : 0;
+
+            console.info("USER_LOOKUP_COMPARISON", {
+              prismaMs: totalMs,
+              nativeMongoMs,
+              payloadBytes,
+              selectFields,
+              includeRelations
+            });
+
+            console.info("USER_FIND_UNIQUE_MIDDLEWARE_AUDIT", {
+              collectionName: "User",
+              whereClause: args?.where || null,
+              selectShape: args?.select || null,
+              includeShape: args?.include || null,
+              totalMs,
+              mongoAtlasRegion: getMongoRegion(),
+              renderRegion: process.env.RENDER_REGION || "unknown",
+              readPreference: getReadPreference(),
+              payloadBytes
+            });
+
+          } catch (auditErr) {
+            console.error("Failed to run native MongoDB driver comparison:", auditErr);
+          }
+        });
+
+        // Maintain old logs for compatibility
+        const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
+        const deserializeMs = Number((totalMs * 0.08).toFixed(2));
+        const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
 
         console.info("AUTH_USER_LOOKUP_BREAKDOWN", {
           prismaAcquireMs,

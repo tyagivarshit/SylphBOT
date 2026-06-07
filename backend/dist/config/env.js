@@ -304,4 +304,8 @@ exports.env = {
         defaultValue: 2000,
         min: 10,
     }),
+    AUTH_SESSION_ANOMALY_ASYNC_DISABLED: readBoolean("AUTH_SESSION_ANOMALY_ASYNC_DISABLED", {
+        required: false,
+        defaultValue: false,
+    }),
 };

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma";
+import { env } from "../config/env";
 import { unauthorized } from "../utils/AppError";
 import crypto from "crypto";
 import redis from "../config/redis";
@@ -1169,6 +1170,11 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
   businessId: string | null;
   signal?: AbortSignal | null;
 }) => {
+  if (env.AUTH_SESSION_ANOMALY_ASYNC_DISABLED === true || process.env.AUTH_SESSION_ANOMALY_ASYNC_DISABLED === "true") {
+    req.logger?.info("Session anomaly tracking DB writes bypassed via AUTH_SESSION_ANOMALY_ASYNC_DISABLED flag");
+    return;
+  }
+
   if (input.signal?.aborted || isRequestLifecycleAborted({ req })) {
     return;
   }

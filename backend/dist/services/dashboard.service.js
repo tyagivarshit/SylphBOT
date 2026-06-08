@@ -27,7 +27,7 @@ const EMPTY_USAGE = {
         },
     },
 };
-const DASHBOARD_STATS_CACHE_TTL_MS = 8000;
+const DASHBOARD_STATS_CACHE_TTL_MS = 60000;
 const dashboardStatsCache = new Map();
 const getSettledValue = (result, fallback) => result.status === "fulfilled" ? result.value : fallback;
 class DashboardService {

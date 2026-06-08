@@ -40,7 +40,7 @@ const EMPTY_USAGE: UsageOverviewSafe = {
   },
 };
 
-const DASHBOARD_STATS_CACHE_TTL_MS = 8_000;
+const DASHBOARD_STATS_CACHE_TTL_MS = 60_000;
 
 const dashboardStatsCache = new Map<
   string,

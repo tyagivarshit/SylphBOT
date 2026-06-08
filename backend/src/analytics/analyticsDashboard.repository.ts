@@ -179,11 +179,26 @@ export async function getMessagesInRange(
   start: Date,
   end: Date
 ): Promise<AnalyticsMessageRecord[]> {
+  const leads = await prisma.lead.findMany({
+    where: {
+      businessId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  const leadIds = leads.map((l) => l.id);
+
+  if (leadIds.length === 0) {
+    return [];
+  }
+
   return prisma.message.findMany({
     where: {
-      lead: {
-        businessId,
-        deletedAt: null,
+      leadId: {
+        in: leadIds,
       },
       createdAt: {
         gte: start,

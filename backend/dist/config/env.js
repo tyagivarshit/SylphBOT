@@ -283,11 +283,11 @@ exports.env = {
     }),
     MESSAGE_BUSINESSID_DUALWRITE_ENABLED: readBoolean("MESSAGE_BUSINESSID_DUALWRITE_ENABLED", {
         required: false,
-        defaultValue: false,
+        defaultValue: true,
     }),
     MESSAGE_READ_CUTOVER_A_ENABLED: readBoolean("MESSAGE_READ_CUTOVER_A_ENABLED", {
         required: false,
-        defaultValue: false,
+        defaultValue: true,
     }),
     REDIS_CONNECT_TIMEOUT_MS: readNumber("REDIS_CONNECT_TIMEOUT_MS", {
         required: false,

@@ -407,14 +407,14 @@ export const env = {
     "MESSAGE_BUSINESSID_DUALWRITE_ENABLED",
     {
       required: false,
-      defaultValue: false,
+      defaultValue: true,
     }
   ) as boolean,
   MESSAGE_READ_CUTOVER_A_ENABLED: readBoolean(
     "MESSAGE_READ_CUTOVER_A_ENABLED",
     {
       required: false,
-      defaultValue: false,
+      defaultValue: true,
     }
   ) as boolean,
   REDIS_CONNECT_TIMEOUT_MS: readNumber("REDIS_CONNECT_TIMEOUT_MS", {

@@ -722,6 +722,7 @@ model SalesMessageVariant {
   @@index([businessId, clientId])
   @@index([messageType, isActive])
   @@index([isPromoted])
+  @@index([businessId, clientId, messageType, isActive])
 }
 
 model SalesMessageTracking {
@@ -1112,6 +1113,10 @@ model RevenueTouchLedger {
   @@index([traceId])
   @@index([campaignId])
   @@index([deliveryState, createdAt])
+  @@index([businessId, createdAt])
+  @@index([businessId, clientId, createdAt])
+  @@index([businessId, messageType, createdAt])
+  @@index([businessId, clientId, messageType, createdAt])
 }
 
 model ConsentLedger {
@@ -1850,6 +1855,8 @@ model Appointment {
   @@index([businessId])
   @@index([businessId, createdAt])
   @@index([leadId])
+  @@index([businessId, leadId, startTime])
+  @@index([businessId, leadId, updatedAt])
 }
 
 model AppointmentLedger {

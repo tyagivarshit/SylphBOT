@@ -93,6 +93,8 @@ const toVariantContext = (variant: {
   isPromoted: variant.isPromoted,
 });
 
+const ensuredVariantsCache = new Set<string>();
+
 const ensureDefaultVariants = async ({
   businessId,
   clientId,
@@ -100,41 +102,61 @@ const ensureDefaultVariants = async ({
 }: Required<Pick<VariantSelectionInput, "businessId" | "messageType">> & {
   clientId?: string | null;
 }) => {
-  for (const variant of DEFAULT_VARIANTS) {
-    try {
-      const existing = await prisma.salesMessageVariant.findFirst({
-        where: {
-          businessId,
-          clientId: clientId || null,
-          messageType,
-          variantKey: variant.variantKey,
-        },
-      });
+  const cacheKey = `${businessId}:${clientId || ""}:${messageType}`;
+  if (process.env.NODE_ENV !== "test" && ensuredVariantsCache.has(cacheKey)) {
+    return;
+  }
 
-      if (existing) {
-        continue;
+  try {
+    const existing = await prisma.salesMessageVariant.findMany({
+      where: {
+        businessId,
+        clientId: clientId || null,
+        messageType,
+        variantKey: {
+          in: DEFAULT_VARIANTS.map((v) => v.variantKey),
+        },
+      },
+    });
+
+    const existingKeys = new Set(existing.map((v) => v.variantKey));
+    const missing = DEFAULT_VARIANTS.filter((v) => !existingKeys.has(v.variantKey));
+
+    for (const variant of missing) {
+      try {
+        await prisma.salesMessageVariant.create({
+          data: {
+            businessId,
+            clientId: clientId || null,
+            messageType,
+            ...variant,
+          },
+        });
+      } catch (createError) {
+        logger.debug(
+          {
+            businessId,
+            clientId: clientId || null,
+            messageType,
+            variantKey: variant.variantKey,
+            error: createError,
+          },
+          "Default A/B variant could not be created"
+        );
       }
-
-      await prisma.salesMessageVariant.create({
-        data: {
-          businessId,
-          clientId: clientId || null,
-          messageType,
-          ...variant,
-        },
-      });
-    } catch (error) {
-      logger.debug(
-        {
-          businessId,
-          clientId: clientId || null,
-          messageType,
-          variantKey: variant.variantKey,
-          error,
-        },
-        "Default A/B variant already exists or could not be created"
-      );
     }
+
+    ensuredVariantsCache.add(cacheKey);
+  } catch (error) {
+    logger.debug(
+      {
+        businessId,
+        clientId: clientId || null,
+        messageType,
+        error,
+      },
+      "Failed to ensure default variants"
+    );
   }
 };
 

@@ -93,7 +93,7 @@ export class DashboardService {
     const todayStart = startOfDay(now);
     const monthStart = startOfMonth(now);
 
-    const baseFilter: Prisma.LeadWhereInput = { businessId };
+    const baseFilter: Prisma.LeadWhereInput = { businessId, deletedAt: null };
 
     const [subscription, coreMetrics, usageOverview, timeline] = await Promise.all([
       getCanonicalSubscriptionSnapshot(businessId).catch(() => null),
@@ -113,14 +113,17 @@ export class DashboardService {
         }),
         prisma.message.count({
           where: {
-            lead: { businessId },
+            lead: { businessId, deletedAt: null },
             createdAt: { gte: todayStart },
           },
         }),
         prisma.lead.count({
           where: {
             ...baseFilter,
-            stage: "QUALIFIED",
+            stage: {
+              in: ["QUALIFIED", "READY_TO_BUY", "WON"],
+              mode: "insensitive",
+            },
           },
         }),
       ]),
@@ -353,6 +356,7 @@ export class DashboardService {
       const rows = await prisma.lead.findMany({
         where: {
           businessId,
+          deletedAt: null,
           createdAt: {
             gte: oldestDayStart,
             lt: newestDayEnd,
@@ -399,7 +403,7 @@ export class DashboardService {
       const newestDayEnd = days[days.length - 1]?.dayEnd || addDays(today, 1);
       const rows = await prisma.message.findMany({
         where: {
-          lead: { businessId },
+          lead: { businessId, deletedAt: null },
           createdAt: {
             gte: oldestDayStart,
             lt: newestDayEnd,
@@ -431,7 +435,7 @@ export class DashboardService {
     }
     try {
       const leads = await prisma.lead.findMany({
-        where: { businessId },
+        where: { businessId, deletedAt: null },
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {
@@ -471,12 +475,14 @@ export class DashboardService {
         prisma.lead.count({
           where: {
             businessId,
+            deletedAt: null,
             lastMessageAt: { not: null },
           },
         }),
         prisma.lead.count({
           where: {
             businessId,
+            deletedAt: null,
             lastMessageAt: { not: null },
             unreadCount: { gt: 0 },
           },

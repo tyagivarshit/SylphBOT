@@ -66,7 +66,14 @@ const QUALIFIED_STAGES = new Set(["QUALIFIED", "READY_TO_BUY", "WON"]);
 const READY_STAGES = new Set(["READY_TO_BUY", "WON"]);
 const INBOUND_SENDERS = new Set(["USER"]);
 const OUTBOUND_SENDERS = new Set(["AI", "AGENT"]);
-const ACTIVE_BOOKING_STATUSES = new Set(["RESCHEDULED", "CONFIRMED"]);
+const ACTIVE_BOOKING_STATUSES = new Set([
+  "CONFIRMED",
+  "RESCHEDULED",
+  "CHECKED_IN",
+  "COMPLETED",
+  "FOLLOWUP_BOOKED",
+  "REMINDER_SENT",
+]);
 
 const RANGE_CONFIG: Record<
   string,

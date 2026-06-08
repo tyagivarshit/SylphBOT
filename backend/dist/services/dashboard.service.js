@@ -64,7 +64,7 @@ class DashboardService {
             const now = new Date();
             const todayStart = (0, date_fns_1.startOfDay)(now);
             const monthStart = (0, date_fns_1.startOfMonth)(now);
-            const baseFilter = { businessId };
+            const baseFilter = { businessId, deletedAt: null };
             const [subscription, coreMetrics, usageOverview, timeline] = await Promise.all([
                 (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId).catch(() => null),
                 Promise.allSettled([
@@ -83,14 +83,17 @@ class DashboardService {
                     }),
                     prisma_1.default.message.count({
                         where: {
-                            lead: { businessId },
+                            lead: { businessId, deletedAt: null },
                             createdAt: { gte: todayStart },
                         },
                     }),
                     prisma_1.default.lead.count({
                         where: {
                             ...baseFilter,
-                            stage: "QUALIFIED",
+                            stage: {
+                                in: ["QUALIFIED", "READY_TO_BUY", "WON"],
+                                mode: "insensitive",
+                            },
                         },
                     }),
                 ]),
@@ -291,6 +294,7 @@ class DashboardService {
             const rows = await prisma_1.default.lead.findMany({
                 where: {
                     businessId,
+                    deletedAt: null,
                     createdAt: {
                         gte: oldestDayStart,
                         lt: newestDayEnd,
@@ -334,7 +338,7 @@ class DashboardService {
             const newestDayEnd = days[days.length - 1]?.dayEnd || (0, date_fns_1.addDays)(today, 1);
             const rows = await prisma_1.default.message.findMany({
                 where: {
-                    lead: { businessId },
+                    lead: { businessId, deletedAt: null },
                     createdAt: {
                         gte: oldestDayStart,
                         lt: newestDayEnd,
@@ -365,7 +369,7 @@ class DashboardService {
         }
         try {
             const leads = await prisma_1.default.lead.findMany({
-                where: { businessId },
+                where: { businessId, deletedAt: null },
                 orderBy: { createdAt: "desc" },
                 take: 5,
                 select: {
@@ -403,12 +407,14 @@ class DashboardService {
                 prisma_1.default.lead.count({
                     where: {
                         businessId,
+                        deletedAt: null,
                         lastMessageAt: { not: null },
                     },
                 }),
                 prisma_1.default.lead.count({
                     where: {
                         businessId,
+                        deletedAt: null,
                         lastMessageAt: { not: null },
                         unreadCount: { gt: 0 },
                     },

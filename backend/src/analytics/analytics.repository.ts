@@ -4,6 +4,7 @@ export const countLeads = (businessId: string, start: Date, end: Date) => {
   return prisma.lead.count({
     where: {
       businessId,
+      deletedAt: null,
       createdAt: { gte: start, lte: end }
     }
   });
@@ -14,7 +15,8 @@ export const countMessages = async (businessId: string, start: Date, end: Date) 
   return prisma.message.count({
     where: {
       lead: {
-        businessId
+        businessId,
+        deletedAt: null
       },
       createdAt: { gte: start, lte: end }
     }
@@ -26,7 +28,8 @@ export const countAIReplies = async (businessId: string, start: Date, end: Date)
     where: {
       sender: "AI",
       lead: {
-        businessId
+        businessId,
+        deletedAt: null
       },
       createdAt: { gte: start, lte: end }
     }
@@ -37,6 +40,9 @@ export const countBookings = (businessId: string, start: Date, end: Date) => {
   return prisma.appointment.count({
     where: {
       businessId,
+      status: {
+        in: ["CONFIRMED", "RESCHEDULED", "CHECKED_IN", "COMPLETED", "FOLLOWUP_BOOKED", "REMINDER_SENT"]
+      },
       createdAt: { gte: start, lte: end }
     }
   });
@@ -51,6 +57,7 @@ export const getLeadsGroupedByDate = async (
   const data = await prisma.lead.findMany({
     where: {
       businessId,
+      deletedAt: null,
       createdAt: { gte: start, lte: end }
     },
     select: {
@@ -73,10 +80,17 @@ export const getLeadsGroupedByDate = async (
 
 export const getFunnelStats = async (businessId: string) => {
   const [leads, interested, qualified, booked] = await Promise.all([
-    prisma.lead.count({ where: { businessId } }),
-    prisma.lead.count({ where: { businessId, stage: "INTERESTED" } }),
-    prisma.lead.count({ where: { businessId, stage: "QUALIFIED" } }),
-    prisma.appointment.count({ where: { businessId } })
+    prisma.lead.count({ where: { businessId, deletedAt: null } }),
+    prisma.lead.count({ where: { businessId, deletedAt: null, stage: { in: ["INTERESTED"], mode: "insensitive" } } }),
+    prisma.lead.count({ where: { businessId, deletedAt: null, stage: { in: ["QUALIFIED", "READY_TO_BUY", "WON"], mode: "insensitive" } } }),
+    prisma.appointment.count({
+      where: {
+        businessId,
+        status: {
+          in: ["CONFIRMED", "RESCHEDULED", "CHECKED_IN", "COMPLETED", "FOLLOWUP_BOOKED", "REMINDER_SENT"]
+        }
+      }
+    })
   ]);
 
   return { leads, interested, qualified, booked };
@@ -84,7 +98,7 @@ export const getFunnelStats = async (businessId: string) => {
 
 export const getTopSources = async (businessId: string) => {
   const leads = await prisma.lead.findMany({
-    where: { businessId },
+    where: { businessId, deletedAt: null },
     select: { platform: true }
   });
 

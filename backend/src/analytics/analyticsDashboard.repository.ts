@@ -147,6 +147,7 @@ export async function getLeadsInRange(
   return prisma.lead.findMany({
     where: {
       businessId,
+      deletedAt: null,
       createdAt: {
         gte: start,
         lte: end,
@@ -164,7 +165,7 @@ export async function getAllLeads(
   businessId: string
 ): Promise<AnalyticsLeadRecord[]> {
   return prisma.lead.findMany({
-    where: { businessId },
+    where: { businessId, deletedAt: null },
     orderBy: {
       createdAt: "desc",
     },
@@ -182,6 +183,7 @@ export async function getMessagesInRange(
     where: {
       lead: {
         businessId,
+        deletedAt: null,
       },
       createdAt: {
         gte: start,

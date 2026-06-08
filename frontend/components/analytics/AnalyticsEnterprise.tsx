@@ -352,7 +352,7 @@ function DeepDive({ dashboard }: { dashboard: AnalyticsDashboard }) {
           <div className="mt-5 space-y-3">
             {dashboard.sourcePerformance.length === 0 ? (
               <p className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                Selected range me abhi koi source data available nahi hai.
+                No source data is available for the selected range.
               </p>
             ) : (
               dashboard.sourcePerformance.map((source) => (
@@ -458,7 +458,7 @@ export default function AnalyticsEnterprise() {
   if (analyticsQuery.isError || !dashboard) {
     return (
       <div className="rounded-[28px] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">
-        Analytics dashboard load nahi ho paya. Refresh karke dobara try karo.
+        Failed to load the analytics dashboard. Please refresh and try again.
       </div>
     );
   }

@@ -131,9 +131,15 @@ apiClient.interceptors.response.use(
       const { data, ...meta } = response.data;
 
       if (isRecord(data)) {
+        const mergedMeta =
+          isRecord(data.meta) && isRecord(meta.meta)
+            ? { ...data.meta, ...meta.meta }
+            : meta.meta ?? data.meta;
+
         response.data = {
           ...data,
           ...meta,
+          ...(mergedMeta !== undefined ? { meta: mergedMeta } : {}),
         };
       } else {
         response.data = data;

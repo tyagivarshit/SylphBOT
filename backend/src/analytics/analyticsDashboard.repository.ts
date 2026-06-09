@@ -319,3 +319,19 @@ export async function getAllLeadAppointments(
     take: ANALYTICS_MAX_APPOINTMENT_ALL_ROWS,
   });
 }
+
+export async function getAllAppointments(
+  businessId: string
+): Promise<AnalyticsAppointmentRecord[]> {
+  return prisma.appointment.findMany({
+    where: {
+      businessId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: appointmentSelect,
+    take: ANALYTICS_MAX_APPOINTMENT_ALL_ROWS,
+  });
+}
+

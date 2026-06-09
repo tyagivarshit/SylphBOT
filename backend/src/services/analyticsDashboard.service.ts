@@ -12,15 +12,13 @@ import {
   AnalyticsMessageRecord,
   AnalyticsRevenueBrainEventRecord,
   AnalyticsTrackedMessageRecord,
-  getAllLeadAppointments,
   getAllLeads,
-  getAppointmentsInRange,
   getBusinessProfile,
   getConversionEventsInRange,
-  getLeadsInRange,
   getMessagesInRange,
   getRevenueBrainAnalyticsInRange,
   getTrackedMessagesInRange,
+  getAllAppointments,
 } from "../analytics/analyticsDashboard.repository";
 import { getVariantPerformance } from "./salesAgent/abTesting.service";
 import { runSalesOptimizer } from "./salesAgent/optimizer.service";
@@ -333,6 +331,18 @@ function getDaysInInterval(start: Date, end: Date) {
   return days;
 }
 
+function formatYYYYMMDD(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function formatEEE(date: Date): string {
+  return WEEKDAY_NAMES[date.getDay()];
+}
+
 function buildDailySeries(
   start: Date,
   end: Date,
@@ -355,9 +365,9 @@ function buildDailySeries(
     }
   >(
     days.map((date) => [
-      format(date, "yyyy-MM-dd"),
+      formatYYYYMMDD(date),
       {
-        date: format(date, "yyyy-MM-dd"),
+        date: formatYYYYMMDD(date),
         label: format(date, days.length > 31 ? "dd MMM" : "EEE, dd MMM"),
         leads: 0,
         qualified: 0,
@@ -370,7 +380,7 @@ function buildDailySeries(
   );
 
   for (const lead of leads) {
-    const key = format(lead.createdAt, "yyyy-MM-dd");
+    const key = formatYYYYMMDD(lead.createdAt);
     const bucket = map.get(key);
 
     if (!bucket) {
@@ -385,7 +395,7 @@ function buildDailySeries(
   }
 
   for (const message of messages) {
-    const key = format(message.createdAt, "yyyy-MM-dd");
+    const key = formatYYYYMMDD(message.createdAt);
     const bucket = map.get(key);
 
     if (!bucket) {
@@ -408,7 +418,7 @@ function buildDailySeries(
       continue;
     }
 
-    const key = format(appointment.createdAt, "yyyy-MM-dd");
+    const key = formatYYYYMMDD(appointment.createdAt);
     const bucket = map.get(key);
 
     if (bucket) {
@@ -489,6 +499,17 @@ function buildStageDistribution(leads: AnalyticsLeadRecord[]) {
     .sort((left, right) => right.count - left.count);
 }
 
+function buildStageDistributionFromCounts(counts: Map<string, number>, total: number) {
+  return Array.from(counts.entries())
+    .map(([key, count]) => ({
+      key,
+      label: STAGE_LABELS[key] || key.replace(/_/g, " "),
+      count,
+      share: percent(count, total),
+    }))
+    .sort((left, right) => right.count - left.count);
+}
+
 function buildIntentBreakdown(leads: AnalyticsLeadRecord[]) {
   const leadsWithIntent = leads.filter((lead) => Boolean(lead.intent));
   const total = leadsWithIntent.length;
@@ -528,6 +549,40 @@ function buildTemperatureBreakdown(leads: AnalyticsLeadRecord[]) {
   }));
 }
 
+function buildTemperatureBreakdownFromCounts(
+  counts: { HOT: number; WARM: number; COLD: number },
+  total: number
+) {
+  return (["HOT", "WARM", "COLD"] as const).map((bucket) => ({
+    bucket,
+    count: counts[bucket],
+    share: percent(counts[bucket], total),
+  }));
+}
+
+function buildFunnelFromCounts(counts: {
+  total: number;
+  engaged: number;
+  qualified: number;
+  ready: number;
+  booked: number;
+}) {
+  const stages = [
+    { key: "leads", label: "Leads", count: counts.total },
+    { key: "engaged", label: "Engaged", count: counts.engaged },
+    { key: "qualified", label: "Qualified", count: counts.qualified },
+    { key: "ready", label: "Ready To Buy", count: counts.ready },
+    { key: "booked", label: "Booked", count: counts.booked },
+  ];
+
+  return stages.map((stage, index) => ({
+    ...stage,
+    conversionFromTop: percent(stage.count, counts.total),
+    conversionFromPrevious:
+      index === 0 ? 100 : percent(stage.count, stages[index - 1].count),
+  }));
+}
+
 function buildWeekdayPerformance(
   leads: AnalyticsLeadRecord[],
   messages: AnalyticsMessageRecord[],
@@ -547,7 +602,7 @@ function buildWeekdayPerformance(
   );
 
   for (const lead of leads) {
-    const key = format(lead.createdAt, "EEE");
+    const key = formatEEE(lead.createdAt);
     const bucket = map.get(key);
 
     if (bucket) {
@@ -556,7 +611,7 @@ function buildWeekdayPerformance(
   }
 
   for (const message of messages) {
-    const key = format(message.createdAt, "EEE");
+    const key = formatEEE(message.createdAt);
     const bucket = map.get(key);
 
     if (bucket) {
@@ -569,7 +624,7 @@ function buildWeekdayPerformance(
       continue;
     }
 
-    const key = format(appointment.createdAt, "EEE");
+    const key = formatEEE(appointment.createdAt);
     const bucket = map.get(key);
 
     if (bucket) {
@@ -1142,28 +1197,18 @@ async function computeAnalyticsDashboardProjection(
 
   const [
     business,
-    currentLeads,
-    previousLeads,
     allLeads,
-    currentMessages,
-    previousMessages,
-    currentAppointments,
-    previousAppointments,
-    allLeadAppointments,
+    allAppointments,
+    rangeMessages,
     currentConversionEvents,
     currentRevenueBrainEvents,
     currentTrackedMessages,
     variantPerformance,
   ] = await Promise.all([
     getBusinessProfile(businessId),
-    getLeadsInRange(businessId, window.current.start, window.current.end),
-    getLeadsInRange(businessId, window.previous.start, window.previous.end),
     getAllLeads(businessId),
-    getMessagesInRange(businessId, window.current.start, window.current.end),
-    getMessagesInRange(businessId, window.previous.start, window.previous.end),
-    getAppointmentsInRange(businessId, window.current.start, window.current.end),
-    getAppointmentsInRange(businessId, window.previous.start, window.previous.end),
-    getAllLeadAppointments(businessId),
+    getAllAppointments(businessId),
+    getMessagesInRange(businessId, window.previous.start, window.current.end),
     getConversionEventsInRange(businessId, window.current.start, window.current.end),
     getRevenueBrainAnalyticsInRange(
       businessId,
@@ -1174,8 +1219,48 @@ async function computeAnalyticsDashboardProjection(
     getVariantPerformance({ businessId }),
   ]);
 
+  // Split messages
+  const currentMessages = rangeMessages.filter(
+    (m) =>
+      m.createdAt >= window.current.start &&
+      m.createdAt <= window.current.end
+  );
+  const previousMessages = rangeMessages.filter(
+    (m) =>
+      m.createdAt >= window.previous.start &&
+      m.createdAt <= window.previous.end
+  );
+
+  // Split leads
+  const currentLeads = allLeads.filter(
+    (lead) =>
+      lead.createdAt >= window.current.start &&
+      lead.createdAt <= window.current.end
+  );
+  const previousLeads = allLeads.filter(
+    (lead) =>
+      lead.createdAt >= window.previous.start &&
+      lead.createdAt <= window.previous.end
+  );
+
+  // Split appointments
+  const allLeadAppointments = allAppointments.filter(
+    (appointment) => appointment.leadId !== null
+  );
+  const currentAppointments = allAppointments.filter(
+    (appointment) =>
+      appointment.createdAt >= window.current.start &&
+      appointment.createdAt <= window.current.end
+  );
+  const previousAppointments = allAppointments.filter(
+    (appointment) =>
+      appointment.createdAt >= window.previous.start &&
+      appointment.createdAt <= window.previous.end
+  );
+
   const currentLeadIdSet = new Set(currentLeads.map((lead) => lead.id));
   const previousLeadIdSet = new Set(previousLeads.map((lead) => lead.id));
+  
   const currentLeadAppointments = allLeadAppointments.filter((appointment) =>
     appointment.leadId ? currentLeadIdSet.has(appointment.leadId) : false
   );
@@ -1186,6 +1271,7 @@ async function computeAnalyticsDashboardProjection(
   const currentLeadBookedIds = getActiveBookedLeadIds(currentLeadAppointments);
   const previousLeadBookedIds = getActiveBookedLeadIds(previousLeadAppointments);
   const allBookedLeadIds = getActiveBookedLeadIds(allLeadAppointments);
+
   const revenueEngine = buildRevenueEngineMetrics(
     currentTrackedMessages,
     currentConversionEvents,
@@ -1216,6 +1302,75 @@ async function computeAnalyticsDashboardProjection(
     previousLeads.length
   );
 
+  // Single-pass computation for allLeads metrics
+  let unreadBacklog = 0;
+  let hotLeadCount = 0;
+  let activeConversations = 0;
+  let humanTakeoverCount = 0;
+  let hotLeadsWithoutBooking = 0;
+  let unreadQualifiedLeads = 0;
+  let totalFollowups = 0;
+
+  const stageDistributionCounts = new Map<string, number>();
+
+  let temperatureHot = 0;
+  let temperatureWarm = 0;
+  let temperatureCold = 0;
+
+  let funnelEngaged = 0;
+  let funnelQualified = 0;
+  let funnelReady = 0;
+  let funnelBooked = 0;
+
+  for (let i = 0; i < allLeads.length; i++) {
+    const lead = allLeads[i];
+    const isQualified = isQualifiedLead(lead);
+    const isReady = isReadyLead(lead);
+    const tempBucket = getTemperatureBucket(lead);
+    const isBooked = allBookedLeadIds.has(lead.id);
+
+    if (lead.unreadCount > 0) {
+      unreadBacklog++;
+      if (isQualified) {
+        unreadQualifiedLeads++;
+      }
+    }
+
+    if (tempBucket === "HOT") {
+      hotLeadCount++;
+      if (!isBooked) {
+        hotLeadsWithoutBooking++;
+      }
+    }
+
+    if (lead.lastMessageAt) {
+      activeConversations++;
+      funnelEngaged++;
+    }
+
+    if (lead.isHumanActive) {
+      humanTakeoverCount++;
+    }
+
+    totalFollowups += lead.followupCount || 0;
+
+    // stage distribution
+    const stageKey = (lead.stage || "NEW").toUpperCase();
+    stageDistributionCounts.set(stageKey, (stageDistributionCounts.get(stageKey) || 0) + 1);
+
+    // temperature breakdown
+    if (tempBucket === "HOT") temperatureHot++;
+    else if (tempBucket === "WARM") temperatureWarm++;
+    else temperatureCold++;
+
+    // funnel
+    if (isQualified) funnelQualified++;
+    if (isReady) funnelReady++;
+    if (isBooked) funnelBooked++;
+  }
+
+  const averageFollowups = allLeads.length > 0 ? round(totalFollowups / allLeads.length, 1) : 0;
+
   const currentQualified = currentLeads.filter(isQualifiedLead).length;
   const previousQualified = previousLeads.filter(isQualifiedLead).length;
   const currentLeadScore = getAverageLeadScore(currentLeads);
@@ -1228,12 +1383,7 @@ async function computeAnalyticsDashboardProjection(
     previousMix.aiReplies,
     previousMix.aiReplies + previousMix.agentReplies
   );
-  const unreadBacklog = allLeads.filter((lead) => lead.unreadCount > 0).length;
-  const hotLeadCount = allLeads.filter((lead) => getTemperatureBucket(lead) === "HOT")
-    .length;
-  const activeConversations = allLeads.filter((lead) => Boolean(lead.lastMessageAt))
-    .length;
-  const humanTakeoverCount = allLeads.filter((lead) => lead.isHumanActive).length;
+  
   const qualificationRate = percent(currentQualified, currentLeads.length);
   const previousQualificationRate = percent(
     previousQualified,
@@ -1259,27 +1409,23 @@ async function computeAnalyticsDashboardProjection(
     currentLeadBookedIds
   );
 
-  const hotLeadsWithoutBooking = allLeads.filter(
-    (lead) => getTemperatureBucket(lead) === "HOT" && !allBookedLeadIds.has(lead.id)
-  ).length;
-  const unreadQualifiedLeads = allLeads.filter(
-    (lead) => isQualifiedLead(lead) && lead.unreadCount > 0
-  ).length;
-  const averageFollowups =
-    allLeads.length > 0
-      ? round(
-          allLeads.reduce((sum, lead) => sum + (lead.followupCount || 0), 0) /
-            allLeads.length,
-          1
-        )
-      : 0;
+  const funnel = buildFunnelFromCounts({
+    total: allLeads.length,
+    engaged: funnelEngaged,
+    qualified: funnelQualified,
+    ready: funnelReady,
+    booked: funnelBooked,
+  });
 
   const deepDive =
     planKey === "ELITE"
       ? {
-          stageDistribution: buildStageDistribution(allLeads),
+          stageDistribution: buildStageDistributionFromCounts(stageDistributionCounts, allLeads.length),
           intentBreakdown: buildIntentBreakdown(currentLeads),
-          temperatureBreakdown: buildTemperatureBreakdown(allLeads),
+          temperatureBreakdown: buildTemperatureBreakdownFromCounts(
+            { HOT: temperatureHot, WARM: temperatureWarm, COLD: temperatureCold },
+            allLeads.length
+          ),
           weekdayPerformance: buildWeekdayPerformance(
             currentLeads,
             currentMessages,
@@ -1384,11 +1530,11 @@ async function computeAnalyticsDashboardProjection(
           : 0,
       },
     },
-    funnel: buildFunnel(allLeads, allBookedLeadIds),
+    funnel,
     revenueEngine: {
       ...revenueEngine,
       variantPerformance,
-      funnelBreakdown: buildFunnel(allLeads, allBookedLeadIds),
+      funnelBreakdown: funnel,
     },
     revenueBrain,
     sourcePerformance,

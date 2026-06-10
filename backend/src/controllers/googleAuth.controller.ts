@@ -72,6 +72,17 @@ const pruneRefreshTokens = async (userId: string, retainCount = 4) => {
   });
 };
 
+const runDetachedGoogleAuthTask = (
+  label: string,
+  task: () => Promise<void>
+) => {
+  setImmediate(() => {
+    task().catch((error) => {
+      console.error(`[GOOGLE_AUTH_BACKGROUND_TASK_FAILED] ${label}`, error);
+    });
+  });
+};
+
 /* ======================================
 GOOGLE INIT
 ====================================== */
@@ -173,7 +184,9 @@ export const googleCallback = async (req: Request, res: Response) => {
     );
     const refreshToken = hashToken(refreshRaw);
 
-    void pruneRefreshTokens(bootstrap.user.id, 4);
+    runDetachedGoogleAuthTask("google_callback.prune_refresh_tokens", async () => {
+      await pruneRefreshTokens(bootstrap.user.id, 4);
+    });
 
     await prisma.refreshToken.create({
       data: {

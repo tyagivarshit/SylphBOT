@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.dbUsageMetrics = void 0;
 const client_1 = require("@prisma/client");
@@ -6,13 +9,37 @@ const env_1 = require("./env");
 const businessIdResolver_1 = require("../utils/businessIdResolver");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
 const mongodb_1 = require("mongodb");
+const os_1 = __importDefault(require("os"));
 let nativeMongoClient = null;
+const resolveDatabasePoolSize = () => {
+    const cpuCores = Math.max(1, os_1.default.cpus()?.length || 1);
+    const computedPoolSize = Math.min(20, cpuCores * 4);
+    const configuredPoolSize = Number(process.env.DATABASE_POOL_SIZE || process.env.PRISMA_POOL_SIZE || "");
+    if (Number.isFinite(configuredPoolSize) && configuredPoolSize > 0) {
+        return Math.min(20, Math.max(1, Math.trunc(configuredPoolSize)));
+    }
+    return computedPoolSize;
+};
+const MAX_POOL_SIZE = resolveDatabasePoolSize();
+const MIN_POOL_SIZE = 0;
+const buildDatabaseUrlWithPoolSize = (databaseUrl) => {
+    try {
+        const url = new URL(databaseUrl);
+        url.searchParams.set("maxPoolSize", String(MAX_POOL_SIZE));
+        url.searchParams.set("minPoolSize", String(MIN_POOL_SIZE));
+        return url.toString();
+    }
+    catch {
+        return databaseUrl;
+    }
+};
+const pooledDatabaseUrl = buildDatabaseUrlWithPoolSize(env_1.env.DATABASE_URL);
 const getNativeMongoDb = async () => {
     if (nativeMongoClient) {
         return nativeMongoClient.db();
     }
     try {
-        const uri = env_1.env.DATABASE_URL;
+        const uri = pooledDatabaseUrl;
         nativeMongoClient = new mongodb_1.MongoClient(uri);
         await nativeMongoClient.connect();
         return nativeMongoClient.db();
@@ -48,6 +75,11 @@ const getReadPreference = () => {
 const globalForPrisma = global;
 const basePrisma = globalForPrisma.prisma ||
     new client_1.PrismaClient({
+        datasources: {
+            db: {
+                url: pooledDatabaseUrl,
+            },
+        },
         log: ["error", "warn"],
     });
 // Enforce singleton across all environments (including production) to avoid multiple connection pools
@@ -70,8 +102,94 @@ exports.dbUsageMetrics = {
 };
 let activeConnections = 0;
 let waitingRequests = 0;
-const MAX_POOL_SIZE = 5;
-const MIN_POOL_SIZE = 0;
+const AUTH_USER_FIND_UNIQUE_L1_TTL_MS = 15000;
+const AUTH_USER_FIND_UNIQUE_L1_MAX_ENTRIES = 5000;
+const authUserFindUniqueL1Cache = new Map();
+const blockedAuthUserCacheFields = new Set([
+    "password",
+    "resetToken",
+    "resetTokenExpiry",
+    "verifyToken",
+    "verifyTokenExpiry",
+]);
+const getTimingBreakdown = (totalMs) => {
+    const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
+    const deserializeMs = Number((totalMs * 0.08).toFixed(2));
+    const connectionAcquireMs = Number(Math.max(0, totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+    return {
+        connectionAcquireMs,
+        prismaAcquireMs: connectionAcquireMs,
+        queryExecutionMs,
+        deserializeMs,
+        totalMs: Number(totalMs.toFixed(2)),
+    };
+};
+const logDbTiming = (operation, timing, extra = {}) => {
+    console.info("DB_TIMING", {
+        operation,
+        ...timing,
+        activeConnections,
+        idleConnections: Math.max(0, MAX_POOL_SIZE - activeConnections),
+        waitingRequests,
+        maxPoolSize: MAX_POOL_SIZE,
+        minPoolSize: MIN_POOL_SIZE,
+        timestamp: new Date().toISOString(),
+        instanceId: prismaInstanceId,
+        processId: process.pid,
+        workerId: getWorkerId(),
+        ...extra,
+    });
+};
+const hasBlockedAuthUserCacheField = (select) => Object.entries(select).some(([key, value]) => {
+    if (blockedAuthUserCacheFields.has(key) && value) {
+        return true;
+    }
+    if (value && typeof value === "object" && "select" in value) {
+        return hasBlockedAuthUserCacheField((value.select || {}));
+    }
+    return false;
+});
+const getAuthUserFindUniqueL1CacheKey = (args) => {
+    const where = args?.where || {};
+    const select = args?.select || null;
+    if (!select || args?.include) {
+        return null;
+    }
+    const whereKeys = Object.keys(where);
+    if (whereKeys.length !== 1 || whereKeys[0] !== "id" || typeof where.id !== "string") {
+        return null;
+    }
+    if (hasBlockedAuthUserCacheField(select)) {
+        return null;
+    }
+    return JSON.stringify({
+        where,
+        select,
+    });
+};
+const pruneAuthUserFindUniqueL1Cache = () => {
+    if (authUserFindUniqueL1Cache.size <= AUTH_USER_FIND_UNIQUE_L1_MAX_ENTRIES) {
+        return;
+    }
+    const now = Date.now();
+    for (const [key, entry] of authUserFindUniqueL1Cache.entries()) {
+        if (entry.expiresAt <= now || authUserFindUniqueL1Cache.size > AUTH_USER_FIND_UNIQUE_L1_MAX_ENTRIES) {
+            authUserFindUniqueL1Cache.delete(key);
+        }
+    }
+};
+const invalidateAuthUserFindUniqueL1Cache = (userId) => {
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) {
+        authUserFindUniqueL1Cache.clear();
+        return;
+    }
+    for (const key of authUserFindUniqueL1Cache.keys()) {
+        if (key.includes(`"id":"${normalizedUserId}"`)) {
+            authUserFindUniqueL1Cache.delete(key);
+        }
+    }
+};
 const prisma = basePrisma.$extends({
     query: {
         message: {
@@ -173,6 +291,22 @@ const prisma = basePrisma.$extends({
         },
         user: {
             async findUnique({ args, query }) {
+                const cacheKey = getAuthUserFindUniqueL1CacheKey(args);
+                if (cacheKey) {
+                    const cached = authUserFindUniqueL1Cache.get(cacheKey);
+                    if (cached && cached.expiresAt > Date.now()) {
+                        const timing = getTimingBreakdown(0);
+                        console.info("AUTH_USER_LOOKUP_BREAKDOWN", timing);
+                        logDbTiming("user.findUnique", timing, {
+                            cacheHit: true,
+                            cacheLayer: "l1_memory",
+                        });
+                        return cached.value;
+                    }
+                    if (cached) {
+                        authUserFindUniqueL1Cache.delete(cacheKey);
+                    }
+                }
                 waitingRequests++;
                 const tStart = Date.now();
                 activeConnections++;
@@ -249,14 +383,13 @@ const prisma = basePrisma.$extends({
                     }
                 });
                 // Maintain old logs for compatibility
-                const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
-                const deserializeMs = Number((totalMs * 0.08).toFixed(2));
-                const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+                const timing = getTimingBreakdown(totalMs);
                 console.info("AUTH_USER_LOOKUP_BREAKDOWN", {
-                    prismaAcquireMs,
-                    queryExecutionMs,
-                    deserializeMs,
-                    totalMs: Number(totalMs.toFixed(2)),
+                    prismaAcquireMs: timing.prismaAcquireMs,
+                    connectionAcquireMs: timing.connectionAcquireMs,
+                    queryExecutionMs: timing.queryExecutionMs,
+                    deserializeMs: timing.deserializeMs,
+                    totalMs: timing.totalMs,
                 });
                 console.info("POOL_AUDIT", {
                     activeConnections,
@@ -264,13 +397,33 @@ const prisma = basePrisma.$extends({
                     waitingRequests,
                     maxPoolSize: MAX_POOL_SIZE,
                     minPoolSize: MIN_POOL_SIZE,
-                    connectionAcquireMs: prismaAcquireMs,
+                    connectionAcquireMs: timing.connectionAcquireMs,
+                    queryExecutionMs: timing.queryExecutionMs,
+                    deserializeMs: timing.deserializeMs,
                     operation: "user.findUnique",
                     timestamp: new Date().toISOString(),
                     instanceId: prismaInstanceId,
                     processId: process.pid,
                     workerId: getWorkerId(),
                 });
+                logDbTiming("user.findUnique", timing, { cacheHit: false });
+                if (cacheKey && result) {
+                    authUserFindUniqueL1Cache.set(cacheKey, {
+                        value: result,
+                        expiresAt: Date.now() + AUTH_USER_FIND_UNIQUE_L1_TTL_MS,
+                    });
+                    pruneAuthUserFindUniqueL1Cache();
+                }
+                return result;
+            },
+            async update({ args, query }) {
+                const result = await query(args);
+                invalidateAuthUserFindUniqueL1Cache(args?.where?.id || null);
+                return result;
+            },
+            async updateMany({ args, query }) {
+                const result = await query(args);
+                invalidateAuthUserFindUniqueL1Cache();
                 return result;
             }
         },
@@ -288,9 +441,7 @@ const prisma = basePrisma.$extends({
                     activeConnections = Math.max(0, activeConnections - 1);
                 }
                 const totalMs = Date.now() - tStart;
-                const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
-                const deserializeMs = Number((totalMs * 0.08).toFixed(2));
-                const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+                const timing = getTimingBreakdown(totalMs);
                 const isAuthQuery = Boolean(requestLifecycle_1.requestStorage?.getStore()?.req);
                 if (isAuthQuery) {
                     exports.dbUsageMetrics.authQueryCount++;
@@ -306,13 +457,16 @@ const prisma = basePrisma.$extends({
                     waitingRequests,
                     maxPoolSize: MAX_POOL_SIZE,
                     minPoolSize: MIN_POOL_SIZE,
-                    connectionAcquireMs: prismaAcquireMs,
+                    connectionAcquireMs: timing.connectionAcquireMs,
+                    queryExecutionMs: timing.queryExecutionMs,
+                    deserializeMs: timing.deserializeMs,
                     operation: "refreshToken.findUnique",
                     timestamp: new Date().toISOString(),
                     instanceId: prismaInstanceId,
                     processId: process.pid,
                     workerId: getWorkerId(),
                 });
+                logDbTiming("refreshToken.findUnique", timing);
                 return result;
             },
             async create({ args, query }) {
@@ -328,9 +482,7 @@ const prisma = basePrisma.$extends({
                     activeConnections = Math.max(0, activeConnections - 1);
                 }
                 const totalMs = Date.now() - tStart;
-                const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
-                const deserializeMs = Number((totalMs * 0.08).toFixed(2));
-                const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+                const timing = getTimingBreakdown(totalMs);
                 const isAuthQuery = Boolean(requestLifecycle_1.requestStorage?.getStore()?.req);
                 if (isAuthQuery) {
                     exports.dbUsageMetrics.authQueryCount++;
@@ -346,13 +498,16 @@ const prisma = basePrisma.$extends({
                     waitingRequests,
                     maxPoolSize: MAX_POOL_SIZE,
                     minPoolSize: MIN_POOL_SIZE,
-                    connectionAcquireMs: prismaAcquireMs,
+                    connectionAcquireMs: timing.connectionAcquireMs,
+                    queryExecutionMs: timing.queryExecutionMs,
+                    deserializeMs: timing.deserializeMs,
                     operation: "refreshToken.create",
                     timestamp: new Date().toISOString(),
                     instanceId: prismaInstanceId,
                     processId: process.pid,
                     workerId: getWorkerId(),
                 });
+                logDbTiming("refreshToken.create", timing);
                 return result;
             },
             async deleteMany({ args, query }) {
@@ -368,9 +523,7 @@ const prisma = basePrisma.$extends({
                     activeConnections = Math.max(0, activeConnections - 1);
                 }
                 const totalMs = Date.now() - tStart;
-                const queryExecutionMs = Number(Math.min(1.0, totalMs * 0.10).toFixed(2));
-                const deserializeMs = Number((totalMs * 0.08).toFixed(2));
-                const prismaAcquireMs = Number((totalMs - queryExecutionMs - deserializeMs).toFixed(2));
+                const timing = getTimingBreakdown(totalMs);
                 const isAuthQuery = Boolean(requestLifecycle_1.requestStorage?.getStore()?.req);
                 if (isAuthQuery) {
                     exports.dbUsageMetrics.authQueryCount++;
@@ -386,13 +539,16 @@ const prisma = basePrisma.$extends({
                     waitingRequests,
                     maxPoolSize: MAX_POOL_SIZE,
                     minPoolSize: MIN_POOL_SIZE,
-                    connectionAcquireMs: prismaAcquireMs,
+                    connectionAcquireMs: timing.connectionAcquireMs,
+                    queryExecutionMs: timing.queryExecutionMs,
+                    deserializeMs: timing.deserializeMs,
                     operation: "refreshToken.deleteMany",
                     timestamp: new Date().toISOString(),
                     instanceId: prismaInstanceId,
                     processId: process.pid,
                     workerId: getWorkerId(),
                 });
+                logDbTiming("refreshToken.deleteMany", timing);
                 return result;
             }
         }

@@ -15,14 +15,11 @@ const countLeads = (businessId, start, end) => {
     });
 };
 exports.countLeads = countLeads;
-// 🔥 messages → via lead relation
+// 🔥 messages → direct businessId lookup
 const countMessages = async (businessId, start, end) => {
     return prisma_1.default.message.count({
         where: {
-            lead: {
-                businessId,
-                deletedAt: null
-            },
+            businessId,
             createdAt: { gte: start, lte: end }
         }
     });
@@ -32,10 +29,7 @@ const countAIReplies = async (businessId, start, end) => {
     return prisma_1.default.message.count({
         where: {
             sender: "AI",
-            lead: {
-                businessId,
-                deletedAt: null
-            },
+            businessId,
             createdAt: { gte: start, lte: end }
         }
     });

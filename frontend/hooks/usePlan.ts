@@ -7,6 +7,7 @@ import { normalizePlan } from "@/lib/featureGuard"
 import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry"
 
 const BILLING_FETCH_TIMEOUT_MS = 7_000;
+export const BILLING_PLAN_STALE_TIME_MS = 5 * 60 * 1000;
 const BILLING_POLL_ACTIVE_MS = 75_000;
 const BILLING_POLL_IDLE_MS = 120_000;
 const BILLING_POLL_MAX_BACKOFF_MS = 300_000;
@@ -95,12 +96,16 @@ export function usePlan() {
 
   const queryClient = useQueryClient()
 
-  const [mounted, setMounted] = useState(false)
-  const [localPlan, setLocalPlan] = useState<string | null>(null)
-  const [localStatus, setLocalStatus] = useState<string | null>(null)
+  const [localPlan, setLocalPlan] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null
+    return localStorage.getItem("lkv-billing-plan")
+  })
+  const [localStatus, setLocalStatus] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null
+    return localStorage.getItem("lkv-billing-status")
+  })
 
   useEffect(() => {
-    setMounted(true)
     if (typeof window !== "undefined") {
       const savedPlan = localStorage.getItem("lkv-billing-plan")
       const savedStatus = localStorage.getItem("lkv-billing-status")
@@ -118,7 +123,7 @@ export function usePlan() {
     queryKey: ["billing-plan"],
     queryFn: fetchBillingPlanState,
 
-    staleTime: 1000 * 20,
+    staleTime: BILLING_PLAN_STALE_TIME_MS,
     refetchOnWindowFocus: false,
     refetchInterval: (query) => getBillingPollIntervalMs(query),
     refetchIntervalInBackground: false,
@@ -154,17 +159,17 @@ export function usePlan() {
   // Determine final plan and status
   const plan = data
     ? resolvedPlan
-    : mounted && localPlan
+    : localPlan
     ? localPlan
     : "FREE_LOCKED"
 
   const status = data
     ? rawStatus
-    : mounted && localStatus
+    : localStatus
     ? localStatus
     : "INACTIVE"
 
-  const loading = isLoading && (!mounted || !localPlan)
+  const loading = isLoading && !localPlan
 
   /* 🔥 FORCE REFRESH (AFTER CHECKOUT) */
   const refreshPlan = async () => {

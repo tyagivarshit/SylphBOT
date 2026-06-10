@@ -12,7 +12,10 @@ import { useUpgrade } from "@/app/(dashboard)/layout";
 import { useAuth } from "@/context/AuthContext";
 import { useProgressiveHydration } from "@/hooks/useProgressiveHydration";
 import { EmptyState, RetryState, SkeletonCard } from "@/components/ui/feedback";
-import { fetchBillingPlanState } from "@/hooks/usePlan";
+import {
+  BILLING_PLAN_STALE_TIME_MS,
+  fetchBillingPlanState,
+} from "@/hooks/usePlan";
 
 type DashboardValue = number | string;
 
@@ -180,7 +183,7 @@ export default function DashboardPage() {
         .fetchQuery({
           queryKey: ["billing-plan"],
           queryFn: fetchBillingPlanState,
-          staleTime: 20_000,
+          staleTime: BILLING_PLAN_STALE_TIME_MS,
         })
         .then((billingData) => {
           if (!billingData) {

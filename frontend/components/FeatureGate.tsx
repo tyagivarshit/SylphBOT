@@ -24,16 +24,8 @@ feature: Feature
 children: ReactNode
 }){
 
-  const { plan, loading } = usePlan()
+  const { plan } = usePlan()
   const { openUpgrade } = useUpgrade()
-
-  if (loading) {
-    return (
-      <div className="opacity-0 pointer-events-none transition-opacity duration-200">
-        {children}
-      </div>
-    )
-  }
 
   const allowed = hasFeature(plan, feature)
 

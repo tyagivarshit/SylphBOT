@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import LeadsChart from "@/components/charts/LeadsCharts";
@@ -12,6 +12,7 @@ import { useUpgrade } from "@/app/(dashboard)/layout";
 import { useAuth } from "@/context/AuthContext";
 import { useProgressiveHydration } from "@/hooks/useProgressiveHydration";
 import { EmptyState, RetryState, SkeletonCard } from "@/components/ui/feedback";
+import { fetchBillingPlanState } from "@/hooks/usePlan";
 
 type DashboardValue = number | string;
 
@@ -50,6 +51,9 @@ const EMPTY_CONVERSATION_STATS: ConversationStats = {
   resolved: 0,
 };
 
+const BACKGROUND_STARTUP_DELAY_MS = 2_500;
+const BILLING_BOOTSTRAP_STORAGE_KEY = "lkv-billing-bootstrap-snapshot";
+
 const parseConversationStats = (value: unknown): ConversationStats => {
   if (!value || typeof value !== "object") {
     return EMPTY_CONVERSATION_STATS;
@@ -67,8 +71,10 @@ const parseConversationStats = (value: unknown): ConversationStats => {
 export default function DashboardPage() {
   const { user, lifecycleState } = useAuth();
   const { openUpgrade } = useUpgrade();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const deferredTriggerRef = useRef<HTMLDivElement | null>(null);
+  const [backgroundStartupReady, setBackgroundStartupReady] = useState(false);
 
   const isHydrated = lifecycleState === "hydrated" || lifecycleState === "authenticated";
   const authStable = Boolean(user) && isHydrated;
@@ -100,6 +106,10 @@ export default function DashboardPage() {
 
   const workspaceKey = user?.businessId || user?.workspace?.id || user?.id || "none";
 
+  useEffect(() => {
+    setBackgroundStartupReady(false);
+  }, [authStable, workspaceKey]);
+
   const statsQuery = useQuery({
     queryKey: ["dashboard", "critical", "stats", workspaceKey],
     enabled: authStable,
@@ -122,11 +132,14 @@ export default function DashboardPage() {
   });
 
   const criticalSettled = statsQuery.isSuccess || statsQuery.isError;
+  const dashboardInteractive = authStable && statsQuery.isSuccess;
 
   const conversationQuery = useQuery({
     queryKey: ["dashboard", "important", "conversations", workspaceKey],
-    enabled: authStable,
+    enabled: authStable && backgroundStartupReady,
     staleTime: 45_000,
+    refetchInterval: 45_000,
+    refetchIntervalInBackground: false,
     retry: 1,
     queryFn: async () => {
       const response = await getActiveConversations();
@@ -142,7 +155,7 @@ export default function DashboardPage() {
     },
   });
 
-  const importantSettled = conversationQuery.isSuccess || conversationQuery.isError;
+  const importantSettled = true;
 
   const {
     canLoadDeferred,
@@ -155,32 +168,41 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
-    if (!importantSettled) {
+    if (!dashboardInteractive) {
       return;
     }
 
-    const target = deferredTriggerRef.current;
-    if (!target || typeof IntersectionObserver === "undefined") {
-      requestDeferredHydration("dashboard_deferred_fallback");
-      return;
-    }
+    const timer = window.setTimeout(() => {
+      setBackgroundStartupReady(true);
+      requestDeferredHydration("dashboard_background_startup_delay");
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const becameVisible = entries.some((entry) => entry.isIntersecting);
-        if (!becameVisible) {
-          return;
-        }
+      void queryClient
+        .fetchQuery({
+          queryKey: ["billing-plan"],
+          queryFn: fetchBillingPlanState,
+          staleTime: 20_000,
+        })
+        .then((billingData) => {
+          if (!billingData) {
+            return;
+          }
 
-        requestDeferredHydration("dashboard_deferred_visible");
-        observer.disconnect();
-      },
-      { rootMargin: "180px 0px" }
-    );
+          try {
+            localStorage.setItem(
+              BILLING_BOOTSTRAP_STORAGE_KEY,
+              JSON.stringify({
+                billingData,
+                plansData: null,
+                updatedAt: Date.now(),
+              })
+            );
+          } catch {}
+        })
+        .catch(() => undefined);
+    }, BACKGROUND_STARTUP_DELAY_MS);
 
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [importantSettled, requestDeferredHydration]);
+    return () => window.clearTimeout(timer);
+  }, [dashboardInteractive, queryClient, requestDeferredHydration]);
 
   useEffect(() => {
     if (!canLoadDeferred) {

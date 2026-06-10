@@ -63,7 +63,7 @@ const getBillingPollIntervalMs = (query: unknown) => {
 
 /* ================= FETCH ================= */
 
-const fetchBilling = async () => {
+export const fetchBillingPlanState = async () => {
   const response = await apiFetch<{
     billing?: {
       status?: string;
@@ -116,7 +116,7 @@ export function usePlan() {
     refetch
   } = useQuery({
     queryKey: ["billing-plan"],
-    queryFn: fetchBilling,
+    queryFn: fetchBillingPlanState,
 
     staleTime: 1000 * 20,
     refetchOnWindowFocus: false,

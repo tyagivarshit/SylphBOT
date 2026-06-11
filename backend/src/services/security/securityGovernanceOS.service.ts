@@ -335,6 +335,50 @@ const logSessionLedgerMetric = (
   });
 };
 
+const SECURITY_GOVERNANCE_FILE = "backend/src/services/security/securityGovernanceOS.service.ts";
+
+const logFeatureGateAwaitTrace = (
+  event: string,
+  fields: Record<string, unknown>
+) => {
+  console.info("FEATURE_GATE_AWAIT_TRACE", {
+    event,
+    fileName: SECURITY_GOVERNANCE_FILE,
+    redisOps: "none",
+    ...fields,
+  });
+};
+
+const traceFeatureGateAwait = async <T>(
+  functionName: string,
+  fields: Record<string, unknown>,
+  work: () => Promise<T>
+): Promise<T> => {
+  const startedAt = Date.now();
+  logFeatureGateAwaitTrace("start", {
+    functionName,
+    ...fields,
+  });
+
+  try {
+    const result = await work();
+    logFeatureGateAwaitTrace("end", {
+      functionName,
+      durationMs: Date.now() - startedAt,
+      ...fields,
+    });
+    return result;
+  } catch (error) {
+    logFeatureGateAwaitTrace("error", {
+      functionName,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+      ...fields,
+    });
+    throw error;
+  }
+};
+
 const scheduleSessionLedgerAsyncUpdate = (input: {
   sessionKey: string;
   businessId?: string | null;
@@ -855,15 +899,25 @@ const writePolicyLedger = async (input: {
   store.policyLedger.set(row.policyVersionKey, row);
   bumpAuthority("PolicyLedger");
 
-  await withDbMirrorStrict(() =>
-    db.policyLedger.create({
-      data: {
-        ...row,
-        rules: row.rules,
-        approvalFlow: row.approvalFlow,
-        metadata: row.metadata,
-      },
-    })
+  await traceFeatureGateAwait(
+    "writePolicyLedger:policyLedger.create",
+    {
+      cacheStatus: "none",
+      dbQueries: [`policyLedger.create(${row.policyVersionKey})`],
+      policyVersionKey: row.policyVersionKey,
+      policyDomain: row.policyDomain,
+    },
+    () =>
+      withDbMirrorStrict(() =>
+        db.policyLedger.create({
+          data: {
+            ...row,
+            rules: row.rules,
+            approvalFlow: row.approvalFlow,
+            metadata: row.metadata,
+          },
+        })
+      )
   );
 
   return row;
@@ -909,14 +963,23 @@ export const bootstrapSecurityGovernanceOS = async () => {
       bumpAuthority("RoleLedger");
 
       const updateData = toCanonicalUpdateData(row);
-      await withDbMirrorStrict(() =>
-        db.roleLedger.upsert({
-          where: {
-            roleKey,
-          },
-          update: updateData,
-          create: row,
-        })
+      await traceFeatureGateAwait(
+        "bootstrapSecurityGovernanceOS:roleLedger.upsert",
+        {
+          cacheStatus: "bootstrap_miss",
+          dbQueries: [`roleLedger.upsert(${roleKey})`],
+          roleKey,
+        },
+        () =>
+          withDbMirrorStrict(() =>
+            db.roleLedger.upsert({
+              where: {
+                roleKey,
+              },
+              update: updateData,
+              create: row,
+            })
+          )
       );
     }
 
@@ -944,25 +1007,43 @@ export const bootstrapSecurityGovernanceOS = async () => {
       bumpAuthority("PermissionLedger");
 
       const updateData = toCanonicalUpdateData(row);
-      await withDbMirrorStrict(() =>
-        db.permissionLedger.upsert({
-          where: {
-            permissionKey,
-          },
-          update: updateData,
-          create: row,
-        })
+      await traceFeatureGateAwait(
+        "bootstrapSecurityGovernanceOS:permissionLedger.upsert",
+        {
+          cacheStatus: "bootstrap_miss",
+          dbQueries: [`permissionLedger.upsert(${permissionKey})`],
+          permissionKey,
+        },
+        () =>
+          withDbMirrorStrict(() =>
+            db.permissionLedger.upsert({
+              where: {
+                permissionKey,
+              },
+              update: updateData,
+              create: row,
+            })
+          )
       );
     }
 
     for (const policy of DEFAULT_POLICIES) {
-      await writePolicyLedger({
-        policyDomain: policy.domain,
-        rules: policy.rules,
-        status: "APPROVED",
-        isActive: true,
-        createdBy: "system_bootstrap",
-      });
+      await traceFeatureGateAwait(
+        "bootstrapSecurityGovernanceOS:writePolicyLedger",
+        {
+          cacheStatus: "bootstrap_miss",
+          dbQueries: [`policyLedger.create(${policy.domain})`],
+          policyDomain: policy.domain,
+        },
+        () =>
+          writePolicyLedger({
+            policyDomain: policy.domain,
+            rules: policy.rules,
+            status: "APPROVED",
+            isActive: true,
+            createdBy: "system_bootstrap",
+          })
+      );
 
       const accessPolicyRow = {
         policyKey: `access:${policy.domain.toLowerCase()}:global:v1`,
@@ -988,22 +1069,31 @@ export const bootstrapSecurityGovernanceOS = async () => {
       bumpAuthority("AccessPolicyLedger");
 
       const updateData = toCanonicalUpdateData(accessPolicyRow);
-      await withDbMirrorStrict(() =>
-        db.accessPolicyLedger.upsert({
-          where: {
-            policyKey: accessPolicyRow.policyKey,
-          },
-          update: {
-            ...updateData,
-            ruleSet: accessPolicyRow.ruleSet,
-            approvalFlow: accessPolicyRow.approvalFlow,
-          },
-          create: {
-            ...accessPolicyRow,
-            ruleSet: accessPolicyRow.ruleSet,
-            approvalFlow: accessPolicyRow.approvalFlow,
-          },
-        })
+      await traceFeatureGateAwait(
+        "bootstrapSecurityGovernanceOS:accessPolicyLedger.upsert",
+        {
+          cacheStatus: "bootstrap_miss",
+          dbQueries: [`accessPolicyLedger.upsert(${accessPolicyRow.policyKey})`],
+          policyKey: accessPolicyRow.policyKey,
+        },
+        () =>
+          withDbMirrorStrict(() =>
+            db.accessPolicyLedger.upsert({
+              where: {
+                policyKey: accessPolicyRow.policyKey,
+              },
+              update: {
+                ...updateData,
+                ruleSet: accessPolicyRow.ruleSet,
+                approvalFlow: accessPolicyRow.approvalFlow,
+              },
+              create: {
+                ...accessPolicyRow,
+                ruleSet: accessPolicyRow.ruleSet,
+                approvalFlow: accessPolicyRow.approvalFlow,
+              },
+            })
+          )
       );
     }
 
@@ -1031,14 +1121,23 @@ export const bootstrapSecurityGovernanceOS = async () => {
     bumpAuthority("RetentionPolicyLedger");
 
     const retentionUpdate = toCanonicalUpdateData(retentionRow);
-    await withDbMirrorStrict(() =>
-      db.retentionPolicyLedger.upsert({
-        where: {
-          retentionPolicyKey: retentionRow.retentionPolicyKey,
-        },
-        update: retentionUpdate,
-        create: retentionRow,
-      })
+    await traceFeatureGateAwait(
+      "bootstrapSecurityGovernanceOS:retentionPolicyLedger.upsert",
+      {
+        cacheStatus: "bootstrap_miss",
+        dbQueries: [`retentionPolicyLedger.upsert(${retentionRow.retentionPolicyKey})`],
+        retentionPolicyKey: retentionRow.retentionPolicyKey,
+      },
+      () =>
+        withDbMirrorStrict(() =>
+          db.retentionPolicyLedger.upsert({
+            where: {
+              retentionPolicyKey: retentionRow.retentionPolicyKey,
+            },
+            update: retentionUpdate,
+            create: retentionRow,
+          })
+        )
     );
 
     for (const controlType of [
@@ -1068,14 +1167,23 @@ export const bootstrapSecurityGovernanceOS = async () => {
       bumpAuthority("ComplianceLedger");
 
       const updateData = toCanonicalUpdateData(row);
-      await withDbMirrorStrict(() =>
-        db.complianceLedger.upsert({
-          where: {
-            complianceKey,
-          },
-          update: updateData,
-          create: row,
-        })
+      await traceFeatureGateAwait(
+        "bootstrapSecurityGovernanceOS:complianceLedger.upsert",
+        {
+          cacheStatus: "bootstrap_miss",
+          dbQueries: [`complianceLedger.upsert(${complianceKey})`],
+          complianceKey,
+        },
+        () =>
+          withDbMirrorStrict(() =>
+            db.complianceLedger.upsert({
+              where: {
+                complianceKey,
+              },
+              update: updateData,
+              create: row,
+            })
+          )
       );
     }
 
@@ -1180,32 +1288,41 @@ export const assertTenantIsolation = async (input: {
   getStore().tenantIsolationLedger.set(isolationKey, row);
   bumpAuthority("TenantIsolationLedger");
 
-  await mirrorCanonicalUpsert({
-    upsert: () =>
-      db.tenantIsolationLedger.upsert({
-        where: {
-          isolationKey,
-        },
-        update: {
-          businessId: row.businessId,
-          tenantId: row.tenantId,
-          subsystem: row.subsystem,
-          actorTenantId: row.actorTenantId,
-          resourceTenantId: row.resourceTenantId,
-          verdict: row.verdict,
-          bleedDetected: row.bleedDetected,
-          reason: row.reason,
-          metadata: row.metadata,
-        },
-        create: row,
-      }),
-    find: () =>
-      db.tenantIsolationLedger.findUnique({
-        where: {
-          isolationKey,
-        },
-      }),
-  });
+  await traceFeatureGateAwait(
+    "assertTenantIsolation:tenantIsolationLedger.upsert",
+    {
+      cacheStatus: "none",
+      dbQueries: [`tenantIsolationLedger.upsert(${isolationKey})`],
+      isolationKey,
+    },
+    () =>
+      mirrorCanonicalUpsert({
+        upsert: () =>
+          db.tenantIsolationLedger.upsert({
+            where: {
+              isolationKey,
+            },
+            update: {
+              businessId: row.businessId,
+              tenantId: row.tenantId,
+              subsystem: row.subsystem,
+              actorTenantId: row.actorTenantId,
+              resourceTenantId: row.resourceTenantId,
+              verdict: row.verdict,
+              bleedDetected: row.bleedDetected,
+              reason: row.reason,
+              metadata: row.metadata,
+            },
+            create: row,
+          }),
+        find: () =>
+          db.tenantIsolationLedger.findUnique({
+            where: {
+              isolationKey,
+            },
+          }),
+      })
+  );
 
   if (mismatch) {
     if (isCritical) {
@@ -1506,16 +1623,27 @@ export const appendAuthEvent = async (input: {
   getStore().authEventLedger.set(eventKey, row);
   bumpAuthority("AuthEventLedger");
 
-  await withDbMirror(() =>
-    db.authEventLedger.upsert({
-      where: {
-        eventKey,
-      },
-      update: {
-        eventKey,
-      },
-      create: row,
-    })
+  await traceFeatureGateAwait(
+    "appendAuthEvent:authEventLedger.upsert",
+    {
+      cacheStatus: "none",
+      dbQueries: [`authEventLedger.upsert(${eventKey})`],
+      eventKey,
+      action: row.action,
+      outcome: row.outcome,
+    },
+    () =>
+      withDbMirror(() =>
+        db.authEventLedger.upsert({
+          where: {
+            eventKey,
+          },
+          update: {
+            eventKey,
+          },
+          create: row,
+        })
+      )
   );
 
   return row;
@@ -2464,7 +2592,31 @@ const matchesScopedOverride = (
 };
 
 export const authorizeAccess = async (request: AccessRequest) => {
-  await bootstrapSecurityGovernanceOS();
+  const bootstrapCacheStatus = getStore().bootstrappedAt
+    ? "hit"
+    : bootstrapSecurityGovernanceInFlight
+      ? "deduped_miss"
+      : "miss";
+  await traceFeatureGateAwait(
+    "authorizeAccess:bootstrapSecurityGovernanceOS",
+    {
+      action: request.action,
+      route: toRecord(request.metadata).route || null,
+      cacheStatus: bootstrapCacheStatus,
+      dbQueries:
+        bootstrapCacheStatus === "hit"
+          ? []
+          : [
+              "roleLedger.upsert x default roles",
+              "permissionLedger.upsert x unique permissions",
+              "policyLedger.create x default policies",
+              "accessPolicyLedger.upsert x default policies",
+              "retentionPolicyLedger.upsert x1",
+              "complianceLedger.upsert x default controls",
+            ],
+    },
+    () => bootstrapSecurityGovernanceOS()
+  );
 
   const store = getStore();
   store.invokeCount += 1;
@@ -2485,19 +2637,29 @@ export const authorizeAccess = async (request: AccessRequest) => {
     .sort((left, right) => Number(right.priority || 0) - Number(left.priority || 0))[0];
 
   if (override && String(override.action || "").toUpperCase() === "DENY") {
-    await appendAuthEvent({
-      businessId,
-      tenantId,
-      sessionKey: request.sessionKey || null,
-      actorId,
-      actorType,
-      action,
-      outcome: "DENIED",
-      reason: "security_override_deny",
-      metadata: {
-        overrideKey: override.overrideKey,
+    await traceFeatureGateAwait(
+      "authorizeAccess:appendAuthEvent:security_override_deny",
+      {
+        action,
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["authEventLedger.upsert"],
       },
-    });
+      () =>
+        appendAuthEvent({
+          businessId,
+          tenantId,
+          sessionKey: request.sessionKey || null,
+          actorId,
+          actorType,
+          action,
+          outcome: "DENIED",
+          reason: "security_override_deny",
+          metadata: {
+            overrideKey: override.overrideKey,
+          },
+        })
+    );
     return {
       allowed: false,
       reason: "security_override_deny",
@@ -2506,73 +2668,113 @@ export const authorizeAccess = async (request: AccessRequest) => {
   }
 
   if (tenantId && isTenantFrozen(tenantId) && actorType !== "SYSTEM") {
-    await appendAuthEvent({
-      businessId,
-      tenantId,
-      sessionKey: request.sessionKey || null,
-      actorId,
-      actorType,
-      action,
-      outcome: "DENIED",
-      reason: "tenant_frozen",
-    });
+    await traceFeatureGateAwait(
+      "authorizeAccess:appendAuthEvent:tenant_frozen",
+      {
+        action,
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["authEventLedger.upsert"],
+      },
+      () =>
+        appendAuthEvent({
+          businessId,
+          tenantId,
+          sessionKey: request.sessionKey || null,
+          actorId,
+          actorType,
+          action,
+          outcome: "DENIED",
+          reason: "tenant_frozen",
+        })
+    );
     return {
       allowed: false,
       reason: "tenant_frozen",
     };
   }
 
-  const isolation = await assertTenantIsolation({
-    businessId,
-    tenantId,
-    actorTenantId: tenantId,
-    resourceTenantId: request.resourceTenantId || tenantId,
-    subsystem: "ACCESS",
-    reason: "authorization_path",
-    metadata: {
+  const isolation = await traceFeatureGateAwait(
+    "authorizeAccess:assertTenantIsolation",
+    {
       action,
+      route: toRecord(request.metadata).route || null,
+      cacheStatus: "none",
+      dbQueries: ["tenantIsolationLedger.upsert"],
     },
-  });
+    () =>
+      assertTenantIsolation({
+        businessId,
+        tenantId,
+        actorTenantId: tenantId,
+        resourceTenantId: request.resourceTenantId || tenantId,
+        subsystem: "ACCESS",
+        reason: "authorization_path",
+        metadata: {
+          action,
+        },
+      })
+  );
 
   if (!isolation.allowed) {
-    await appendAuthEvent({
-      businessId,
-      tenantId,
-      sessionKey: request.sessionKey || null,
-      actorId,
-      actorType,
-      action,
-      outcome: "DENIED",
-      reason: isolation.reason,
-    });
+    await traceFeatureGateAwait(
+      "authorizeAccess:appendAuthEvent:isolation_denied",
+      {
+        action,
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["authEventLedger.upsert"],
+      },
+      () =>
+        appendAuthEvent({
+          businessId,
+          tenantId,
+          sessionKey: request.sessionKey || null,
+          actorId,
+          actorType,
+          action,
+          outcome: "DENIED",
+          reason: isolation.reason,
+        })
+    );
     return {
       allowed: false,
       reason: isolation.reason,
     };
   }
 
-  await attestInfraIsolation({
-    businessId,
-    tenantId,
-    source: "ACCESS_RUNTIME",
-    checks: {
-      db: true,
-      cache: true,
-      queue: true,
-      logs: true,
-      files: true,
-      tokens: !String(request.sessionKey || "").trim()
-        ? true
-        : !getStore().revokedSessionKeys.has(String(request.sessionKey || "").trim()),
-      providers: true,
-      analytics: true,
-      traces: true,
-    },
-    metadata: {
+  await traceFeatureGateAwait(
+    "authorizeAccess:attestInfraIsolation",
+    {
       action,
-      actorType,
+      route: toRecord(request.metadata).route || null,
+      cacheStatus: "none",
+      dbQueries: ["isolationAttestationLedger.create"],
     },
-  }).catch(() => undefined);
+    () =>
+      attestInfraIsolation({
+        businessId,
+        tenantId,
+        source: "ACCESS_RUNTIME",
+        checks: {
+          db: true,
+          cache: true,
+          queue: true,
+          logs: true,
+          files: true,
+          tokens: !String(request.sessionKey || "").trim()
+            ? true
+            : !getStore().revokedSessionKeys.has(String(request.sessionKey || "").trim()),
+          providers: true,
+          analytics: true,
+          traces: true,
+        },
+        metadata: {
+          action,
+          actorType,
+        },
+      }).catch(() => undefined)
+  );
 
   const directPermissions = toStringList(request.permissions);
   const rolePermissions = resolveRolePermissions(role);
@@ -2584,19 +2786,29 @@ export const authorizeAccess = async (request: AccessRequest) => {
       toStringList(accessRules.servicePrincipals).includes(actorType));
 
   if (!baseAllowed) {
-    await appendAuthEvent({
-      businessId,
-      tenantId,
-      sessionKey: request.sessionKey || null,
-      actorId,
-      actorType,
-      action,
-      outcome: "DENIED",
-      reason: "permission_denied",
-      metadata: {
-        role,
+    await traceFeatureGateAwait(
+      "authorizeAccess:appendAuthEvent:permission_denied",
+      {
+        action,
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["authEventLedger.upsert"],
       },
-    });
+      () =>
+        appendAuthEvent({
+          businessId,
+          tenantId,
+          sessionKey: request.sessionKey || null,
+          actorId,
+          actorType,
+          action,
+          outcome: "DENIED",
+          reason: "permission_denied",
+          metadata: {
+            role,
+          },
+        })
+    );
     return {
       allowed: false,
       reason: "permission_denied",
@@ -2608,21 +2820,31 @@ export const authorizeAccess = async (request: AccessRequest) => {
   const hour = requestTime.getUTCHours();
   const inHours = hour >= startHour && hour <= endHour;
   if (!inHours) {
-    await appendAuthEvent({
-      businessId,
-      tenantId,
-      sessionKey: request.sessionKey || null,
-      actorId,
-      actorType,
-      action,
-      outcome: "DENIED",
-      reason: "outside_allowed_hours",
-      metadata: {
-        hour,
-        startHour,
-        endHour,
+    await traceFeatureGateAwait(
+      "authorizeAccess:appendAuthEvent:outside_allowed_hours",
+      {
+        action,
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["authEventLedger.upsert"],
       },
-    });
+      () =>
+        appendAuthEvent({
+          businessId,
+          tenantId,
+          sessionKey: request.sessionKey || null,
+          actorId,
+          actorType,
+          action,
+          outcome: "DENIED",
+          reason: "outside_allowed_hours",
+          metadata: {
+            hour,
+            startHour,
+            endHour,
+          },
+        })
+    );
     return {
       allowed: false,
       reason: "outside_allowed_hours",
@@ -2638,16 +2860,26 @@ export const authorizeAccess = async (request: AccessRequest) => {
       availableScopes.has(String(scope).toUpperCase())
     );
     if (!matchesScope) {
-      await appendAuthEvent({
-        businessId,
-        tenantId,
-        sessionKey: request.sessionKey || null,
-        actorId,
-        actorType,
-        action,
-        outcome: "DENIED",
-        reason: "scope_denied",
-      });
+      await traceFeatureGateAwait(
+        "authorizeAccess:appendAuthEvent:scope_denied",
+        {
+          action,
+          route: toRecord(request.metadata).route || null,
+          cacheStatus: "none",
+          dbQueries: ["authEventLedger.upsert"],
+        },
+        () =>
+          appendAuthEvent({
+            businessId,
+            tenantId,
+            sessionKey: request.sessionKey || null,
+            actorId,
+            actorType,
+            action,
+            outcome: "DENIED",
+            reason: "scope_denied",
+          })
+      );
       return {
         allowed: false,
         reason: "scope_denied",
@@ -2659,24 +2891,44 @@ export const authorizeAccess = async (request: AccessRequest) => {
     toStringList(accessRules.sensitiveMfaActions)
   );
   if (sensitiveMfaActions.has(action)) {
-    const mfa = await assertMfaRequirement({
-      ...request,
-      businessId,
-      tenantId,
-      actorId,
-      actorType,
-    });
-    if (!mfa.allowed) {
-      await appendAuthEvent({
-        businessId,
-        tenantId,
-        sessionKey: request.sessionKey || null,
-        actorId,
-        actorType,
+    const mfa = await traceFeatureGateAwait(
+      "authorizeAccess:assertMfaRequirement",
+      {
         action,
-        outcome: "DENIED",
-        reason: mfa.reason,
-      });
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["mfaChallengeLedger/write depending on state"],
+      },
+      () =>
+        assertMfaRequirement({
+          ...request,
+          businessId,
+          tenantId,
+          actorId,
+          actorType,
+        })
+    );
+    if (!mfa.allowed) {
+      await traceFeatureGateAwait(
+        "authorizeAccess:appendAuthEvent:mfa_denied",
+        {
+          action,
+          route: toRecord(request.metadata).route || null,
+          cacheStatus: "none",
+          dbQueries: ["authEventLedger.upsert"],
+        },
+        () =>
+          appendAuthEvent({
+            businessId,
+            tenantId,
+            sessionKey: request.sessionKey || null,
+            actorId,
+            actorType,
+            action,
+            outcome: "DENIED",
+            reason: mfa.reason,
+          })
+      );
       return {
         allowed: false,
         reason: mfa.reason,
@@ -2688,23 +2940,43 @@ export const authorizeAccess = async (request: AccessRequest) => {
     toStringList(accessRules.escalationRequiredActions)
   );
   if (escalationRequiredActions.has(action)) {
-    const consumed = await consumeEscalationToken({
-      approvalToken: request.approvalToken || null,
-      action,
-      actorId,
-    });
+    const consumed = await traceFeatureGateAwait(
+      "authorizeAccess:consumeEscalationToken",
+      {
+        action,
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["privilegeEscalationLedger update depending on token"],
+      },
+      () =>
+        consumeEscalationToken({
+          approvalToken: request.approvalToken || null,
+          action,
+          actorId,
+        })
+    );
 
     if (!consumed.consumed) {
-      await appendAuthEvent({
-        businessId,
-        tenantId,
-        sessionKey: request.sessionKey || null,
-        actorId,
-        actorType,
-        action,
-        outcome: "DENIED",
-        reason: consumed.reason,
-      });
+      await traceFeatureGateAwait(
+        "authorizeAccess:appendAuthEvent:escalation_denied",
+        {
+          action,
+          route: toRecord(request.metadata).route || null,
+          cacheStatus: "none",
+          dbQueries: ["authEventLedger.upsert"],
+        },
+        () =>
+          appendAuthEvent({
+            businessId,
+            tenantId,
+            sessionKey: request.sessionKey || null,
+            actorId,
+            actorType,
+            action,
+            outcome: "DENIED",
+            reason: consumed.reason,
+          })
+      );
       return {
         allowed: false,
         reason: consumed.reason,
@@ -2712,19 +2984,29 @@ export const authorizeAccess = async (request: AccessRequest) => {
     }
   }
 
-  await appendAuthEvent({
-    businessId,
-    tenantId,
-    sessionKey: request.sessionKey || null,
-    actorId,
-    actorType,
-    action,
-    outcome: "ALLOWED",
-    reason: "authorized",
-    metadata: {
-      role,
+  await traceFeatureGateAwait(
+    "authorizeAccess:appendAuthEvent:authorized",
+    {
+      action,
+      route: toRecord(request.metadata).route || null,
+      cacheStatus: "none",
+      dbQueries: ["authEventLedger.upsert"],
     },
-  });
+    () =>
+      appendAuthEvent({
+        businessId,
+        tenantId,
+        sessionKey: request.sessionKey || null,
+        actorId,
+        actorType,
+        action,
+        outcome: "ALLOWED",
+        reason: "authorized",
+        metadata: {
+          role,
+        },
+      })
+  );
 
   return {
     allowed: true,
@@ -2733,7 +3015,16 @@ export const authorizeAccess = async (request: AccessRequest) => {
 };
 
 export const assertAuthorizedAccess = async (request: AccessRequest) => {
-  const result = await authorizeAccess(request);
+  const result = await traceFeatureGateAwait(
+    "assertAuthorizedAccess:authorizeAccess",
+    {
+      action: request.action,
+      route: toRecord(request.metadata).route || null,
+      cacheStatus: "delegated",
+      dbQueries: ["see nested FEATURE_GATE_AWAIT_TRACE events"],
+    },
+    () => authorizeAccess(request)
+  );
   if (!result.allowed) {
     throw forbidden(`Access denied (${result.reason})`);
   }
@@ -3301,26 +3592,39 @@ export const attestInfraIsolation = async (input: {
   getStore().isolationAttestationLedger.set(attestationKey, row);
   bumpAuthority("IsolationAttestationLedger");
   const ledger = getDbLedger("isolationAttestationLedger");
-  await withDbMirror(() =>
-    withBoundedLedgerRetry({
-      ledger: "isolationAttestationLedger",
-      key: attestationKey,
-      businessId,
-      tenantId,
-      operation: () =>
+  await traceFeatureGateAwait(
+    "attestInfraIsolation:isolationAttestationLedger.upsert",
+    {
+      cacheStatus: "none",
+      dbQueries: [
         ledger?.upsert
-          ? ledger.upsert({
-              where: {
-                attestationKey,
-              },
-              update: {
-                metadata: row.metadata,
-                updatedAt: now(),
-              },
-              create: row,
-            })
-          : ledger?.create?.({ data: row }),
-    })
+          ? `isolationAttestationLedger.upsert(${attestationKey})`
+          : `isolationAttestationLedger.create(${attestationKey})`,
+      ],
+      attestationKey,
+    },
+    () =>
+      withDbMirror(() =>
+        withBoundedLedgerRetry({
+          ledger: "isolationAttestationLedger",
+          key: attestationKey,
+          businessId,
+          tenantId,
+          operation: () =>
+            ledger?.upsert
+              ? ledger.upsert({
+                  where: {
+                    attestationKey,
+                  },
+                  update: {
+                    metadata: row.metadata,
+                    updatedAt: now(),
+                  },
+                  create: row,
+                })
+              : ledger?.create?.({ data: row }),
+        })
+      )
   );
 
   if (breachedDomains.length) {

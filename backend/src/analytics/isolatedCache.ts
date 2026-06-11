@@ -1,3 +1,6 @@
+import { runOutsideRequestContext } from "../observability/requestContext";
+import { requestStorage } from "../utils/requestLifecycle";
+
 export type ProjectionSnapshotReadResult<T> = {
   value: T;
   meta: {
@@ -26,6 +29,14 @@ type InflightEntry<T> = {
 
 const cache = new Map<string, CachedEntry<unknown>>();
 const inflight = new Map<string, InflightEntry<unknown>>();
+
+const runOutsideHttpRequest = <T>(task: () => T): T =>
+  requestStorage.exit(() => runOutsideRequestContext(task));
+
+const unrefTimer = (timer: NodeJS.Timeout) => {
+  timer.unref?.();
+  return timer;
+};
 
 const logProjectionTiming = (
   label: string,
@@ -141,12 +152,14 @@ export const getIsolatedProjectionSnapshot = async <T>(input: {
 
     const computeStartedAt = Date.now();
     logProjectionTiming(input.label, "compute_start", timingBase);
-    const promise = (async () => {
-      if (input.requestSignal?.aborted) {
-        throw new Error("aborted");
-      }
-      return input.compute();
-    })().then((result) => {
+    const promise = runOutsideHttpRequest(() =>
+      (async () => {
+        if (input.requestSignal?.aborted) {
+          throw new Error("aborted");
+        }
+        return input.compute();
+      })()
+    ).then((result) => {
       const finishedAt = Date.now();
       cache.set(input.cacheKey, {
         value: result,
@@ -210,14 +223,18 @@ export const getIsolatedProjectionSnapshot = async <T>(input: {
   let initialWaitTimeoutId: NodeJS.Timeout;
   let computeBudgetTimeoutId: NodeJS.Timeout;
   const initialWaitPromise = new Promise<never>((_, reject) => {
-    initialWaitTimeoutId = setTimeout(() => {
-      reject(new Error("InitialWaitTimeout"));
-    }, input.initialWaitMs);
+    initialWaitTimeoutId = unrefTimer(
+      setTimeout(() => {
+        reject(new Error("InitialWaitTimeout"));
+      }, input.initialWaitMs)
+    );
   });
   const computeBudgetPromise = new Promise<never>((_, reject) => {
-    computeBudgetTimeoutId = setTimeout(() => {
-      reject(new Error("ComputeBudgetTimeout"));
-    }, input.computeBudgetMs);
+    computeBudgetTimeoutId = unrefTimer(
+      setTimeout(() => {
+        reject(new Error("ComputeBudgetTimeout"));
+      }, input.computeBudgetMs)
+    );
   });
   computeBudgetPromise.catch(() => {
     const current = inflight.get(input.cacheKey);

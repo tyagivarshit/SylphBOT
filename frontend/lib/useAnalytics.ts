@@ -1,5 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { getAnalyticsDashboard, getOverview, getCharts, getFunnel, getSources } from "./analytics";
+import { logLoginAnalyticsTimeline } from "./loginAnalyticsTimeline";
 
 const analyticsQueryDefaults = {
   retry: 1,
@@ -9,6 +11,14 @@ const analyticsQueryDefaults = {
 } as const;
 
 export const useAnalyticsDashboard = (range: string) => {
+  useEffect(() => {
+    logLoginAnalyticsTimeline("ANALYTICS_QUERY_ENABLED", {
+      queryKey: ["analytics-dashboard", range],
+      range,
+      enabled: true,
+    });
+  }, [range]);
+
   return useQuery({
     queryKey: ["analytics-dashboard", range],
     queryFn: () => getAnalyticsDashboard(range),

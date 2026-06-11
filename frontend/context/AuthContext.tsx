@@ -20,6 +20,10 @@ import {
   classifyAuthRouteContext,
   type AuthRouteContext,
 } from "@/lib/authRouteContext";
+import {
+  getLoginAnalyticsTimeline,
+  logLoginAnalyticsTimeline,
+} from "@/lib/loginAnalyticsTimeline";
 
 export type AuthUser = CurrentUser & {
   role?: string;
@@ -463,6 +467,16 @@ export const AuthProvider = ({
               attempts: attempt + 1,
               routeContext,
             });
+            if (getLoginAnalyticsTimeline()) {
+              logLoginAnalyticsTimeline("AUTH_CONTEXT_READY", {
+                source,
+                mode,
+                attempts: attempt + 1,
+                routeContext,
+                userId: nextUser.id,
+                businessId: nextUser.businessId || null,
+              });
+            }
             closeLoginWindow();
 
             recordMetric("bootstrap_completed", performance.now() - startedAt, {

@@ -10,6 +10,9 @@ import { Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import AuthShell from "@/components/brand/AuthShell";
 import { buildGoogleAuthUrl, loginUser } from "@/lib/auth";
 import { useAuth } from "@/context/AuthContext";
+import {
+  startLoginAnalyticsTimeline,
+} from "@/lib/loginAnalyticsTimeline";
 
 type LoginClientProps = {
   initialEmail: string;
@@ -152,6 +155,9 @@ export default function LoginClient({
         throw new Error(res.message || "Login failed");
       }
 
+      startLoginAnalyticsTimeline({
+        source: "password_login",
+      });
       const stabilizedUser = await finalizeLoginStabilization("password_login");
       if (!stabilizedUser) {
         throw new Error("Session is still starting. Please try again in a moment.");

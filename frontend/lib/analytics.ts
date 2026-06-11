@@ -1,4 +1,8 @@
 import { apiFetch } from "./apiClient";
+import {
+  getLoginAnalyticsHeaders,
+  logLoginAnalyticsTimeline,
+} from "./loginAnalyticsTimeline";
 
 export type AnalyticsMetric = {
   value: number;
@@ -149,11 +153,37 @@ export type AnalyticsDashboard = {
 export async function getAnalyticsDashboard(
   range: string
 ): Promise<AnalyticsDashboard> {
+  logLoginAnalyticsTimeline("ANALYTICS_REQUEST_SENT", {
+    endpoint: "/api/analytics/dashboard",
+    range,
+  });
   const res = await apiFetch<AnalyticsDashboard>(
-    `/api/analytics/dashboard?range=${range}`
+    `/api/analytics/dashboard?range=${range}`,
+    {
+      headers: getLoginAnalyticsHeaders(),
+    }
   );
+  logLoginAnalyticsTimeline("ANALYTICS_RESPONSE_RECEIVED", {
+    endpoint: "/api/analytics/dashboard",
+    range,
+    success: res.success,
+    code: res.code || null,
+    limited: res.limited,
+    unauthorized: res.unauthorized,
+    upgradeRequired: res.upgradeRequired,
+    networkError: Boolean(res.networkError),
+  });
 
   if (!res.success || !res.data) {
+    logLoginAnalyticsTimeline("ANALYTICS_ERROR", {
+      endpoint: "/api/analytics/dashboard",
+      range,
+      message: res.message || "Failed to load analytics",
+      code: res.code || null,
+      limited: res.limited,
+      unauthorized: res.unauthorized,
+      networkError: Boolean(res.networkError),
+    });
     throw new Error(res.message || "Failed to load analytics");
   }
 

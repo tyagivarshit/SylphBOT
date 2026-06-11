@@ -1,9 +1,10 @@
 "use client"
 
-import { ReactNode } from "react"
+import { ReactNode, useMemo } from "react"
 import { usePlan } from "@/hooks/usePlan"
 import { hasFeature, getNextPlan, PLAN_LABELS } from "@/lib/featureGuard"
 import { useUpgrade } from "@/app/(dashboard)/layout"
+import { logLoginAnalyticsTimeline } from "@/lib/loginAnalyticsTimeline"
 
 /* ✅ UPDATED TYPE */
 type Feature =
@@ -27,7 +28,25 @@ children: ReactNode
   const { plan } = usePlan()
   const { openUpgrade } = useUpgrade()
 
-  const allowed = hasFeature(plan, feature)
+  const allowed = useMemo(() => {
+    const route =
+      typeof window !== "undefined" ? window.location.pathname : null
+
+    logLoginAnalyticsTimeline("FEATURE_GATE_EVALUATION_START", {
+      feature,
+      plan,
+      route,
+    })
+    const featureAllowed = hasFeature(plan, feature)
+    logLoginAnalyticsTimeline("FEATURE_GATE_EVALUATION_END", {
+      feature,
+      plan,
+      allowed: featureAllowed,
+      route,
+    })
+
+    return featureAllowed
+  }, [feature, plan])
 
 /* =========================
 ✅ ALLOWED

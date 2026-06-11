@@ -8,6 +8,7 @@ type RequestLike = {
 };
 
 const ANALYTICS_DASHBOARD_PATH = "/api/analytics/dashboard";
+const LOGIN_SUCCESS_AT_HEADER = "x-login-success-at-ms";
 
 const readPath = (req: RequestLike) =>
   String(req.originalUrl || req.path || req.url || "").split("?")[0];
@@ -28,6 +29,14 @@ export const markAnalyticsDashboardLifecycleStart = (
   if (correlationId) {
     res.locals.analyticsDashboardCorrelationId = correlationId;
   }
+};
+
+export const getAnalyticsDashboardLoginSuccessAtMs = (req: RequestLike) => {
+  const headerValue = getHeaderValue(req.headers?.[LOGIN_SUCCESS_AT_HEADER]);
+  const timestampMs =
+    typeof headerValue === "string" ? Number(headerValue.trim()) : NaN;
+
+  return Number.isFinite(timestampMs) && timestampMs > 0 ? timestampMs : null;
 };
 
 export const getAnalyticsDashboardLifecycleElapsedMs = (input?: {

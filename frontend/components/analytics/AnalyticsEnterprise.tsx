@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -16,6 +16,7 @@ import {
 import { Crown, Flame, Lock, MessageSquareText, Target } from "lucide-react";
 import { useAnalyticsDashboard } from "@/lib/useAnalytics";
 import type { AnalyticsDashboard, AnalyticsMetric } from "@/lib/analytics";
+import { logLoginAnalyticsTimeline } from "@/lib/loginAnalyticsTimeline";
 import DateFilter from "./DateFilter";
 import StatCard from "./StatCard";
 
@@ -438,6 +439,33 @@ export default function AnalyticsEnterprise() {
   const [range, setRange] = useState("30d");
   const analyticsQuery = useAnalyticsDashboard(range);
   const dashboard = analyticsQuery.data;
+
+  useEffect(() => {
+    if (!analyticsQuery.isError) {
+      return;
+    }
+
+    logLoginAnalyticsTimeline("ANALYTICS_ERROR", {
+      range,
+      message:
+        analyticsQuery.error instanceof Error
+          ? analyticsQuery.error.message
+          : "unknown_analytics_error",
+    });
+  }, [analyticsQuery.error, analyticsQuery.isError, range]);
+
+  useEffect(() => {
+    if (!dashboard || analyticsQuery.isError) {
+      return;
+    }
+
+    logLoginAnalyticsTimeline("ANALYTICS_RENDERED", {
+      range,
+      planKey: dashboard.meta.planKey,
+      isElite: dashboard.meta.isElite,
+      upgradeRequired: dashboard.meta.upgradeRequired,
+    });
+  }, [analyticsQuery.isError, dashboard, range]);
 
   if (analyticsQuery.isPending) {
     return (

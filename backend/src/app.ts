@@ -80,6 +80,7 @@ import {
 } from "./utils/requestLifecycle";
 import {
   getAnalyticsDashboardCorrelationId,
+  getAnalyticsDashboardLoginSuccessAtMs,
   getAnalyticsDashboardLifecycleElapsedMs,
   isAnalyticsDashboardRequest,
   logAnalyticsDashboardLifecycle,
@@ -544,10 +545,12 @@ app.use((req, res, next) => {
   const startedAt = Date.now();
   const route = req.originalUrl || req.path || null;
   const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
+  const analyticsDashboardElapsedStartedAt =
+    isAnalyticsDashboard ? getAnalyticsDashboardLoginSuccessAtMs(req) || startedAt : startedAt;
   if (isAnalyticsDashboard) {
     markAnalyticsDashboardLifecycleStart(
       res,
-      startedAt,
+      analyticsDashboardElapsedStartedAt,
       getAnalyticsDashboardCorrelationId({ req, res })
     );
   }
@@ -570,7 +573,7 @@ app.use((req, res, next) => {
       route,
       method: req.method,
       timeoutMs,
-      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
     });
   }
   console.info("REQUEST_START", {
@@ -606,7 +609,7 @@ app.use((req, res, next) => {
         route,
         method: req.method,
         statusCode: res.statusCode,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
+        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
       });
     }
   };

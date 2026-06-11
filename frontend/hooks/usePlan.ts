@@ -5,6 +5,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/apiClient"
 import { normalizePlan } from "@/lib/featureGuard"
 import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry"
+import {
+  getLoginAnalyticsHeaders,
+  logLoginAnalyticsTimeline,
+} from "@/lib/loginAnalyticsTimeline"
 
 const BILLING_FETCH_TIMEOUT_MS = 7_000;
 export const BILLING_PLAN_STALE_TIME_MS = 5 * 60 * 1000;
@@ -65,6 +69,9 @@ const getBillingPollIntervalMs = (query: unknown) => {
 /* ================= FETCH ================= */
 
 export const fetchBillingPlanState = async () => {
+  logLoginAnalyticsTimeline("PLAN_QUERY_START", {
+    endpoint: "/api/billing?surface=billing",
+  });
   const response = await apiFetch<{
     billing?: {
       status?: string;
@@ -81,6 +88,19 @@ export const fetchBillingPlanState = async () => {
     credentials: "include",
     cache: "no-store",
     timeoutMs: BILLING_FETCH_TIMEOUT_MS,
+    headers: getLoginAnalyticsHeaders(),
+  });
+  logLoginAnalyticsTimeline("PLAN_QUERY_END", {
+    endpoint: "/api/billing?surface=billing",
+    success: response.success,
+    code: response.code || null,
+    limited: response.limited,
+    unauthorized: response.unauthorized,
+    planKey: response.data?.billing?.planKey || null,
+    status:
+      response.data?.billing?.status ||
+      response.data?.subscription?.status ||
+      null,
   });
 
   if (!response.success || !response.data) {

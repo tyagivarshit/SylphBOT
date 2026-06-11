@@ -2,6 +2,7 @@ import crypto from "crypto";
 import prisma from "../../config/prisma";
 import { forbidden } from "../../utils/AppError";
 import { decrypt, encrypt } from "../../utils/encrypt";
+import { logAnalyticsDashboardLifecycle } from "../../utils/analyticsDashboardLifecycleTrace";
 import { registerKmsAuditSink, kmsProviderRouterService } from "./kmsProviderRouter.service";
 
 type JsonRecord = Record<string, unknown>;
@@ -364,6 +365,13 @@ const scheduleSessionLedgerAsyncUpdate = (input: {
 
   const writePromise = new Promise((resolve) => {
     setImmediate(async () => {
+      const writeStartedAt = Date.now();
+      logAnalyticsDashboardLifecycle("SESSION_LEDGER_ASYNC_WRITE start", {
+        sessionKey,
+        businessId: input.businessId || null,
+        tenantId: input.tenantId || null,
+        writeClass,
+      });
       let lastError: unknown = null;
       for (let attempt = 0; attempt < SESSION_LEDGER_ASYNC_RETRY_ATTEMPTS; attempt += 1) {
         try {
@@ -389,6 +397,15 @@ const scheduleSessionLedgerAsyncUpdate = (input: {
             tenantId: input.tenantId || null,
             attempt: attempt + 1,
           });
+          logAnalyticsDashboardLifecycle("SESSION_LEDGER_ASYNC_WRITE end", {
+            sessionKey,
+            businessId: input.businessId || null,
+            tenantId: input.tenantId || null,
+            writeClass,
+            attempt: attempt + 1,
+            durationMs: Date.now() - writeStartedAt,
+            error: null,
+          });
           resolve(null);
           return;
         } catch (error) {
@@ -413,6 +430,14 @@ const scheduleSessionLedgerAsyncUpdate = (input: {
         }
       }
 
+      logAnalyticsDashboardLifecycle("SESSION_LEDGER_ASYNC_WRITE end", {
+        sessionKey,
+        businessId: input.businessId || null,
+        tenantId: input.tenantId || null,
+        writeClass,
+        durationMs: Date.now() - writeStartedAt,
+        error: lastError instanceof Error ? lastError.message : String(lastError || "unknown"),
+      });
       resolve(lastError);
     });
   }).finally(() => {

@@ -23,6 +23,7 @@ import {
 import { getVariantPerformance } from "./salesAgent/abTesting.service";
 import { runSalesOptimizer } from "./salesAgent/optimizer.service";
 import { getIsolatedProjectionSnapshot } from "../analytics/isolatedCache";
+import { logAnalyticsDashboardLifecycle } from "../utils/analyticsDashboardLifecycleTrace";
 
 type PlanKey = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE";
 type MetricFormat = "number" | "percent" | "minutes";
@@ -1647,6 +1648,7 @@ export async function getAnalyticsDashboard(
     planKey,
     cacheKey,
   };
+  logAnalyticsDashboardLifecycle("getAnalyticsDashboard service called", dashboardTimingFields);
   logAnalyticsDashboardTiming("getAnalyticsDashboard:start", dashboardTimingFields);
 
   if (planKey !== "ELITE") {
@@ -1657,6 +1659,10 @@ export async function getAnalyticsDashboard(
       planKey,
     });
     logAnalyticsDashboardTiming("getAnalyticsDashboard:non_elite_fallback", dashboardTimingFields);
+    logAnalyticsDashboardLifecycle("getAnalyticsDashboard service returned", {
+      ...dashboardTimingFields,
+      source: "non_elite_fallback",
+    });
     return buildAnalyticsDashboardFallback(range, planKey);
   }
 
@@ -1697,6 +1703,12 @@ export async function getAnalyticsDashboard(
     cancelled: snapshot.meta.cancelled,
   });
   logAnalyticsDashboardTiming("getAnalyticsDashboard:end", {
+    ...dashboardTimingFields,
+    source: snapshot.meta.source,
+    waitMs: snapshot.meta.waitMs,
+    budgetExceeded: snapshot.meta.budgetExceeded,
+  });
+  logAnalyticsDashboardLifecycle("getAnalyticsDashboard service returned", {
     ...dashboardTimingFields,
     source: snapshot.meta.source,
     waitMs: snapshot.meta.waitMs,

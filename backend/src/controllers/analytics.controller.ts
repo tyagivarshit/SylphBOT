@@ -14,6 +14,11 @@ import {
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
+import {
+  getAnalyticsDashboardLifecycleElapsedMs,
+  isAnalyticsDashboardRequest,
+  logAnalyticsDashboardLifecycle,
+} from "../utils/analyticsDashboardLifecycleTrace";
 
 const getBusinessId = async (
   userId: string,
@@ -235,6 +240,15 @@ export const getDeepAnalyticsDashboard = async (
   req: Request,
   res: Response
 ) => {
+  const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
+  if (isAnalyticsDashboard) {
+    logAnalyticsDashboardLifecycle("Controller entered", {
+      requestId: req.requestId || null,
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+      route: req.originalUrl,
+      method: req.method,
+    });
+  }
   try {
     const businessId = (req as any).user?.businessId as string | null;
     const range = (req.query.range as string) || "30d";
@@ -258,15 +272,43 @@ export const getDeepAnalyticsDashboard = async (
       res,
       label: "analytics_dashboard",
       fallback: buildAnalyticsDashboardFallback(range, planKey),
-      task: () =>
-        getAnalyticsDashboard(businessId, range, planKey, {
+      task: async () => {
+        if (isAnalyticsDashboard) {
+          logAnalyticsDashboardLifecycle("getAnalyticsDashboard called", {
+            requestId: req.requestId || null,
+            elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+            businessId,
+            range,
+            planKey,
+          });
+        }
+        const dashboard = await getAnalyticsDashboard(businessId, range, planKey, {
           requestSignal: getRequestAbortSignal({ req, res }),
-        }),
+        });
+        if (isAnalyticsDashboard) {
+          logAnalyticsDashboardLifecycle("getAnalyticsDashboard returned", {
+            requestId: req.requestId || null,
+            elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+            businessId,
+            range,
+            planKey,
+          });
+        }
+        return dashboard;
+      },
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;
     }
 
+    if (isAnalyticsDashboard) {
+      logAnalyticsDashboardLifecycle("controller res.json about to invoke", {
+        requestId: req.requestId || null,
+        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+        degraded: projection.degraded,
+        reason: projection.reason,
+      });
+    }
     return res.json({
       success: true,
       data: projection.value,

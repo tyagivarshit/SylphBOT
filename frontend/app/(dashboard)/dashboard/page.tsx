@@ -54,6 +54,11 @@ const EMPTY_CONVERSATION_STATS: ConversationStats = {
   resolved: 0,
 };
 
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: IdleRequestCallback) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
 const BACKGROUND_STARTUP_DELAY_MS = 2_500;
 const BILLING_BOOTSTRAP_STORAGE_KEY = "lkv-billing-bootstrap-snapshot";
 
@@ -175,9 +180,40 @@ export default function DashboardPage() {
       return;
     }
 
-    const timer = window.setTimeout(() => {
+    const idleWindow = window as IdleWindow;
+    let timeoutId: number | null = null;
+    let idleCallbackId: number | null = null;
+
+    const loadActiveConversations = () => {
       setBackgroundStartupReady(true);
       requestDeferredHydration("dashboard_background_startup_delay");
+    };
+
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      idleCallbackId = idleWindow.requestIdleCallback(loadActiveConversations);
+    } else {
+      timeoutId = window.setTimeout(
+        loadActiveConversations,
+        BACKGROUND_STARTUP_DELAY_MS
+      );
+    }
+
+    return () => {
+      if (idleCallbackId !== null && typeof idleWindow.cancelIdleCallback === "function") {
+        idleWindow.cancelIdleCallback(idleCallbackId);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [dashboardInteractive, requestDeferredHydration]);
+
+  useEffect(() => {
+    if (!dashboardInteractive) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
 
       void queryClient
         .fetchQuery({
@@ -205,7 +241,7 @@ export default function DashboardPage() {
     }, BACKGROUND_STARTUP_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [dashboardInteractive, queryClient, requestDeferredHydration]);
+  }, [dashboardInteractive, queryClient]);
 
   useEffect(() => {
     if (!canLoadDeferred) {

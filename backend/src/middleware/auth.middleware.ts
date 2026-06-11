@@ -137,6 +137,7 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
 const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
 
 const SESSION_LEDGER_QUIET_ROUTE_PREFIXES = [
+  "/api/analytics",
   "/api/clients/oauth/meta/lifecycle",
   "/api/user/api-key",
 ];

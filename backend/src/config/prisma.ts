@@ -79,6 +79,9 @@ const globalForPrisma = global as unknown as {
   prisma: any;
 };
 
+const isNativeUserLookupAuditEnabled = () =>
+  process.env.AUTH_USER_LOOKUP_NATIVE_AUDIT_ENABLED === "true";
+
 const basePrisma =
   globalForPrisma.prisma ||
   new PrismaClient({
@@ -372,63 +375,64 @@ const prisma = basePrisma.$extends({
           dbUsageMetrics.workerQueryDurationMs += totalMs;
         }
 
-        // Instrument user.findUnique to compare with native MongoDB driver
-        setImmediate(async () => {
-          try {
-            // 1. Map query filter for native Mongo operations
-            let filter: any = {};
-            if (args?.where) {
-              for (const key of Object.keys(args.where)) {
-                const value = args.where[key];
-                if (key === "id") {
-                  if (typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value)) {
-                    filter["_id"] = new ObjectId(value);
+        if (isNativeUserLookupAuditEnabled()) {
+          setImmediate(async () => {
+            try {
+              // 1. Map query filter for native Mongo operations
+              let filter: any = {};
+              if (args?.where) {
+                for (const key of Object.keys(args.where)) {
+                  const value = args.where[key];
+                  if (key === "id") {
+                    if (typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value)) {
+                      filter["_id"] = new ObjectId(value);
+                    } else {
+                      filter["_id"] = value;
+                    }
                   } else {
-                    filter["_id"] = value;
+                    filter[key] = value;
                   }
-                } else {
-                  filter[key] = value;
                 }
               }
+
+              // Run query directly using MongoDB native driver
+              const db = await getNativeMongoDb();
+              const collection = db.collection("User");
+
+              const tNativeStart = Date.now();
+              await collection.findOne(filter);
+              const nativeMongoMs = Date.now() - tNativeStart;
+
+              const selectFields = args?.select ? Object.keys(args.select) : ["*"];
+              const includeRelations = args?.include ? Object.keys(args.include) : [];
+              const payloadString = result ? JSON.stringify(result) : "";
+              const payloadBytes = payloadString ? Buffer.byteLength(payloadString, "utf8") : 0;
+
+              console.info("USER_LOOKUP_COMPARISON", {
+                prismaMs: totalMs,
+                nativeMongoMs,
+                payloadBytes,
+                selectFields,
+                includeRelations
+              });
+
+              console.info("USER_FIND_UNIQUE_MIDDLEWARE_AUDIT", {
+                collectionName: "User",
+                whereClause: args?.where || null,
+                selectShape: args?.select || null,
+                includeShape: args?.include || null,
+                totalMs,
+                mongoAtlasRegion: getMongoRegion(),
+                renderRegion: process.env.RENDER_REGION || "unknown",
+                readPreference: getReadPreference(),
+                payloadBytes
+              });
+
+            } catch (auditErr) {
+              console.error("Failed to run native MongoDB driver comparison:", auditErr);
             }
-
-            // Run query directly using MongoDB native driver
-            const db = await getNativeMongoDb();
-            const collection = db.collection("User");
-
-            const tNativeStart = Date.now();
-            const nativeResult = await collection.findOne(filter);
-            const nativeMongoMs = Date.now() - tNativeStart;
-
-            const selectFields = args?.select ? Object.keys(args.select) : ["*"];
-            const includeRelations = args?.include ? Object.keys(args.include) : [];
-            const payloadString = result ? JSON.stringify(result) : "";
-            const payloadBytes = payloadString ? Buffer.byteLength(payloadString, "utf8") : 0;
-
-            console.info("USER_LOOKUP_COMPARISON", {
-              prismaMs: totalMs,
-              nativeMongoMs,
-              payloadBytes,
-              selectFields,
-              includeRelations
-            });
-
-            console.info("USER_FIND_UNIQUE_MIDDLEWARE_AUDIT", {
-              collectionName: "User",
-              whereClause: args?.where || null,
-              selectShape: args?.select || null,
-              includeShape: args?.include || null,
-              totalMs,
-              mongoAtlasRegion: getMongoRegion(),
-              renderRegion: process.env.RENDER_REGION || "unknown",
-              readPreference: getReadPreference(),
-              payloadBytes
-            });
-
-          } catch (auditErr) {
-            console.error("Failed to run native MongoDB driver comparison:", auditErr);
-          }
-        });
+          });
+        }
 
         // Maintain old logs for compatibility
         const timing = getTimingBreakdown(totalMs);

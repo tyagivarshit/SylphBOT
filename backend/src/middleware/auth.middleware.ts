@@ -141,6 +141,7 @@ const SESSION_LEDGER_QUIET_ROUTE_PREFIXES = [
   "/api/clients/oauth/meta/lifecycle",
   "/api/user/api-key",
 ];
+const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 type CachedAuthContext = {
   userId: string;
@@ -1151,6 +1152,10 @@ const isInstantCheckoutRoute = (req: Request) => {
 };
 
 const isSessionLedgerQuietRoute = (req: Request) => {
+  if (!READ_ONLY_METHODS.has(String(req.method || "").toUpperCase())) {
+    return false;
+  }
+
   const route = String(req.originalUrl || req.path || req.url || "")
     .trim()
     .toLowerCase();
@@ -1205,6 +1210,7 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
       userAgent: getUserAgent(req),
       deviceId: String(req.headers["x-device-id"] || "").trim() || null,
       signal: null,
+      suppressTouchWrite: isSessionLedgerQuietRoute(req),
     }).catch((err) => {
       req.logger?.warn(
         { error: err?.message || String(err), sessionKey },

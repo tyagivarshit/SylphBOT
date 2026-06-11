@@ -340,6 +340,7 @@ const scheduleSessionLedgerAsyncUpdate = (input: {
   businessId?: string | null;
   tenantId?: string | null;
   data: JsonRecord;
+  suppressTouchWrite?: boolean;
 }) => {
   const sessionKey = String(input.sessionKey || "").trim();
   if (!sessionKey || shouldUseInMemory) {
@@ -350,6 +351,16 @@ const scheduleSessionLedgerAsyncUpdate = (input: {
   const writeClass = ["LOCKED", "REVOKED", "CHALLENGE_REQUIRED"].includes(writeStatus)
     ? `state:${writeStatus}:${stableHash(input.data)}`
     : "touch";
+  if (input.suppressTouchWrite && writeClass === "touch") {
+    logSessionLedgerMetric("SESSION_LEDGER_DEADLOCK_AVOIDED", {
+      sessionKey,
+      businessId: input.businessId || null,
+      tenantId: input.tenantId || null,
+      writeClass,
+      reason: "read_only_route_session_ledger_quiet",
+    });
+    return Promise.resolve(null);
+  }
   const writeKey = `session-ledger:update:${sessionKey}:${writeClass}`;
   const store = getStore();
   const nowMs = Date.now();
@@ -2871,6 +2882,7 @@ export const trackSessionAnomaly = async (input: {
   userAgent?: string | null;
   deviceId?: string | null;
   signal?: AbortSignal | null;
+  suppressTouchWrite?: boolean;
 }) => {
   const assertActive = (stage: string) => {
     if (input.signal?.aborted) {
@@ -3026,6 +3038,7 @@ export const trackSessionAnomaly = async (input: {
     sessionKey: existing.sessionKey,
     businessId: existing.businessId,
     tenantId: existing.tenantId,
+    suppressTouchWrite: input.suppressTouchWrite,
     data: {
       ipHash: existing.ipHash,
       userAgentHash: existing.userAgentHash,

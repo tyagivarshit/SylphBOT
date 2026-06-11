@@ -29,6 +29,12 @@ import {
 } from "../utils/requestLifecycle";
 import { TimeoutExceededError, withTimeout } from "../utils/boundedTimeout";
 import { getStartupIsolationSnapshot } from "../runtime/startupIsolation.service";
+import {
+  getAnalyticsDashboardCorrelationId,
+  getAnalyticsDashboardLifecycleElapsedMs,
+  isAnalyticsDashboardRequest,
+  logAnalyticsDashboardLifecycle,
+} from "../utils/analyticsDashboardLifecycleTrace";
 
 class LightweightMemoryCache<K, V> {
   private cache = new Map<K, { value: V; expiresAt: number }>();
@@ -1547,6 +1553,35 @@ export const protect = async (
   next: NextFunction
 ) => {
   const startedAt = Date.now();
+  const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
+  let authEndLogged = false;
+  const logAuthEnd = () => {
+    if (!isAnalyticsDashboard || authEndLogged) {
+      return;
+    }
+    authEndLogged = true;
+    logAnalyticsDashboardLifecycle("AUTH_END", {
+      correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
+      requestId: req.requestId || null,
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+      route: req.originalUrl,
+      method: req.method,
+    });
+  };
+  const originalNext = next;
+  next = ((...args: Parameters<NextFunction>) => {
+    logAuthEnd();
+    return originalNext(...args);
+  }) as NextFunction;
+  if (isAnalyticsDashboard) {
+    logAnalyticsDashboardLifecycle("AUTH_START", {
+      correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
+      requestId: req.requestId || null,
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+      route: req.originalUrl,
+      method: req.method,
+    });
+  }
   const isCheckout =
     String(req.originalUrl || "").includes("/checkout") ||
     String(req.originalUrl || "").includes("surface=checkout") ||

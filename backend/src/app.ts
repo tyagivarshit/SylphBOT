@@ -79,6 +79,7 @@ import {
   requestStorage,
 } from "./utils/requestLifecycle";
 import {
+  getAnalyticsDashboardCorrelationId,
   getAnalyticsDashboardLifecycleElapsedMs,
   isAnalyticsDashboardRequest,
   logAnalyticsDashboardLifecycle,
@@ -389,7 +390,8 @@ app.use((req, res, next) => {
   }) as typeof res.setHeader;
   res.json = ((body: unknown) => {
     if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("res.json invoked", {
+      logAnalyticsDashboardLifecycle("RES_JSON_START", {
+        correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
         requestId: req.requestId || null,
         elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
         headersSent: res.headersSent,
@@ -415,7 +417,8 @@ app.use((req, res, next) => {
     const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
     markExplicitFinalResponseWrite(res);
     if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("res.json returned", {
+      logAnalyticsDashboardLifecycle("RES_JSON_END", {
+        correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
         requestId: req.requestId || null,
         elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
         headersSent: res.headersSent,
@@ -542,7 +545,11 @@ app.use((req, res, next) => {
   const route = req.originalUrl || req.path || null;
   const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
   if (isAnalyticsDashboard) {
-    markAnalyticsDashboardLifecycleStart(res, startedAt);
+    markAnalyticsDashboardLifecycleStart(
+      res,
+      startedAt,
+      getAnalyticsDashboardCorrelationId({ req, res })
+    );
   }
   const timeoutMs = resolveRequestTimeoutMs(req.path || req.originalUrl || "");
   const locals = res.locals as Record<string, unknown>;
@@ -558,6 +565,7 @@ app.use((req, res, next) => {
   ensureBackgroundQueueRecovery();
   if (isAnalyticsDashboard) {
     logAnalyticsDashboardLifecycle("REQUEST_START", {
+      correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
       requestId: req.requestId || null,
       route,
       method: req.method,
@@ -574,23 +582,7 @@ app.use((req, res, next) => {
 
   let completionLogged = false;
   const logRequestComplete = () => {
-    if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("REQUEST_COMPLETE middleware start", {
-        requestId: req.requestId || null,
-        route,
-        method: req.method,
-        statusCode: res.statusCode,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-      });
-    }
     if (completionLogged) {
-      if (isAnalyticsDashboard) {
-        logAnalyticsDashboardLifecycle("REQUEST_COMPLETE middleware end", {
-          requestId: req.requestId || null,
-          skipped: true,
-          elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-        });
-      }
       return;
     }
     completionLogged = true;
@@ -608,15 +600,12 @@ app.use((req, res, next) => {
       abortReason: lifecycle?.abortReason || null,
     });
     if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("REQUEST_COMPLETE emitted", {
+      logAnalyticsDashboardLifecycle("REQUEST_COMPLETE", {
+        correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
         requestId: req.requestId || null,
         route,
         method: req.method,
         statusCode: res.statusCode,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-      });
-      logAnalyticsDashboardLifecycle("REQUEST_COMPLETE middleware end", {
-        requestId: req.requestId || null,
         elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
       });
     }
@@ -641,21 +630,7 @@ app.use((req, res, next) => {
   });
 
   res.on("close", () => {
-    if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("app res.close handler start", {
-        requestId: req.requestId || null,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-        writableEnded: res.writableEnded,
-      });
-    }
     if (res.writableEnded) {
-      if (isAnalyticsDashboard) {
-        logAnalyticsDashboardLifecycle("app res.close handler end", {
-          requestId: req.requestId || null,
-          skipped: true,
-          elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-        });
-      }
       return;
     }
     const marked = markRequestLifecycleAborted({
@@ -673,22 +648,9 @@ app.use((req, res, next) => {
       reason: "response_closed",
       durationMs: Date.now() - startedAt,
     });
-    if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("app res.close handler end", {
-        requestId: req.requestId || null,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-      });
-    }
   });
 
   res.on("finish", () => {
-    if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("app res.finish handler start", {
-        requestId: req.requestId || null,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-        statusCode: res.statusCode,
-      });
-    }
     res.setTimeout(0);
     markRequestLifecycleAborted({
       req,
@@ -707,13 +669,6 @@ app.use((req, res, next) => {
       priorityClass,
     });
     logRequestComplete();
-    if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("app res.finish handler end", {
-        requestId: req.requestId || null,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res, startedAt }),
-        statusCode: res.statusCode,
-      });
-    }
   });
 
   res.setTimeout(timeoutMs, () => {

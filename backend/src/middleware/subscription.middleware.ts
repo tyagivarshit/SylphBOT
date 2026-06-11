@@ -11,6 +11,12 @@ import { prewarmState } from "../services/prewarmState";
 import { registerBillingPrewarmer } from "../services/prewarm.service";
 import { requestStorage, getRequestRemainingMs, getRequestAbortSignal } from "../utils/requestLifecycle";
 import { runProjectionComputeTask } from "../services/projectionCoordinator.service";
+import {
+  getAnalyticsDashboardCorrelationId,
+  getAnalyticsDashboardLifecycleElapsedMs,
+  isAnalyticsDashboardRequest,
+  logAnalyticsDashboardLifecycle,
+} from "../utils/analyticsDashboardLifecycleTrace";
 
 registerBillingPrewarmer(async (businessId) => {
   await loadBillingContext(businessId).catch(() => null);
@@ -617,6 +623,40 @@ const getCachedSubscription = async (businessId: string, isCheckout?: boolean) =
 };
 
 const getEarlyAccessSnapshot = async (subscription: any | null) => {
+  const currentStore = requestStorage.getStore();
+  const currentReq = currentStore?.req;
+  const currentRes = currentStore?.res;
+  const isAnalyticsDashboard =
+    Boolean(currentReq) && isAnalyticsDashboardRequest(currentReq);
+  if (isAnalyticsDashboard) {
+    logAnalyticsDashboardLifecycle("EARLY_ACCESS_START", {
+      correlationId: getAnalyticsDashboardCorrelationId({
+        req: currentReq,
+        res: currentRes,
+      }),
+      requestId: currentReq?.requestId || null,
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res: currentRes }),
+      route: currentReq?.originalUrl || null,
+      method: currentReq?.method || null,
+      businessId: subscription?.businessId || null,
+    });
+  }
+  const logEarlyAccessEnd = () => {
+    if (!isAnalyticsDashboard) {
+      return;
+    }
+    logAnalyticsDashboardLifecycle("EARLY_ACCESS_END", {
+      correlationId: getAnalyticsDashboardCorrelationId({
+        req: currentReq,
+        res: currentRes,
+      }),
+      requestId: currentReq?.requestId || null,
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res: currentRes }),
+      route: currentReq?.originalUrl || null,
+      method: currentReq?.method || null,
+      businessId: subscription?.businessId || null,
+    });
+  };
   const cacheKey = EARLY_ACCESS_CACHE_KEY;
   const cached = earlyAccessCache.get(cacheKey);
 
@@ -629,6 +669,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
         cache: "memory_early_access",
       },
     });
+    logEarlyAccessEnd();
     return cached.value;
   }
 
@@ -683,8 +724,10 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
       expiresAt: Date.now() + EARLY_ACCESS_CACHE_TTL_MS,
     });
 
+    logEarlyAccessEnd();
     return value;
   } catch {
+    logEarlyAccessEnd();
     return {
       allowEarly: false,
       remainingEarly: 0,
@@ -921,10 +964,36 @@ export const attachBillingContext = async (
   res: Response,
   next: NextFunction
 ) => {
+  const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
+  if (isAnalyticsDashboard) {
+    logAnalyticsDashboardLifecycle("SUBSCRIPTION_CONTEXT_START", {
+      correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
+      requestId: req.requestId || null,
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+      route: req.originalUrl,
+      method: req.method,
+      businessId: req.user?.businessId || null,
+    });
+  }
+  let subscriptionContextEndLogged = false;
+  const logSubscriptionContextEnd = () => {
+    if (!isAnalyticsDashboard || subscriptionContextEndLogged) {
+      return;
+    }
+    subscriptionContextEndLogged = true;
+    logAnalyticsDashboardLifecycle("SUBSCRIPTION_CONTEXT_END", {
+      correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
+      requestId: req.requestId || null,
+      elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+      route: req.originalUrl,
+      method: req.method,
+    });
+  };
   try {
     const businessId = req.user?.businessId;
 
     if (!businessId) {
+      logSubscriptionContextEnd();
       return res.status(401).json({
         code: "UNAUTHORIZED",
         message: "Unauthorized",
@@ -947,6 +1016,8 @@ export const attachBillingContext = async (
       context = result.context;
     } catch (loadError) {
       console.warn("Non-critical loadBillingContext failed, continuing checkout in degraded mode:", loadError);
+    } finally {
+      logSubscriptionContextEnd();
     }
 
     (req as any).subscription = subscription;

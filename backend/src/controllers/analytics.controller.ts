@@ -15,6 +15,7 @@ import {
   throwIfRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
 import {
+  getAnalyticsDashboardCorrelationId,
   getAnalyticsDashboardLifecycleElapsedMs,
   isAnalyticsDashboardRequest,
   logAnalyticsDashboardLifecycle,
@@ -242,7 +243,8 @@ export const getDeepAnalyticsDashboard = async (
 ) => {
   const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
   if (isAnalyticsDashboard) {
-    logAnalyticsDashboardLifecycle("Controller entered", {
+    logAnalyticsDashboardLifecycle("CONTROLLER_ENTER", {
+      correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
       requestId: req.requestId || null,
       elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
       route: req.originalUrl,
@@ -274,7 +276,8 @@ export const getDeepAnalyticsDashboard = async (
       fallback: buildAnalyticsDashboardFallback(range, planKey),
       task: async () => {
         if (isAnalyticsDashboard) {
-          logAnalyticsDashboardLifecycle("getAnalyticsDashboard called", {
+          logAnalyticsDashboardLifecycle("GET_ANALYTICS_START", {
+            correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
             requestId: req.requestId || null,
             elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
             businessId,
@@ -282,33 +285,28 @@ export const getDeepAnalyticsDashboard = async (
             planKey,
           });
         }
-        const dashboard = await getAnalyticsDashboard(businessId, range, planKey, {
-          requestSignal: getRequestAbortSignal({ req, res }),
-        });
-        if (isAnalyticsDashboard) {
-          logAnalyticsDashboardLifecycle("getAnalyticsDashboard returned", {
-            requestId: req.requestId || null,
-            elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
-            businessId,
-            range,
-            planKey,
+        try {
+          return await getAnalyticsDashboard(businessId, range, planKey, {
+            requestSignal: getRequestAbortSignal({ req, res }),
           });
+        } finally {
+          if (isAnalyticsDashboard) {
+            logAnalyticsDashboardLifecycle("GET_ANALYTICS_END", {
+              correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
+              requestId: req.requestId || null,
+              elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
+              businessId,
+              range,
+              planKey,
+            });
+          }
         }
-        return dashboard;
       },
     });
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
       return;
     }
 
-    if (isAnalyticsDashboard) {
-      logAnalyticsDashboardLifecycle("controller res.json about to invoke", {
-        requestId: req.requestId || null,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
-        degraded: projection.degraded,
-        reason: projection.reason,
-      });
-    }
     return res.json({
       success: true,
       data: projection.value,

@@ -13,7 +13,6 @@ import {
   getRequestRemainingMs,
   isRequestLifecycleAborted,
   throwIfRequestLifecycleAborted,
-  markRequestLifecycleAborted,
 } from "../utils/requestLifecycle";
 
 const getBusinessId = async (
@@ -87,16 +86,11 @@ const withLifecycleBudget = async <T>(input: {
 
   const outcome = await Promise.race([taskOutcome, timeoutOutcome]);
   if (outcome.timedOut) {
-    markRequestLifecycleAborted({
-      req: input.req,
-      res: input.res,
-      reason: "request_timeout",
-    });
-    console.warn("REQUEST_ABORTED", {
+    console.warn("REQUEST_DEGRADED", {
       requestId: input.req.requestId || null,
       route: input.req.originalUrl,
       method: input.req.method,
-      reason: `${input.label}_budget_exceeded`,
+      reason: `${input.label}_projection_budget_exceeded`,
       timeoutMs,
     });
     return {
@@ -273,7 +267,7 @@ export const getDeepAnalyticsDashboard = async (
       return;
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: projection.value,
       limited: projection.value.meta.upgradeRequired,

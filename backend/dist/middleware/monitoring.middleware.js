@@ -7,6 +7,7 @@ const performanceMetrics_1 = require("../observability/performanceMetrics");
 const reliabilityOS_service_1 = require("../services/reliability/reliabilityOS.service");
 const tenant_service_1 = require("../services/tenant.service");
 const monitoring_config_1 = require("../config/monitoring.config");
+const analyticsDashboardLifecycleTrace_1 = require("../utils/analyticsDashboardLifecycleTrace");
 const HIGH_VALUE_OBSERVABILITY_PATH_PREFIXES = [
     "/api/billing",
     "/api/webhook",
@@ -29,6 +30,7 @@ const readEventLoopLagMs = () => {
 };
 const monitoringMiddleware = (req, res, next) => {
     const startedAt = Date.now();
+    const isAnalyticsDashboard = (0, analyticsDashboardLifecycleTrace_1.isAnalyticsDashboardRequest)(req);
     inflightRequestCount += 1;
     peakInflightRequestCount = Math.max(peakInflightRequestCount, inflightRequestCount);
     let releasedInflight = false;
@@ -39,8 +41,33 @@ const monitoringMiddleware = (req, res, next) => {
         releasedInflight = true;
         inflightRequestCount = Math.max(0, inflightRequestCount - 1);
     };
-    res.on("close", releaseInflight);
+    res.on("close", () => {
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("monitoring res.close handler start", {
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                middlewareElapsedMs: Date.now() - startedAt,
+                writableEnded: res.writableEnded,
+            });
+        }
+        releaseInflight();
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("monitoring res.close handler end", {
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                middlewareElapsedMs: Date.now() - startedAt,
+            });
+        }
+    });
     res.on("finish", () => {
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("monitoring res.finish handler start", {
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                middlewareElapsedMs: Date.now() - startedAt,
+                statusCode: res.statusCode,
+            });
+        }
         releaseInflight();
         const businessId = (0, tenant_service_1.getRequestBusinessId)(req);
         const traceId = req.requestId || null;
@@ -69,7 +96,14 @@ const monitoringMiddleware = (req, res, next) => {
         }, "Request completed");
         if (shouldPersistDetailedObservability) {
             setImmediate(() => {
-                void (0, reliabilityOS_service_1.recordTraceLedger)({
+                if (isAnalyticsDashboard) {
+                    (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("monitoring deferred observability start", {
+                        requestId: req.requestId || null,
+                        elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                        durationMs,
+                    });
+                }
+                const traceLedgerWrite = (0, reliabilityOS_service_1.recordTraceLedger)({
                     traceId,
                     correlationId: traceId,
                     businessId,
@@ -85,7 +119,7 @@ const monitoringMiddleware = (req, res, next) => {
                         durationMs,
                     },
                 }).catch(() => undefined);
-                void (0, reliabilityOS_service_1.recordObservabilityEvent)({
+                const observabilityEventWrite = (0, reliabilityOS_service_1.recordObservabilityEvent)({
                     businessId,
                     tenantId: businessId,
                     eventType: "http.request.completed",
@@ -113,6 +147,15 @@ const monitoringMiddleware = (req, res, next) => {
                         eventLoopLagMs,
                     },
                 }).catch(() => undefined);
+                void Promise.all([traceLedgerWrite, observabilityEventWrite]).finally(() => {
+                    if (isAnalyticsDashboard) {
+                        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("monitoring deferred observability end", {
+                            requestId: req.requestId || null,
+                            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                            durationMs,
+                        });
+                    }
+                });
             });
         }
         (0, performanceMetrics_1.emitPerformanceMetric)({
@@ -164,6 +207,14 @@ const monitoringMiddleware = (req, res, next) => {
                     businessId,
                     requestId: req.requestId,
                 },
+            });
+        }
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("monitoring res.finish handler end", {
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                middlewareElapsedMs: Date.now() - startedAt,
+                statusCode,
             });
         }
     });

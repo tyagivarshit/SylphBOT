@@ -16,6 +16,7 @@ const prewarmState_1 = require("../services/prewarmState");
 const prewarm_service_1 = require("../services/prewarm.service");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
 const projectionCoordinator_service_1 = require("../services/projectionCoordinator.service");
+const analyticsDashboardLifecycleTrace_1 = require("../utils/analyticsDashboardLifecycleTrace");
 (0, prewarm_service_1.registerBillingPrewarmer)(async (businessId) => {
     await (0, exports.loadBillingContext)(businessId).catch(() => null);
 });
@@ -508,6 +509,39 @@ const getCachedSubscription = async (businessId, isCheckout) => {
     return loadPromise;
 };
 const getEarlyAccessSnapshot = async (subscription) => {
+    const currentStore = requestLifecycle_1.requestStorage.getStore();
+    const currentReq = currentStore?.req;
+    const currentRes = currentStore?.res;
+    const isAnalyticsDashboard = Boolean(currentReq) && (0, analyticsDashboardLifecycleTrace_1.isAnalyticsDashboardRequest)(currentReq);
+    if (isAnalyticsDashboard) {
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("EARLY_ACCESS_START", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({
+                req: currentReq,
+                res: currentRes,
+            }),
+            requestId: currentReq?.requestId || null,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res: currentRes }),
+            route: currentReq?.originalUrl || null,
+            method: currentReq?.method || null,
+            businessId: subscription?.businessId || null,
+        });
+    }
+    const logEarlyAccessEnd = () => {
+        if (!isAnalyticsDashboard) {
+            return;
+        }
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("EARLY_ACCESS_END", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({
+                req: currentReq,
+                res: currentRes,
+            }),
+            requestId: currentReq?.requestId || null,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res: currentRes }),
+            route: currentReq?.originalUrl || null,
+            method: currentReq?.method || null,
+            businessId: subscription?.businessId || null,
+        });
+    };
     const cacheKey = EARLY_ACCESS_CACHE_KEY;
     const cached = earlyAccessCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
@@ -519,6 +553,7 @@ const getEarlyAccessSnapshot = async (subscription) => {
                 cache: "memory_early_access",
             },
         });
+        logEarlyAccessEnd();
         return cached.value;
     }
     (0, performanceMetrics_1.emitPerformanceMetric)({
@@ -560,9 +595,11 @@ const getEarlyAccessSnapshot = async (subscription) => {
             value,
             expiresAt: Date.now() + EARLY_ACCESS_CACHE_TTL_MS,
         });
+        logEarlyAccessEnd();
         return value;
     }
     catch {
+        logEarlyAccessEnd();
         return {
             allowEarly: false,
             remainingEarly: 0,
@@ -767,9 +804,35 @@ const loadBillingContext = async (businessId, options) => {
 };
 exports.loadBillingContext = loadBillingContext;
 const attachBillingContext = async (req, res, next) => {
+    const isAnalyticsDashboard = (0, analyticsDashboardLifecycleTrace_1.isAnalyticsDashboardRequest)(req);
+    if (isAnalyticsDashboard) {
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("SUBSCRIPTION_CONTEXT_START", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+            requestId: req.requestId || null,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+            route: req.originalUrl,
+            method: req.method,
+            businessId: req.user?.businessId || null,
+        });
+    }
+    let subscriptionContextEndLogged = false;
+    const logSubscriptionContextEnd = () => {
+        if (!isAnalyticsDashboard || subscriptionContextEndLogged) {
+            return;
+        }
+        subscriptionContextEndLogged = true;
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("SUBSCRIPTION_CONTEXT_END", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+            requestId: req.requestId || null,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+            route: req.originalUrl,
+            method: req.method,
+        });
+    };
     try {
         const businessId = req.user?.businessId;
         if (!businessId) {
+            logSubscriptionContextEnd();
             return res.status(401).json({
                 code: "UNAUTHORIZED",
                 message: "Unauthorized",
@@ -786,6 +849,9 @@ const attachBillingContext = async (req, res, next) => {
         }
         catch (loadError) {
             console.warn("Non-critical loadBillingContext failed, continuing checkout in degraded mode:", loadError);
+        }
+        finally {
+            logSubscriptionContextEnd();
         }
         req.subscription = subscription;
         req.billing = context;

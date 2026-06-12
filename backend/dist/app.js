@@ -62,6 +62,7 @@ const sentry_1 = require("./observability/sentry");
 const embedding_service_1 = require("./services/embedding.service");
 const startupIsolation_service_1 = require("./runtime/startupIsolation.service");
 const requestLifecycle_1 = require("./utils/requestLifecycle");
+const analyticsDashboardLifecycleTrace_1 = require("./utils/analyticsDashboardLifecycleTrace");
 const redis_1 = require("./config/redis");
 const app = (0, express_1.default)();
 const isPlainRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -284,7 +285,9 @@ app.use((req, res, next) => {
     const originalSetHeader = res.setHeader.bind(res);
     const originalJson = res.json.bind(res);
     const originalSend = res.send.bind(res);
+    const originalEnd = res.end.bind(res);
     const originalRedirect = res.redirect.bind(res);
+    const isAnalyticsDashboard = (0, analyticsDashboardLifecycleTrace_1.isAnalyticsDashboardRequest)(req);
     res.setHeader = ((name, value) => {
         if (isResponseCommitted(res)) {
             recordLateResponseBlocked({
@@ -297,6 +300,15 @@ app.use((req, res, next) => {
         return originalSetHeader(name, value);
     });
     res.json = ((body) => {
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("RES_JSON_START", {
+                correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                headersSent: res.headersSent,
+                writableEnded: res.writableEnded,
+            });
+        }
         if (isResponseCommitted(res)) {
             recordLateResponseBlocked({
                 req,
@@ -312,6 +324,15 @@ app.use((req, res, next) => {
         }
         const response = originalJson(normalizeJsonResponseBody(body, res.statusCode));
         markExplicitFinalResponseWrite(res);
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("RES_JSON_END", {
+                correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                headersSent: res.headersSent,
+                writableEnded: res.writableEnded,
+            });
+        }
         if (isCheckoutRedirect) {
             if (typeof res.flush === "function") {
                 res.flush();
@@ -323,6 +344,26 @@ app.use((req, res, next) => {
                 if (res.socket && !res.socket.destroyed) {
                     res.socket.end();
                 }
+            });
+        }
+        return response;
+    });
+    res.end = ((...args) => {
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("res.end invoked", {
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                headersSent: res.headersSent,
+                writableEnded: res.writableEnded,
+            });
+        }
+        const response = originalEnd(...args);
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("res.end returned", {
+                requestId: req.requestId || null,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                headersSent: res.headersSent,
+                writableEnded: res.writableEnded,
             });
         }
         return response;
@@ -395,6 +436,11 @@ app.use(monitoring_middleware_1.monitoringMiddleware);
 app.use((req, res, next) => {
     const startedAt = Date.now();
     const route = req.originalUrl || req.path || null;
+    const isAnalyticsDashboard = (0, analyticsDashboardLifecycleTrace_1.isAnalyticsDashboardRequest)(req);
+    const analyticsDashboardElapsedStartedAt = isAnalyticsDashboard ? (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLoginSuccessAtMs)(req) || startedAt : startedAt;
+    if (isAnalyticsDashboard) {
+        (0, analyticsDashboardLifecycleTrace_1.markAnalyticsDashboardLifecycleStart)(res, analyticsDashboardElapsedStartedAt, (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }));
+    }
     const timeoutMs = resolveRequestTimeoutMs(req.path || req.originalUrl || "");
     const locals = res.locals;
     locals.requestTimeoutMs = timeoutMs;
@@ -407,6 +453,16 @@ app.use((req, res, next) => {
         timeoutMs,
     });
     (0, redis_1.ensureBackgroundQueueRecovery)();
+    if (isAnalyticsDashboard) {
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("REQUEST_START", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+            requestId: req.requestId || null,
+            route,
+            method: req.method,
+            timeoutMs,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+        });
+    }
     console.info("REQUEST_START", {
         requestId: req.requestId || null,
         route,
@@ -432,6 +488,16 @@ app.use((req, res, next) => {
             aborted: Boolean(lifecycle?.aborted),
             abortReason: lifecycle?.abortReason || null,
         });
+        if (isAnalyticsDashboard) {
+            (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("REQUEST_COMPLETE", {
+                correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+                requestId: req.requestId || null,
+                route,
+                method: req.method,
+                statusCode: res.statusCode,
+                elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+            });
+        }
     };
     req.on("aborted", () => {
         const marked = (0, requestLifecycle_1.markRequestLifecycleAborted)({

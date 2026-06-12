@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma";
 import { forbidden } from "../../utils/AppError";
+import { runDetachedBackgroundTask } from "../../utils/backgroundTask";
 import { decrypt, encrypt } from "../../utils/encrypt";
 import { logAnalyticsDashboardLifecycle } from "../../utils/analyticsDashboardLifecycleTrace";
 import { registerKmsAuditSink, kmsProviderRouterService } from "./kmsProviderRouter.service";
@@ -377,6 +378,18 @@ const traceFeatureGateAwait = async <T>(
     });
     throw error;
   }
+};
+
+const runSecurityAuditBackgroundTask = (
+  label: string,
+  task: () => Promise<unknown> | unknown
+) => {
+  runDetachedBackgroundTask(label, task, (error) => {
+    console.warn("SECURITY_AUDIT_BACKGROUND_TASK_FAILED", {
+      label,
+      reason: String((error as Error)?.message || error || "unknown"),
+    });
+  });
 };
 
 const scheduleSessionLedgerAsyncUpdate = (input: {
@@ -1288,43 +1301,45 @@ export const assertTenantIsolation = async (input: {
   getStore().tenantIsolationLedger.set(isolationKey, row);
   bumpAuthority("TenantIsolationLedger");
 
-  await traceFeatureGateAwait(
-    "assertTenantIsolation:tenantIsolationLedger.upsert",
-    {
-      cacheStatus: "none",
-      dbQueries: [`tenantIsolationLedger.upsert(${isolationKey})`],
-      isolationKey,
-    },
-    () =>
-      mirrorCanonicalUpsert({
-        upsert: () =>
-          db.tenantIsolationLedger.upsert({
-            where: {
-              isolationKey,
-            },
-            update: {
-              businessId: row.businessId,
-              tenantId: row.tenantId,
-              subsystem: row.subsystem,
-              actorTenantId: row.actorTenantId,
-              resourceTenantId: row.resourceTenantId,
-              verdict: row.verdict,
-              bleedDetected: row.bleedDetected,
-              reason: row.reason,
-              metadata: row.metadata,
-            },
-            create: row,
-          }),
-        find: () =>
-          db.tenantIsolationLedger.findUnique({
-            where: {
-              isolationKey,
-            },
-          }),
-      })
-  );
+  const persistTenantIsolationLedger = () =>
+    traceFeatureGateAwait(
+      "assertTenantIsolation:tenantIsolationLedger.upsert",
+      {
+        cacheStatus: "none",
+        dbQueries: [`tenantIsolationLedger.upsert(${isolationKey})`],
+        isolationKey,
+      },
+      () =>
+        mirrorCanonicalUpsert({
+          upsert: () =>
+            db.tenantIsolationLedger.upsert({
+              where: {
+                isolationKey,
+              },
+              update: {
+                businessId: row.businessId,
+                tenantId: row.tenantId,
+                subsystem: row.subsystem,
+                actorTenantId: row.actorTenantId,
+                resourceTenantId: row.resourceTenantId,
+                verdict: row.verdict,
+                bleedDetected: row.bleedDetected,
+                reason: row.reason,
+                metadata: row.metadata,
+              },
+              create: row,
+            }),
+          find: () =>
+            db.tenantIsolationLedger.findUnique({
+              where: {
+                isolationKey,
+              },
+            }),
+        })
+    );
 
   if (mismatch) {
+    await persistTenantIsolationLedger();
     if (isCritical) {
       if (actorTenantId) {
         getStore().frozenTenants.add(actorTenantId);
@@ -1377,6 +1392,11 @@ export const assertTenantIsolation = async (input: {
       ledger: row,
     };
   }
+
+  runSecurityAuditBackgroundTask(
+    "security.tenant_isolation_ledger.persist",
+    persistTenantIsolationLedger
+  );
 
   return {
     allowed: true,
@@ -1582,6 +1602,7 @@ export const appendAuthEvent = async (input: {
   outcome: string;
   reason?: string | null;
   metadata?: JsonRecord | null;
+  persistence?: "sync" | "async";
 }) => {
   const timestamp = now();
   const eventSeed = {
@@ -1623,28 +1644,38 @@ export const appendAuthEvent = async (input: {
   getStore().authEventLedger.set(eventKey, row);
   bumpAuthority("AuthEventLedger");
 
-  await traceFeatureGateAwait(
-    "appendAuthEvent:authEventLedger.upsert",
-    {
-      cacheStatus: "none",
-      dbQueries: [`authEventLedger.upsert(${eventKey})`],
-      eventKey,
-      action: row.action,
-      outcome: row.outcome,
-    },
-    () =>
-      withDbMirror(() =>
-        db.authEventLedger.upsert({
-          where: {
-            eventKey,
-          },
-          update: {
-            eventKey,
-          },
-          create: row,
-        })
-      )
-  );
+  const persistAuthEventLedger = () =>
+    traceFeatureGateAwait(
+      "appendAuthEvent:authEventLedger.upsert",
+      {
+        cacheStatus: "none",
+        dbQueries: [`authEventLedger.upsert(${eventKey})`],
+        eventKey,
+        action: row.action,
+        outcome: row.outcome,
+      },
+      () =>
+        withDbMirror(() =>
+          db.authEventLedger.upsert({
+            where: {
+              eventKey,
+            },
+            update: {
+              eventKey,
+            },
+            create: row,
+          })
+        )
+    );
+
+  if (input.persistence === "async") {
+    runSecurityAuditBackgroundTask(
+      "security.auth_event_ledger.persist",
+      persistAuthEventLedger
+    );
+  } else {
+    await persistAuthEventLedger();
+  }
 
   return row;
 };
@@ -2743,38 +2774,49 @@ export const authorizeAccess = async (request: AccessRequest) => {
     };
   }
 
-  await traceFeatureGateAwait(
-    "authorizeAccess:attestInfraIsolation",
-    {
-      action,
-      route: toRecord(request.metadata).route || null,
-      cacheStatus: "none",
-      dbQueries: ["isolationAttestationLedger.create"],
-    },
-    () =>
-      attestInfraIsolation({
-        businessId,
-        tenantId,
-        source: "ACCESS_RUNTIME",
-        checks: {
-          db: true,
-          cache: true,
-          queue: true,
-          logs: true,
-          files: true,
-          tokens: !String(request.sessionKey || "").trim()
-            ? true
-            : !getStore().revokedSessionKeys.has(String(request.sessionKey || "").trim()),
-          providers: true,
-          analytics: true,
-          traces: true,
-        },
-        metadata: {
-          action,
-          actorType,
-        },
-      }).catch(() => undefined)
-  );
+  const accessRuntimeIsolationChecks = {
+    db: true,
+    cache: true,
+    queue: true,
+    logs: true,
+    files: true,
+    tokens: !String(request.sessionKey || "").trim()
+      ? true
+      : !getStore().revokedSessionKeys.has(String(request.sessionKey || "").trim()),
+    providers: true,
+    analytics: true,
+    traces: true,
+  };
+  const persistAccessRuntimeAttestation = () =>
+    traceFeatureGateAwait(
+      "authorizeAccess:attestInfraIsolation",
+      {
+        action,
+        route: toRecord(request.metadata).route || null,
+        cacheStatus: "none",
+        dbQueries: ["isolationAttestationLedger.create"],
+      },
+      () =>
+        attestInfraIsolation({
+          businessId,
+          tenantId,
+          source: "ACCESS_RUNTIME",
+          checks: accessRuntimeIsolationChecks,
+          metadata: {
+            action,
+            actorType,
+          },
+        }).catch(() => undefined)
+    );
+
+  if (Object.values(accessRuntimeIsolationChecks).every(Boolean)) {
+    runSecurityAuditBackgroundTask(
+      "security.access_runtime_attestation.persist",
+      persistAccessRuntimeAttestation
+    );
+  } else {
+    await persistAccessRuntimeAttestation();
+  }
 
   const directPermissions = toStringList(request.permissions);
   const rolePermissions = resolveRolePermissions(role);
@@ -2984,28 +3026,32 @@ export const authorizeAccess = async (request: AccessRequest) => {
     }
   }
 
-  await traceFeatureGateAwait(
-    "authorizeAccess:appendAuthEvent:authorized",
-    {
-      action,
-      route: toRecord(request.metadata).route || null,
-      cacheStatus: "none",
-      dbQueries: ["authEventLedger.upsert"],
-    },
+  runSecurityAuditBackgroundTask(
+    "security.auth_event.authorized.persist",
     () =>
-      appendAuthEvent({
-        businessId,
-        tenantId,
-        sessionKey: request.sessionKey || null,
-        actorId,
-        actorType,
-        action,
-        outcome: "ALLOWED",
-        reason: "authorized",
-        metadata: {
-          role,
+      traceFeatureGateAwait(
+        "authorizeAccess:appendAuthEvent:authorized",
+        {
+          action,
+          route: toRecord(request.metadata).route || null,
+          cacheStatus: "none",
+          dbQueries: ["authEventLedger.upsert"],
         },
-      })
+        () =>
+          appendAuthEvent({
+            businessId,
+            tenantId,
+            sessionKey: request.sessionKey || null,
+            actorId,
+            actorType,
+            action,
+            outcome: "ALLOWED",
+            reason: "authorized",
+            metadata: {
+              role,
+            },
+          })
+      )
   );
 
   return {

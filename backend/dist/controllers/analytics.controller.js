@@ -44,6 +44,7 @@ const conversionTracker_service_1 = require("../services/salesAgent/conversionTr
 const followup_queue_1 = require("../queues/followup.queue");
 const tenant_service_1 = require("../services/tenant.service");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
+const analyticsDashboardLifecycleTrace_1 = require("../utils/analyticsDashboardLifecycleTrace");
 const getBusinessId = async (userId, requestBusinessId) => {
     if (requestBusinessId) {
         return requestBusinessId;
@@ -225,6 +226,16 @@ const getTopSources = async (req, res) => {
 };
 exports.getTopSources = getTopSources;
 const getDeepAnalyticsDashboard = async (req, res) => {
+    const isAnalyticsDashboard = (0, analyticsDashboardLifecycleTrace_1.isAnalyticsDashboardRequest)(req);
+    if (isAnalyticsDashboard) {
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("CONTROLLER_ENTER", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+            requestId: req.requestId || null,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+            route: req.originalUrl,
+            method: req.method,
+        });
+    }
     try {
         const businessId = req.user?.businessId;
         const range = req.query.range || "30d";
@@ -240,9 +251,35 @@ const getDeepAnalyticsDashboard = async (req, res) => {
             res,
             label: "analytics_dashboard",
             fallback: (0, analyticsDashboard_service_1.buildAnalyticsDashboardFallback)(range, planKey),
-            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey, {
-                requestSignal: (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }),
-            }),
+            task: async () => {
+                if (isAnalyticsDashboard) {
+                    (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("GET_ANALYTICS_START", {
+                        correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+                        requestId: req.requestId || null,
+                        elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                        businessId,
+                        range,
+                        planKey,
+                    });
+                }
+                try {
+                    return await (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey, {
+                        requestSignal: (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }),
+                    });
+                }
+                finally {
+                    if (isAnalyticsDashboard) {
+                        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("GET_ANALYTICS_END", {
+                            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+                            requestId: req.requestId || null,
+                            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+                            businessId,
+                            range,
+                            planKey,
+                        });
+                    }
+                }
+            },
         });
         if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
             return;

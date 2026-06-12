@@ -17,6 +17,7 @@ const tenant_service_1 = require("../services/tenant.service");
 const securityGovernanceOS_service_1 = require("../services/security/securityGovernanceOS.service");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
 const boundedTimeout_1 = require("../utils/boundedTimeout");
+const analyticsDashboardLifecycleTrace_1 = require("../utils/analyticsDashboardLifecycleTrace");
 class LightweightMemoryCache {
     constructor(maxKeys = 1000, defaultTtlMs = 15000) {
         this.cache = new Map();
@@ -116,9 +117,11 @@ const SESSION_ANOMALY_SYNC_PATH_PREFIXES = [
 ];
 const SESSION_ANOMALY_ASYNC_GUARD_TIMEOUT_MS = 80;
 const SESSION_LEDGER_QUIET_ROUTE_PREFIXES = [
+    "/api/analytics",
     "/api/clients/oauth/meta/lifecycle",
     "/api/user/api-key",
 ];
+const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const authContextCache = new LightweightMemoryCache(3000, AUTH_CONTEXT_CACHE_TTL_MS);
 const userBusinessCache = new LightweightMemoryCache(2000, 5000);
 const businessResolutionCache = new LightweightMemoryCache(2000, 15000);
@@ -776,6 +779,9 @@ const isInstantCheckoutRoute = (req) => {
         path.endsWith("/billing/checkout/instant"));
 };
 const isSessionLedgerQuietRoute = (req) => {
+    if (!READ_ONLY_METHODS.has(String(req.method || "").toUpperCase())) {
+        return false;
+    }
     const route = String(req.originalUrl || req.path || req.url || "")
         .trim()
         .toLowerCase();
@@ -817,6 +823,7 @@ const enforceSessionAnomalyGuard = async (req, input) => {
             userAgent: getUserAgent(req),
             deviceId: String(req.headers["x-device-id"] || "").trim() || null,
             signal: null,
+            suppressTouchWrite: isSessionLedgerQuietRoute(req),
         }).catch((err) => {
             req.logger?.warn({ error: err?.message || String(err), sessionKey }, "Background session anomaly tracking failed");
         });
@@ -1085,6 +1092,35 @@ const validateRefreshTokenDbOrGrace = async (hashedToken, userId) => {
 };
 const protect = async (req, res, next) => {
     const startedAt = Date.now();
+    const isAnalyticsDashboard = (0, analyticsDashboardLifecycleTrace_1.isAnalyticsDashboardRequest)(req);
+    let authEndLogged = false;
+    const logAuthEnd = () => {
+        if (!isAnalyticsDashboard || authEndLogged) {
+            return;
+        }
+        authEndLogged = true;
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("AUTH_END", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+            requestId: req.requestId || null,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+            route: req.originalUrl,
+            method: req.method,
+        });
+    };
+    const originalNext = next;
+    next = ((...args) => {
+        logAuthEnd();
+        return originalNext(...args);
+    });
+    if (isAnalyticsDashboard) {
+        (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("AUTH_START", {
+            correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),
+            requestId: req.requestId || null,
+            elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
+            route: req.originalUrl,
+            method: req.method,
+        });
+    }
     const isCheckout = String(req.originalUrl || "").includes("/checkout") ||
         String(req.originalUrl || "").includes("surface=checkout") ||
         String(req.query?.surface || "").trim().toLowerCase() === "checkout";

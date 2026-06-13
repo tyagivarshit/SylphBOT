@@ -132,7 +132,7 @@ function LeadsPageContent(){
                   </h2>
                   <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
                     Filter stages, review unread activity, and open lead context
-                    from one clean CRM surface.
+                    from one clean Lead OS surface.
                   </p>
                 </div>
               </div>

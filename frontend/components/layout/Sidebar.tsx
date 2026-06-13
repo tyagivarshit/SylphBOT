@@ -44,7 +44,7 @@ const menu: MenuSection[] = [
     items: [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard }],
   },
   {
-    section: "CRM",
+    section: "Lead OS",
     items: [
       { name: "Leads", href: "/leads", icon: Users },
       { name: "Conversations", href: "/conversations", icon: MessageCircle },

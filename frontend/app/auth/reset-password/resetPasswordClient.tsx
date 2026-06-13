@@ -112,7 +112,7 @@ export default function ResetPasswordPage() {
 
           <div className="brand-note-card">
             Your password has been reset. Use your new credentials to continue
-            into the dashboard and resume conversations, CRM work, and
+            into the dashboard and resume conversations, Lead OS work, and
             automation tasks.
           </div>
 

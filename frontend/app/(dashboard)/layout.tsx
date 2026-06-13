@@ -120,7 +120,7 @@ function UpgradeModal({
         title: state?.title || "Unlock this feature on a higher plan",
         description:
           state?.description ||
-          "Upgrade to unlock advanced automation, CRM visibility, and AI growth features as your workspace scales.",
+          "Upgrade to unlock advanced automation, Lead OS visibility, and AI growth features as your workspace scales.",
         primaryLabel: "Upgrade Plan",
         secondaryLabel: "Maybe later",
         icon: <ShieldCheck size={14} />,

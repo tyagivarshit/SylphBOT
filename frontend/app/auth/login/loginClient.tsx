@@ -205,7 +205,7 @@ export default function LoginClient({
   return (
     <AuthShell
       title="Welcome back"
-      subtitle="Sign in to your Automexia Lead OS workspace and continue handling conversations, CRM, and automation with the same premium brand experience."
+      subtitle="Sign in to your Automexia Lead OS workspace and continue handling conversations, leads, and automation with the same premium brand experience."
       footer={
         <p className="text-center">
           Don&apos;t have an account?{" "}
@@ -224,7 +224,7 @@ export default function LoginClient({
             Trusted access for your revenue workspace
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            Your CRM activity, automations, and AI desk settings stay protected
+            Your Lead OS activity, automations, and AI desk settings stay protected
             behind authenticated workspace access.
           </p>
         </div>

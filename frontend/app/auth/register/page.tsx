@@ -114,7 +114,7 @@ export default function RegisterPage() {
             Built for premium client-facing automation
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            Your account unlocks the same brand language across CRM, inbox,
+            Your account unlocks the same brand language across Lead OS, inbox,
             automations, and AI-assisted sales workflows.
           </p>
         </div>

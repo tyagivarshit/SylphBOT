@@ -29,11 +29,12 @@ import {
 } from "recharts";
 import UsageOverview from "@/components/dashboard/UsageOverview";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
+import { EmptyState, RetryState, SkeletonCard } from "@/components/ui/feedback";
+import { getAutomationFlows } from "@/lib/automation.service";
 import { getActiveConversations, getDashboardStats } from "@/lib/dashboard.api";
 import { useUpgrade } from "@/app/(dashboard)/layout";
 import { useAuth } from "@/context/AuthContext";
 import { useProgressiveHydration } from "@/hooks/useProgressiveHydration";
-import { EmptyState, RetryState, SkeletonCard } from "@/components/ui/feedback";
 import {
   BILLING_PLAN_STALE_TIME_MS,
   fetchBillingPlanState,
@@ -105,6 +106,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const deferredTriggerRef = useRef<HTMLDivElement | null>(null);
   const [backgroundStartupReady, setBackgroundStartupReady] = useState(false);
+  const [showComingSoon, setShowComingSoon] = useState(false);
 
   const isHydrated = lifecycleState === "hydrated" || lifecycleState === "authenticated";
   const authStable = Boolean(user) && isHydrated;
@@ -184,6 +186,17 @@ export default function DashboardPage() {
       return parseConversationStats(response.data);
     },
   });
+
+  const automationsQuery = useQuery({
+    queryKey: ["automation-flows"],
+    queryFn: getAutomationFlows,
+    enabled: authStable,
+    staleTime: 60_000,
+  });
+
+  const activeAutomationsCount = automationsQuery.data
+    ? automationsQuery.data.filter(flow => flow.status === "ACTIVE" || flow.status === "active").length
+    : 0;
 
   const importantSettled = true;
 
@@ -325,8 +338,8 @@ export default function DashboardPage() {
     { title: "Revenue Today", value: "₹12,450", trend: "+12.4%", trendUp: true },
     { title: "New Leads", value: stats?.leadsToday ?? 0, trend: "+15.0%", trendUp: true },
     { title: "Meetings Today", value: "5", trend: "+20.0%", trendUp: true },
-    { title: "Growth Score", value: "94/100", trend: "+2.0%", trendUp: true },
-    { title: "AI Tasks Running", value: "12", trend: "Active", trendUp: undefined },
+    { title: "Growth Score", value: "94/100", trend: "+2.0%", trendUp: true, description: "Weighted index of lead engagement, conversion velocity, and AI resolution success." },
+    { title: "Active Automations", value: automationsQuery.isLoading ? "..." : activeAutomationsCount, trend: "Live", trendUp: undefined, description: "Total workflows currently actively monitoring channels." },
     { title: "Conversion Rate", value: "3.2%", trend: "+0.4%", trendUp: true },
   ];
 
@@ -390,7 +403,7 @@ export default function DashboardPage() {
           </p>
         </div>
         <button
-          onClick={() => router.push("/help")}
+          onClick={() => setShowComingSoon(true)}
           className="brand-button-primary bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-400 text-white hover:brightness-110 shadow-md flex items-center gap-2 self-start md:self-auto"
         >
           <Sparkles size={14} />
@@ -446,6 +459,7 @@ export default function DashboardPage() {
               value={card.value}
               trend={card.trend}
               trendUp={card.trendUp}
+              description={!isMobile ? card.description : undefined}
               loading={statsQuery.isPending}
             />
           );
@@ -487,7 +501,15 @@ export default function DashboardPage() {
   // SECTION 4: AI Workforce Status
   const renderWorkforceStatus = () => (
     <div className="space-y-4">
-      <h2 className="font-semibold text-gray-900 text-base">AI Workforce Status</h2>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="font-semibold text-gray-900 text-base">AI Workforce Status</h2>
+        <button
+          onClick={() => setShowComingSoon(true)}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 transition"
+        >
+          View Workforce →
+        </button>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {workforce.map((ai) => (
           <div
@@ -711,6 +733,30 @@ export default function DashboardPage() {
           <SkeletonCard className="h-52" />
         </div>
       )}
+
+      {/* ======================================
+          ✨ COMING SOON OVERLAY MODAL
+          ====================================== */}
+      {showComingSoon && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="brand-panel-strong w-full max-w-sm rounded-[28px] p-6 text-center bg-white shadow-xl animate-in zoom-in-95 border border-blue-100">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 shadow-[0_8px_20px_rgba(37,99,235,0.15)]">
+              <Sparkles size={20} />
+            </div>
+            <h3 className="mt-4 text-base font-bold text-slate-900">Dedicated Experience</h3>
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              This workforce node is coming soon. The dedicated dashboard features are under development to help you orchestrate your sales workflows.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowComingSoon(false)}
+              className="mt-5 w-full brand-button-primary py-2.5 rounded-xl text-sm"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -786,34 +832,43 @@ function Card({
   value, 
   trend, 
   trendUp, 
+  description,
   loading 
 }: { 
   title: string; 
   value?: DashboardValue; 
   trend?: string; 
   trendUp?: boolean; 
+  description?: string;
   loading?: boolean; 
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-sm transition hover:shadow-md">
-      <p className="text-xs font-semibold text-gray-500">{title}</p>
-      {loading ? (
-        <div className="mt-2.5 h-6 w-16 animate-pulse rounded bg-slate-200" />
-      ) : (
-        <div className="mt-2.5 flex items-baseline justify-between gap-1.5 flex-wrap">
-          <h2 className="break-words text-lg font-bold text-gray-900">{value}</h2>
-          {trend ? (
-            <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 border ${
-              trendUp === undefined 
-                ? "text-blue-600 bg-blue-50 border-blue-100" 
-                : trendUp 
-                ? "text-emerald-600 bg-emerald-50 border-emerald-100" 
-                : "text-rose-600 bg-rose-50 border-rose-100"
-            }`}>
-              {trend}
-            </span>
-          ) : null}
-        </div>
+    <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-sm transition hover:shadow-md flex flex-col justify-between h-full">
+      <div>
+        <p className="text-xs font-semibold text-gray-500">{title}</p>
+        {loading ? (
+          <div className="mt-2.5 h-6 w-16 animate-pulse rounded bg-slate-200" />
+        ) : (
+          <div className="mt-2.5 flex items-baseline justify-between gap-1.5 flex-wrap">
+            <h2 className="break-words text-lg font-bold text-gray-900">{value}</h2>
+            {trend ? (
+              <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 border ${
+                trendUp === undefined 
+                  ? "text-blue-600 bg-blue-50 border-blue-100" 
+                  : trendUp 
+                  ? "text-emerald-600 bg-emerald-50 border-emerald-100" 
+                  : "text-rose-600 bg-rose-50 border-rose-100"
+              }`}>
+                {trend}
+              </span>
+            ) : null}
+          </div>
+        )}
+      </div>
+      {description && !loading && (
+        <p className="mt-3 text-[10px] text-slate-400 leading-relaxed border-t border-slate-100/50 pt-2 shrink-0">
+          {description}
+        </p>
       )}
     </div>
   );

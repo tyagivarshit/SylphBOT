@@ -1,10 +1,14 @@
 "use client"
 
-import { Suspense, useEffect, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { usePlan } from "@/hooks/usePlan"
 import { useSearchParams } from "next/navigation"
 import { apiFetch } from "@/lib/apiClient"
 import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry"
+import { getDashboardStats } from "@/lib/dashboard.api"
+import { getLeadOpportunityIntelligence } from "@/lib/opportunityIntelligence"
+import StatCard from "@/components/cards/StatCard"
+import { Flame, AlertCircle, TrendingUp } from "lucide-react"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
@@ -20,12 +24,12 @@ const stageOptions = [
 ]
 
 type LeadItem = {
-  id: string
-  name?: string | null
-  platform?: string | null
-  stage: string
-  lastMessage?: string | null
-  unreadCount?: number
+  id: string;
+  name?: string | null;
+  platform?: string | null;
+  stage: string;
+  lastMessage?: string | null;
+  unreadCount?: number;
 }
 
 function LeadsPageContent(){
@@ -38,6 +42,7 @@ function LeadsPageContent(){
   const [stage,setStage] = useState("")
   const [page,setPage] = useState(1)
   const [totalPages,setTotalPages] = useState(1)
+  const [stats,setStats] = useState<any>(null)
   const initialSelectedLeadId = searchParams.get("leadId")
   const leadsRequestSequenceRef = useRef(0)
 
@@ -109,6 +114,44 @@ function LeadsPageContent(){
 
   },[stage,page,isAllowed])
 
+  useEffect(() => {
+    if (!isAllowed) return;
+    getDashboardStats()
+      .then((res) => {
+        if (res.success && res.data) {
+          setStats(res.data);
+        }
+      })
+      .catch((err) => console.error("Stats load error", err));
+  }, [isAllowed]);
+
+  const overviewMetrics = useMemo(() => {
+    const intelLeads = leads.map(l => ({
+      ...l,
+      intel: getLeadOpportunityIntelligence(l)
+    }))
+
+    const hotList = intelLeads.filter(l => l.stage === "QUALIFIED" || l.intel.closeProbability >= 75)
+    const attentionList = intelLeads.filter(l => l.stage === "NEW" || (l.unreadCount && l.unreadCount > 0))
+    const activeList = intelLeads.filter(l => l.stage === "NEW" || l.stage === "QUALIFIED")
+
+    const hotRev = hotList.reduce((acc, curr) => acc + curr.intel.revenuePotential, 0)
+    const attentionRev = attentionList.reduce((acc, curr) => acc + curr.intel.revenuePotential, 0)
+    const activeRev = activeList.reduce((acc, curr) => acc + curr.intel.revenuePotential, 0)
+
+    const totalLeadsStat = stats?.totalLeads || leads.length
+    const qualifiedLeadsStat = stats?.qualifiedLeads || hotList.length
+
+    return {
+      hotCount: qualifiedLeadsStat,
+      hotRevenue: hotRev || (qualifiedLeadsStat * 75000),
+      attentionCount: Math.max(0, totalLeadsStat - qualifiedLeadsStat),
+      attentionRevenue: attentionRev || (Math.max(0, totalLeadsStat - qualifiedLeadsStat) * 30000),
+      activeCount: totalLeadsStat,
+      activeRevenue: activeRev || (totalLeadsStat * 45000),
+    }
+  }, [leads, stats])
+
   return(
 
     <div className="min-w-0 space-y-5">
@@ -116,11 +159,33 @@ function LeadsPageContent(){
       {/* CONTENT */}
       {loading ? (
         <div className="brand-panel rounded-[26px] p-6 text-slate-500">
-          Loading leads...
+          Loading Lead OS...
         </div>
       ) : (
 
         <FeatureGate feature="CRM">
+
+          {/* SECTION 1: Lead OS Overview */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard
+              title="Hot Leads"
+              value={overviewMetrics.hotCount}
+              icon={<Flame size={20} className="text-orange-600" />}
+              trend={`₹${overviewMetrics.hotRevenue.toLocaleString('en-IN')} Est. Opportunity`}
+            />
+            <StatCard
+              title="Needs Attention"
+              value={overviewMetrics.attentionCount}
+              icon={<AlertCircle size={20} className="text-amber-600" />}
+              trend={`₹${overviewMetrics.attentionRevenue.toLocaleString('en-IN')} Est. Opportunity`}
+            />
+            <StatCard
+              title="Active Opportunities"
+              value={overviewMetrics.activeCount}
+              icon={<TrendingUp size={20} className="text-emerald-600" />}
+              trend={`₹${overviewMetrics.activeRevenue.toLocaleString('en-IN')} Est. Opportunity`}
+            />
+          </div>
 
           <div className="brand-section-shell rounded-[30px] p-4 sm:p-5 lg:p-6">
             <div className="mb-5 flex flex-col gap-4 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-start sm:justify-between">
@@ -128,11 +193,10 @@ function LeadsPageContent(){
                 <span className="brand-chip w-fit">Pipeline visibility</span>
                 <div>
                   <h2 className="text-lg font-semibold tracking-tight text-slate-950">
-                    Lead pipeline
+                    Opportunity Intelligence Workspace
                   </h2>
                   <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-                    Filter stages, review unread activity, and open lead context
-                    from one clean Lead OS surface.
+                    Understand where revenue opportunities exist, why they matter, and what action should happen next.
                   </p>
                 </div>
               </div>
@@ -140,7 +204,7 @@ function LeadsPageContent(){
               <StageSelect
                 value={stage}
                 options={stageOptions}
-                ariaLabel="Filter leads by stage"
+                ariaLabel="Filter opportunities by stage"
                 className="w-full sm:w-[220px]"
                 onChange={(value)=>{
                   setStage(value)
@@ -151,11 +215,11 @@ function LeadsPageContent(){
 
             {!isAllowed ? (
               <p className="brand-empty-state rounded-[24px] py-10 text-center text-sm">
-                Preview of your leads will appear here 🚀
+                Preview of your Lead OS V2 will appear here 🚀
               </p>
             ) : leads.length === 0 ? (
               <p className="brand-empty-state rounded-[24px] py-10 text-center text-sm">
-                No leads yet. Start automations to capture leads 🚀
+                No active opportunities yet. Capture new leads to begin.
               </p>
             ) : (
               <>
@@ -207,7 +271,7 @@ function LeadsPageFallback() {
   return (
     <div className="min-w-0 space-y-6">
       <div className="brand-panel rounded-[26px] p-6 text-slate-500">
-        Loading leads...
+        Loading Lead OS...
       </div>
     </div>
   )

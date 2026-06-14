@@ -5,7 +5,7 @@ export default function CRMPage(){
   return (
     <FeatureGate feature="CRM">
       <div>
-        CRM UI yaha aayega
+        Opportunity Workspace UI yaha aayega
       </div>
     </FeatureGate>
   )

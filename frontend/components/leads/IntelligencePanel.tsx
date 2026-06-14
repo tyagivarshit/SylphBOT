@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation"
 
 const stageOptions = [
   { value: "NEW", label: "Initial Contact" },
-  { value: "QUALIFIED", label: "Qualified Lead" },
+  { value: "QUALIFIED", label: "Qualified Opportunity" },
   { value: "WON", label: "Deal Won" },
   { value: "LOST", label: "Deal Lost" },
 ]
@@ -110,7 +110,7 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
   }
 
   const handleActionClick = (actionLabel: string) => {
-    setActionMessage(`Action logged: "${actionLabel}" for ${lead.name || "Lead"}`)
+    setActionMessage(`Action logged: "${actionLabel}" for ${lead.name || "Opportunity"}`)
     setTimeout(() => {
       setActionMessage(null)
     }, 4000)

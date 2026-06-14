@@ -352,7 +352,7 @@ export default function LeadsTable({
                 <li>Opportunities needing attention</li>
                 <li>Sales AI recommendations</li>
               </ul>
-              <p className="mt-2 text-slate-400">Capture new prospects to begin.</p>
+              <p className="mt-2 text-slate-400">Capture new opportunities to begin.</p>
             </div>
           </div>
           <div className="pt-2">

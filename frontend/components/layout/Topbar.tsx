@@ -201,12 +201,12 @@ function getPageMeta(pathname: string) {
       match: "/dashboard",
       title: "Dashboard",
       eyebrow: "Overview",
-      subtitle: "Live visibility into leads, usage, and active conversations.",
+      subtitle: "Live visibility into opportunities, usage, and active conversations.",
     },
     {
       match: "/leads",
-      title: "Leads",
-      eyebrow: "CRM",
+      title: "Opportunities",
+      eyebrow: "LEAD OS",
       subtitle: "Track stages, live activity, and conversion-ready conversations.",
     },
     {

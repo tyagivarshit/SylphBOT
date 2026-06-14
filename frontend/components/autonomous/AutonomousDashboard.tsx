@@ -142,7 +142,7 @@ export default function AutonomousDashboard() {
               Opportunity discovery, ethical outreach, and dispatch observability
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-              The engine scans CRM intelligence, scores proactive opportunities,
+              The engine scans Lead OS intelligence, scores proactive opportunities,
               applies guardrails, and routes approved outreach back through Revenue Brain.
             </p>
           </div>

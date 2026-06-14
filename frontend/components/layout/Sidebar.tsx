@@ -46,7 +46,7 @@ const menu: MenuSection[] = [
   {
     section: "Lead OS",
     items: [
-      { name: "Leads", href: "/leads", icon: Users },
+      { name: "Opportunities", href: "/leads", icon: Users },
       { name: "Conversations", href: "/conversations", icon: MessageCircle },
     ],
   },
@@ -231,8 +231,8 @@ function SidebarComponent({ open, setOpen }: SidebarProps) {
               Always-on AI sales desk
             </span>
             <p className="mt-3 text-sm leading-6 text-white/64">
-              Product-first command center for conversations, CRM, automation,
-              and lead conversion.
+              Product-first command center for conversations, Lead OS, automation,
+              and revenue generation.
             </p>
           </div>
           <p className="px-1 text-xs text-white/42">© 2026 Automexia AI</p>

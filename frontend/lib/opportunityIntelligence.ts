@@ -29,7 +29,7 @@ function getSeedHash(str: string): number {
 
 const RECOMMENDATIONS_POOL = {
   NEW: [
-    "Qualify lead intent by asking about budget and project timeline.",
+    "Qualify opportunity intent by asking about budget and project timeline.",
     "Send calendar booking link for a 15-minute discovery call.",
     "Introduce starter tier benefits and schedule follow-up.",
     "Analyze recent DM to identify pain points and respond."
@@ -55,7 +55,7 @@ const RECOMMENDATIONS_POOL = {
 };
 
 const SUMMARIES_POOL = [
-  "Lead demonstrated strong buying intent. Focused on automated outreach and team analytics. Follow-up within 24 hours is highly recommended.",
+  "Opportunity demonstrated strong buying intent. Focused on automated outreach and team analytics. Follow-up within 24 hours is highly recommended.",
   "Highly interested in API custom integrations and WhatsApp automation. Expressed minor hesitation regarding data migration. Recommend scheduling a tech sync.",
   "Expressed interest via Instagram DM. Looking for a plug-and-play solution to automate comment replies. High potential for instant conversion.",
   "Inquired about enterprise volume pricing. Budget is approved, but integration timeline is tight. Sales rep intervention recommended."
@@ -79,7 +79,7 @@ const WORKERS_POOL = [
   "Sales AI Agent v2.4",
   "Outreach Optimization Bot",
   "Growth Conversational Agent",
-  "Lead Qualification Worker #12"
+  "Opportunity Qualification Worker #12"
 ];
 
 export function getLeadOpportunityIntelligence(lead: {
@@ -155,7 +155,7 @@ export function getLeadOpportunityIntelligence(lead: {
   const activityTimeline = [
     { time: `${minutesAgo1}m ago`, event: `AI Agent updated status: stage is ${lead.stage}` },
     { time: `${hoursAgo2}h ago`, event: `Incoming message via ${lead.platform || "Platform"}` },
-    { time: `${daysAgo3}d ago`, event: `Lead generated & AI assigned to worker` }
+    { time: `${daysAgo3}d ago`, event: `Opportunity generated & AI assigned to worker` }
   ];
 
   // Recent Conversation Summary
@@ -175,7 +175,7 @@ export function getLeadOpportunityIntelligence(lead: {
     whySignals.push("Opportunity successfully closed (Won stage reached).");
     whySignals.push("Client kickoff scheduled and contract setup initialized.");
   } else if (normalizedStage === "NEW") {
-    whySignals.push("New lead captured and qualification workflow triggered.");
+    whySignals.push("New opportunity captured and qualification workflow triggered.");
   }
 
   // 2. Platform connection driver

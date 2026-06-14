@@ -13,8 +13,8 @@ const plans = [
     name: "PRO",
     price: "₹999/mo",
     features: [
-      "CRM Access",
-      "Leads & Conversations",
+      "Lead OS Access",
+      "Opportunities & Conversations",
       "WhatsApp Automation",
       "Follow-ups"
     ]

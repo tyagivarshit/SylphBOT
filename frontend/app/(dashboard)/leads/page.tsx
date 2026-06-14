@@ -18,7 +18,7 @@ import { hasFeature } from "@/lib/featureGuard"
 const stageOptions = [
   { value: "", label: "All Opportunities" },
   { value: "NEW", label: "Initial Contact" },
-  { value: "QUALIFIED", label: "Qualified Lead" },
+  { value: "QUALIFIED", label: "Qualified Opportunity" },
   { value: "WON", label: "Deal Won" },
   { value: "LOST", label: "Deal Lost" },
 ]
@@ -169,7 +169,7 @@ function LeadsPageContent(){
           {/* SECTION 1: Lead OS Overview */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard
-              title="Hot Leads"
+              title="Hot Opportunities"
               value={overviewMetrics.hotCount}
               icon={<Flame size={20} className="text-orange-600" />}
               trend={`₹${overviewMetrics.hotRevenue.toLocaleString('en-IN')} Est. Opportunity`}
@@ -233,7 +233,7 @@ function LeadsPageContent(){
                       <li>Opportunities needing attention</li>
                       <li>Sales AI recommendations</li>
                     </ul>
-                    <p className="mt-2 text-slate-400">Capture new leads to begin.</p>
+                    <p className="mt-2 text-slate-400">Capture new opportunities to begin.</p>
                   </div>
                 </div>
                 <div className="pt-2">

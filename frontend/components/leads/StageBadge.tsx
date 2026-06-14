@@ -4,7 +4,7 @@ const HUMAN_STAGES: Record<string, string> = {
   NEW: "Initial Contact",
   INITIAL_CONTACT: "Initial Contact",
   ONBOARDING_DEMO: "Demo Scheduled",
-  QUALIFIED: "Qualified Lead",
+  QUALIFIED: "Qualified Opportunity",
   NEGOTIATION: "Negotiation",
   WON: "Deal Won",
   CLOSED_WON: "Deal Won",

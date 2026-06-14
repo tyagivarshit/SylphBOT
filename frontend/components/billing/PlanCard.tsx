@@ -12,7 +12,7 @@ const FEATURE_MAP: Record<string, string[]> = {
   BASIC: [
     "Instagram DM automation",
     "Comment auto-replies",
-    "Comment → DM lead capture",
+    "Comment → DM opportunity capture",
     "Up to 5 automation workflows",
     "Basic AI response system",
   ],
@@ -20,7 +20,7 @@ const FEATURE_MAP: Record<string, string[]> = {
   PRO: [
     "Instagram DM & comment automation",
     "WhatsApp automation (full funnel)",
-    "Built-in CRM (lead tracking)",
+    "Built-in Lead OS (opportunity tracking)",
     "Automated follow-ups",
     "Custom follow-up sequences",
     "Unlimited automation workflows",

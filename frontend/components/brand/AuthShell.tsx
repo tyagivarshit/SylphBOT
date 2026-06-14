@@ -13,7 +13,7 @@ type AuthShellProps = {
 };
 
 const previewItems = [
-  "Premium CRM, inbox, and automation shell",
+  "Premium Lead OS, inbox, and automation shell",
   "Consistent enterprise-grade trust cues",
   "Mobile-safe product experience without horizontal scroll",
 ];
@@ -40,10 +40,10 @@ export default function AuthShell({
 
                 <div>
                   <h2 className="max-w-lg text-4xl font-semibold tracking-tight text-white">
-                    One branded operating system for leads, replies, and growth.
+                    One branded operating system for opportunities, replies, and growth.
                   </h2>
                   <p className="mt-4 max-w-xl text-sm leading-7 text-white/70">
-                    Auth, CRM, inbox, and automation now speak the same
+                    Auth, Lead OS, inbox, and automation now speak the same
                     Automexia design language so the product feels as polished
                     as the marketing site.
                   </p>
@@ -80,7 +80,7 @@ export default function AuthShell({
                   Customer: Price kya hai?
                 </div>
                 <div className="max-w-[82%] rounded-[18px] bg-blue-500/18 px-4 py-3 text-sm text-white">
-                  AI: Plans start from Rs 999/month with lead capture, CRM, and
+                  AI: Plans start from Rs 999/month with opportunity capture, Lead OS, and
                   automation included.
                 </div>
               </div>
@@ -88,7 +88,7 @@ export default function AuthShell({
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <div className="rounded-[18px] bg-white/8 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/45">
-                    Leads
+                    Opportunities
                   </p>
                   <p className="mt-1 text-lg font-semibold text-white">128</p>
                 </div>

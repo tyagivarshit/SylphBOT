@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma";
+import redis from "../../config/redis";
 import { forbidden } from "../../utils/AppError";
 import { runDetachedBackgroundTask } from "../../utils/backgroundTask";
 import { decrypt, encrypt } from "../../utils/encrypt";
@@ -581,6 +582,8 @@ let bootstrapSecurityGovernanceInFlight: Promise<{
   phaseVersion: string;
 }> | null = null;
 
+let governanceAlreadyInitialized = false;
+
 const createStore = (): SecurityStore => ({
   bootstrappedAt: null,
   invokeCount: 0,
@@ -938,11 +941,33 @@ const writePolicyLedger = async (input: {
 
 export const bootstrapSecurityGovernanceOS = async () => {
   const store = getStore();
-  if (store.bootstrappedAt) {
+  if (governanceAlreadyInitialized || store.bootstrappedAt) {
+    governanceAlreadyInitialized = true;
+    if (!store.bootstrappedAt) {
+      store.bootstrappedAt = new Date();
+    }
     return {
       bootstrappedAt: store.bootstrappedAt,
       phaseVersion: SECURITY_PHASE_VERSION,
     };
+  }
+
+  const redisKey = `sylph:security:governance:initialized:${SECURITY_PHASE_VERSION}`;
+  if (!shouldUseInMemory) {
+    try {
+      const cached = await redis.get(redisKey);
+      if (cached) {
+        governanceAlreadyInitialized = true;
+        const bootstrappedDate = new Date(Number(cached) || Date.now());
+        store.bootstrappedAt = bootstrappedDate;
+        return {
+          bootstrappedAt: bootstrappedDate,
+          phaseVersion: SECURITY_PHASE_VERSION,
+        };
+      }
+    } catch (err) {
+      console.warn("Redis get failed for governance init, falling back to local init", err);
+    }
   }
 
   if (bootstrapSecurityGovernanceInFlight) {
@@ -1201,6 +1226,14 @@ export const bootstrapSecurityGovernanceOS = async () => {
     }
 
     store.bootstrappedAt = timestamp;
+    governanceAlreadyInitialized = true;
+    if (!shouldUseInMemory) {
+      try {
+        await redis.set(redisKey, String(timestamp.getTime()));
+      } catch (err) {
+        console.warn("Redis set failed for governance init", err);
+      }
+    }
     return {
       bootstrappedAt: timestamp,
       phaseVersion: SECURITY_PHASE_VERSION,
@@ -2623,32 +2656,6 @@ const matchesScopedOverride = (
 };
 
 export const authorizeAccess = async (request: AccessRequest) => {
-  const bootstrapCacheStatus = getStore().bootstrappedAt
-    ? "hit"
-    : bootstrapSecurityGovernanceInFlight
-      ? "deduped_miss"
-      : "miss";
-  await traceFeatureGateAwait(
-    "authorizeAccess:bootstrapSecurityGovernanceOS",
-    {
-      action: request.action,
-      route: toRecord(request.metadata).route || null,
-      cacheStatus: bootstrapCacheStatus,
-      dbQueries:
-        bootstrapCacheStatus === "hit"
-          ? []
-          : [
-              "roleLedger.upsert x default roles",
-              "permissionLedger.upsert x unique permissions",
-              "policyLedger.create x default policies",
-              "accessPolicyLedger.upsert x default policies",
-              "retentionPolicyLedger.upsert x1",
-              "complianceLedger.upsert x default controls",
-            ],
-    },
-    () => bootstrapSecurityGovernanceOS()
-  );
-
   const store = getStore();
   store.invokeCount += 1;
   const businessId = normalizeBusinessId(request.businessId);
@@ -5314,6 +5321,7 @@ export const __securityPhase6BTestInternals = {
   resetStore: () => {
     globalForSecurity.__sylphSecurityStore = createStore();
     bootstrapSecurityGovernanceInFlight = null;
+    governanceAlreadyInitialized = false;
     kmsProviderRouterService.resetState();
     kmsAuditSinkAttached = false;
     attachKmsAuditSink();

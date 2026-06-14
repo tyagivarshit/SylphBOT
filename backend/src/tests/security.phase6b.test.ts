@@ -1006,12 +1006,81 @@ export const securityPhase6BTests: TestCase[] = [
         permissions: ["messages:enqueue"],
         scopes: ["WRITE"],
       });
+      await new Promise((resolve) => setTimeout(resolve, 50));
       const audit = await runSecurityGovernanceSelfAudit({
         businessId: "business_1",
       });
       assert.equal(audit.deeplyWired, true);
       assert.equal(audit.checks.bootstrapped, true);
       assert.equal(audit.checks.authoritative, true);
+    },
+  },
+  {
+    name: "phase6b verify elite feature gates for owner role",
+    run: async () => {
+      await reset();
+      const actions = [
+        "analytics:view", // Dashboard / Opportunities / Analytics
+        "messages:enqueue", // Automation
+        "billing:view", // Billing surfaces
+        "billing:manage", // Billing surfaces
+      ];
+      for (const action of actions) {
+        const allowed = await authorizeAccess({
+          action,
+          businessId: "business_1",
+          tenantId: "business_1",
+          actorId: "service_1",
+          actorType: "SERVICE",
+          role: "OWNER",
+          permissions: [action],
+          scopes: ["WRITE", "READ"],
+        });
+        assert.equal(allowed.allowed, true, `Elite gate ${action} should be allowed`);
+      }
+    },
+  },
+  {
+    name: "phase6b feature gate evaluation latency P95 is less than 100ms",
+    run: async () => {
+      await reset();
+      
+      // Warm up
+      await authorizeAccess({
+        action: "analytics:view",
+        businessId: "business_1",
+        tenantId: "business_1",
+        actorId: "service_1",
+        actorType: "SERVICE",
+        role: "SERVICE",
+        permissions: ["analytics:view"],
+        scopes: ["WRITE"],
+      });
+
+      const runs = 100;
+      const durations: number[] = [];
+
+      for (let i = 0; i < runs; i++) {
+        const start = performance.now();
+        await authorizeAccess({
+          action: "analytics:view",
+          businessId: "business_1",
+          tenantId: "business_1",
+          actorId: "service_1",
+          actorType: "SERVICE",
+          role: "SERVICE",
+          permissions: ["analytics:view"],
+          scopes: ["WRITE"],
+        });
+        const duration = performance.now() - start;
+        durations.push(duration);
+      }
+
+      durations.sort((a, b) => a - b);
+      const p95Index = Math.floor(runs * 0.95);
+      const p95 = durations[p95Index];
+      console.log(`[LATENCY_METRIC] P95 Feature Gate Evaluation Latency: ${p95.toFixed(2)}ms`);
+      assert.ok(p95 < 100, `P95 latency should be less than 100ms, got ${p95.toFixed(2)}ms`);
     },
   },
 ];

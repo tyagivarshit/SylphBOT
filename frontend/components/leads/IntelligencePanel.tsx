@@ -142,7 +142,7 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
 
         <button
           onClick={onClose}
-          className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition duration-150"
+          className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition duration-150 lg:hidden"
           aria-label="Close intelligence panel"
         >
           <X size={16} />
@@ -191,11 +191,11 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
                   <Percent size={14} className="text-blue-500" />
                   Close Probability
-                  <span 
-                    title="Calculated using pipeline stage and interaction velocity." 
-                    className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
-                  >
+                  <span className="brand-tooltip cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]">
                     ⓘ
+                    <span className="brand-tooltip-text">
+                      Calculated using pipeline stage and interaction velocity.
+                    </span>
                   </span>
                 </div>
                 <div className="text-xl font-bold text-slate-900">
@@ -214,11 +214,11 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
                   <BadgeDollarSign size={14} className="text-emerald-500" />
                   Estimated Opportunity
-                  <span 
-                    title="Calculated using current opportunity signals." 
-                    className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
-                  >
+                  <span className="brand-tooltip cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]">
                     ⓘ
+                    <span className="brand-tooltip-text">
+                      Calculated using current opportunity signals.
+                    </span>
                   </span>
                 </div>
                 <div className="text-xl font-bold text-emerald-700">
@@ -226,11 +226,11 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
                 </div>
                 <div className="text-[10px] text-slate-400 font-medium capitalize flex items-center gap-1">
                   Intent: <span className="font-bold text-slate-600">{intel.intentAnalysis}</span>
-                  <span 
-                    title="Identified based on positive keyword sentiments and activity touchpoints." 
-                    className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
-                  >
+                  <span className="brand-tooltip cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]">
                     ⓘ
+                    <span className="brand-tooltip-text">
+                      Identified based on positive keyword sentiments and activity touchpoints.
+                    </span>
                   </span>
                 </div>
               </div>

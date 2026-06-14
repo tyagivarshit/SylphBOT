@@ -115,6 +115,26 @@ export default function LeadsTable({
   }, [selectedLeadId, tableLeads])
 
   useEffect(() => {
+    if (tableLeads.length > 0) {
+      const isDesktop = typeof window !== "undefined" && window.innerWidth >= 1024;
+      const isSelectedLeadInList = tableLeads.some(l => l.id === selectedLeadId);
+      
+      if (isDesktop) {
+        if (!isSelectedLeadInList) {
+          const fallbackLead = tableLeads.find(l => l.id === initialSelectedLeadId) || tableLeads[0];
+          setSelectedLeadId(fallbackLead.id);
+        }
+      } else {
+        if (selectedLeadId && !isSelectedLeadInList) {
+          setSelectedLeadId(null);
+        }
+      }
+    } else {
+      setSelectedLeadId(null);
+    }
+  }, [tableLeads, selectedLeadId, initialSelectedLeadId]);
+
+  useEffect(() => {
     const handleNewMessage = (msg: NewMessagePayload) => {
       setLivePatches((prev) => {
         const existing = prev[msg.leadId]
@@ -175,7 +195,7 @@ export default function LeadsTable({
                   <button
                     key={lead.id}
                     type="button"
-                    onClick={() => setSelectedLeadId(isSelected ? null : lead.id)}
+                    onClick={() => setSelectedLeadId(lead.id)}
                     className={`relative w-full max-w-[360px] rounded-[24px] p-5 text-left transition-all duration-200 border bg-white/70 backdrop-blur-xl mx-auto md:mx-0 ${
                       isSelected
                         ? "border-blue-500 shadow-md ring-2 ring-blue-500/10 bg-blue-50/20"
@@ -190,25 +210,25 @@ export default function LeadsTable({
                       </span>
                     ) : null}
 
-                    {/* Header: Initial, Name, Platform, Stage */}
-                    <div className="flex items-start gap-3 justify-between">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,#0b2a5b_0%,#1e5eff_60%,#4da3ff_100%)] text-xs font-semibold text-white shadow-sm">
-                          {lead.name?.charAt(0)?.toUpperCase() || "?"}
-                        </div>
-                        <div className="min-w-0">
-                          <p 
-                            className="line-clamp-2 font-bold text-slate-900 text-sm leading-snug" 
-                            title={lead.name || "Opportunity"}
-                          >
-                            {lead.name || "New Opportunity"}
-                          </p>
+                    {/* Header: Initial, Name, Stage, Platform in visual hierarchy */}
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,#0b2a5b_0%,#1e5eff_60%,#4da3ff_100%)] text-xs font-semibold text-white shadow-sm mt-0.5">
+                        {lead.name?.charAt(0)?.toUpperCase() || "?"}
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <p 
+                          className="font-bold text-slate-900 text-sm leading-snug truncate sm:whitespace-normal sm:line-clamp-2" 
+                          title={lead.name || "Opportunity"}
+                        >
+                          {lead.name || "New Opportunity"}
+                        </p>
+                        <div className="flex flex-col items-start gap-1">
+                          <StageBadge stage={lead.stage} />
                           <div className="mt-0.5">
                             <PlatformBadge platform={lead.platform} />
                           </div>
                         </div>
                       </div>
-                      <StageBadge stage={lead.stage} />
                     </div>
 
                     {/* Middle: Probability & Revenue */}
@@ -216,11 +236,11 @@ export default function LeadsTable({
                       <div>
                         <span className="text-slate-400 inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-[9px]">
                           Close Probability
-                          <span 
-                            title="Calculated using pipeline stage and interaction velocity." 
-                            className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
-                          >
+                          <span className="brand-tooltip cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]">
                             ⓘ
+                            <span className="brand-tooltip-text">
+                              Calculated using pipeline stage and interaction velocity.
+                            </span>
                           </span>
                         </span>
                         <span className="text-slate-900 font-bold text-sm block">
@@ -230,11 +250,11 @@ export default function LeadsTable({
                       <div className="text-right">
                         <span className="text-slate-400 inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-[9px]">
                           Estimated Opportunity
-                          <span 
-                            title="Calculated using current opportunity signals." 
-                            className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
-                          >
+                          <span className="brand-tooltip cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]">
                             ⓘ
+                            <span className="brand-tooltip-text">
+                              Calculated using current opportunity signals.
+                            </span>
                           </span>
                         </span>
                         <span className="text-emerald-700 font-bold text-sm block">

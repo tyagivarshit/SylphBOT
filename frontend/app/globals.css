@@ -667,3 +667,52 @@
     padding: 2rem;
   }
 }
+
+/* Custom Premium Tooltips */
+.brand-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-tooltip .brand-tooltip-text {
+  visibility: hidden;
+  width: 200px;
+  background-color: #0f1d34; /* Dark slate matching theme */
+  color: #ffffff;
+  text-align: center;
+  border-radius: 10px;
+  padding: 6px 10px;
+  position: absolute;
+  z-index: 100;
+  bottom: 140%;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  white-space: normal;
+  text-transform: none;
+}
+
+.brand-tooltip .brand-tooltip-text::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px;
+  border-style: solid;
+  border-color: #0f1d34 transparent transparent transparent;
+}
+
+.brand-tooltip:hover .brand-tooltip-text {
+  visibility: visible;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

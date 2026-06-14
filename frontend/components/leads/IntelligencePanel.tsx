@@ -11,10 +11,10 @@ import { getLeadOpportunityIntelligence } from "@/lib/opportunityIntelligence"
 import { useRouter } from "next/navigation"
 
 const stageOptions = [
-  { value: "NEW", label: "NEW" },
-  { value: "QUALIFIED", label: "QUALIFIED" },
-  { value: "WON", label: "WON" },
-  { value: "LOST", label: "LOST" },
+  { value: "NEW", label: "Initial Contact" },
+  { value: "QUALIFIED", label: "Qualified Lead" },
+  { value: "WON", label: "Deal Won" },
+  { value: "LOST", label: "Deal Lost" },
 ]
 
 export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any) {
@@ -128,7 +128,7 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-950 truncate max-w-[180px]">
-              {lead?.name || "Lead Details"}
+              {lead?.name || "Opportunity Details"}
             </h2>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -190,7 +190,13 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
               <div className="bg-white p-4 rounded-[20px] border border-slate-100 shadow-sm space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
                   <Percent size={14} className="text-blue-500" />
-                  Probability
+                  Close Probability
+                  <span 
+                    title="Calculated using pipeline stage and interaction velocity." 
+                    className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
+                  >
+                    ⓘ
+                  </span>
                 </div>
                 <div className="text-xl font-bold text-slate-900">
                   {intel.closeProbability}%
@@ -207,13 +213,25 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: any)
               <div className="bg-white p-4 rounded-[20px] border border-slate-100 shadow-sm space-y-1.5">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
                   <BadgeDollarSign size={14} className="text-emerald-500" />
-                  Revenue Est.
+                  Estimated Opportunity
+                  <span 
+                    title="Calculated using current opportunity signals." 
+                    className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
+                  >
+                    ⓘ
+                  </span>
                 </div>
                 <div className="text-xl font-bold text-emerald-700">
                   ₹{intel.revenuePotential.toLocaleString("en-IN")}
                 </div>
-                <div className="text-[10px] text-slate-400 font-medium capitalize">
+                <div className="text-[10px] text-slate-400 font-medium capitalize flex items-center gap-1">
                   Intent: <span className="font-bold text-slate-600">{intel.intentAnalysis}</span>
+                  <span 
+                    title="Identified based on positive keyword sentiments and activity touchpoints." 
+                    className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
+                  >
+                    ⓘ
+                  </span>
                 </div>
               </div>
             </div>

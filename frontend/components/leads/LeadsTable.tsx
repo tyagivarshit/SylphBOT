@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { socket } from "@/lib/socket"
 import StageBadge from "./StageBadge"
 import IntelligencePanel from "./IntelligencePanel"
@@ -85,6 +86,7 @@ export default function LeadsTable({
   leads: Lead[];
   initialSelectedLeadId?: string | null;
 }) {
+  const router = useRouter()
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(
     initialSelectedLeadId ?? null
   )
@@ -161,13 +163,9 @@ export default function LeadsTable({
     <div className="relative">
       {tableLeads.length > 0 ? (
         <div className="flex flex-col lg:flex-row gap-6 items-stretch">
-          {/* LEFT: Opportunity List */}
-          <div className={`w-full transition-all duration-300 ${selectedLead ? "lg:w-3/5" : "lg:w-full"}`}>
-            <div className={`grid gap-4 ${
-              selectedLead 
-                ? "grid-cols-1" 
-                : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
-            }`}>
+          {/* LEFT: Opportunity List (Persistent split layout) */}
+          <div className="flex-1 min-w-0 transition-all duration-300">
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-2">
               {tableLeads.map((lead) => {
                 const intel = opportunityData[lead.id] || getLeadOpportunityIntelligence(lead)
                 const isSelected = lead.id === selectedLeadId
@@ -178,7 +176,7 @@ export default function LeadsTable({
                     key={lead.id}
                     type="button"
                     onClick={() => setSelectedLeadId(isSelected ? null : lead.id)}
-                    className={`relative w-full rounded-[24px] p-5 text-left transition-all duration-200 border bg-white/70 backdrop-blur-xl ${
+                    className={`relative w-full max-w-[360px] rounded-[24px] p-5 text-left transition-all duration-200 border bg-white/70 backdrop-blur-xl mx-auto md:mx-0 ${
                       isSelected
                         ? "border-blue-500 shadow-md ring-2 ring-blue-500/10 bg-blue-50/20"
                         : "border-slate-200/80 shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5"
@@ -199,8 +197,11 @@ export default function LeadsTable({
                           {lead.name?.charAt(0)?.toUpperCase() || "?"}
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate font-bold text-slate-900 text-sm">
-                            {lead.name || "Lead Opportunity"}
+                          <p 
+                            className="line-clamp-2 font-bold text-slate-900 text-sm leading-snug" 
+                            title={lead.name || "Opportunity"}
+                          >
+                            {lead.name || "New Opportunity"}
                           </p>
                           <div className="mt-0.5">
                             <PlatformBadge platform={lead.platform} />
@@ -213,57 +214,70 @@ export default function LeadsTable({
                     {/* Middle: Probability & Revenue */}
                     <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
                       <div>
-                        <span className="text-slate-400 block font-semibold uppercase tracking-wider text-[9px]">
+                        <span className="text-slate-400 inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-[9px]">
                           Close Probability
+                          <span 
+                            title="Calculated using pipeline stage and interaction velocity." 
+                            className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
+                          >
+                            ⓘ
+                          </span>
                         </span>
-                        <span className="text-slate-900 font-bold text-sm">
+                        <span className="text-slate-900 font-bold text-sm block">
                           {intel.closeProbability}%
                         </span>
                       </div>
                       <div className="text-right">
-                        <span className="text-slate-400 block font-semibold uppercase tracking-wider text-[9px]">
-                          Revenue Opportunity
+                        <span className="text-slate-400 inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-[9px]">
+                          Estimated Opportunity
+                          <span 
+                            title="Calculated using current opportunity signals." 
+                            className="cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]"
+                          >
+                            ⓘ
+                          </span>
                         </span>
-                        <span className="text-emerald-700 font-bold text-sm">
+                        <span className="text-emerald-700 font-bold text-sm block">
                           ₹{intel.revenuePotential.toLocaleString('en-IN')}
                         </span>
                       </div>
                     </div>
 
                     {/* Footer: Sales AI Recommendation */}
-                    <div className="mt-3.5 bg-blue-50/50 rounded-xl p-2.5 border border-blue-100/40 flex items-start gap-1.5">
-                      <Bot size={14} className="text-blue-600 shrink-0 mt-0.5" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between">
+                    <div className="mt-3.5 bg-blue-50/50 rounded-xl p-3 border border-blue-100/40">
+                      <div className="flex items-start gap-1.5">
+                        <Bot size={14} className="text-blue-600 shrink-0 mt-0.5" />
+                        <div className="min-w-0 flex-1">
                           <span className="text-[9px] font-bold text-blue-800 uppercase tracking-wider block">
                             Sales AI Recommendation
                           </span>
-                          {/* Why CTA Toggle (hidden on mobile) */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation(); // prevent selecting the card
-                              setExpandedWhyLeadId(isWhyExpanded ? null : lead.id);
-                            }}
-                            className="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline px-1.5 py-0.5 rounded hover:bg-blue-100/40 transition hidden sm:inline-block"
-                          >
-                            {isWhyExpanded ? "Hide Why ▲" : "Why? ▾"}
-                          </button>
+                          <p className="text-xs text-slate-800 font-semibold mt-0.5 leading-normal">
+                            "{intel.aiRecommendation}"
+                          </p>
                         </div>
-                        <p className="text-xs text-slate-600 mt-0.5 line-clamp-1 italic font-medium">
-                          "{intel.aiRecommendation}"
-                        </p>
+                      </div>
+
+                      {/* Why CTA Toggle (hidden on mobile, accordion on tablet/desktop) */}
+                      <div className="mt-2 text-left hidden sm:block">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation(); // prevent selecting the card
+                            setExpandedWhyLeadId(isWhyExpanded ? null : lead.id);
+                          }}
+                          className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition"
+                        >
+                          <span>Why This Matters</span>
+                          <span className="text-[9px]">{isWhyExpanded ? "▲" : "▼"}</span>
+                        </button>
                       </div>
                     </div>
 
                     {/* Inline WHY signals accordion (tablet & desktop only) */}
                     {isWhyExpanded && (
-                      <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5 text-xs text-slate-600 hidden sm:block animate-in slide-in-from-top duration-200">
-                        <span className="font-bold text-slate-700 block uppercase tracking-wider text-[9px] mb-1">
-                          Why this matters:
-                        </span>
+                      <div className="mt-3 p-3 bg-slate-50/40 rounded-xl border border-slate-200/40 space-y-1.5 text-xs text-slate-650 hidden sm:block animate-in slide-in-from-top duration-200">
                         {intel.whySignals?.map((signal, idx) => (
-                          <div key={idx} className="flex items-start gap-1.5 font-medium">
+                          <div key={idx} className="flex items-start gap-1.5 font-medium leading-relaxed">
                             <span className="text-emerald-500 font-bold">✓</span>
                             <span>{signal}</span>
                           </div>
@@ -276,18 +290,30 @@ export default function LeadsTable({
             </div>
           </div>
 
-          {/* RIGHT: Intelligence Panel (Desktop) */}
-          {selectedLead && (
-            <div className="hidden lg:block lg:w-2/5 shrink-0 min-w-[380px] max-w-[460px] animate-in slide-in-from-right duration-250">
-              <div className="sticky top-4 h-[calc(100vh-140px)]">
+          {/* RIGHT: Persistent Intelligence Panel (Desktop Only) */}
+          <div className="hidden lg:block lg:w-[400px] shrink-0 animate-in slide-in-from-right duration-250">
+            <div className="sticky top-4 h-[calc(100vh-140px)]">
+              {selectedLead ? (
                 <IntelligencePanel
                   lead={selectedLead}
                   onClose={() => setSelectedLeadId(null)}
                   onStageUpdate={handleStageUpdate}
                 />
-              </div>
+              ) : (
+                <div className="flex h-full flex-col justify-center items-center p-6 text-center rounded-[26px] bg-white/60 border border-slate-200/80 backdrop-blur-xl shadow-sm">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 mb-4 animate-pulse">
+                    <Bot size={24} />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900 mb-1">
+                    Opportunity Intelligence Command
+                  </h3>
+                  <p className="text-xs text-slate-400 max-w-[260px] leading-relaxed font-medium">
+                    Select any opportunity from the list to reveal revenue insights, why it matters, and recommended actions.
+                  </p>
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
           {/* TABLET: Intelligence Panel below the list */}
           {selectedLead && (
@@ -312,8 +338,32 @@ export default function LeadsTable({
           )}
         </div>
       ) : (
-        <div className="brand-empty-state rounded-[24px] px-6 py-12 text-center text-sm">
-          No opportunities found. Capture new leads to populate.
+        <div className="brand-panel rounded-[30px] p-8 text-center max-w-lg mx-auto space-y-4 my-6">
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 mx-auto">
+            <Bot size={22} />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold text-slate-900">No active opportunities yet</h3>
+            <div className="text-xs text-slate-500 leading-relaxed space-y-2 font-medium">
+              <p>Once conversations begin, Automexia will identify:</p>
+              <ul className="text-left inline-block space-y-1 pl-4 list-disc">
+                <li>Hot opportunities</li>
+                <li>Revenue signals</li>
+                <li>Opportunities needing attention</li>
+                <li>Sales AI recommendations</li>
+              </ul>
+              <p className="mt-2 text-slate-400">Capture new prospects to begin.</p>
+            </div>
+          </div>
+          <div className="pt-2">
+            <button
+              onClick={() => router.push("/conversations")}
+              className="brand-button-secondary inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition shadow-sm hover:shadow active:scale-[0.98]"
+            >
+              <span>Open Conversations</span>
+              <span>→</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

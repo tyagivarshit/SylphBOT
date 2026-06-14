@@ -2,13 +2,13 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { usePlan } from "@/hooks/usePlan"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { apiFetch } from "@/lib/apiClient"
 import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry"
 import { getDashboardStats } from "@/lib/dashboard.api"
 import { getLeadOpportunityIntelligence } from "@/lib/opportunityIntelligence"
 import StatCard from "@/components/cards/StatCard"
-import { Flame, AlertCircle, TrendingUp } from "lucide-react"
+import { Flame, AlertCircle, TrendingUp, Bot } from "lucide-react"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
@@ -16,11 +16,11 @@ import FeatureGate from "@/components/FeatureGate"
 import { hasFeature } from "@/lib/featureGuard"
 
 const stageOptions = [
-  { value: "", label: "All Stages" },
-  { value: "NEW", label: "New" },
-  { value: "QUALIFIED", label: "Qualified" },
-  { value: "WON", label: "Won" },
-  { value: "LOST", label: "Lost" },
+  { value: "", label: "All Opportunities" },
+  { value: "NEW", label: "Initial Contact" },
+  { value: "QUALIFIED", label: "Qualified Lead" },
+  { value: "WON", label: "Deal Won" },
+  { value: "LOST", label: "Deal Lost" },
 ]
 
 type LeadItem = {
@@ -33,6 +33,7 @@ type LeadItem = {
 }
 
 function LeadsPageContent(){
+  const router = useRouter()
   const searchParams = useSearchParams()
 
   const { plan } = usePlan()
@@ -159,7 +160,7 @@ function LeadsPageContent(){
       {/* CONTENT */}
       {loading ? (
         <div className="brand-panel rounded-[26px] p-6 text-slate-500">
-          Loading Lead OS...
+          Loading Opportunity Workspace...
         </div>
       ) : (
 
@@ -218,9 +219,33 @@ function LeadsPageContent(){
                 Preview of your Lead OS V2 will appear here 🚀
               </p>
             ) : leads.length === 0 ? (
-              <p className="brand-empty-state rounded-[24px] py-10 text-center text-sm">
-                No active opportunities yet. Capture new leads to begin.
-              </p>
+              <div className="brand-panel rounded-[30px] p-8 text-center max-w-lg mx-auto space-y-4 my-6">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 mx-auto">
+                  <Bot size={22} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-sm font-bold text-slate-900">No active opportunities yet</h3>
+                  <div className="text-xs text-slate-500 leading-relaxed space-y-2 font-medium">
+                    <p>Once conversations begin, Automexia will identify:</p>
+                    <ul className="text-left inline-block space-y-1 pl-4 list-disc">
+                      <li>Hot opportunities</li>
+                      <li>Revenue signals</li>
+                      <li>Opportunities needing attention</li>
+                      <li>Sales AI recommendations</li>
+                    </ul>
+                    <p className="mt-2 text-slate-400">Capture new leads to begin.</p>
+                  </div>
+                </div>
+                <div className="pt-2">
+                  <button
+                    onClick={() => router.push("/conversations")}
+                    className="brand-button-secondary inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition shadow-sm hover:shadow active:scale-[0.98]"
+                  >
+                    <span>Open Conversations</span>
+                    <span>→</span>
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 <LeadsTable
@@ -271,7 +296,7 @@ function LeadsPageFallback() {
   return (
     <div className="min-w-0 space-y-6">
       <div className="brand-panel rounded-[26px] p-6 text-slate-500">
-        Loading Lead OS...
+        Loading Opportunity Workspace...
       </div>
     </div>
   )

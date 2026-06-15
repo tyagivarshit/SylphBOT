@@ -16,6 +16,10 @@ import { socket } from "@/lib/socket";
 import { setDashboardRoutePrefetchPaused } from "@/lib/dashboardRoutePrefetch";
 import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry";
 import { useDebounce } from "@/hooks/useDebounce";
+import {
+  getConversationIntelligence,
+  type ConversationIntelligence,
+} from "@/lib/conversationIntelligence";
 
 export interface Lead {
   id: string;
@@ -224,6 +228,7 @@ function getLeadDisplayName(lead: Lead) {
 }
 
 export type WorkspaceTab = "inbox" | "ai" | "chat";
+export type FilterType = "all" | "hot" | "attention" | "human" | "ai";
 
 interface ConversationsContextType {
   leads: Lead[];
@@ -243,7 +248,10 @@ interface ConversationsContextType {
   setActiveTab: (tab: WorkspaceTab) => void;
   search: string;
   setSearch: (search: string) => void;
+  filter: FilterType;
+  setFilter: (filter: FilterType) => void;
   filteredLeads: Lead[];
+  leadsIntelligence: Record<string, ConversationIntelligence>;
 }
 
 const ConversationsContext = createContext<ConversationsContextType | undefined>(
@@ -254,6 +262,7 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("inbox");
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<FilterType>("all");
   
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -272,15 +281,83 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
 
   const debouncedSearch = useDebounce(search, 180);
 
+  // Cache/memoize intelligence results so they don't re-calculate on every render
+  const leadsIntelligence = useMemo(() => {
+    const cache: Record<string, ConversationIntelligence> = {};
+    leads.forEach((lead) => {
+      cache[lead.id] = getConversationIntelligence(lead);
+    });
+    return cache;
+  }, [leads]);
+
+  // Compute final filtered and sorted leads
   const filteredLeads = useMemo(() => {
+    // 1. First apply search query against Name, Platform, and Last Message Preview
     const query = debouncedSearch.trim().toLowerCase();
-    if (!query) {
-      return leads;
+    let result = leads;
+
+    if (query) {
+      result = result.filter((lead) => {
+        const name = getLeadDisplayName(lead).toLowerCase();
+        const platform = (lead.platform || "").toLowerCase();
+        const lastMsg = (lead.lastMessage || "").toLowerCase();
+        return (
+          name.includes(query) ||
+          platform.includes(query) ||
+          lastMsg.includes(query)
+        );
+      });
     }
-    return leads.filter((lead) =>
-      getLeadDisplayName(lead).toLowerCase().includes(query)
-    );
-  }, [debouncedSearch, leads]);
+
+    // 2. Next apply client-side filter category
+    if (filter !== "all") {
+      result = result.filter((lead) => {
+        const intel = leadsIntelligence[lead.id];
+        if (!intel) return false;
+
+        switch (filter) {
+          case "hot":
+            return intel.recommendedBadge === "HOT_OPPORTUNITY";
+          case "attention":
+            return intel.recommendedBadge === "NEEDS_ATTENTION";
+          case "human":
+            return intel.recommendedBadge === "HUMAN_REQUIRED";
+          case "ai":
+            return intel.recommendedBadge === "AI_HANDLING";
+          default:
+            return true;
+        }
+      });
+    }
+
+    // 3. Finally sort based on Badge Priority and Timestamp
+    const badgePriority: Record<ConversationIntelligence["recommendedBadge"], number> = {
+      HUMAN_REQUIRED: 1,
+      HOT_OPPORTUNITY: 2,
+      NEEDS_ATTENTION: 3,
+      AI_HANDLING: 4,
+      NONE: 5,
+    };
+
+    return [...result].sort((a, b) => {
+      const intelA = leadsIntelligence[a.id];
+      const intelB = leadsIntelligence[b.id];
+      const badgeA = intelA?.recommendedBadge || "NONE";
+      const badgeB = intelB?.recommendedBadge || "NONE";
+
+      const prioA = badgePriority[badgeA];
+      const prioB = badgePriority[badgeB];
+
+      if (prioA !== prioB) {
+        return prioA - prioB;
+      }
+
+      // Secondary sort: timestamp descending (newest first)
+      const timeA = a.lastMessageTime ? Date.parse(a.lastMessageTime) : 0;
+      const timeB = b.lastMessageTime ? Date.parse(b.lastMessageTime) : 0;
+      return timeB - timeA;
+    });
+  }, [leads, debouncedSearch, filter, leadsIntelligence]);
 
   useEffect(() => {
     setDashboardRoutePrefetchPaused(true);
@@ -422,7 +499,6 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
 
         if (matchedLead) {
           setSelectedLead(matchedLead);
-          // Auto switch to chat tab since lead is selected via query param
           setActiveTab("chat");
           return;
         }
@@ -623,7 +699,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       setActiveTab,
       search,
       setSearch,
+      filter,
+      setFilter,
       filteredLeads,
+      leadsIntelligence,
     }),
     [
       leads,
@@ -638,7 +717,9 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       fetchMessages,
       activeTab,
       search,
+      filter,
       filteredLeads,
+      leadsIntelligence,
     ]
   );
 

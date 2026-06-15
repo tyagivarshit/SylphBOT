@@ -10,8 +10,13 @@ import {
   Info,
   Send,
   Sparkles,
+  UserCheck,
+  Eye,
 } from "lucide-react";
 import { useUpgrade } from "@/app/(dashboard)/layout";
+import { useConversations } from "./ConversationsContext";
+import { toast } from "react-hot-toast";
+import { createNotification } from "@/lib/userApi";
 import {
   previewAIReply,
   sendConversationMessage,
@@ -226,6 +231,35 @@ export default function ChatWindow({
 }: Props) {
   const router = useRouter();
   const { openUpgrade } = useUpgrade();
+  const { 
+    conversationModes, 
+    setConversationMode, 
+    overrideDates, 
+    setOverrideDate 
+  } = useConversations();
+  const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false);
+
+  const handleModeClick = (nextMode: "AUTONOMOUS" | "OBSERVE" | "HUMAN_OVERRIDE") => {
+    const currentMode = selectedLead ? (conversationModes[selectedLead.id] || "AUTONOMOUS") : "AUTONOMOUS";
+    if (nextMode === currentMode) return;
+
+    if (nextMode === "HUMAN_OVERRIDE") {
+      setIsOverrideModalOpen(true);
+    } else {
+      if (selectedLead) {
+        setConversationMode(selectedLead.id, nextMode);
+        if (nextMode === "AUTONOMOUS") {
+          toast.success("Sales AI resumed control of this conversation.");
+          createNotification({
+            title: "Sales AI Resumed Control",
+            message: `Sales AI resumed control of the conversation with ${selectedLead.name || 'Lead'}.`,
+            type: "ALERT"
+          }).catch((err) => console.error("Notification failed", err));
+        }
+      }
+    }
+  };
+
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -630,7 +664,7 @@ export default function ChatWindow({
 
       <div className="border-b border-slate-200/80 bg-white/86 px-3 py-3 backdrop-blur-xl md:px-5">
         <div className={`flex flex-col gap-3 ${onBack ? "pl-12 md:pl-0" : ""}`}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
                 Conversation
@@ -638,6 +672,48 @@ export default function ChatWindow({
               <h2 className="mt-1 text-lg font-semibold text-slate-950">
                 {selectedLead.name || "Lead conversation"}
               </h2>
+            </div>
+
+            {/* Control Strip */}
+            <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 shrink-0 border border-slate-200/50 shadow-inner">
+              <button
+                type="button"
+                onClick={() => handleModeClick("AUTONOMOUS")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  (conversationModes[selectedLead.id] || "AUTONOMOUS") === "AUTONOMOUS"
+                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <span>🤖</span>
+                <span>Autonomous</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleModeClick("OBSERVE")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  (conversationModes[selectedLead.id] || "AUTONOMOUS") === "OBSERVE"
+                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <span>👁</span>
+                <span>Observe</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleModeClick("HUMAN_OVERRIDE")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  (conversationModes[selectedLead.id] || "AUTONOMOUS") === "HUMAN_OVERRIDE"
+                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <span>👤</span>
+                <span>Human Override</span>
+              </button>
             </div>
           </div>
 
@@ -676,6 +752,56 @@ export default function ChatWindow({
           ) : null}
         </div>
       </div>
+
+      {/* 7+ Days SLA Active human override warning banner */}
+      {(() => {
+        const mode = conversationModes[selectedLead.id] || "AUTONOMOUS";
+        const overrideDate = overrideDates[selectedLead.id];
+        const isOverrideOlderThan7Days = overrideDate && 
+          (Date.now() - new Date(overrideDate).getTime() > 7 * 24 * 60 * 60 * 1000);
+
+        if (mode !== "HUMAN_OVERRIDE") return null;
+
+        return (
+          <div className="border-b border-amber-200 bg-amber-50/92 px-4 py-2 text-[11px] text-amber-800 font-medium flex items-center justify-between gap-3 shadow-inner">
+            <span className="flex items-center gap-1.5">
+              <span className="animate-pulse">⚠️</span>
+              <span>
+                {isOverrideOlderThan7Days 
+                  ? "Warning: Human Override has been active for 7+ days. Consider resuming AI control." 
+                  : "Human Override active. Sales AI is paused only for this thread."}
+              </span>
+            </span>
+            <div className="flex items-center gap-3 shrink-0">
+              {!isOverrideOlderThan7Days && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const eightDaysAgo = new Date();
+                    eightDaysAgo.setDate(eightDaysAgo.getDate() - 8);
+                    setOverrideDate(selectedLead.id, eightDaysAgo.toISOString());
+                    createNotification({
+                      title: "Human Override Alert (7+ Days)",
+                      message: `Warning: Human Override has been active for 7+ days on conversation with ${selectedLead.name || 'Lead'}. The conversation remains unresolved.`,
+                      type: "ALERT"
+                    }).catch((err) => console.error("Notification failed", err));
+                  }}
+                  className="text-[9px] underline text-slate-400 hover:text-slate-600 font-bold cursor-pointer"
+                >
+                  Simulate 7+ Days
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleModeClick("AUTONOMOUS")}
+                className="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1 text-[10px] font-bold shadow-sm transition cursor-pointer"
+              >
+                Resume AI
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       <div
         ref={scrollViewportRef}
@@ -806,102 +932,177 @@ export default function ChatWindow({
       </div>
 
       <div className="border-t border-slate-200/80 bg-white/88 px-3 py-3 backdrop-blur-xl md:px-5">
-        {sendError ? (
-          <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{sendError}</span>
+        {(() => {
+          const mode = conversationModes[selectedLead.id] || "AUTONOMOUS";
+          
+          if (mode !== "HUMAN_OVERRIDE") {
+            return (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 py-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  {mode === "AUTONOMOUS" ? (
+                    <>
+                      <span>🤖</span>
+                      <span>Autonomous Mode active. Sales AI has full control.</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye size={14} className="text-slate-400" />
+                      <span>Observe Mode active. AI is handling replies.</span>
+                    </>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleModeClick("HUMAN_OVERRIDE")}
+                  className="brand-button-primary py-1.5 px-3 text-xs rounded-xl inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                >
+                  <UserCheck size={12} />
+                  <span>Take Control (Human Override)</span>
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <>
+              {/* Shadow Learning active banner */}
+              <div className="mb-3 flex items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2 text-[10px] font-bold text-blue-600 shadow-sm max-w-fit">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                <span>Shadow Learning active: AI is silently recording your negotiation styles.</span>
+              </div>
+
+              {sendError ? (
+                <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{sendError}</span>
+                    <button
+                      type="button"
+                      onClick={() => void sendMessage()}
+                      className="brand-button-secondary"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mb-3 rounded-[22px] border border-slate-200/80 bg-slate-50/80 p-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <span>Reply mode</span>
+                  <button
+                    type="button"
+                    title="Choose how this reply should be sent."
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"
+                  >
+                    <Info size={14} />
+                  </button>
+                </div>
+
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => handleReplyModeChange("AI")}
+                    className={`rounded-[18px] border px-4 py-3 text-left transition ${
+                      replyMode === "AI"
+                        ? "border-blue-300 bg-blue-50 text-blue-900 shadow-sm"
+                        : "border-slate-200 bg-white text-slate-700"
+                    } ${usageState.aiDisabled ? "border-dashed" : ""}`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold">
+                      <Bot size={16} />
+                      Use AI reply
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleReplyModeChange("TEMPLATE")}
+                    className={`rounded-[18px] border px-4 py-3 text-left transition ${
+                      replyMode === "TEMPLATE"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-900 shadow-sm"
+                        : "border-slate-200 bg-white text-slate-700"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold">
+                      <Sparkles size={16} />
+                      Use template reply
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="brand-input-shell gap-2 pl-4 pr-2">
+                <input
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value || "");
+                    if (sendError) {
+                      setSendError(null);
+                    }
+                  }}
+                  placeholder={
+                    replyMode === "AI"
+                      ? "Add AI guidance or leave blank to use the latest customer message"
+                      : "Write the exact reply to send"
+                  }
+                  className="min-w-0 bg-transparent text-sm"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void sendMessage();
+                    }
+                  }}
+                />
+
+                <button
+                  onClick={() => void sendMessage()}
+                  disabled={isSendDisabled}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-400 text-white shadow-sm transition hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                  title={
+                    replyMode === "AI" && sending
+                      ? "Generating AI reply"
+                      : "Send reply"
+                  }
+                >
+                  {sending ? <LoadingSpinner className="h-4 w-4" /> : <Send size={16} />}
+                </button>
+              </div>
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Override Confirmation Modal */}
+      {isOverrideModalOpen && selectedLead && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <div className="brand-panel-strong w-full max-w-md rounded-[28px] p-6 shadow-xl border border-slate-200/20 bg-white text-center sm:text-left">
+            <h3 className="text-base font-bold text-slate-950">
+              Take control of this conversation?
+            </h3>
+            <p className="mt-2 text-xs text-slate-500 leading-normal">
+              Sales AI will pause only for this conversation. You can resume AI at any time.
+            </p>
+            <div className="mt-5 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => void sendMessage()}
-                className="brand-button-secondary"
+                onClick={() => setIsOverrideModalOpen(false)}
+                className="brand-button-secondary py-1.5 px-3.5 text-xs rounded-xl cursor-pointer"
               >
-                Try again
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConversationMode(selectedLead.id, "HUMAN_OVERRIDE");
+                  setIsOverrideModalOpen(false);
+                }}
+                className="brand-button-primary py-1.5 px-3.5 text-xs rounded-xl cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold"
+              >
+                Take Over
               </button>
             </div>
           </div>
-        ) : null}
-
-        <div className="mb-3 rounded-[22px] border border-slate-200/80 bg-slate-50/80 p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <span>Reply mode</span>
-            <button
-              type="button"
-              title="Choose how this reply should be sent."
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500"
-            >
-              <Info size={14} />
-            </button>
-          </div>
-
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => handleReplyModeChange("AI")}
-              className={`rounded-[18px] border px-4 py-3 text-left transition ${
-                replyMode === "AI"
-                  ? "border-blue-300 bg-blue-50 text-blue-900 shadow-sm"
-                  : "border-slate-200 bg-white text-slate-700"
-              } ${usageState.aiDisabled ? "border-dashed" : ""}`}
-            >
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                <Bot size={16} />
-                Use AI reply
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleReplyModeChange("TEMPLATE")}
-              className={`rounded-[18px] border px-4 py-3 text-left transition ${
-                replyMode === "TEMPLATE"
-                  ? "border-emerald-300 bg-emerald-50 text-emerald-900 shadow-sm"
-                  : "border-slate-200 bg-white text-slate-700"
-              }`}
-            >
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                <Sparkles size={16} />
-                Use template reply
-              </span>
-            </button>
-          </div>
         </div>
-
-        <div className="brand-input-shell gap-2 pl-4 pr-2">
-          <input
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value || "");
-              if (sendError) {
-                setSendError(null);
-              }
-            }}
-            placeholder={
-              replyMode === "AI"
-                ? "Add AI guidance or leave blank to use the latest customer message"
-                : "Write the exact reply to send"
-            }
-            className="min-w-0 bg-transparent text-sm"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                void sendMessage();
-              }
-            }}
-          />
-
-          <button
-            onClick={() => void sendMessage()}
-            disabled={isSendDisabled}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-400 text-white shadow-sm transition hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
-            title={
-              replyMode === "AI" && sending
-                ? "Generating AI reply"
-                : "Send reply"
-            }
-          >
-            {sending ? <LoadingSpinner className="h-4 w-4" /> : <Send size={16} />}
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

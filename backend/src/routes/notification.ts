@@ -146,4 +146,41 @@ router.patch("/read-all", async (req, res) => {
   });
 });
 
+/* ======================================================
+🔥 CREATE NOTIFICATION (DASHBOARD + EMAIL SIMULATOR)
+====================================================== */
+router.post("/", async (req, res) => {
+  const userId = req.user?.id;
+  const { title, message, type, link } = req.body;
+
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const { createNotification } = await import("../services/notification.service");
+    const notification = await createNotification({
+      userId,
+      title,
+      message,
+      type: type || "ALERT",
+      link,
+    });
+
+    // Simulate sending email to founder
+    console.log(`\n======================================================`);
+    console.log(`📧 [EMAIL SENT TO FOUNDER]`);
+    console.log(`Subject: ${title}`);
+    console.log(`Message: ${message}`);
+    console.log(`======================================================\n`);
+
+    res.json({
+      success: true,
+      data: notification,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to create notification" });
+  }
+});
+
 export default router;

@@ -55,6 +55,8 @@ type SeenConversationState = Record<
 >;
 
 const SEEN_CONVERSATIONS_STORAGE_KEY = "automexia.conversations.seen.v1";
+const CONVERSATION_MODES_STORAGE_KEY = "automexia.conversations.modes.v1";
+const OVERRIDE_DATES_STORAGE_KEY = "automexia.conversations.override_dates.v1";
 
 function readSeenConversationState(): SeenConversationState {
   if (typeof window === "undefined") {
@@ -229,6 +231,11 @@ function getLeadDisplayName(lead: Lead) {
 
 export type WorkspaceTab = "inbox" | "ai" | "chat";
 export type FilterType = "all" | "hot" | "attention" | "human" | "ai";
+export type ControlMode = "AUTONOMOUS" | "OBSERVE" | "HUMAN_OVERRIDE";
+
+export interface ExtendedConversationIntelligence extends Omit<ConversationIntelligence, "recommendedBadge"> {
+  recommendedBadge: "HUMAN_REQUIRED" | "HOT_OPPORTUNITY" | "NEEDS_ATTENTION" | "AI_HANDLING" | "HUMAN_CONTROLLED" | "NONE";
+}
 
 interface ConversationsContextType {
   leads: Lead[];
@@ -251,7 +258,13 @@ interface ConversationsContextType {
   filter: FilterType;
   setFilter: (filter: FilterType) => void;
   filteredLeads: Lead[];
-  leadsIntelligence: Record<string, ConversationIntelligence>;
+  leadsIntelligence: Record<string, ExtendedConversationIntelligence>;
+  
+  // Phase 4: Conversation Control Modes State & Persistence
+  conversationModes: Record<string, ControlMode>;
+  setConversationMode: (leadId: string, mode: ControlMode) => void;
+  overrideDates: Record<string, string>;
+  setOverrideDate: (leadId: string, dateStr: string) => void;
 }
 
 const ConversationsContext = createContext<ConversationsContextType | undefined>(
@@ -272,6 +285,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [leadsError, setLeadsError] = useState<string | null>(null);
   const [messagesError, setMessagesError] = useState<string | null>(null);
+
+  // Phase 4 States
+  const [conversationModes, setConversationModes] = useState<Record<string, ControlMode>>({});
+  const [overrideDates, setOverrideDates] = useState<Record<string, string>>({});
   
   const leadIdFromQuery = searchParams.get("leadId");
   const seenStateRef = useRef<SeenConversationState>({});
@@ -281,21 +298,81 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
 
   const debouncedSearch = useDebounce(search, 180);
 
-  // Cache/memoize intelligence results so they don't re-calculate on every render
+  // Initialize modes and dates from localStorage on client mount
+  useEffect(() => {
+    try {
+      const savedModes = window.localStorage.getItem(CONVERSATION_MODES_STORAGE_KEY);
+      if (savedModes) {
+        setConversationModes(JSON.parse(savedModes));
+      }
+
+      const savedDates = window.localStorage.getItem(OVERRIDE_DATES_STORAGE_KEY);
+      if (savedDates) {
+        setOverrideDates(JSON.parse(savedDates));
+      }
+    } catch {}
+  }, []);
+
+  // Set control mode helper with localStorage persistence
+  const setConversationMode = useCallback((leadId: string, mode: ControlMode) => {
+    setConversationModes((prev) => {
+      const next = { ...prev, [leadId]: mode };
+      try {
+        window.localStorage.setItem(CONVERSATION_MODES_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    // Update override dates when human control is toggled
+    setOverrideDates((prev) => {
+      const next = { ...prev };
+      if (mode === "HUMAN_OVERRIDE") {
+        next[leadId] = new Date().toISOString();
+      } else {
+        delete next[leadId];
+      }
+      try {
+        window.localStorage.setItem(OVERRIDE_DATES_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  const setOverrideDate = useCallback((leadId: string, dateStr: string) => {
+    setOverrideDates((prev) => {
+      const next = { ...prev, [leadId]: dateStr };
+      try {
+        window.localStorage.setItem(OVERRIDE_DATES_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  // Cache/memoize intelligence results with Human Override badges mapping
   const leadsIntelligence = useMemo(() => {
-    const cache: Record<string, ConversationIntelligence> = {};
+    const cache: Record<string, ExtendedConversationIntelligence> = {};
     leads.forEach((lead) => {
-      cache[lead.id] = getConversationIntelligence(lead);
+      const mode = conversationModes[lead.id] || "AUTONOMOUS";
+      const baseIntel = getConversationIntelligence(lead);
+      
+      // Override badge to Human Controlled if Human Override mode is active
+      const recommendedBadge: ExtendedConversationIntelligence["recommendedBadge"] =
+        mode === "HUMAN_OVERRIDE" ? "HUMAN_CONTROLLED" : baseIntel.recommendedBadge;
+
+      cache[lead.id] = {
+        ...baseIntel,
+        recommendedBadge,
+      };
     });
     return cache;
-  }, [leads]);
+  }, [leads, conversationModes]);
 
   // Compute final filtered and sorted leads
   const filteredLeads = useMemo(() => {
-    // 1. First apply search query against Name, Platform, and Last Message Preview
     const query = debouncedSearch.trim().toLowerCase();
     let result = leads;
 
+    // 1. Search Query Filters
     if (query) {
       result = result.filter((lead) => {
         const name = getLeadDisplayName(lead).toLowerCase();
@@ -309,7 +386,7 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // 2. Next apply client-side filter category
+    // 2. Client-side Category Filters
     if (filter !== "all") {
       result = result.filter((lead) => {
         const intel = leadsIntelligence[lead.id];
@@ -319,9 +396,16 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
           case "hot":
             return intel.recommendedBadge === "HOT_OPPORTUNITY";
           case "attention":
-            return intel.recommendedBadge === "NEEDS_ATTENTION";
+            // Human Controlled conversations automatically surface inside the Needs Attention workspace
+            return (
+              intel.recommendedBadge === "NEEDS_ATTENTION" ||
+              intel.recommendedBadge === "HUMAN_CONTROLLED"
+            );
           case "human":
-            return intel.recommendedBadge === "HUMAN_REQUIRED";
+            return (
+              intel.recommendedBadge === "HUMAN_REQUIRED" ||
+              intel.recommendedBadge === "HUMAN_CONTROLLED"
+            );
           case "ai":
             return intel.recommendedBadge === "AI_HANDLING";
           default:
@@ -330,9 +414,11 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // 3. Finally sort based on Badge Priority and Timestamp
-    const badgePriority: Record<ConversationIntelligence["recommendedBadge"], number> = {
+    // 3. Sorting following priority:
+    // HUMAN_REQUIRED = 1, HUMAN_CONTROLLED = 1, HOT_OPPORTUNITY = 2, NEEDS_ATTENTION = 3, AI_HANDLING = 4, NONE = 5
+    const badgePriority: Record<ExtendedConversationIntelligence["recommendedBadge"], number> = {
       HUMAN_REQUIRED: 1,
+      HUMAN_CONTROLLED: 1, // Prioritize manually overridden threads alongside human handoffs
       HOT_OPPORTUNITY: 2,
       NEEDS_ATTENTION: 3,
       AI_HANDLING: 4,
@@ -352,7 +438,7 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
         return prioA - prioB;
       }
 
-      // Secondary sort: timestamp descending (newest first)
+      // Secondary: timestamp descending
       const timeA = a.lastMessageTime ? Date.parse(a.lastMessageTime) : 0;
       const timeB = b.lastMessageTime ? Date.parse(b.lastMessageTime) : 0;
       return timeB - timeA;
@@ -703,6 +789,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       setFilter,
       filteredLeads,
       leadsIntelligence,
+      conversationModes,
+      setConversationMode,
+      overrideDates,
+      setOverrideDate,
     }),
     [
       leads,
@@ -720,6 +810,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       filter,
       filteredLeads,
       leadsIntelligence,
+      conversationModes,
+      setConversationMode,
+      overrideDates,
+      setOverrideDate,
     ]
   );
 

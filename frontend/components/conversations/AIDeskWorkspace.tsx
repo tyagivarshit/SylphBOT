@@ -10,10 +10,11 @@ import {
   GitCommit,
   FileText,
   ArrowRight,
+  CheckCircle2,
 } from "lucide-react";
 
 export default function AIDeskWorkspace() {
-  const { selectedLead, setActiveTab } = useConversations();
+  const { selectedLead, setActiveTab, leadsIntelligence } = useConversations();
 
   // If no conversation is selected, show a beautiful, clean empty state
   if (!selectedLead) {
@@ -41,6 +42,128 @@ export default function AIDeskWorkspace() {
     );
   }
 
+  // Get active intelligence signals for the selected lead
+  const intel = leadsIntelligence[selectedLead.id];
+  const badgeType = intel?.recommendedBadge || "NONE";
+
+  // 1. Dynamic Intent Analysis values
+  const getIntentProbability = () => {
+    if (badgeType === "HOT_OPPORTUNITY") return { pct: 92, label: "HIGH PURCHASE INTENT" };
+    if (badgeType === "HUMAN_REQUIRED") return { pct: 55, label: "INTERVENTION REQUIRED" };
+    if (badgeType === "NEEDS_ATTENTION") return { pct: 70, label: "MEDIUM PRIORITY QUERY" };
+    return { pct: 25, label: "LOW ROUTINE QUERY" };
+  };
+  const intent = getIntentProbability();
+
+  // 2. Dynamic Conversation Summary bullets
+  const getConversationSummary = () => {
+    const platform = selectedLead.platform || "Meta Channel";
+
+    if (badgeType === "HUMAN_REQUIRED") {
+      return [
+        `Client started conversation via ${platform}.`,
+        `AI assistant greeted client and attempted qualification.`,
+        `⚠️ Flagged: Client explicitly requested human agent assistance.`
+      ];
+    }
+    if (badgeType === "HOT_OPPORTUNITY") {
+      return [
+        `Client expressed interest in buying options via ${platform}.`,
+        `AI responded with high-level packages and product highlights.`,
+        `🔥 Thread classified: Hot commercial inquiry active.`
+      ];
+    }
+    return [
+      `User initiated thread via ${platform}.`,
+      `Bot responder handled routine greetings successfully.`,
+      `Conversation currently waiting for next user touchpoint.`
+    ];
+  };
+  const summaryBullets = getConversationSummary();
+
+  // 3. Dynamic Recommended Actions list
+  const getRecommendedActions = () => {
+    switch (badgeType) {
+      case "HUMAN_REQUIRED":
+        return [
+          "Manage the conversation personally.",
+          "Review previous customer support history."
+        ];
+      case "HOT_OPPORTUNITY":
+        return [
+          "Send product brochure and commercial pricing details.",
+          "Suggest calendar booking link for demo session."
+        ];
+      case "NEEDS_ATTENTION":
+        return [
+          "Reply directly to query within 5 minutes.",
+          "Confirm client issues are resolved."
+        ];
+      case "AI_HANDLING":
+        return [
+          "Monitor active automated bot responses.",
+          "Intervene if query deviates from template scopes."
+        ];
+      default:
+        return [
+          "Manage the conversation personally.",
+          "Acknowledge recent customer query."
+        ];
+    }
+  };
+  const actionsList = getRecommendedActions();
+
+  // 4. Dynamic Objections list
+  const getObjections = () => {
+    if (badgeType === "HOT_OPPORTUNITY") {
+      return {
+        objection: "Pricing Concern Detected",
+        detail: "Client asked 'how much' - potential cost objection context."
+      };
+    }
+    if (badgeType === "HUMAN_REQUIRED") {
+      return {
+        objection: "Handoff Request Detected",
+        detail: "Client requested human staff - AI template out of scope."
+      };
+    }
+    return {
+      objection: "No Objections Detected",
+      detail: "No active buyer friction or pricing complaints detected in logs."
+    };
+  };
+  const objectionData = getObjections();
+
+  // 5. Dynamic Customer Signals
+  const getSignals = () => {
+    if (badgeType === "HOT_OPPORTUNITY") return { sentiment: "Positive (Buyer)", score: "High Potential" };
+    if (badgeType === "HUMAN_REQUIRED") return { sentiment: "Neutral / Urgent", score: "Handoff Signal" };
+    if (badgeType === "NEEDS_ATTENTION") return { sentiment: "Needs Reply", score: "SLA Risk" };
+    return { sentiment: "Routine", score: "AI Handled" };
+  };
+  const signals = getSignals();
+
+  // 6. Dynamic Timeline Events
+  const getTimeline = () => {
+    if (badgeType === "HUMAN_REQUIRED") {
+      return [
+        { text: "Handoff Triggered", time: "Just now" },
+        { text: "User Requested Person", time: "5m ago" }
+      ];
+    }
+    if (badgeType === "HOT_OPPORTUNITY") {
+      return [
+        { text: "Pricing Query Detected", time: "2m ago" },
+        { text: "AI Greeting Sent", time: "6m ago" }
+      ];
+    }
+    return [
+      { text: "Thread Monitored", time: "Just now" },
+      { text: "Session Initiated", time: "15m ago" }
+    ];
+  };
+  const timelineEvents = getTimeline();
+
   const cards = [
     {
       id: "intent",
@@ -48,19 +171,22 @@ export default function AIDeskWorkspace() {
       description: "Detect customer purchase intent, urgency levels, and query categorization in real-time.",
       icon: Brain,
       iconColor: "text-purple-600 bg-purple-50 border-purple-100",
-      // Custom abstract dashed visual layout
       visual: (
         <div className="mt-4 space-y-2.5 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50">
-          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400">
-            <span>PURCHASE PROBABILITY</span>
-            <span className="h-2 w-16 rounded-full bg-slate-200 animate-pulse" />
+          <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+            <span>{intent.label}</span>
+            <span className="text-[10px] text-purple-600 font-extrabold">{intent.pct}%</span>
           </div>
           <div className="h-1.5 w-full rounded-full bg-slate-200/60 overflow-hidden">
-            <div className="h-full w-2/3 rounded-full bg-slate-300/60 border-r border-dashed border-slate-400/50" />
+            <div 
+              className="h-full rounded-full bg-purple-500 transition-all duration-500 ease-out" 
+              style={{ width: `${intent.pct}%` }}
+            />
           </div>
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <span className="h-4 w-16 rounded bg-slate-200/80" />
-            <span className="h-4 w-20 rounded bg-slate-200/60" />
+          <div className="flex items-center gap-1.5 mt-1">
+            <span className="h-4 rounded bg-purple-50 px-1.5 py-0.5 text-[8px] font-bold text-purple-600 uppercase border border-purple-100">
+              {badgeType === "HOT_OPPORTUNITY" ? "Hot Lead" : "Standard"}
+            </span>
           </div>
         </div>
       ),
@@ -72,10 +198,13 @@ export default function AIDeskWorkspace() {
       icon: FileText,
       iconColor: "text-blue-600 bg-blue-50 border-blue-100",
       visual: (
-        <div className="mt-4 space-y-2 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50">
-          <div className="h-2 w-5/6 rounded bg-slate-200/80" />
-          <div className="h-2 w-4/6 rounded bg-slate-200/60" />
-          <div className="h-2 w-3/6 rounded bg-slate-200/40" />
+        <div className="mt-4 space-y-2 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50 text-[10px] text-slate-500">
+          {summaryBullets.map((bullet, idx) => (
+            <div key={idx} className="flex items-start gap-1.5">
+              <span className="mt-1 flex-shrink-0 h-1 w-1 rounded-full bg-blue-400" />
+              <p className="leading-normal">{bullet}</p>
+            </div>
+          ))}
         </div>
       ),
     },
@@ -87,14 +216,12 @@ export default function AIDeskWorkspace() {
       iconColor: "text-amber-600 bg-amber-50 border-amber-100",
       visual: (
         <div className="mt-4 space-y-2">
-          <div className="flex items-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-2 bg-slate-50/30">
-            <span className="h-3 w-3 rounded-full border border-slate-300" />
-            <span className="h-2 w-32 rounded bg-slate-200/80" />
-          </div>
-          <div className="flex items-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-2 bg-slate-50/30">
-            <span className="h-3 w-3 rounded-full border border-slate-300" />
-            <span className="h-2 w-24 rounded bg-slate-200/60" />
-          </div>
+          {actionsList.map((action, idx) => (
+            <div key={idx} className="flex items-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-2 bg-slate-50/30 text-[10px] text-slate-600 font-semibold">
+              <CheckCircle2 size={12} className="text-amber-500 shrink-0" />
+              <span className="truncate">{action}</span>
+            </div>
+          ))}
         </div>
       ),
     },
@@ -105,11 +232,13 @@ export default function AIDeskWorkspace() {
       icon: ShieldAlert,
       iconColor: "text-rose-600 bg-rose-50 border-rose-100",
       visual: (
-        <div className="mt-4 flex items-start gap-2 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50">
-          <div className="h-4 w-4 rounded-full bg-slate-200 animate-pulse shrink-0" />
-          <div className="space-y-1.5 flex-1">
-            <div className="h-2 w-24 rounded bg-slate-200/80" />
-            <div className="h-2 w-36 rounded bg-slate-200/50" />
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50 text-[10px]">
+          <div className="h-5 w-5 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 shrink-0 font-bold animate-pulse">
+            !
+          </div>
+          <div className="space-y-1 flex-1">
+            <div className="font-bold text-slate-800">{objectionData.objection}</div>
+            <div className="text-slate-500 leading-normal">{objectionData.detail}</div>
           </div>
         </div>
       ),
@@ -121,17 +250,17 @@ export default function AIDeskWorkspace() {
       icon: Activity,
       iconColor: "text-emerald-600 bg-emerald-50 border-emerald-100",
       visual: (
-        <div className="mt-4 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50 flex items-center justify-between gap-4">
-          <div className="space-y-1.5 flex-1">
-            <div className="h-2.5 w-16 rounded bg-slate-200/80" />
-            <div className="h-2 w-28 rounded bg-slate-200/50" />
+        <div className="mt-4 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50 flex items-center justify-between gap-4 text-[10px]">
+          <div className="space-y-1 flex-1">
+            <div className="font-bold text-slate-800">{signals.sentiment}</div>
+            <div className="text-slate-500">{signals.score}</div>
           </div>
-          {/* Mock Chart Shimmer */}
-          <div className="flex items-end gap-1 h-8">
-            <span className="h-3 w-2.5 rounded bg-slate-200/30" />
-            <span className="h-5 w-2.5 rounded bg-slate-200/50" />
-            <span className="h-8 w-2.5 rounded bg-slate-200/70 animate-pulse" />
-            <span className="h-4 w-2.5 rounded bg-slate-200/40" />
+          {/* Mock sparkline trend */}
+          <div className="flex items-end gap-1 h-8 shrink-0">
+            <span className="h-3 w-1.5 rounded bg-emerald-200/50" />
+            <span className="h-5 w-1.5 rounded bg-emerald-300/60" />
+            <span className="h-8 w-1.5 rounded bg-emerald-500/80 animate-pulse" />
+            <span className="h-4 w-1.5 rounded bg-emerald-300/40" />
           </div>
         </div>
       ),
@@ -143,18 +272,19 @@ export default function AIDeskWorkspace() {
       icon: GitCommit,
       iconColor: "text-indigo-600 bg-indigo-50 border-indigo-100",
       visual: (
-        <div className="mt-4 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50">
-          <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-            <span className="h-2 w-16 rounded bg-slate-200/80" />
-            <span className="text-[9px] text-slate-300 font-medium">10:30 AM</span>
-          </div>
-          <div className="ml-0.5 my-1.5 h-3 w-0.5 border-l border-dashed border-slate-300" />
-          <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-            <span className="h-2 w-20 rounded bg-slate-200/50" />
-            <span className="text-[9px] text-slate-300 font-medium">10:45 AM</span>
-          </div>
+        <div className="mt-4 rounded-xl border border-dashed border-slate-200 p-3 bg-slate-50/50 text-[10px]">
+          {timelineEvents.map((event, idx) => (
+            <div key={idx}>
+              <div className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                <span className="font-bold text-slate-700">{event.text}</span>
+                <span className="text-[9px] text-slate-400 font-semibold">{event.time}</span>
+              </div>
+              {idx < timelineEvents.length - 1 && (
+                <div className="ml-[3px] my-1.5 h-3 w-0.5 border-l border-dashed border-slate-300" />
+              )}
+            </div>
+          ))}
         </div>
       ),
     },

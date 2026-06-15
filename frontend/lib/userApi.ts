@@ -685,6 +685,24 @@ export async function markAllNotificationsRead() {
   }
 }
 
+export async function createNotification(body: {
+  title: string;
+  message: string;
+  type?: string;
+  link?: string;
+}) {
+  const response = await apiFetch("/api/notifications", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  if (!response.success) {
+    throw new Error(response.message || "Failed to create notification");
+  }
+
+  return response.data;
+}
+
 export async function searchApp(query: string): Promise<SearchResult[]> {
   const value = query.trim();
 

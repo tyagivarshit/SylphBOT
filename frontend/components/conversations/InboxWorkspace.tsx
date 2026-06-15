@@ -215,8 +215,18 @@ export default function InboxWorkspace() {
                 const intel = leadsIntelligence[l.id];
                 if (!intel) return false;
                 if (pill.type === "hot") return intel.recommendedBadge === "HOT_OPPORTUNITY";
-                if (pill.type === "attention") return intel.recommendedBadge === "NEEDS_ATTENTION";
-                if (pill.type === "human") return intel.recommendedBadge === "HUMAN_REQUIRED";
+                if (pill.type === "attention") {
+                  return (
+                    intel.recommendedBadge === "NEEDS_ATTENTION" ||
+                    intel.recommendedBadge === "HUMAN_CONTROLLED"
+                  );
+                }
+                if (pill.type === "human") {
+                  return (
+                    intel.recommendedBadge === "HUMAN_REQUIRED" ||
+                    intel.recommendedBadge === "HUMAN_CONTROLLED"
+                  );
+                }
                 if (pill.type === "ai") return intel.recommendedBadge === "AI_HANDLING";
                 return false;
               }).length;
@@ -344,6 +354,14 @@ export default function InboxWorkspace() {
                       <span className="inline-flex items-center gap-0.5 rounded-full border border-rose-100 bg-rose-50 px-1.5 py-0.5 text-[8px] font-bold text-rose-600 uppercase tracking-wider">
                         <UserCheck size={9} />
                         Human Required
+                      </span>
+                    );
+                    break;
+                  case "HUMAN_CONTROLLED":
+                    intelBadgeElement = (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[8px] font-bold text-blue-600 uppercase tracking-wider">
+                        <UserCheck size={9} />
+                        Human Controlled
                       </span>
                     );
                     break;

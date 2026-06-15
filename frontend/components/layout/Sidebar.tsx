@@ -51,10 +51,9 @@ const menu: MenuSection[] = [
     ],
   },
   {
-    section: "Automation",
+    section: "Growth",
     items: [
-      { name: "Automation", href: "/automation", icon: Workflow },
-      { name: "Comment Automation", href: "/comment-automation", icon: MessageSquare },
+      { name: "Growth Engine", href: "/growth-engine" as any, icon: Workflow },
     ],
   },
   {

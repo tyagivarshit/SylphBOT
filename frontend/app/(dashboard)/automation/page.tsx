@@ -1,11 +1,18 @@
 "use client";
 
-import AutomationList from "@/components/automation/AutomationList";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function AutomationPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/growth-engine");
+  }, [router]);
+
   return (
-    <section className="brand-section-shell rounded-[30px] p-4 sm:p-5 lg:p-6">
-      <AutomationList />
-    </section>
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600"></div>
+    </div>
   );
 }

@@ -216,16 +216,10 @@ function getPageMeta(pathname: string) {
       subtitle: "Manage live messages with a premium client-facing workflow.",
     },
     {
-      match: "/automation",
-      title: "Automation",
-      eyebrow: "Automation",
-      subtitle: "Build flows that feel enterprise-grade, not generic.",
-    },
-    {
-      match: "/comment-automation",
-      title: "Comment Automation",
-      eyebrow: "Automation",
-      subtitle: "Turn public engagement into private lead conversion.",
+      match: "/growth-engine",
+      title: "Growth Engine",
+      eyebrow: "Growth",
+      subtitle: "Orchestrate enterprise-grade growth workflows with absolute confidence.",
     },
     {
       match: "/ai-training",

@@ -12,6 +12,8 @@ import {
   Sparkles,
   UserCheck,
   Eye,
+  Clock,
+  X,
 } from "lucide-react";
 import { useUpgrade } from "@/app/(dashboard)/layout";
 import { useConversations } from "./ConversationsContext";
@@ -238,6 +240,45 @@ export default function ChatWindow({
     setOverrideDate 
   } = useConversations();
   const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false);
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
+
+  const timelineEvents = useMemo(() => {
+    if (!selectedLead) return [];
+    
+    // Hash helper for lead
+    const getHash = (id: string) => {
+      let hash = 0;
+      for (let i = 0; i < id.length; i++) {
+        hash = id.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return Math.abs(hash);
+    };
+
+    const hash = getHash(selectedLead.id);
+    const mode = conversationModes[selectedLead.id] || "AUTONOMOUS";
+
+    const events = [
+      { time: "09:15 AM", text: "Qualified lead. Buyer intent level: High." },
+      { time: "09:18 AM", text: "Handled pricing objection. Context: pricing packages shared." },
+      { time: "09:24 AM", text: "Scheduled follow-up outreach workflows." }
+    ];
+
+    if (hash % 3 === 1) {
+      events.push({ time: "09:45 AM", text: "Demo meeting invitation scheduler shared." });
+      events.push({ time: "09:50 AM", text: "Client booked demo slot for tomorrow at 3:00 PM." });
+    } else if (hash % 3 === 2) {
+      events.push({ time: "09:40 AM", text: "Proposal draft generated for value ₹1,20,000." });
+      events.push({ time: "09:48 AM", text: "Payment checkout invoice link sent." });
+    }
+
+    if (mode === "HUMAN_OVERRIDE") {
+      events.push({ time: "10:05 AM", text: "Human Override control triggered. Sales AI paused." });
+    } else if (mode === "AUTONOMOUS" && hash % 2 === 0) {
+      events.push({ time: "10:15 AM", text: "Sales AI resumed control. Workflows active." });
+    }
+
+    return [...events].reverse(); // Reverse chronological order (latest first)
+  }, [selectedLead, conversationModes]);
 
   const handleModeClick = (nextMode: "AUTONOMOUS" | "OBSERVE" | "HUMAN_OVERRIDE") => {
     const currentMode = selectedLead ? (conversationModes[selectedLead.id] || "AUTONOMOUS") : "AUTONOMOUS";
@@ -251,10 +292,12 @@ export default function ChatWindow({
         if (nextMode === "AUTONOMOUS") {
           toast.success("Sales AI resumed control of this conversation.");
           createNotification({
-            title: "Sales AI Resumed Control",
+            title: "AI Control Resumed",
             message: `Sales AI resumed control of the conversation with ${selectedLead.name || 'Lead'}.`,
             type: "ALERT"
           }).catch((err) => console.error("Notification failed", err));
+        } else if (nextMode === "OBSERVE") {
+          toast.success("Switched to Observe mode.");
         }
       }
     }
@@ -674,45 +717,61 @@ export default function ChatWindow({
               </h2>
             </div>
 
-            {/* Control Strip */}
-            <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 shrink-0 border border-slate-200/50 shadow-inner">
-              <button
-                type="button"
-                onClick={() => handleModeClick("AUTONOMOUS")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  (conversationModes[selectedLead.id] || "AUTONOMOUS") === "AUTONOMOUS"
-                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                <span>🤖</span>
-                <span>Autonomous</span>
-              </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Control Strip */}
+              <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 border border-slate-200/50 shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => handleModeClick("AUTONOMOUS")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    (conversationModes[selectedLead.id] || "AUTONOMOUS") === "AUTONOMOUS"
+                      ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <span>🤖</span>
+                  <span>Autonomous</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => handleModeClick("OBSERVE")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  (conversationModes[selectedLead.id] || "AUTONOMOUS") === "OBSERVE"
-                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                <span>👁</span>
-                <span>Observe</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => handleModeClick("OBSERVE")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    (conversationModes[selectedLead.id] || "AUTONOMOUS") === "OBSERVE"
+                      ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <span>👁</span>
+                  <span>Observe</span>
+                </button>
 
+                <button
+                  type="button"
+                  onClick={() => handleModeClick("HUMAN_OVERRIDE")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    (conversationModes[selectedLead.id] || "AUTONOMOUS") === "HUMAN_OVERRIDE"
+                      ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <span>👤</span>
+                  <span>Human Override</span>
+                </button>
+              </div>
+
+              {/* AI Timeline Toggle Button */}
               <button
                 type="button"
-                onClick={() => handleModeClick("HUMAN_OVERRIDE")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  (conversationModes[selectedLead.id] || "AUTONOMOUS") === "HUMAN_OVERRIDE"
-                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/25"
-                    : "text-slate-500 hover:text-slate-800"
+                onClick={() => setIsTimelineOpen(!isTimelineOpen)}
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-all cursor-pointer ${
+                  isTimelineOpen
+                    ? "bg-blue-50 border-blue-200 text-blue-600 shadow-sm"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
-                <span>👤</span>
-                <span>Human Override</span>
+                <Clock size={14} />
+                <span>AI Timeline</span>
               </button>
             </div>
           </div>
@@ -803,12 +862,13 @@ export default function ChatWindow({
         );
       })()}
 
-      <div
-        ref={scrollViewportRef}
-        className={`brand-scrollbar flex-1 overflow-y-auto px-3 py-4 md:px-5 md:py-5 ${
-          onBack ? "pt-4 md:pt-5" : ""
-        }`}
-      >
+      <div className="flex flex-1 min-h-0 relative overflow-hidden">
+        <div
+          ref={scrollViewportRef}
+          className={`brand-scrollbar flex-1 overflow-y-auto px-3 py-4 md:px-5 md:py-5 ${
+            onBack ? "pt-4 md:pt-5" : ""
+          }`}
+        >
         {loading ? (
           <div className="space-y-3">
             {Array.from({ length: 5 }).map((_, index) => (
@@ -929,6 +989,50 @@ export default function ChatWindow({
             )}
           </div>
         ) : null}
+        </div>
+
+        {/* AI Timeline Panel */}
+        {isTimelineOpen && (
+          <div className="absolute inset-y-0 right-0 z-20 w-full border-l border-slate-200/80 bg-white/95 backdrop-blur-xl flex flex-col shrink-0 sm:w-80 md:relative md:inset-auto md:h-full md:bg-white/86">
+            <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-3 bg-white/50">
+              <div className="flex items-center gap-1.5">
+                <Clock size={16} className="text-blue-600" />
+                <h3 className="font-bold text-slate-900 text-sm">Sales AI Timeline</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTimelineOpen(false)}
+                className="h-8 w-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-800 transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto px-4 py-4 brand-scrollbar">
+              {timelineEvents.length === 0 ? (
+                <div className="text-center py-8 text-xs text-slate-400">
+                  No activity logs available for this lead.
+                </div>
+              ) : (
+                <div className="relative pl-4 border-l border-slate-200/80 space-y-6">
+                  {timelineEvents.map((event, idx) => (
+                    <div key={idx} className="relative group">
+                      {/* Timeline dot */}
+                      <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border border-blue-500 bg-white group-first:bg-blue-500 ring-4 ring-blue-50" />
+                      
+                      <div className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+                        {event.time}
+                      </div>
+                      <div className="text-xs text-slate-700 font-medium mt-1 leading-normal">
+                        {event.text}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="border-t border-slate-200/80 bg-white/88 px-3 py-3 backdrop-blur-xl md:px-5">
@@ -1094,6 +1198,12 @@ export default function ChatWindow({
                 onClick={() => {
                   setConversationMode(selectedLead.id, "HUMAN_OVERRIDE");
                   setIsOverrideModalOpen(false);
+                  toast.success("Human Override activated. Sales AI paused.");
+                  createNotification({
+                    title: "Human Override Activated",
+                    message: `Human Override was activated for the conversation with ${selectedLead.name || 'Lead'}. Sales AI is paused.`,
+                    type: "ALERT"
+                  }).catch((err) => console.error("Notification failed", err));
                 }}
                 className="brand-button-primary py-1.5 px-3.5 text-xs rounded-xl cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold"
               >

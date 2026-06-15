@@ -30,6 +30,9 @@ router.post("/ops/replay-pending-webhooks", requirePermission("billing:manage"),
 router.post("/ops/replay-pending-entitlements", requirePermission("billing:manage"), CommerceController.replayPendingEntitlements);
 router.post("/reconcile-webhook", requirePermission("billing:manage"), CommerceController.reconcileWebhook);
 router.get("/projection", requirePermission("billing:view"), CommerceController.getProjection);
+router.get("/plans", requirePermission("billing:view"), CommerceController.listPlans);
+router.get("/proposals", requirePermission("billing:view"), CommerceController.listProposals);
+router.get("/proposal/:proposalKey", requirePermission("billing:view"), CommerceController.getProposalDetails);
 router.post("/chargeback", requirePermission("billing:manage"), CommerceController.openChargeback);
 router.post("/provider-credential", requirePermission("billing:manage"), CommerceController.upsertProviderCredential);
 router.post("/override", requirePermission("billing:manage"), CommerceController.createManualOverride);

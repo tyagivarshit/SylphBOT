@@ -229,7 +229,7 @@ function getLeadDisplayName(lead: Lead) {
   return lead?.name || lead?.phone || lead?.id || "User";
 }
 
-export type WorkspaceTab = "inbox" | "ai" | "chat";
+export type WorkspaceTab = "inbox" | "ai" | "chat" | "activity";
 export type FilterType = "all" | "hot" | "attention" | "human" | "ai";
 export type ControlMode = "AUTONOMOUS" | "OBSERVE" | "HUMAN_OVERRIDE";
 

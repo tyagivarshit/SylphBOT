@@ -10,6 +10,7 @@ import WorkspaceTabs from "@/components/conversations/WorkspaceTabs";
 import InboxWorkspace from "@/components/conversations/InboxWorkspace";
 import AIDeskWorkspace from "@/components/conversations/AIDeskWorkspace";
 import ChatWorkspace from "@/components/conversations/ChatWorkspace";
+import AIActivityWorkspace from "@/components/conversations/AIActivityWorkspace";
 
 // Re-export Lead and Message types for backward compatibility with ChatSidebar and ChatWindow
 export type { Lead, Message } from "@/components/conversations/ConversationsContext";
@@ -25,6 +26,7 @@ function ConversationsPageContent() {
         {activeTab === "inbox" && <InboxWorkspace />}
         {activeTab === "ai" && <AIDeskWorkspace />}
         {activeTab === "chat" && <ChatWorkspace />}
+        {activeTab === "activity" && <AIActivityWorkspace />}
       </div>
     </div>
   );

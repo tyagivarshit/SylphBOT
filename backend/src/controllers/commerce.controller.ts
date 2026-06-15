@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import prisma from "../config/prisma";
 import { purchaseAddon } from "../services/addon.service";
 import { chargebackEngineService } from "../services/chargebackEngine.service";
 import { checkoutRecoveryService } from "../services/checkoutRecovery.service";
@@ -578,6 +579,69 @@ export class CommerceController {
         success: false,
         message: error.message || "subscription_override_failed",
       });
+    }
+  }
+
+  static async listPlans(req: Request, res: Response) {
+    try {
+      const businessId = getBusinessId(req);
+      const plans = await prisma.pricingCatalog.findMany({
+        where: {
+          OR: [
+            { businessId },
+            { businessId: null }
+          ],
+          isActive: true,
+        },
+        orderBy: {
+          planCode: "asc",
+        },
+      });
+      return res.json({ success: true, data: plans });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message || "list_plans_failed" });
+    }
+  }
+
+  static async listProposals(req: Request, res: Response) {
+    try {
+      const businessId = getBusinessId(req);
+      const proposals = await prisma.proposalLedger.findMany({
+        where: {
+          businessId,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+      return res.json({ success: true, data: proposals });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message || "list_proposals_failed" });
+    }
+  }
+
+  static async getProposalDetails(req: Request, res: Response) {
+    try {
+      const businessId = getBusinessId(req);
+      const proposalKey = String(req.params.proposalKey || "").trim();
+      const proposal = await prisma.proposalLedger.findFirst({
+        where: {
+          businessId,
+          proposalKey,
+        },
+        include: {
+          contracts: true,
+          paymentIntents: true,
+          invoices: true,
+          discountApprovals: true,
+        },
+      });
+      if (!proposal) {
+        return res.status(404).json({ success: false, message: "proposal_not_found" });
+      }
+      return res.json({ success: true, data: proposal });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message || "get_proposal_failed" });
     }
   }
 }

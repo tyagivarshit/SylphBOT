@@ -1,21 +1,72 @@
 "use client";
 
 import { useConversations, WorkspaceTab } from "./ConversationsContext";
-import { Inbox, Sparkles, MessageSquare, type LucideIcon } from "lucide-react";
+import { AlertCircle, Activity, SlidersHorizontal, Sparkles, MessageSquare, type LucideIcon } from "lucide-react";
 import { motion } from "framer-motion";
+import { useMemo } from "react";
 
 export default function WorkspaceTabs() {
-  const { activeTab, setActiveTab, leads, selectedLead } = useConversations();
+  const { activeTab, setActiveTab, filter, setFilter, leads, selectedLead, leadsIntelligence } = useConversations();
 
-  // Calculate unread count for the Inbox tab
-  const totalUnread = leads.reduce((sum, lead) => sum + (lead.unreadCount || 0), 0);
+  // Map active state to our custom tab IDs: "attention" | "activity" | "all" | "ai" | "chat"
+  const currentTabId = useMemo(() => {
+    if (activeTab === "inbox") {
+      if (filter === "attention") return "attention";
+      return "all";
+    }
+    return activeTab;
+  }, [activeTab, filter]);
 
-  const tabs: Array<{ id: WorkspaceTab; label: string; mobileLabel: string; icon: LucideIcon }> = [
+  const handleTabClick = (tabId: string) => {
+    if (tabId === "attention") {
+      setActiveTab("inbox");
+      setFilter("attention");
+    } else if (tabId === "all") {
+      setActiveTab("inbox");
+      setFilter("all");
+    } else {
+      setActiveTab(tabId as any);
+    }
+  };
+
+  // Calculate unread count for Attention vs All tabs
+  const attentionUnread = useMemo(() => {
+    return leads
+      .filter((l) => {
+        const intel = leadsIntelligence[l.id];
+        return (
+          intel?.recommendedBadge === "NEEDS_ATTENTION" ||
+          intel?.recommendedBadge === "HUMAN_CONTROLLED" ||
+          intel?.recommendedBadge === "HUMAN_REQUIRED"
+        );
+      })
+      .reduce((sum, lead) => sum + (lead.unreadCount || 0), 0);
+  }, [leads, leadsIntelligence]);
+
+  const totalUnread = useMemo(() => {
+    return leads.reduce((sum, lead) => sum + (lead.unreadCount || 0), 0);
+  }, [leads]);
+
+  const tabs: Array<{ id: string; label: string; mobileLabel: string; icon: LucideIcon; unreadCount?: number }> = [
     {
-      id: "inbox",
-      label: "Inbox",
-      mobileLabel: "Inbox",
-      icon: Inbox,
+      id: "attention",
+      label: "Needs Attention",
+      mobileLabel: "Attention",
+      icon: AlertCircle,
+      unreadCount: attentionUnread,
+    },
+    {
+      id: "activity",
+      label: "AI Activity",
+      mobileLabel: "Activity",
+      icon: Activity,
+    },
+    {
+      id: "all",
+      label: "All Conversations",
+      mobileLabel: "All",
+      icon: SlidersHorizontal,
+      unreadCount: totalUnread,
     },
     {
       id: "ai",
@@ -38,13 +89,13 @@ export default function WorkspaceTabs() {
         <div className="flex w-full overflow-x-auto no-scrollbar sm:w-auto">
           <div className="flex items-center gap-1.5 rounded-2xl bg-slate-200/60 p-1 backdrop-blur-xl">
             {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
+              const isActive = currentTabId === tab.id;
               const Icon = tab.icon;
 
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => handleTabClick(tab.id)}
                   className={`
                     relative flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold tracking-wide transition-all duration-200 ease-out focus:outline-none sm:text-sm
                     ${isActive ? "text-blue-600" : "text-slate-500 hover:text-slate-800"}
@@ -64,10 +115,10 @@ export default function WorkspaceTabs() {
                     <span className="hidden sm:inline">{tab.label}</span>
                     <span className="inline sm:hidden">{tab.mobileLabel}</span>
 
-                    {/* Unread indicator for Inbox tab */}
-                    {tab.id === "inbox" && totalUnread > 0 && (
+                    {/* Unread indicator for tab */}
+                    {tab.unreadCount !== undefined && tab.unreadCount > 0 && (
                       <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[9px] font-bold text-white">
-                        {totalUnread}
+                        {tab.unreadCount}
                       </span>
                     )}
 

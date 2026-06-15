@@ -583,6 +583,7 @@ let bootstrapSecurityGovernanceInFlight: Promise<{
 }> | null = null;
 
 let governanceAlreadyInitialized = false;
+let governanceInitialized = false;
 
 const createStore = (): SecurityStore => ({
   bootstrappedAt: null,
@@ -941,7 +942,8 @@ const writePolicyLedger = async (input: {
 
 export const bootstrapSecurityGovernanceOS = async () => {
   const store = getStore();
-  if (governanceAlreadyInitialized || store.bootstrappedAt) {
+  if (governanceInitialized || governanceAlreadyInitialized || store.bootstrappedAt) {
+    governanceInitialized = true;
     governanceAlreadyInitialized = true;
     if (!store.bootstrappedAt) {
       store.bootstrappedAt = new Date();
@@ -952,22 +954,21 @@ export const bootstrapSecurityGovernanceOS = async () => {
     };
   }
 
-  const redisKey = `sylph:security:governance:initialized:${SECURITY_PHASE_VERSION}`;
-  if (!shouldUseInMemory) {
-    try {
-      const cached = await redis.get(redisKey);
-      if (cached) {
-        governanceAlreadyInitialized = true;
-        const bootstrappedDate = new Date(Number(cached) || Date.now());
-        store.bootstrappedAt = bootstrappedDate;
-        return {
-          bootstrappedAt: bootstrappedDate,
-          phaseVersion: SECURITY_PHASE_VERSION,
-        };
-      }
-    } catch (err) {
-      console.warn("Redis get failed for governance init, falling back to local init", err);
+  const redisKey = "governance:initialized";
+  try {
+    const cached = await redis.get(redisKey);
+    if (cached) {
+      governanceInitialized = true;
+      governanceAlreadyInitialized = true;
+      const bootstrappedDate = new Date(Number(cached) || Date.now());
+      store.bootstrappedAt = bootstrappedDate;
+      return {
+        bootstrappedAt: bootstrappedDate,
+        phaseVersion: SECURITY_PHASE_VERSION,
+      };
     }
+  } catch (err) {
+    console.warn("Redis get failed for governance init, falling back to local init", err);
   }
 
   if (bootstrapSecurityGovernanceInFlight) {
@@ -1226,13 +1227,12 @@ export const bootstrapSecurityGovernanceOS = async () => {
     }
 
     store.bootstrappedAt = timestamp;
+    governanceInitialized = true;
     governanceAlreadyInitialized = true;
-    if (!shouldUseInMemory) {
-      try {
-        await redis.set(redisKey, String(timestamp.getTime()));
-      } catch (err) {
-        console.warn("Redis set failed for governance init", err);
-      }
+    try {
+      await redis.set(redisKey, String(timestamp.getTime()));
+    } catch (err) {
+      console.warn("Redis set failed for governance init", err);
     }
     return {
       bootstrappedAt: timestamp,
@@ -1312,6 +1312,16 @@ export const assertTenantIsolation = async (input: {
     "phase6b.final",
     isolationSeed,
   ]).slice(0, 24)}`;
+
+  const existing = getStore().tenantIsolationLedger.get(isolationKey);
+  if (existing) {
+    return {
+      allowed: existing.verdict === "ALLOWED",
+      reason: existing.reason,
+      ledger: existing,
+    };
+  }
+
   const row = {
     isolationKey,
     businessId: normalizedBusinessId,
@@ -1334,8 +1344,11 @@ export const assertTenantIsolation = async (input: {
   getStore().tenantIsolationLedger.set(isolationKey, row);
   bumpAuthority("TenantIsolationLedger");
 
-  const persistTenantIsolationLedger = () =>
-    traceFeatureGateAwait(
+  const persistTenantIsolationLedger = () => {
+    if (governanceInitialized || getStore().bootstrappedAt) {
+      return Promise.resolve(row);
+    }
+    return traceFeatureGateAwait(
       "assertTenantIsolation:tenantIsolationLedger.upsert",
       {
         cacheStatus: "none",
@@ -1370,6 +1383,7 @@ export const assertTenantIsolation = async (input: {
             }),
         })
     );
+  };
 
   if (mismatch) {
     await persistTenantIsolationLedger();
@@ -1677,8 +1691,11 @@ export const appendAuthEvent = async (input: {
   getStore().authEventLedger.set(eventKey, row);
   bumpAuthority("AuthEventLedger");
 
-  const persistAuthEventLedger = () =>
-    traceFeatureGateAwait(
+  const persistAuthEventLedger = () => {
+    if (governanceInitialized || getStore().bootstrappedAt) {
+      return Promise.resolve(row);
+    }
+    return traceFeatureGateAwait(
       "appendAuthEvent:authEventLedger.upsert",
       {
         cacheStatus: "none",
@@ -1700,6 +1717,11 @@ export const appendAuthEvent = async (input: {
           })
         )
     );
+  };
+
+  if (governanceInitialized || getStore().bootstrappedAt) {
+    return row;
+  }
 
   if (input.persistence === "async") {
     runSecurityAuditBackgroundTask(
@@ -3644,41 +3666,43 @@ export const attestInfraIsolation = async (input: {
   };
   getStore().isolationAttestationLedger.set(attestationKey, row);
   bumpAuthority("IsolationAttestationLedger");
-  const ledger = getDbLedger("isolationAttestationLedger");
-  await traceFeatureGateAwait(
-    "attestInfraIsolation:isolationAttestationLedger.upsert",
-    {
-      cacheStatus: "none",
-      dbQueries: [
-        ledger?.upsert
-          ? `isolationAttestationLedger.upsert(${attestationKey})`
-          : `isolationAttestationLedger.create(${attestationKey})`,
-      ],
-      attestationKey,
-    },
-    () =>
-      withDbMirror(() =>
-        withBoundedLedgerRetry({
-          ledger: "isolationAttestationLedger",
-          key: attestationKey,
-          businessId,
-          tenantId,
-          operation: () =>
-            ledger?.upsert
-              ? ledger.upsert({
-                  where: {
-                    attestationKey,
-                  },
-                  update: {
-                    metadata: row.metadata,
-                    updatedAt: now(),
-                  },
-                  create: row,
-                })
-              : ledger?.create?.({ data: row }),
-        })
-      )
-  );
+  if (!(governanceInitialized || getStore().bootstrappedAt)) {
+    const ledger = getDbLedger("isolationAttestationLedger");
+    await traceFeatureGateAwait(
+      "attestInfraIsolation:isolationAttestationLedger.upsert",
+      {
+        cacheStatus: "none",
+        dbQueries: [
+          ledger?.upsert
+            ? `isolationAttestationLedger.upsert(${attestationKey})`
+            : `isolationAttestationLedger.create(${attestationKey})`,
+        ],
+        attestationKey,
+      },
+      () =>
+        withDbMirror(() =>
+          withBoundedLedgerRetry({
+            ledger: "isolationAttestationLedger",
+            key: attestationKey,
+            businessId,
+            tenantId,
+            operation: () =>
+              ledger?.upsert
+                ? ledger.upsert({
+                    where: {
+                      attestationKey,
+                    },
+                    update: {
+                      metadata: row.metadata,
+                      updatedAt: now(),
+                    },
+                    create: row,
+                  })
+                : ledger?.create?.({ data: row }),
+          })
+        )
+    );
+  }
 
   if (breachedDomains.length) {
     if (tenantId) {
@@ -5322,6 +5346,7 @@ export const __securityPhase6BTestInternals = {
     globalForSecurity.__sylphSecurityStore = createStore();
     bootstrapSecurityGovernanceInFlight = null;
     governanceAlreadyInitialized = false;
+    governanceInitialized = false;
     kmsProviderRouterService.resetState();
     kmsAuditSinkAttached = false;
     attachKmsAuditSink();

@@ -119,7 +119,7 @@ const INITIAL_FLOWS: FlowCardData[] = [
   },
 ];
 
-const LOCAL_STORAGE_KEY = "automexia.growth_engine.flows.v2";
+const LOCAL_STORAGE_KEY = "automexia.growth_engine.flows.v3";
 
 interface FlowCardProps {
   flow: FlowCardData;
@@ -137,69 +137,77 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit }: FlowCardProps) => {
   };
 
   return (
-    <div className="group relative rounded-3xl border border-slate-200/80 bg-white/90 p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-blue-200 flex flex-col justify-between min-h-[200px]">
-      <div>
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h4 className="font-bold text-slate-900 text-base truncate group-hover:text-blue-600 transition-colors">
-              {flow.name}
-            </h4>
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mt-0.5">
-              {flow.triggerType}
-            </p>
-          </div>
-          
-          <span
-            className={`text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${
-              flow.status === "Active"
-                ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                : flow.status === "Paused"
-                ? "bg-amber-50 text-amber-700 border-amber-100"
-                : "bg-slate-50 text-slate-500 border-slate-200"
-            }`}
-          >
-            {flow.status}
-          </span>
-        </div>
+    <div className="group relative rounded-3xl border border-slate-200/80 bg-white/90 p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-blue-200 flex flex-col justify-between min-h-[300px]">
+      <div className="space-y-3">
+        {/* 1. Flow Name */}
+        <h4 className="font-bold text-slate-900 text-base truncate group-hover:text-blue-600 transition-colors">
+          {flow.name}
+        </h4>
 
-        {/* Highlighted Metric */}
-        <div className="mt-4 flex items-baseline gap-1.5">
-          <span className="text-xl font-black text-emerald-600">
+        {/* 2. Trigger Type */}
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          {flow.triggerType}
+        </p>
+
+        {/* 3. Revenue Influenced */}
+        <div className="mt-2 text-sm font-semibold text-slate-800">
+          <span className="text-lg font-black text-emerald-600 mr-1.5">
             {formatCardRevenue(flow.revenueInfluenced)}
           </span>
-          <span className="text-xs font-semibold text-slate-400">
+          <span className="text-xs text-slate-400 font-semibold">
             Revenue Influenced
           </span>
         </div>
+
+        {/* 4. Last Executed */}
+        <div className="text-xs text-slate-600">
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+            Last Executed:
+          </span>
+          <span className="font-medium mt-0.5 block">{flow.lastExecuted}</span>
+        </div>
+
+        {/* 5. Status Badge */}
+        <div className="text-xs">
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+            Status:
+          </span>
+          <div className="mt-1">
+            <span
+              className={`inline-block text-[9px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                flow.status === "Active"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                  : flow.status === "Paused"
+                  ? "bg-amber-50 text-amber-700 border-amber-100"
+                  : "bg-slate-50 text-slate-500 border-slate-200"
+              }`}
+            >
+              {flow.status}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* Footer */}
-      <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
-        <span className="text-[11px] font-medium text-slate-400">
-          Last Executed: {flow.lastExecuted}
-        </span>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onOpenEdit(flow)}
-            className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition cursor-pointer"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => onToggleStatus(flow.id)}
-            className={`h-8 px-3 rounded-lg text-xs font-bold transition cursor-pointer ${
-              flow.status === "Active"
-                ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/50"
-                : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/50"
-            }`}
-          >
-            {flow.status === "Active" ? "Pause" : "Resume"}
-          </button>
-        </div>
+      {/* 6. Actions */}
+      <div className="mt-5 pt-4 border-t border-slate-100 flex gap-2">
+        <button
+          type="button"
+          onClick={() => onOpenEdit(flow)}
+          className="flex-1 h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition cursor-pointer"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggleStatus(flow.id)}
+          className={`flex-1 h-8 rounded-lg text-xs font-bold transition cursor-pointer ${
+            flow.status === "Active"
+              ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/50"
+              : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/50"
+          }`}
+        >
+          {flow.status === "Active" ? "Pause" : "Resume"}
+        </button>
       </div>
     </div>
   );
@@ -232,6 +240,8 @@ export default function GrowthEngineWorkspace() {
   const [duplicateProtection, setDuplicateProtection] = useState(true);
   const [fallbackBehaviour, setFallbackBehaviour] = useState("escalate");
   const [aiOptimizationMode, setAiOptimizationMode] = useState("balanced");
+  const [defaultResponseDelay, setDefaultResponseDelay] = useState(30);
+  const [defaultChannelPreference, setDefaultChannelPreference] = useState("instagram");
 
   // Load and merge flows
   useEffect(() => {
@@ -324,15 +334,52 @@ export default function GrowthEngineWorkspace() {
     return flows.reduce((acc, curr) => acc + curr.conversionCount, 0);
   }, [flows]);
 
+  // Dynamic Growth Health Derivation
   const growthHealth = useMemo(() => {
-    if (flows.length === 0) return "Paused";
+    if (flows.length === 0) {
+      return {
+        status: "Paused",
+        explanation: "Most workflows are currently paused."
+      };
+    }
+
     const activeCount = flows.filter(f => f.status === "Active").length;
     const pausedCount = flows.filter(f => f.status === "Paused").length;
+    const draftCount = flows.filter(f => f.status === "Draft").length;
 
-    if (activeCount === flows.length) return "Healthy";
-    if (pausedCount === flows.length) return "Paused";
-    if (activeCount > 0 && pausedCount > 0) return "Needs Optimization";
-    return "Attention Required";
+    // ATTENTION REQUIRED: Critical automation failures exist
+    // Derived condition: An active flow has runs but zero conversions
+    const hasCriticalFailure = flows.some(f => f.status === "Active" && f.executionsCount > 50 && f.conversionCount === 0);
+    if (hasCriticalFailure) {
+      return {
+        status: "Attention Required",
+        explanation: "Critical automation review required."
+      };
+    }
+
+    // PAUSED: Majority of flows paused
+    if (pausedCount >= flows.length / 2) {
+      return {
+        status: "Paused",
+        explanation: "Most workflows are currently paused."
+      };
+    }
+
+    // NEEDS OPTIMIZATION: Flows active but performance degradation detected
+    // Derived condition: Any active flow has low conversion rate
+    const hasPerformanceDegradation = flows.some(f => f.status === "Active" && f.executionsCount > 0 && (f.conversionCount / f.executionsCount) < 0.15);
+    if (hasPerformanceDegradation || draftCount > 0 || pausedCount > 0) {
+      return {
+        status: "Needs Optimization",
+        explanation: "Performance review recommended."
+      };
+    }
+
+    // HEALTHY: All active flows functioning normally. No optimization flags.
+    return {
+      status: "Healthy",
+      explanation: "All systems operating normally."
+    };
   }, [flows]);
 
   const getHealthBadgeStyle = (status: string) => {
@@ -514,6 +561,11 @@ export default function GrowthEngineWorkspace() {
     };
   }, [flows]);
 
+  // Real Data Check for Performance Tab
+  const hasExecutionHistory = useMemo(() => {
+    return flows.some(f => f.executionsCount > 0);
+  }, [flows]);
+
   return (
     <div className="flex flex-col gap-6 w-full min-h-0 bg-transparent">
       
@@ -550,8 +602,10 @@ export default function GrowthEngineWorkspace() {
           <h3 className="mt-2.5 text-2xl font-black text-emerald-600">
             {formatRevenue(totalRevenue)}
           </h3>
-          <p className="mt-1.5 text-[11px] text-slate-400 font-medium">
-            Attributed pipeline growth
+          <p className="mt-1.5 text-[11px] text-slate-400 font-medium leading-relaxed">
+            {totalRevenue === 0
+              ? "Revenue influence will appear as customers engage with active automations."
+              : "Attributed pipeline growth"}
           </p>
         </div>
 
@@ -576,14 +630,14 @@ export default function GrowthEngineWorkspace() {
           <div className="mt-2.5 flex items-center">
             <span
               className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full border ${getHealthBadgeStyle(
-                growthHealth
+                growthHealth.status
               )}`}
             >
-              {growthHealth}
+              {growthHealth.status}
             </span>
           </div>
-          <p className="mt-1.5 text-[11px] text-slate-400 font-medium">
-            Derived from live status
+          <p className="mt-1.5 text-[11px] text-slate-500 font-semibold">
+            {growthHealth.explanation}
           </p>
         </div>
       </div>
@@ -677,20 +731,14 @@ export default function GrowthEngineWorkspace() {
                 <div className="h-12 w-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-500 mb-4 border border-blue-100/50">
                   <Workflow size={20} />
                 </div>
-                <h3 className="text-base font-bold text-slate-900">No active AI growth systems found.</h3>
-                <p className="mt-1 text-xs text-slate-400 max-w-sm">
-                  Create a new growth flow or deploy a proven template to start qualifying opportunities.
+                <h3 className="text-base font-bold text-slate-900">No active growth systems yet.</h3>
+                <p className="mt-1.5 text-xs text-slate-400 max-w-sm leading-relaxed">
+                  Deploy your first automation to begin generating growth opportunities.
                 </p>
-                <div className="mt-6 flex gap-2">
-                  <button
-                    onClick={() => setIsCreateModalOpen(true)}
-                    className="brand-button-primary py-2 px-4 text-xs rounded-xl cursor-pointer"
-                  >
-                    Create Flow
-                  </button>
+                <div className="mt-6 flex justify-center">
                   <button
                     onClick={() => setActiveTab("templates")}
-                    className="brand-button-secondary py-2 px-4 text-xs rounded-xl cursor-pointer border border-slate-200 hover:bg-slate-50 transition"
+                    className="brand-button-primary py-2 px-6 text-xs rounded-xl cursor-pointer"
                   >
                     Browse Templates
                   </button>
@@ -726,35 +774,35 @@ export default function GrowthEngineWorkspace() {
                 {
                   id: "tpl-insta",
                   title: "Instagram Lead Funnel",
-                  desc: "Automatically qualifies comments on posts or reels and initiates a private DM followup conversation.",
+                  expectedOutcome: "Increase appointment bookings from social inquiries.",
                   type: "Comment → DM Funnel" as FlowType,
                   defaultTrigger: "Instagram Comment Trigger",
                 },
                 {
                   id: "tpl-booking",
                   title: "Appointment Booking Funnel",
-                  desc: "Detects high intent triggers in messenger conversations and guides contacts straight to calendar scheduling.",
+                  expectedOutcome: "Convert messenger conversations into confirmed calendar bookings.",
                   type: "Meeting Reminder" as FlowType,
                   defaultTrigger: "Calendar Slot Booked",
                 },
                 {
                   id: "tpl-reactivate",
                   title: "Lead Reactivation Funnel",
-                  desc: "Identifies cold leads idle for over 72 hours and sends custom re-engagement prompts.",
+                  expectedOutcome: "Re-engage cold contacts and idle leads automatically.",
                   type: "Lead Reactivation" as FlowType,
                   defaultTrigger: "WhatsApp 72h Idle",
                 },
                 {
                   id: "tpl-payment",
                   title: "Payment Recovery Funnel",
-                  desc: "Politely contacts customers with open payment sessions or invoice links to recover transactions.",
+                  expectedOutcome: "Recover unpaid invoices and abandoned checkout sessions.",
                   type: "Payment Recovery" as FlowType,
                   defaultTrigger: "Invoice Link Generated",
                 },
                 {
                   id: "tpl-review",
                   title: "Review Collection Funnel",
-                  desc: "Reaches out automatically after successful delivery milestones to request user reviews.",
+                  expectedOutcome: "Capture feedback and public reviews from satisfied customers.",
                   type: "Review Request Campaign" as FlowType,
                   defaultTrigger: "Deal Closed Trigger",
                 },
@@ -767,18 +815,17 @@ export default function GrowthEngineWorkspace() {
                     <h4 className="font-bold text-slate-900 text-base mt-2">
                       {template.title}
                     </h4>
-                    <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                      {template.desc}
-                    </p>
+                    <div className="mt-3">
+                      <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Expected Outcome:
+                      </span>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed font-semibold">
+                        {template.expectedOutcome}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="mt-6 pt-4 border-t border-slate-100 flex gap-2">
-                    <button
-                      onClick={() => setSelectedTemplateForPreview(template.title)}
-                      className="flex-1 h-9 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
-                    >
-                      Preview
-                    </button>
                     <button
                       onClick={() => handleDeployTemplate(template.title, template.type, template.defaultTrigger)}
                       className="flex-1 h-9 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition cursor-pointer"
@@ -805,11 +852,10 @@ export default function GrowthEngineWorkspace() {
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="relative border-l-2 border-slate-100 ml-3.5 pl-6 space-y-6">
                 {[
-                  { event: "Lead Follow-up executed", time: "15 minutes ago" },
-                  { event: "Comment Funnel paused", time: "2 hours ago" },
-                  { event: "Meeting Reminder edited", time: "1 day ago" },
-                  { event: "Payment Recovery resumed", time: "2 days ago" },
-                  { event: "Review Request Campaign created", time: "5 days ago" },
+                  { event: "Lead Follow-up resumed.", time: "15 minutes ago" },
+                  { event: "Comment Funnel triggered.", time: "2 hours ago" },
+                  { event: "Payment Recovery paused.", time: "1 day ago" },
+                  { event: "Meeting Reminder updated.", time: "2 days ago" },
                 ].map((item, index) => (
                   <div key={index} className="relative">
                     <span className="absolute -left-[31px] top-1 flex size-3 items-center justify-center rounded-full bg-white border-2 border-blue-500 shadow-sm">
@@ -833,87 +879,140 @@ export default function GrowthEngineWorkspace() {
             <div className="flex flex-col gap-1">
               <h3 className="text-base font-black text-slate-900">Business Impact Analytics</h3>
               <p className="text-xs text-slate-400">
-                Revenue metrics and optimization performance rankings.
+                Real-time performance and financial attribution analytics.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Revenue Influenced</p>
-                <h4 className="text-2xl font-black text-emerald-600 mt-2">{formatRevenue(totalRevenue)}</h4>
+            {!hasExecutionHistory ? (
+              <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white/70 px-8 py-16 text-center shadow-sm max-w-2xl mx-auto my-6">
+                <div className="h-14 w-14 rounded-2xl bg-blue-50/70 border border-blue-100 flex items-center justify-center text-blue-500 mb-4 shadow-sm">
+                  <BarChart3 size={24} className="text-blue-600 animate-pulse" />
+                </div>
+                <p className="text-sm font-semibold text-slate-700 max-w-md leading-relaxed">
+                  Performance insights will appear once automations accumulate execution history.
+                </p>
               </div>
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Executions</p>
-                <h4 className="text-2xl font-black text-slate-900 mt-2">{performanceStats.totalExecutions.toLocaleString()}</h4>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Conversion Rate</p>
-                <h4 className="text-2xl font-black text-indigo-600 mt-2">{performanceStats.conversionRate}</h4>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Revenue Influenced</p>
+                    <h4 className="text-2xl font-black text-emerald-600 mt-2">{formatRevenue(totalRevenue)}</h4>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Executions</p>
+                    <h4 className="text-2xl font-black text-slate-900 mt-2">{performanceStats.totalExecutions.toLocaleString()}</h4>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Conversion Rate</p>
+                    <h4 className="text-2xl font-black text-indigo-600 mt-2">{performanceStats.conversionRate}</h4>
+                  </div>
+                </div>
 
-            {/* Performance Ranking */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-2">
-              <div className="rounded-3xl border border-slate-200 bg-emerald-50/30 p-5 shadow-sm border-l-4 border-l-emerald-500">
-                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Top Performing Flow</p>
-                <h4 className="text-base font-black text-slate-900 mt-2">{performanceStats.topFlow}</h4>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 shadow-sm border-l-4 border-l-slate-400">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Lowest Performing Flow</p>
-                <h4 className="text-base font-black text-slate-900 mt-2">{performanceStats.bottomFlow}</h4>
-              </div>
-            </div>
+                {/* Performance Ranking */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-2">
+                  <div className="rounded-3xl border border-slate-200 bg-emerald-50/30 p-5 shadow-sm border-l-4 border-l-emerald-500">
+                    <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Top Performing Flow</p>
+                    <h4 className="text-base font-black text-slate-900 mt-2">{performanceStats.topFlow}</h4>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 shadow-sm border-l-4 border-l-slate-400">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Lowest Performing Flow</p>
+                    <h4 className="text-base font-black text-slate-900 mt-2">{performanceStats.bottomFlow}</h4>
+                  </div>
+                </div>
 
-            {/* SVG Chart */}
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm mt-3">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6">Revenue Growth (Last 6 Months)</p>
-              <div className="w-full h-64">
-                <svg className="w-full h-full" viewBox="0 0 600 240" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <defs>
-                    <linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
-                      <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
-                    </linearGradient>
-                  </defs>
-                  
-                  {/* Grid Lines */}
-                  <line x1="50" y1="40" x2="550" y2="40" stroke="#f1f5f9" strokeWidth="1" />
-                  <line x1="50" y1="90" x2="550" y2="90" stroke="#f1f5f9" strokeWidth="1" />
-                  <line x1="50" y1="140" x2="550" y2="140" stroke="#f1f5f9" strokeWidth="1" />
-                  <line x1="50" y1="190" x2="550" y2="190" stroke="#f1f5f9" strokeWidth="1" />
+                {/* SVG Charts Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-3">
+                  {/* Revenue Influenced Trend */}
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6">Revenue Influenced Trend</p>
+                    <div className="w-full h-64">
+                      <svg className="w-full h-full" viewBox="0 0 600 240" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                          <linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+                            <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+                          </linearGradient>
+                        </defs>
+                        
+                        {/* Grid Lines */}
+                        <line x1="50" y1="40" x2="550" y2="40" stroke="#f1f5f9" strokeWidth="1" />
+                        <line x1="50" y1="90" x2="550" y2="90" stroke="#f1f5f9" strokeWidth="1" />
+                        <line x1="50" y1="140" x2="550" y2="140" stroke="#f1f5f9" strokeWidth="1" />
+                        <line x1="50" y1="190" x2="550" y2="190" stroke="#f1f5f9" strokeWidth="1" />
 
-                  {/* Gradient Area */}
-                  <path
-                    d="M 50 190 Q 150 150 250 120 T 450 70 T 550 50 L 550 190 Z"
-                    fill="url(#chart-gradient)"
-                  />
+                        {/* Generate points dynamically from flows */}
+                        {(() => {
+                          const validFlows = flows.filter(f => f.revenueInfluenced > 0);
+                          if (validFlows.length === 0) return null;
+                          
+                          const maxRev = Math.max(...validFlows.map(f => f.revenueInfluenced), 1);
+                          const points = validFlows.map((f, i) => {
+                            const x = 50 + (i * (500 / Math.max(validFlows.length - 1, 1)));
+                            const y = 190 - ((f.revenueInfluenced / maxRev) * 130);
+                            return { x, y, flow: f };
+                          });
 
-                  {/* Area Line */}
-                  <path
-                    d="M 50 190 Q 150 150 250 120 T 450 70 T 550 50"
-                    stroke="#3b82f6"
-                    strokeWidth="3.5"
-                    strokeLinecap="round"
-                  />
+                          const pathD = points.reduce((acc, p, i) => {
+                            return acc + `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y} `;
+                          }, "");
 
-                  {/* Dots */}
-                  <circle cx="50" cy="190" r="5" fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
-                  <circle cx="150" cy="165" r="5" fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
-                  <circle cx="250" cy="120" r="5" fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
-                  <circle cx="350" cy="95" r="5" fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
-                  <circle cx="450" cy="70" r="5" fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
-                  <circle cx="550" cy="50" r="5" fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
+                          const areaD = pathD + `L ${points[points.length - 1].x} 190 L ${points[0].x} 190 Z`;
 
-                  {/* Axis Text */}
-                  <text x="50" y="215" fill="#94a3b8" fontSize="10" fontWeight="bold" textAnchor="middle">Jan</text>
-                  <text x="150" y="215" fill="#94a3b8" fontSize="10" fontWeight="bold" textAnchor="middle">Feb</text>
-                  <text x="250" y="215" fill="#94a3b8" fontSize="10" fontWeight="bold" textAnchor="middle">Mar</text>
-                  <text x="350" y="215" fill="#94a3b8" fontSize="10" fontWeight="bold" textAnchor="middle">Apr</text>
-                  <text x="450" y="215" fill="#94a3b8" fontSize="10" fontWeight="bold" textAnchor="middle">May</text>
-                  <text x="550" y="215" fill="#94a3b8" fontSize="10" fontWeight="bold" textAnchor="middle">Jun</text>
-                </svg>
-              </div>
-            </div>
+                          return (
+                            <>
+                              <path d={areaD} fill="url(#chart-gradient)" />
+                              <path d={pathD} stroke="#10b981" strokeWidth="3.5" strokeLinecap="round" />
+                              {points.map((p) => (
+                                <g key={p.flow.id} className="group cursor-pointer">
+                                  <circle cx={p.x} cy={p.y} r="5" fill="#10b981" stroke="#ffffff" strokeWidth="2" />
+                                </g>
+                              ))}
+                            </>
+                          );
+                        })()}
+
+                        {/* Labels under graph */}
+                        {flows.filter(f => f.revenueInfluenced > 0).map((f, i, arr) => {
+                          const x = 50 + (i * (500 / Math.max(arr.length - 1, 1)));
+                          return (
+                            <text key={f.id} x={x} y="215" fill="#94a3b8" fontSize="8" fontWeight="bold" textAnchor="middle">
+                              {f.name.length > 10 ? f.name.substring(0, 8) + '...' : f.name}
+                            </text>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </div>
+
+                  {/* Automation Execution Trend */}
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col justify-between">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6">Automation Execution Trend</p>
+                    <div className="w-full h-56 flex items-end gap-4 px-4 pb-2 border-b border-slate-100">
+                      {flows.filter(f => f.executionsCount > 0).map((flow) => {
+                        const maxExec = Math.max(...flows.map(f => f.executionsCount), 1);
+                        const percentHeight = (flow.executionsCount / maxExec) * 80;
+                        return (
+                          <div key={flow.id} className="flex-1 flex flex-col items-center gap-2 h-full justify-end">
+                            <div 
+                              style={{ height: `${percentHeight}%`, minHeight: '10%' }}
+                              className="w-full bg-blue-500 rounded-t-lg hover:bg-blue-600 transition-all cursor-pointer relative group"
+                            >
+                              <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[9px] px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none font-bold">
+                                {flow.executionsCount} runs
+                              </div>
+                            </div>
+                            <span className="text-[9px] font-bold text-slate-400 truncate w-full text-center">
+                              {flow.name.length > 8 ? flow.name.substring(0, 6) + '..' : flow.name}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -932,9 +1031,9 @@ export default function GrowthEngineWorkspace() {
               {/* Business Hours */}
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">Enforce Business Hours</h4>
+                  <h4 className="text-sm font-bold text-slate-900">Business Hours</h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    Throttle outgoing AI outreach strictly to 9:00 AM - 6:00 PM local time.
+                    Throttle AI communications to standard working hours (9:00 AM - 6:00 PM local time).
                   </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
@@ -948,12 +1047,12 @@ export default function GrowthEngineWorkspace() {
                 </label>
               </div>
 
-              {/* Duplicate Protection */}
+              {/* Duplicate Protection Windows */}
               <div className="flex items-center justify-between gap-4 pt-6 border-t border-slate-100">
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">Duplicate Protection Window</h4>
+                  <h4 className="text-sm font-bold text-slate-900">Duplicate Protection Windows</h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    Silently ignore triggers for active contacts if they were reached in the last 24 hours.
+                    Ignore incoming trigger events if the contact was messaged within the last 24 hours.
                   </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
@@ -967,34 +1066,17 @@ export default function GrowthEngineWorkspace() {
                 </label>
               </div>
 
-              {/* Fallback Behaviour */}
+              {/* AI Optimization Modes */}
               <div className="flex flex-col gap-2 pt-6 border-t border-slate-100">
-                <h4 className="text-sm font-bold text-slate-900">Uncertain Intent Fallback</h4>
+                <h4 className="text-sm font-bold text-slate-900">AI Optimization Modes</h4>
                 <p className="text-xs text-slate-500">
-                  Configure default action when the AI model does not reach the 85% intent classification threshold.
-                </p>
-                <select
-                  value={fallbackBehaviour}
-                  onChange={(e) => setFallbackBehaviour(e.target.value)}
-                  className="mt-2 w-full max-w-md px-3.5 py-2.5 border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none text-xs bg-white font-semibold text-slate-800"
-                >
-                  <option value="escalate">Escalate immediately to Founder Workspace</option>
-                  <option value="default_reply">Send default qualifying template</option>
-                  <option value="pause_lead">Silently pause communication loop</option>
-                </select>
-              </div>
-
-              {/* AI Optimization Mode */}
-              <div className="flex flex-col gap-2 pt-6 border-t border-slate-100">
-                <h4 className="text-sm font-bold text-slate-900">AI Optimization Mode</h4>
-                <p className="text-xs text-slate-500">
-                  Select how aggressively the AI agent adapts tone and schedules follow-ups.
+                  Configure dynamic message modification rules and follow-up intervals.
                 </p>
                 <div className="grid grid-cols-3 gap-3 mt-3">
                   {[
-                    { id: "strict", label: "Strict Templates", desc: "No dynamic variation" },
-                    { id: "balanced", label: "Balanced", desc: "Slight custom variations" },
-                    { id: "autonomous", label: "High Autonomy", desc: "Dynamically generated context" }
+                    { id: "strict", label: "Strict Templates", desc: "Replies match fixed template bounds" },
+                    { id: "balanced", label: "Balanced Mode", desc: "Allow contextual tone adjustments" },
+                    { id: "autonomous", label: "High Autonomy", desc: "Fully generate contextual responses" }
                   ].map((mode) => (
                     <button
                       key={mode.id}
@@ -1012,10 +1094,68 @@ export default function GrowthEngineWorkspace() {
                 </div>
               </div>
 
+              {/* Fallback Behaviors */}
+              <div className="flex flex-col gap-2 pt-6 border-t border-slate-100">
+                <h4 className="text-sm font-bold text-slate-900">Fallback Behaviors</h4>
+                <p className="text-xs text-slate-500">
+                  Default action to execute if AI model confidence falls below the 85% threshold.
+                </p>
+                <select
+                  value={fallbackBehaviour}
+                  onChange={(e) => setFallbackBehaviour(e.target.value)}
+                  className="mt-2 w-full max-w-md px-3.5 py-2.5 border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none text-xs bg-white font-semibold text-slate-800"
+                >
+                  <option value="escalate">Escalate immediately to Founder Workspace</option>
+                  <option value="default_reply">Send default qualifying template</option>
+                  <option value="pause_lead">Silently pause communication loop</option>
+                </select>
+              </div>
+
+              {/* Automation Defaults */}
+              <div className="flex flex-col gap-4 pt-6 border-t border-slate-100">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Automation Defaults</h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Set baseline message processing latency and primary messaging target channel.
+                  </p>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Response Delay (Seconds)
+                    </label>
+                    <input
+                      type="number"
+                      value={defaultResponseDelay}
+                      onChange={(e) => setDefaultResponseDelay(Number(e.target.value))}
+                      className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none text-xs bg-slate-50/50"
+                      min={1}
+                      max={300}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Default Target Channel
+                    </label>
+                    <select
+                      value={defaultChannelPreference}
+                      onChange={(e) => setDefaultChannelPreference(e.target.value)}
+                      className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none text-xs bg-white"
+                    >
+                      <option value="instagram">Instagram DM</option>
+                      <option value="whatsapp">WhatsApp Business</option>
+                      <option value="email">Email Interface</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div className="pt-4 border-t border-slate-100 flex justify-end">
                 <button
                   type="button"
-                  onClick={() => toast.success("Safety configuration saved successfully.")}
+                  onClick={() => toast.success("Configuration updated.")}
                   className="brand-button-primary px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
                 >
                   Save Configuration

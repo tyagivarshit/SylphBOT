@@ -5,10 +5,7 @@ import { usePlan } from "@/hooks/usePlan"
 import { useRouter, useSearchParams } from "next/navigation"
 import { apiFetch } from "@/lib/apiClient"
 import { recordLifecycleEvent } from "@/lib/lifecycleTelemetry"
-import { getDashboardStats } from "@/lib/dashboard.api"
-import { getLeadOpportunityIntelligence } from "@/lib/opportunityIntelligence"
-import StatCard from "@/components/cards/StatCard"
-import { Flame, AlertCircle, TrendingUp, Bot } from "lucide-react"
+import { Bot } from "lucide-react"
 
 import LeadsTable from "@/components/leads/LeadsTable"
 import StageSelect from "@/components/leads/StageSelect"
@@ -43,7 +40,6 @@ function LeadsPageContent(){
   const [stage,setStage] = useState("")
   const [page,setPage] = useState(1)
   const [totalPages,setTotalPages] = useState(1)
-  const [stats,setStats] = useState<any>(null)
   const initialSelectedLeadId = searchParams.get("leadId")
   const leadsRequestSequenceRef = useRef(0)
 
@@ -115,43 +111,7 @@ function LeadsPageContent(){
 
   },[stage,page,isAllowed])
 
-  useEffect(() => {
-    if (!isAllowed) return;
-    getDashboardStats()
-      .then((res) => {
-        if (res.success && res.data) {
-          setStats(res.data);
-        }
-      })
-      .catch((err) => console.error("Stats load error", err));
-  }, [isAllowed]);
 
-  const overviewMetrics = useMemo(() => {
-    const intelLeads = leads.map(l => ({
-      ...l,
-      intel: getLeadOpportunityIntelligence(l)
-    }))
-
-    const hotList = intelLeads.filter(l => l.stage === "QUALIFIED" || l.intel.closeProbability >= 75)
-    const attentionList = intelLeads.filter(l => l.stage === "NEW" || (l.unreadCount && l.unreadCount > 0))
-    const activeList = intelLeads.filter(l => l.stage === "NEW" || l.stage === "QUALIFIED")
-
-    const hotRev = hotList.reduce((acc, curr) => acc + curr.intel.revenuePotential, 0)
-    const attentionRev = attentionList.reduce((acc, curr) => acc + curr.intel.revenuePotential, 0)
-    const activeRev = activeList.reduce((acc, curr) => acc + curr.intel.revenuePotential, 0)
-
-    const totalLeadsStat = stats?.totalLeads || leads.length
-    const qualifiedLeadsStat = stats?.qualifiedLeads || hotList.length
-
-    return {
-      hotCount: qualifiedLeadsStat,
-      hotRevenue: hotRev || (qualifiedLeadsStat * 75000),
-      attentionCount: Math.max(0, totalLeadsStat - qualifiedLeadsStat),
-      attentionRevenue: attentionRev || (Math.max(0, totalLeadsStat - qualifiedLeadsStat) * 30000),
-      activeCount: totalLeadsStat,
-      activeRevenue: activeRev || (totalLeadsStat * 45000),
-    }
-  }, [leads, stats])
 
   return(
 
@@ -160,24 +120,18 @@ function LeadsPageContent(){
       {/* CONTENT */}
       {loading ? (
         <div className="brand-panel rounded-[26px] p-6 text-slate-500">
-          Loading Opportunity Workspace...
+          Loading Opportunity Feed...
         </div>
       ) : (
 
         <FeatureGate feature="CRM">
 
           <div className="brand-section-shell rounded-[30px] p-4 sm:p-5 lg:p-6">
-            <div className="mb-5 flex flex-col gap-4 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-2">
-                <span className="brand-chip w-fit">Pipeline visibility</span>
-                <div>
-                  <h2 className="text-lg font-semibold tracking-tight text-slate-950">
-                    Opportunity Intelligence Workspace
-                  </h2>
-                  <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-                    Understand where revenue opportunities exist, why they matter, and what action should happen next.
-                  </p>
-                </div>
+            <div className="mb-5 flex flex-col gap-4 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-bold tracking-tight text-slate-900 uppercase">
+                  Opportunity Feed
+                </h2>
               </div>
 
               <StageSelect
@@ -274,7 +228,7 @@ function LeadsPageFallback() {
   return (
     <div className="min-w-0 space-y-6">
       <div className="brand-panel rounded-[26px] p-6 text-slate-500">
-        Loading Opportunity Workspace...
+        Loading Opportunity Feed...
       </div>
     </div>
   )

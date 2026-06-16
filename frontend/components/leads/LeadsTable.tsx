@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import { socket } from "@/lib/socket"
 import StageBadge from "./StageBadge"
 import IntelligencePanel from "./IntelligencePanel"
-import { getLeadOpportunityIntelligence } from "@/lib/opportunityIntelligence"
 import { Bot } from "lucide-react"
 
 type Lead = {
@@ -179,14 +178,7 @@ export default function LeadsTable({
     }))
   }
 
-  // Pre-calculate intelligence for all leads to avoid lag
-  const opportunityData = useMemo(() => {
-    const data: Record<string, ReturnType<typeof getLeadOpportunityIntelligence>> = {}
-    tableLeads.forEach(lead => {
-      data[lead.id] = getLeadOpportunityIntelligence(lead)
-    })
-    return data
-  }, [tableLeads])
+
 
   return (
     <div className="relative">

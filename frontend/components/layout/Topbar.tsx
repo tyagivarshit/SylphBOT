@@ -207,7 +207,7 @@ function getPageMeta(pathname: string) {
       match: "/leads",
       title: "Opportunities",
       eyebrow: "LEAD OS",
-      subtitle: "Track stages, live activity, and conversion-ready conversations.",
+      subtitle: "",
     },
     {
       match: "/conversations",

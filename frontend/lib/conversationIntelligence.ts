@@ -12,18 +12,6 @@ export interface ConversationIntelligence {
   recommendedBadge: "HUMAN_REQUIRED" | "HOT_OPPORTUNITY" | "NEEDS_ATTENTION" | "AI_HANDLING" | "NONE";
 }
 
-// Helper to generate a stable, deterministic revenue estimate based on lead ID
-function getStableRevenue(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  // Curated, realistic revenue amounts in INR
-  const values = [45000, 120000, 350000, 85000, 150000, 250000];
-  const index = Math.abs(hash) % values.length;
-  return values[index];
-}
-
 export function getConversationIntelligence(conversation: {
   id: string;
   lastMessage?: string;
@@ -81,7 +69,7 @@ export function getConversationIntelligence(conversation: {
   } else if (isHot) {
     priorityLevel = "HIGH";
     opportunityTier = "HOT";
-    estimatedRevenue = getStableRevenue(conversation.id);
+    estimatedRevenue = null;
   } else if (needsAttention) {
     priorityLevel = "MEDIUM";
     urgencyLevel = "MEDIUM";

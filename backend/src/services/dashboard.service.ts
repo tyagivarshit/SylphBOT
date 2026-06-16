@@ -123,15 +123,81 @@ export class DashboardService {
 
       // Construct AI Manager one-line summaries dynamically
       const overrideStatus = activeOverridesCount > 0
-        ? `${activeOverridesCount} human takeover overrides currently active.`
-        : "Human overrides are operating normally.";
+        ? "A prolonged human override has been detected."
+        : "";
 
       const enterpriseStatus = enterpriseLeadsCount > 0
-        ? `${enterpriseLeadsCount} enterprise opportunities require attention.`
-        : "No enterprise opportunities require urgent attention.";
+        ? "An enterprise opportunity requires closer monitoring."
+        : "";
 
-      const aiSummaryLine = `Sales momentum remains strong. ${overrideStatus} ${enterpriseStatus} Marketing automations are operating normally.`;
-      const systemStatus = (activeOverridesCount > 0) ? "Action Needed" : "System Healthy";
+      let aiSummaryLine = "Your AI workforce is operating within expected conditions. No active blockers have been identified.";
+      if (activeOverridesCount > 0 && enterpriseLeadsCount > 0) {
+        aiSummaryLine = "A prolonged human override has been detected. An enterprise opportunity requires closer monitoring.";
+      } else if (activeOverridesCount > 0) {
+        aiSummaryLine = "A prolonged human override has been detected. Monitored systems remain within expected conditions.";
+      } else if (enterpriseLeadsCount > 0) {
+        aiSummaryLine = "An enterprise opportunity requires closer monitoring. Other workflows are operating normally.";
+      }
+
+      const systemStatus = (activeOverridesCount > 0) ? "Attention Needed" : "Normal";
+
+      const prioritiesList = [];
+      const humanAttentionAlerts = [];
+
+      if (activeOverridesCount > 0) {
+        prioritiesList.push({
+          id: "p1",
+          level: "High",
+          source: "Sales AI",
+          explanation: "A prolonged human override has been detected.",
+          action: "Open Conversations",
+          href: "/conversations",
+        });
+        humanAttentionAlerts.push({
+          id: "h1",
+          title: "Human override active",
+          details: "A prolonged human override has been detected.",
+          action: "Open Conversations",
+          href: "/conversations",
+        });
+      }
+
+      if (enterpriseLeadsCount > 0) {
+        prioritiesList.push({
+          id: "p2",
+          level: "Medium",
+          source: "Sales AI",
+          explanation: "An enterprise opportunity requires closer monitoring.",
+          action: "Open Lead OS",
+          href: "/leads",
+        });
+        humanAttentionAlerts.push({
+          id: "h2",
+          title: "Enterprise monitoring",
+          details: "An enterprise opportunity requires closer monitoring.",
+          action: "Open Lead OS",
+          href: "/leads",
+        });
+      }
+
+      const criticalNotifications = [];
+      // Return empty notifications list if there are no overrides or enterprise actions, to trigger empty state.
+      if (activeOverridesCount > 0 || enterpriseLeadsCount > 0) {
+        criticalNotifications.push({
+          id: "n1",
+          timestamp: "15m ago",
+          type: "Meeting Rescheduled",
+          module: "Booking",
+          message: "A meeting has been rescheduled.",
+        });
+        criticalNotifications.push({
+          id: "n2",
+          timestamp: "45m ago",
+          type: "AI Control Resumed",
+          module: "Conversations",
+          message: "Sales AI has resumed control of a conversation.",
+        });
+      }
 
       const result = {
         totalLeads: 0,
@@ -164,128 +230,16 @@ export class DashboardService {
           summary: aiSummaryLine,
           statusIndicator: systemStatus,
         },
-        priorities: [
-          {
-            id: "p1",
-            level: "Critical",
-            source: "Sales AI",
-            explanation: "Enterprise lead awaiting founder approval.",
-            action: "Open Lead OS",
-            href: "/leads",
-          },
-          {
-            id: "p2",
-            level: "High",
-            source: "Sales AI",
-            explanation: activeOverridesCount > 0
-              ? `Human override active for ${activeOverridesCount} leads.`
-              : "Human override active for 8 days.",
-            action: "Open Conversations",
-            href: "/conversations",
-          },
-          {
-            id: "p3",
-            level: "High",
-            source: "Operations AI",
-            explanation: "Meeting requires confirmation.",
-            action: "Open Booking",
-            href: "/booking",
-          },
-          {
-            id: "p4",
-            level: "Medium",
-            source: "Finance AI",
-            explanation: "Finance AI flagged overdue invoices.",
-            action: "Open Billing",
-            href: "/billing",
-          },
-          {
-            id: "p5",
-            level: "Medium",
-            source: "Marketing AI",
-            explanation: "Marketing AI detected declining campaign engagement.",
-            action: "Open Growth Engine",
-            href: "/growth-engine",
-          },
-        ],
-        humanAttentionAlerts: [
-          {
-            id: "h1",
-            title: "Human overrides active",
-            details: activeOverridesCount > 0
-              ? `${activeOverridesCount} customer conversations currently flagged for manual override.`
-              : "Customer overrides currently active.",
-            action: "Open Conversations",
-            href: "/conversations",
-          },
-          {
-            id: "h2",
-            title: "Escalated negotiations",
-            details: "VIP Enterprise Lead (TechCorp) requested customized SLA terms",
-            action: "Open Lead OS",
-            href: "/leads",
-          },
-          {
-            id: "h3",
-            title: "Unresolved enterprise opportunities",
-            details: enterpriseLeadsCount > 0
-              ? `${enterpriseLeadsCount} qualified enterprise opportunities waiting for founder contact.`
-              : "Stalled enterprise deal with Acme Corp needs manual follow-up",
-            action: "Open Lead OS",
-            href: "/leads",
-          },
-          {
-            id: "h4",
-            title: "Pending founder approvals",
-            details: "Campaign budget increase from Marketing AI needs approval",
-            action: "Open Growth Engine",
-            href: "/growth-engine",
-          },
-        ],
-        criticalNotifications: [
-          {
-            id: "n1",
-            timestamp: "15m ago",
-            type: "Meeting Rescheduled",
-            module: "Booking",
-            message: "Meeting with Vertex Labs rescheduled to June 18th",
-          },
-          {
-            id: "n2",
-            timestamp: "45m ago",
-            type: "AI Resumed Control",
-            module: "Conversations",
-            message: "Sales AI took back control after human handoff expired",
-          },
-          {
-            id: "n3",
-            timestamp: "2h ago",
-            type: "Subscription Renewal",
-            module: "Billing",
-            message: "Automexia subscription renewal approaching in 3 days",
-          },
-          {
-            id: "n4",
-            timestamp: "4h ago",
-            type: "Integration Disconnected",
-            module: "Settings",
-            message: "Google Calendar sync failed due to token expiration",
-          },
-          {
-            id: "n5",
-            timestamp: "1d ago",
-            type: "Integration Reconnected",
-            module: "Settings",
-            message: "WhatsApp API channel reconnected successfully",
-          },
-        ],
+        priorities: prioritiesList,
+        humanAttentionAlerts,
+        criticalNotifications,
         workforceHealth: [
           {
             name: "Manager AI",
             role: "👑 AI Manager",
             status: "Healthy",
             lastActive: "Active 1m ago",
-            workload: "Analyzing briefing",
+            workload: "Operating normally with no active escalations.",
             escalations: 0,
           },
           {
@@ -293,7 +247,9 @@ export class DashboardService {
             role: "💰 Sales AI",
             status: activeOverridesCount > 0 ? "Needs Attention" : "Healthy",
             lastActive: "Active 5m ago",
-            workload: "Monitoring messages",
+            workload: activeOverridesCount > 0
+              ? "Managing elevated business activity."
+              : "Monitoring assigned systems and awaiting new activity.",
             escalations: activeOverridesCount,
           },
           {
@@ -301,7 +257,7 @@ export class DashboardService {
             role: "📈 Marketing AI",
             status: "Healthy",
             lastActive: "Active 12m ago",
-            workload: "Optimizing rule triggers",
+            workload: "Prepared to support upcoming business demands.",
             escalations: 0,
           },
           {
@@ -309,7 +265,7 @@ export class DashboardService {
             role: "❤️ Success AI",
             status: "Healthy",
             lastActive: "Active 24m ago",
-            workload: "Sentiment analysis",
+            workload: "Operating normally with no active escalations.",
             escalations: 0,
           },
           {
@@ -317,7 +273,7 @@ export class DashboardService {
             role: "⚙️ Operations AI",
             status: "Healthy",
             lastActive: "Active 30m ago",
-            workload: "Resolving calendar conflicts",
+            workload: "Available for new assignments.",
             escalations: 0,
           },
           {
@@ -325,8 +281,8 @@ export class DashboardService {
             role: "📊 Finance AI",
             status: "Paused",
             lastActive: "Active 1d ago",
-            workload: "Idle",
-            escalations: 1,
+            workload: "Prepared to support upcoming business demands.",
+            escalations: 0,
           },
         ],
       };

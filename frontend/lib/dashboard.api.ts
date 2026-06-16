@@ -24,6 +24,43 @@ type DashboardStats = {
   chartData: any[];
   messagesChart: any[];
   recentActivity: any[];
+
+  // V3 Founder Briefing Center
+  briefing?: {
+    greeting: string;
+    summary: string;
+    statusIndicator: string;
+  };
+  priorities?: {
+    id: string;
+    level: string;
+    source: string;
+    explanation: string;
+    action: string;
+    href: string;
+  }[];
+  humanAttentionAlerts?: {
+    id: string;
+    title: string;
+    details: string;
+    action: string;
+    href: string;
+  }[];
+  criticalNotifications?: {
+    id: string;
+    timestamp: string;
+    type: string;
+    module: string;
+    message: string;
+  }[];
+  workforceHealth?: {
+    name: string;
+    role: string;
+    status: string;
+    lastActive: string;
+    workload: string;
+    escalations: number;
+  }[];
 };
 
 type LeadsResponse = {

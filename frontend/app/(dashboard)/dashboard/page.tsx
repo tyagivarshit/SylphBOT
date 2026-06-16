@@ -65,7 +65,7 @@ type CriticalNotification = {
 type WorkforceItem = {
   name: string;
   role: string;
-  status: "Healthy" | "Needs Attention" | "Paused" | string;
+  status: "Healthy" | "Busy" | "Needs Attention" | "Paused" | string;
   lastActive: string;
   workload: string;
   escalations: number;
@@ -95,6 +95,21 @@ type DashboardStatsResponse = {
   humanAttentionAlerts?: HumanAlertItem[];
   criticalNotifications?: CriticalNotification[];
   workforceHealth?: WorkforceItem[];
+};
+
+const getHealthStatusText = (status: string) => {
+  switch (status) {
+    case "Healthy":
+      return "Operating within expected conditions.";
+    case "Busy":
+      return "Managing elevated business activity.";
+    case "Needs Attention":
+      return "Additional review may be beneficial.";
+    case "Paused":
+      return "Temporarily awaiting resumption of assigned responsibilities.";
+    default:
+      return status;
+  }
 };
 
 export default function DashboardPage() {
@@ -156,46 +171,26 @@ export default function DashboardPage() {
   // Fallback structures if the backend fails to supply them
   const fallbackBriefing: BriefingData = {
     greeting: "Good Morning",
-    summary: "Sales momentum remains strong. Human overrides are operating normally. No enterprise opportunities require urgent attention.",
-    statusIndicator: "System Healthy"
+    summary: "Your AI workforce is operating within expected conditions. No active blockers have been identified.",
+    statusIndicator: "Normal"
   };
 
-  const fallbackPriorities: PriorityItem[] = [
-    { id: "p1", level: "Critical", source: "Sales AI", explanation: "Enterprise lead awaiting founder approval.", action: "Open Lead OS", href: "/leads" },
-    { id: "p2", level: "High", source: "Sales AI", explanation: "Human override active for 8 days.", action: "Open Conversations", href: "/conversations" },
-    { id: "p3", level: "High", source: "Operations AI", explanation: "Meeting requires confirmation.", action: "Open Booking", href: "/booking" },
-    { id: "p4", level: "Medium", source: "Finance AI", explanation: "Finance AI flagged overdue invoices.", action: "Open Billing", href: "/billing" },
-    { id: "p5", level: "Medium", source: "Marketing AI", explanation: "Marketing AI detected declining campaign engagement.", action: "Open Growth Engine", href: "/growth-engine" }
-  ];
-
-  const fallbackHumanAlerts: HumanAlertItem[] = [
-    { id: "h1", title: "Human overrides currently active", details: "Customer conversation flagged for override (Active 2 hours)", action: "Open Conversations", href: "/conversations" },
-    { id: "h2", title: "Escalated negotiations", details: "VIP Enterprise Lead (TechCorp) requested customized SLA terms", action: "Open Lead OS", href: "/leads" },
-    { id: "h3", title: "Unresolved enterprise opportunities", details: "Stalled enterprise deal with Acme Corp needs manual follow-up", action: "Open Lead OS", href: "/leads" },
-    { id: "h4", title: "Pending founder approvals", details: "Campaign budget increase from Marketing AI needs approval", action: "Open Growth Engine", href: "/growth-engine" }
-  ];
-
-  const fallbackNotifications: CriticalNotification[] = [
-    { id: "n1", timestamp: "15m ago", type: "Meeting Rescheduled", module: "Booking", message: "Meeting with Vertex Labs rescheduled to June 18th" },
-    { id: "n2", timestamp: "45m ago", type: "AI Resumed Control", module: "Conversations", message: "Sales AI took back control after human handoff expired" },
-    { id: "n3", timestamp: "2h ago", type: "Subscription Renewal", module: "Billing", message: "Automexia subscription renewal approaching in 3 days" },
-    { id: "n4", timestamp: "4h ago", type: "Integration Disconnected", module: "Settings", message: "Google Calendar sync failed due to token expiration" },
-    { id: "n5", timestamp: "1d ago", type: "Integration Reconnected", module: "Settings", message: "WhatsApp API channel reconnected successfully" }
-  ];
-
+  const fallbackPriorities: PriorityItem[] = [];
+  const fallbackHumanAlerts: HumanAlertItem[] = [];
+  const fallbackNotifications: CriticalNotification[] = [];
   const fallbackWorkforce: WorkforceItem[] = [
-    { name: "Manager AI", role: "👑 AI Manager", status: "Healthy", lastActive: "Active 1m ago", workload: "Analyzing briefing", escalations: 0 },
-    { name: "Sales AI", role: "💰 Sales AI", status: "Healthy", lastActive: "Active 5m ago", workload: "Monitoring messages", escalations: 0 },
-    { name: "Marketing AI", role: "📈 Marketing AI", status: "Healthy", lastActive: "Active 12m ago", workload: "Optimizing rule triggers", escalations: 0 },
-    { name: "Success AI", role: "❤️ Success AI", status: "Healthy", lastActive: "Active 24m ago", workload: "Sentiment analysis", escalations: 0 },
-    { name: "Operations AI", role: "⚙️ Operations AI", status: "Healthy", lastActive: "Active 30m ago", workload: "Resolving calendar conflicts", escalations: 0 },
-    { name: "Finance AI", role: "📊 Finance AI", status: "Paused", lastActive: "Active 1d ago", workload: "Idle", escalations: 1 }
+    { name: "Manager AI", role: "👑 AI Manager", status: "Healthy", lastActive: "Active 1m ago", workload: "Operating normally with no active escalations.", escalations: 0 },
+    { name: "Sales AI", role: "💰 Sales AI", status: "Healthy", lastActive: "Active 5m ago", workload: "Monitoring assigned systems and awaiting new activity.", escalations: 0 },
+    { name: "Marketing AI", role: "📈 Marketing AI", status: "Healthy", lastActive: "Active 12m ago", workload: "Prepared to support upcoming business demands.", escalations: 0 },
+    { name: "Success AI", role: "❤️ Success AI", status: "Healthy", lastActive: "Active 24m ago", workload: "Operating normally with no active escalations.", escalations: 0 },
+    { name: "Operations AI", role: "⚙️ Operations AI", status: "Healthy", lastActive: "Active 30m ago", workload: "Available for new assignments.", escalations: 0 },
+    { name: "Finance AI", role: "📊 Finance AI", status: "Paused", lastActive: "Active 1d ago", workload: "Prepared to support upcoming business demands.", escalations: 0 }
   ];
 
   const briefing = stats?.briefing || fallbackBriefing;
-  const priorities = stats?.priorities?.slice(0, 5) || fallbackPriorities;
+  const priorities = stats?.priorities || fallbackPriorities;
   const humanAlerts = stats?.humanAttentionAlerts || fallbackHumanAlerts;
-  const notifications = stats?.criticalNotifications?.slice(0, 5) || fallbackNotifications;
+  const notifications = stats?.criticalNotifications || fallbackNotifications;
   const workforce = stats?.workforceHealth || fallbackWorkforce;
 
   if (statsQuery.isPending) {
@@ -258,14 +253,14 @@ export default function DashboardPage() {
           <div className="flex items-center gap-3 shrink-0 bg-white/5 border border-white/10 rounded-2xl px-4 py-2.5 backdrop-blur-md">
             <span className="relative flex h-2 w-2">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                briefing.statusIndicator === "Action Needed" ? "bg-amber-400" : "bg-emerald-400"
+                briefing.statusIndicator === "Attention Needed" ? "bg-amber-400" : "bg-emerald-400"
               }`}></span>
               <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                briefing.statusIndicator === "Action Needed" ? "bg-amber-500" : "bg-emerald-500"
+                briefing.statusIndicator === "Attention Needed" ? "bg-amber-500" : "bg-emerald-500"
               }`}></span>
             </span>
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-200">
-              {briefing.statusIndicator}
+              {briefing.statusIndicator === "Attention Needed" ? "Attention Needed" : "Normal Operations"}
             </span>
           </div>
         </div>
@@ -317,41 +312,54 @@ export default function DashboardPage() {
             </p>
 
             <div className="space-y-4">
-              {priorities.map((item) => (
-                <div
-                  key={item.id}
-                  className="group relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white/70 hover:bg-white p-4 transition duration-200 shadow-sm"
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wide border uppercase ${
-                        item.level === "Critical"
-                          ? "bg-rose-50 text-rose-700 border-rose-100"
-                          : item.level === "High"
-                          ? "bg-amber-50 text-amber-700 border-amber-100"
-                          : "bg-blue-50 text-blue-700 border-blue-100"
-                      }`}>
-                        {item.level}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
-                        <Bot size={11} className="text-slate-400" />
-                        {item.source}
-                      </span>
-                    </div>
-                    <p className="text-xs font-semibold text-slate-900 leading-snug">
-                      {item.explanation}
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => router.push(item.href as any)}
-                    className="inline-flex items-center justify-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 hover:translate-x-0.5 transition duration-150 py-1.5 px-3 rounded-lg bg-blue-50/50 hover:bg-blue-50 font-sans cursor-pointer self-start sm:self-auto"
+              {priorities.length > 0 ? (
+                priorities.map((item) => (
+                  <div
+                    key={item.id}
+                    className="group relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white/70 hover:bg-white p-4 transition duration-200 shadow-sm"
                   >
-                    {item.action}
-                    <ChevronRight size={12} />
-                  </button>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wide border uppercase ${
+                          item.level === "Critical"
+                            ? "bg-rose-50 text-rose-700 border-rose-100"
+                            : item.level === "High"
+                            ? "bg-amber-50 text-amber-700 border-amber-100"
+                            : "bg-blue-50 text-blue-700 border-blue-100"
+                        }`}>
+                          {item.level}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                          <Bot size={11} className="text-slate-400" />
+                          {item.source}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-900 leading-snug">
+                        {item.explanation}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => router.push(item.href as any)}
+                      className="inline-flex items-center justify-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 hover:translate-x-0.5 transition duration-150 py-1.5 px-3 rounded-lg bg-blue-50/50 hover:bg-blue-50 font-sans cursor-pointer self-start sm:self-auto"
+                    >
+                      {item.action}
+                      <ChevronRight size={12} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-200/80 bg-slate-50/40 p-5 text-slate-600">
+                  <p className="text-xs font-bold text-slate-800 mb-3.5">
+                    No founder actions are currently required.
+                  </p>
+                  <ul className="space-y-2.5 text-[11px] font-semibold leading-relaxed list-disc pl-4 text-slate-500">
+                    <li>Your team and AI workforce are progressing without blockers.</li>
+                    <li>All active priorities are being managed appropriately.</li>
+                    <li>There are currently no outstanding actions awaiting review.</li>
+                  </ul>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </section>
@@ -372,30 +380,43 @@ export default function DashboardPage() {
             </p>
 
             <div className="space-y-4">
-              {humanAlerts.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white/70 hover:bg-white p-4 transition duration-200 shadow-sm"
-                >
-                  <div className="space-y-1">
-                    <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
-                      {item.title}
-                    </h3>
-                    <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                      {item.details}
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => router.push(item.href as any)}
-                    className="inline-flex items-center justify-center gap-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:translate-x-0.5 transition duration-150 py-1.5 px-3 rounded-lg bg-rose-50/50 hover:bg-rose-50 font-sans cursor-pointer self-start sm:self-auto"
+              {humanAlerts.length > 0 ? (
+                humanAlerts.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white/70 hover:bg-white p-4 transition duration-200 shadow-sm"
                   >
-                    Resolve
-                    <ChevronRight size={12} />
-                  </button>
+                    <div className="space-y-1">
+                      <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+                        {item.title}
+                      </h3>
+                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                        {item.details}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => router.push(item.href as any)}
+                      className="inline-flex items-center justify-center gap-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:translate-x-0.5 transition duration-150 py-1.5 px-3 rounded-lg bg-rose-50/50 hover:bg-rose-50 font-sans cursor-pointer self-start sm:self-auto"
+                    >
+                      Resolve
+                      <ChevronRight size={12} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-200/80 bg-slate-50/40 p-5 text-slate-600">
+                  <p className="text-xs font-bold text-slate-800 mb-3.5">
+                    No critical alerts have been detected.
+                  </p>
+                  <ul className="space-y-2.5 text-[11px] font-semibold leading-relaxed list-disc pl-4 text-slate-500">
+                    <li>Business operations are proceeding without notable exceptions.</li>
+                    <li>All monitored systems remain within expected conditions.</li>
+                    <li>There are currently no issues requiring immediate awareness.</li>
+                  </ul>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </section>
@@ -415,33 +436,46 @@ export default function DashboardPage() {
           Awareness events without the noise. Showing only the 5 most recent activities.
         </p>
 
-        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-5">
-          {notifications.map((item) => (
-            <div
-              key={item.id}
-              className="flex flex-col justify-between rounded-xl border border-slate-100 bg-white/60 p-4 shadow-sm hover:shadow-md transition duration-150"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2.5">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 uppercase">
-                    {item.type}
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                    {item.timestamp}
-                  </span>
+        {notifications.length > 0 ? (
+          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-5">
+            {notifications.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col justify-between rounded-xl border border-slate-100 bg-white/60 p-4 shadow-sm hover:shadow-md transition duration-150"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2.5">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 uppercase">
+                      {item.type}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                      {item.timestamp}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-medium text-slate-600 leading-normal">
+                    {item.message}
+                  </p>
                 </div>
-                <p className="text-[11px] font-medium text-slate-600 leading-normal">
-                  {item.message}
-                </p>
-              </div>
 
-              <div className="mt-4 pt-2 border-t border-slate-100/50 flex items-center justify-between text-[10px] font-bold text-slate-400">
-                <span>Module:</span>
-                <span className="text-slate-500 uppercase tracking-wider">{item.module}</span>
+                <div className="mt-4 pt-2 border-t border-slate-100/50 flex items-center justify-between text-[10px] font-bold text-slate-400">
+                  <span>Module:</span>
+                  <span className="text-slate-500 uppercase tracking-wider">{item.module}</span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-200/80 bg-slate-50/40 p-5 text-slate-600">
+            <p className="text-xs font-bold text-slate-800 mb-3.5">
+              There are no recent business updates requiring review.
+            </p>
+            <ul className="space-y-2.5 text-[11px] font-semibold leading-relaxed list-disc pl-4 text-slate-500">
+              <li>Your notification feed is currently clear.</li>
+              <li>No important events have been recorded since your previous review.</li>
+              <li>No new developments have been identified at this time.</li>
+            </ul>
+          </div>
+        )}
       </section>
 
       {/* =========================================================================
@@ -478,22 +512,34 @@ export default function DashboardPage() {
                       ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                       : ai.status === "Needs Attention"
                       ? "bg-amber-50 text-amber-700 border-amber-100"
-                      : "bg-slate-100 text-slate-600 border-slate-200"
+                      : ai.status === "Paused"
+                      ? "bg-slate-100 text-slate-600 border-slate-200"
+                      : "bg-blue-50 text-blue-700 border-blue-100"
                   }`}>
                     <span className={`h-1 w-1 rounded-full ${
                       ai.status === "Healthy"
                         ? "bg-emerald-500"
                         : ai.status === "Needs Attention"
                         ? "bg-amber-500 animate-pulse"
-                        : "bg-slate-400"
+                        : ai.status === "Paused"
+                        ? "bg-slate-400"
+                        : "bg-blue-500"
                     }`} />
                     {ai.status}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500 font-semibold mb-1">
-                  Active Workload:
+                
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
+                  Status Description
                 </p>
-                <p className="text-[11px] font-medium text-slate-700 leading-normal mb-2 italic">
+                <p className="text-[11px] font-semibold text-slate-800 leading-snug mb-3">
+                  {getHealthStatusText(ai.status)}
+                </p>
+                
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
+                  Workload Status
+                </p>
+                <p className="text-[11px] font-medium text-slate-600 leading-snug mb-2 italic">
                   "{ai.workload}"
                 </p>
               </div>

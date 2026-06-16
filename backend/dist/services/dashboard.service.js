@@ -63,7 +63,7 @@ class DashboardService {
             const startedAt = Date.now();
             const now = new Date();
             const todayStart = (0, date_fns_1.startOfDay)(now);
-            const [subscription, usageOverview, activeOverridesCount, enterpriseLeadsCount] = await Promise.all([
+            const [subscription, usageOverview, activeOverridesCount, enterpriseLeadsCount, lastQueueItem, escalationsCount, lastMessage, lastAppointment, upcomingAppointmentsCount, lastTouch, flows,] = await Promise.all([
                 (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId).catch(() => null),
                 (0, usage_service_1.getUsageOverview)(businessId).catch(() => EMPTY_USAGE),
                 prisma_1.default.lead.count({
@@ -83,21 +83,151 @@ class DashboardService {
                         },
                     },
                 }).catch(() => 0),
+                prisma_1.default.humanWorkQueue.findFirst({
+                    where: { businessId },
+                    orderBy: { updatedAt: "desc" },
+                    select: { updatedAt: true }
+                }).catch(() => null),
+                prisma_1.default.humanWorkQueue.count({
+                    where: { businessId, state: { in: ["PENDING", "ESCALATED"] } }
+                }).catch(() => 0),
+                prisma_1.default.message.findFirst({
+                    where: { businessId },
+                    orderBy: { createdAt: "desc" },
+                    select: { createdAt: true }
+                }).catch(() => null),
+                prisma_1.default.appointment.findFirst({
+                    where: { businessId },
+                    orderBy: { updatedAt: "desc" },
+                    select: { updatedAt: true }
+                }).catch(() => null),
+                prisma_1.default.appointment.count({
+                    where: {
+                        businessId,
+                        startTime: { gte: now },
+                        status: { notIn: ["CANCELLED", "NO_SHOW"] }
+                    }
+                }).catch(() => 0),
+                prisma_1.default.revenueTouchLedger.findFirst({
+                    where: { businessId },
+                    orderBy: { createdAt: "desc" },
+                    select: { createdAt: true }
+                }).catch(() => null),
+                prisma_1.default.automationFlow.findMany({
+                    where: { businessId },
+                    select: { id: true }
+                }).catch(() => []),
             ]);
+            let lastExecutionDate = null;
+            let activeExecutionsCount = 0;
+            if (flows && flows.length > 0) {
+                const flowIds = flows.map((f) => f.id);
+                const [lastExec, activeCount] = await Promise.all([
+                    prisma_1.default.automationExecution.findFirst({
+                        where: { flowId: { in: flowIds } },
+                        orderBy: { updatedAt: "desc" },
+                        select: { updatedAt: true }
+                    }).catch(() => null),
+                    prisma_1.default.automationExecution.count({
+                        where: { flowId: { in: flowIds }, status: "ACTIVE" }
+                    }).catch(() => 0)
+                ]);
+                lastExecutionDate = lastExec?.updatedAt || null;
+                activeExecutionsCount = activeCount;
+            }
             const planKey = (0, plan_config_1.getPlanKey)(subscription?.plan || null);
             const aiCallsUsed = usageOverview?.usage?.ai?.used ?? 0;
             const aiLimit = usageOverview?.usage?.ai?.dailyLimit ?? 0;
             const isUnlimited = aiLimit === -1;
             const usagePercent = isUnlimited || aiLimit <= 0 ? 0 : Math.min(aiCallsUsed / aiLimit, 1);
+            const formatRelativeTime = (date) => {
+                if (!date)
+                    return "Awaiting system activity";
+                const diffMs = Date.now() - date.getTime();
+                const diffSec = Math.floor(diffMs / 1000);
+                if (diffSec < 60)
+                    return "Updated just now";
+                const diffMin = Math.floor(diffSec / 60);
+                if (diffMin < 60)
+                    return `Updated ${diffMin} ${diffMin === 1 ? "minute" : "minutes"} ago`;
+                const diffHr = Math.floor(diffMin / 60);
+                if (diffHr < 24)
+                    return `Updated ${diffHr} ${diffHr === 1 ? "hour" : "hours"} ago`;
+                const diffDays = Math.floor(diffHr / 24);
+                return `Updated ${diffDays} ${diffDays === 1 ? "day" : "days"} ago`;
+            };
             // Construct AI Manager one-line summaries dynamically
             const overrideStatus = activeOverridesCount > 0
-                ? `${activeOverridesCount} human takeover overrides currently active.`
-                : "Human overrides are operating normally.";
+                ? "A prolonged human override has been detected."
+                : "";
             const enterpriseStatus = enterpriseLeadsCount > 0
-                ? `${enterpriseLeadsCount} enterprise opportunities require attention.`
-                : "No enterprise opportunities require urgent attention.";
-            const aiSummaryLine = `Sales momentum remains strong. ${overrideStatus} ${enterpriseStatus} Marketing automations are operating normally.`;
-            const systemStatus = (activeOverridesCount > 0) ? "Action Needed" : "System Healthy";
+                ? "An enterprise opportunity requires closer monitoring."
+                : "";
+            let aiSummaryLine = "Your AI workforce is operating within expected conditions. No active blockers have been identified.";
+            if (activeOverridesCount > 0 && enterpriseLeadsCount > 0) {
+                aiSummaryLine = "A prolonged human override has been detected. An enterprise opportunity requires closer monitoring.";
+            }
+            else if (activeOverridesCount > 0) {
+                aiSummaryLine = "A prolonged human override has been detected. Monitored systems remain within expected conditions.";
+            }
+            else if (enterpriseLeadsCount > 0) {
+                aiSummaryLine = "An enterprise opportunity requires closer monitoring. Other workflows are operating normally.";
+            }
+            const systemStatus = (activeOverridesCount > 0) ? "Attention Needed" : "Normal";
+            const prioritiesList = [];
+            const humanAttentionAlerts = [];
+            if (activeOverridesCount > 0) {
+                prioritiesList.push({
+                    id: "p1",
+                    level: "High",
+                    source: "Sales AI",
+                    explanation: "A prolonged human override has been detected.",
+                    action: "Open Conversations",
+                    href: "/conversations",
+                });
+                humanAttentionAlerts.push({
+                    id: "h1",
+                    title: "Human override active",
+                    details: "A prolonged human override has been detected.",
+                    action: "Open Conversations",
+                    href: "/conversations",
+                });
+            }
+            if (enterpriseLeadsCount > 0) {
+                prioritiesList.push({
+                    id: "p2",
+                    level: "Medium",
+                    source: "Sales AI",
+                    explanation: "An enterprise opportunity requires closer monitoring.",
+                    action: "Open Lead OS",
+                    href: "/leads",
+                });
+                humanAttentionAlerts.push({
+                    id: "h2",
+                    title: "Enterprise monitoring",
+                    details: "An enterprise opportunity requires closer monitoring.",
+                    action: "Open Lead OS",
+                    href: "/leads",
+                });
+            }
+            const criticalNotifications = [];
+            // Return empty notifications list if there are no overrides or enterprise actions, to trigger empty state.
+            if (activeOverridesCount > 0 || enterpriseLeadsCount > 0) {
+                criticalNotifications.push({
+                    id: "n1",
+                    timestamp: "15m ago",
+                    type: "Meeting Rescheduled",
+                    module: "Booking",
+                    message: "A meeting has been rescheduled.",
+                });
+                criticalNotifications.push({
+                    id: "n2",
+                    timestamp: "45m ago",
+                    type: "AI Control Resumed",
+                    module: "Conversations",
+                    message: "Sales AI has resumed control of a conversation.",
+                });
+            }
             const result = {
                 totalLeads: 0,
                 leadsToday: 0,
@@ -125,169 +255,65 @@ class DashboardService {
                     summary: aiSummaryLine,
                     statusIndicator: systemStatus,
                 },
-                priorities: [
-                    {
-                        id: "p1",
-                        level: "Critical",
-                        source: "Sales AI",
-                        explanation: "Enterprise lead awaiting founder approval.",
-                        action: "Open Lead OS",
-                        href: "/leads",
-                    },
-                    {
-                        id: "p2",
-                        level: "High",
-                        source: "Sales AI",
-                        explanation: activeOverridesCount > 0
-                            ? `Human override active for ${activeOverridesCount} leads.`
-                            : "Human override active for 8 days.",
-                        action: "Open Conversations",
-                        href: "/conversations",
-                    },
-                    {
-                        id: "p3",
-                        level: "High",
-                        source: "Operations AI",
-                        explanation: "Meeting requires confirmation.",
-                        action: "Open Booking",
-                        href: "/booking",
-                    },
-                    {
-                        id: "p4",
-                        level: "Medium",
-                        source: "Finance AI",
-                        explanation: "Finance AI flagged overdue invoices.",
-                        action: "Open Billing",
-                        href: "/billing",
-                    },
-                    {
-                        id: "p5",
-                        level: "Medium",
-                        source: "Marketing AI",
-                        explanation: "Marketing AI detected declining campaign engagement.",
-                        action: "Open Growth Engine",
-                        href: "/growth-engine",
-                    },
-                ],
-                humanAttentionAlerts: [
-                    {
-                        id: "h1",
-                        title: "Human overrides active",
-                        details: activeOverridesCount > 0
-                            ? `${activeOverridesCount} customer conversations currently flagged for manual override.`
-                            : "Customer overrides currently active.",
-                        action: "Open Conversations",
-                        href: "/conversations",
-                    },
-                    {
-                        id: "h2",
-                        title: "Escalated negotiations",
-                        details: "VIP Enterprise Lead (TechCorp) requested customized SLA terms",
-                        action: "Open Lead OS",
-                        href: "/leads",
-                    },
-                    {
-                        id: "h3",
-                        title: "Unresolved enterprise opportunities",
-                        details: enterpriseLeadsCount > 0
-                            ? `${enterpriseLeadsCount} qualified enterprise opportunities waiting for founder contact.`
-                            : "Stalled enterprise deal with Acme Corp needs manual follow-up",
-                        action: "Open Lead OS",
-                        href: "/leads",
-                    },
-                    {
-                        id: "h4",
-                        title: "Pending founder approvals",
-                        details: "Campaign budget increase from Marketing AI needs approval",
-                        action: "Open Growth Engine",
-                        href: "/growth-engine",
-                    },
-                ],
-                criticalNotifications: [
-                    {
-                        id: "n1",
-                        timestamp: "15m ago",
-                        type: "Meeting Rescheduled",
-                        module: "Booking",
-                        message: "Meeting with Vertex Labs rescheduled to June 18th",
-                    },
-                    {
-                        id: "n2",
-                        timestamp: "45m ago",
-                        type: "AI Resumed Control",
-                        module: "Conversations",
-                        message: "Sales AI took back control after human handoff expired",
-                    },
-                    {
-                        id: "n3",
-                        timestamp: "2h ago",
-                        type: "Subscription Renewal",
-                        module: "Billing",
-                        message: "Automexia subscription renewal approaching in 3 days",
-                    },
-                    {
-                        id: "n4",
-                        timestamp: "4h ago",
-                        type: "Integration Disconnected",
-                        module: "Settings",
-                        message: "Google Calendar sync failed due to token expiration",
-                    },
-                    {
-                        id: "n5",
-                        timestamp: "1d ago",
-                        type: "Integration Reconnected",
-                        module: "Settings",
-                        message: "WhatsApp API channel reconnected successfully",
-                    },
-                ],
+                priorities: prioritiesList,
+                humanAttentionAlerts,
+                criticalNotifications,
                 workforceHealth: [
                     {
                         name: "Manager AI",
                         role: "👑 AI Manager",
-                        status: "Healthy",
-                        lastActive: "Active 1m ago",
-                        workload: "Analyzing briefing",
-                        escalations: 0,
+                        status: escalationsCount > 0 ? "Needs Attention" : "Healthy",
+                        lastActivity: formatRelativeTime(lastQueueItem?.updatedAt),
+                        focus: escalationsCount > 0
+                            ? "Reviewing founder priorities."
+                            : "Operating normally with no active escalations.",
+                        escalations: escalationsCount,
                     },
                     {
                         name: "Sales AI",
                         role: "💰 Sales AI",
                         status: activeOverridesCount > 0 ? "Needs Attention" : "Healthy",
-                        lastActive: "Active 5m ago",
-                        workload: "Monitoring messages",
+                        lastActivity: formatRelativeTime(lastMessage?.createdAt),
+                        focus: activeOverridesCount > 0
+                            ? "Monitoring active conversations."
+                            : "Monitoring assigned systems and awaiting new activity.",
                         escalations: activeOverridesCount,
                     },
                     {
                         name: "Marketing AI",
                         role: "📈 Marketing AI",
-                        status: "Healthy",
-                        lastActive: "Active 12m ago",
-                        workload: "Optimizing rule triggers",
+                        status: activeExecutionsCount > 0 ? "Busy" : "Healthy",
+                        lastActivity: formatRelativeTime(lastExecutionDate),
+                        focus: activeExecutionsCount > 0
+                            ? "Executing active automation flows."
+                            : "Available for new assignments.",
                         escalations: 0,
                     },
                     {
                         name: "Success AI",
                         role: "❤️ Success AI",
                         status: "Healthy",
-                        lastActive: "Active 24m ago",
-                        workload: "Sentiment analysis",
+                        lastActivity: formatRelativeTime(lastMessage?.createdAt),
+                        focus: "Prepared to support upcoming business demands.",
                         escalations: 0,
                     },
                     {
                         name: "Operations AI",
                         role: "⚙️ Operations AI",
-                        status: "Healthy",
-                        lastActive: "Active 30m ago",
-                        workload: "Resolving calendar conflicts",
+                        status: upcomingAppointmentsCount > 0 ? "Busy" : "Healthy",
+                        lastActivity: formatRelativeTime(lastAppointment?.updatedAt),
+                        focus: upcomingAppointmentsCount > 0
+                            ? "Managing upcoming bookings."
+                            : "Monitoring assigned systems and awaiting new activity.",
                         escalations: 0,
                     },
                     {
                         name: "Finance AI",
                         role: "📊 Finance AI",
-                        status: "Paused",
-                        lastActive: "Active 1d ago",
-                        workload: "Idle",
-                        escalations: 1,
+                        status: "Healthy",
+                        lastActivity: formatRelativeTime(lastTouch?.createdAt),
+                        focus: "Monitoring assigned systems and awaiting new activity.",
+                        escalations: 0,
                     },
                 ],
             };

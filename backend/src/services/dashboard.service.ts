@@ -92,7 +92,19 @@ export class DashboardService {
       const now = new Date();
       const todayStart = startOfDay(now);
 
-      const [subscription, usageOverview, activeOverridesCount, enterpriseLeadsCount] = await Promise.all([
+      const [
+        subscription,
+        usageOverview,
+        activeOverridesCount,
+        enterpriseLeadsCount,
+        lastQueueItem,
+        escalationsCount,
+        lastMessage,
+        lastAppointment,
+        upcomingAppointmentsCount,
+        lastTouch,
+        flows,
+      ] = await Promise.all([
         getCanonicalSubscriptionSnapshot(businessId).catch(() => null),
         getUsageOverview(businessId).catch(() => EMPTY_USAGE),
         prisma.lead.count({
@@ -112,7 +124,59 @@ export class DashboardService {
             },
           },
         }).catch(() => 0),
+        prisma.humanWorkQueue.findFirst({
+          where: { businessId },
+          orderBy: { updatedAt: "desc" },
+          select: { updatedAt: true }
+        }).catch(() => null),
+        prisma.humanWorkQueue.count({
+          where: { businessId, state: { in: ["PENDING", "ESCALATED"] } }
+        }).catch(() => 0),
+        prisma.message.findFirst({
+          where: { businessId },
+          orderBy: { createdAt: "desc" },
+          select: { createdAt: true }
+        }).catch(() => null),
+        prisma.appointment.findFirst({
+          where: { businessId },
+          orderBy: { updatedAt: "desc" },
+          select: { updatedAt: true }
+        }).catch(() => null),
+        prisma.appointment.count({
+          where: {
+            businessId,
+            startTime: { gte: now },
+            status: { notIn: ["CANCELLED", "NO_SHOW"] }
+          }
+        }).catch(() => 0),
+        prisma.revenueTouchLedger.findFirst({
+          where: { businessId },
+          orderBy: { createdAt: "desc" },
+          select: { createdAt: true }
+        }).catch(() => null),
+        prisma.automationFlow.findMany({
+          where: { businessId },
+          select: { id: true }
+        }).catch(() => []),
       ]);
+
+      let lastExecutionDate: Date | null = null;
+      let activeExecutionsCount = 0;
+      if (flows && flows.length > 0) {
+        const flowIds = flows.map((f: any) => f.id);
+        const [lastExec, activeCount] = await Promise.all([
+          prisma.automationExecution.findFirst({
+            where: { flowId: { in: flowIds } },
+            orderBy: { updatedAt: "desc" },
+            select: { updatedAt: true }
+          }).catch(() => null),
+          prisma.automationExecution.count({
+            where: { flowId: { in: flowIds }, status: "ACTIVE" }
+          }).catch(() => 0)
+        ]);
+        lastExecutionDate = lastExec?.updatedAt || null;
+        activeExecutionsCount = activeCount;
+      }
 
       const planKey = getPlanKey(subscription?.plan || null);
       const aiCallsUsed = usageOverview?.usage?.ai?.used ?? 0;
@@ -120,6 +184,19 @@ export class DashboardService {
       const isUnlimited = aiLimit === -1;
       const usagePercent =
         isUnlimited || aiLimit <= 0 ? 0 : Math.min(aiCallsUsed / aiLimit, 1);
+
+      const formatRelativeTime = (date: Date | null | undefined): string => {
+        if (!date) return "Awaiting system activity";
+        const diffMs = Date.now() - date.getTime();
+        const diffSec = Math.floor(diffMs / 1000);
+        if (diffSec < 60) return "Updated just now";
+        const diffMin = Math.floor(diffSec / 60);
+        if (diffMin < 60) return `Updated ${diffMin} ${diffMin === 1 ? "minute" : "minutes"} ago`;
+        const diffHr = Math.floor(diffMin / 60);
+        if (diffHr < 24) return `Updated ${diffHr} ${diffHr === 1 ? "hour" : "hours"} ago`;
+        const diffDays = Math.floor(diffHr / 24);
+        return `Updated ${diffDays} ${diffDays === 1 ? "day" : "days"} ago`;
+      };
 
       // Construct AI Manager one-line summaries dynamically
       const overrideStatus = activeOverridesCount > 0
@@ -237,51 +314,57 @@ export class DashboardService {
           {
             name: "Manager AI",
             role: "👑 AI Manager",
-            status: "Healthy",
-            lastActive: "Active 1m ago",
-            workload: "Operating normally with no active escalations.",
-            escalations: 0,
+            status: escalationsCount > 0 ? "Needs Attention" : "Healthy",
+            lastActivity: formatRelativeTime(lastQueueItem?.updatedAt),
+            focus: escalationsCount > 0
+              ? "Reviewing founder priorities."
+              : "Operating normally with no active escalations.",
+            escalations: escalationsCount,
           },
           {
             name: "Sales AI",
             role: "💰 Sales AI",
             status: activeOverridesCount > 0 ? "Needs Attention" : "Healthy",
-            lastActive: "Active 5m ago",
-            workload: activeOverridesCount > 0
-              ? "Managing elevated business activity."
+            lastActivity: formatRelativeTime(lastMessage?.createdAt),
+            focus: activeOverridesCount > 0
+              ? "Monitoring active conversations."
               : "Monitoring assigned systems and awaiting new activity.",
             escalations: activeOverridesCount,
           },
           {
             name: "Marketing AI",
             role: "📈 Marketing AI",
-            status: "Healthy",
-            lastActive: "Active 12m ago",
-            workload: "Prepared to support upcoming business demands.",
+            status: activeExecutionsCount > 0 ? "Busy" : "Healthy",
+            lastActivity: formatRelativeTime(lastExecutionDate),
+            focus: activeExecutionsCount > 0
+              ? "Executing active automation flows."
+              : "Available for new assignments.",
             escalations: 0,
           },
           {
             name: "Success AI",
             role: "❤️ Success AI",
             status: "Healthy",
-            lastActive: "Active 24m ago",
-            workload: "Operating normally with no active escalations.",
+            lastActivity: formatRelativeTime(lastMessage?.createdAt),
+            focus: "Prepared to support upcoming business demands.",
             escalations: 0,
           },
           {
             name: "Operations AI",
             role: "⚙️ Operations AI",
-            status: "Healthy",
-            lastActive: "Active 30m ago",
-            workload: "Available for new assignments.",
+            status: upcomingAppointmentsCount > 0 ? "Busy" : "Healthy",
+            lastActivity: formatRelativeTime(lastAppointment?.updatedAt),
+            focus: upcomingAppointmentsCount > 0
+              ? "Managing upcoming bookings."
+              : "Monitoring assigned systems and awaiting new activity.",
             escalations: 0,
           },
           {
             name: "Finance AI",
             role: "📊 Finance AI",
-            status: "Paused",
-            lastActive: "Active 1d ago",
-            workload: "Prepared to support upcoming business demands.",
+            status: "Healthy",
+            lastActivity: formatRelativeTime(lastTouch?.createdAt),
+            focus: "Monitoring assigned systems and awaiting new activity.",
             escalations: 0,
           },
         ],

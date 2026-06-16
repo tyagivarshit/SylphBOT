@@ -60,7 +60,7 @@ const menu: MenuSection[] = [
   {
     section: "AI",
     items: [
-      { name: "AI Training", href: "/ai-training", icon: Brain },
+      { name: "AI Training / Workforce", href: "/ai-training", icon: Brain },
       { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
     ],
   },

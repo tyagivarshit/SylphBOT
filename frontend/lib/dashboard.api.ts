@@ -57,8 +57,8 @@ type DashboardStats = {
     name: string;
     role: string;
     status: string;
-    lastActive: string;
-    workload: string;
+    lastActivity: string;
+    focus: string;
     escalations: number;
   }[];
 };

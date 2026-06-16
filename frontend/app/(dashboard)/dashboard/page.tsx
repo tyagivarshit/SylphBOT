@@ -7,6 +7,7 @@ import {
   Sparkles, 
   AlertTriangle, 
   ChevronRight, 
+  ChevronLeft,
   ShieldCheck, 
   Coins, 
   Bot,
@@ -66,8 +67,8 @@ type WorkforceItem = {
   name: string;
   role: string;
   status: "Healthy" | "Busy" | "Needs Attention" | "Paused" | string;
-  lastActive: string;
-  workload: string;
+  lastActivity: string;
+  focus: string;
   escalations: number;
 };
 
@@ -97,21 +98,6 @@ type DashboardStatsResponse = {
   workforceHealth?: WorkforceItem[];
 };
 
-const getHealthStatusText = (status: string) => {
-  switch (status) {
-    case "Healthy":
-      return "Operating within expected conditions.";
-    case "Busy":
-      return "Managing elevated business activity.";
-    case "Needs Attention":
-      return "Additional review may be beneficial.";
-    case "Paused":
-      return "Temporarily awaiting resumption of assigned responsibilities.";
-    default:
-      return status;
-  }
-};
-
 export default function DashboardPage() {
   const { user, lifecycleState } = useAuth();
   const { openUpgrade } = useUpgrade();
@@ -119,8 +105,9 @@ export default function DashboardPage() {
   
   const prioritiesRef = useRef<HTMLDivElement | null>(null);
   const workforceRef = useRef<HTMLDivElement | null>(null);
+  const sliderRef = useRef<HTMLDivElement | null>(null);
 
-  const isHydrated = lifecycleState === "hydrated" || lifecycleState === "authenticated";
+  const isHydrated = (lifecycleState as string) === "hydrated" || lifecycleState === "authenticated";
   const authStable = Boolean(user) && isHydrated;
   const workspaceKey = user?.businessId || user?.workspace?.id || user?.id || "none";
 
@@ -168,6 +155,14 @@ export default function DashboardPage() {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const scrollSlider = (direction: "left" | "right") => {
+    if (sliderRef.current) {
+      const cardWidth = sliderRef.current.firstElementChild?.getBoundingClientRect().width || 320;
+      const scrollOffset = direction === "left" ? -(cardWidth + 16) : (cardWidth + 16);
+      sliderRef.current.scrollBy({ left: scrollOffset, behavior: "smooth" });
+    }
+  };
+
   // Fallback structures if the backend fails to supply them
   const fallbackBriefing: BriefingData = {
     greeting: "Good Morning",
@@ -179,12 +174,12 @@ export default function DashboardPage() {
   const fallbackHumanAlerts: HumanAlertItem[] = [];
   const fallbackNotifications: CriticalNotification[] = [];
   const fallbackWorkforce: WorkforceItem[] = [
-    { name: "Manager AI", role: "👑 AI Manager", status: "Healthy", lastActive: "Active 1m ago", workload: "Operating normally with no active escalations.", escalations: 0 },
-    { name: "Sales AI", role: "💰 Sales AI", status: "Healthy", lastActive: "Active 5m ago", workload: "Monitoring assigned systems and awaiting new activity.", escalations: 0 },
-    { name: "Marketing AI", role: "📈 Marketing AI", status: "Healthy", lastActive: "Active 12m ago", workload: "Prepared to support upcoming business demands.", escalations: 0 },
-    { name: "Success AI", role: "❤️ Success AI", status: "Healthy", lastActive: "Active 24m ago", workload: "Operating normally with no active escalations.", escalations: 0 },
-    { name: "Operations AI", role: "⚙️ Operations AI", status: "Healthy", lastActive: "Active 30m ago", workload: "Available for new assignments.", escalations: 0 },
-    { name: "Finance AI", role: "📊 Finance AI", status: "Paused", lastActive: "Active 1d ago", workload: "Prepared to support upcoming business demands.", escalations: 0 }
+    { name: "Manager AI", role: "👑 AI Manager", status: "Healthy", lastActivity: "Updated 2 minutes ago", focus: "Reviewing founder priorities.", escalations: 0 },
+    { name: "Sales AI", role: "💰 Sales AI", status: "Healthy", lastActivity: "Updated 5 minutes ago", focus: "Monitoring active conversations.", escalations: 0 },
+    { name: "Marketing AI", role: "📈 Marketing AI", status: "Healthy", lastActivity: "Updated 12 minutes ago", focus: "Optimizing campaign performance.", escalations: 0 },
+    { name: "Success AI", role: "❤️ Success AI", status: "Healthy", lastActivity: "Updated 24 minutes ago", focus: "Monitoring customer satisfaction.", escalations: 0 },
+    { name: "Operations AI", role: "⚙️ Operations AI", status: "Healthy", lastActivity: "Updated 30 minutes ago", focus: "Managing upcoming bookings.", escalations: 0 },
+    { name: "Finance AI", role: "📊 Finance AI", status: "Paused", lastActivity: "Updated 1 hour ago", focus: "Tracking outstanding invoices.", escalations: 0 }
   ];
 
   const briefing = stats?.briefing || fallbackBriefing;
@@ -192,6 +187,18 @@ export default function DashboardPage() {
   const humanAlerts = stats?.humanAttentionAlerts || fallbackHumanAlerts;
   const notifications = stats?.criticalNotifications || fallbackNotifications;
   const workforce = stats?.workforceHealth || fallbackWorkforce;
+
+  // Compute dynamic workforce health summary header derived from actual AI states
+  const totalAgentsCount = workforce.length;
+  const needsAttentionCount = workforce.filter(ai => ai.status === "Needs Attention" || ai.status === "Paused").length;
+  const normalAgentsCount = totalAgentsCount - needsAttentionCount;
+
+  let workforceSummaryText = "All active AI systems are functioning within expected conditions.";
+  if (needsAttentionCount > 0) {
+    workforceSummaryText = needsAttentionCount === 1
+      ? "One AI system may benefit from additional review."
+      : `${normalAgentsCount} AI agents operating normally. ${needsAttentionCount} agents awaiting review.`;
+  }
 
   if (statsQuery.isPending) {
     return (
@@ -479,85 +486,117 @@ export default function DashboardPage() {
       </section>
 
       {/* =========================================================================
-          SECTION 5 – AI WORKFORCE HEALTH
+          SECTION 5 – AI WORKFORCE HEALTH (V3 Compact Slider)
           ========================================================================= */}
       <section 
         id="workforce-section" 
         ref={workforceRef} 
         className="scroll-mt-6 brand-section-shell rounded-2xl p-6"
       >
-        <div className="flex items-center justify-between gap-4 mb-2">
-          <div className="flex items-center gap-2.5">
-            <span className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-              <Heart size={16} />
-            </span>
-            <h2 className="text-base font-bold text-gray-900">AI Workforce Health</h2>
+        {/* 1. Workforce Summary Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 border-b border-slate-100 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
+                <Heart size={16} />
+              </span>
+              <h2 className="text-base font-bold text-gray-900">AI Workforce Health</h2>
+            </div>
+            <p className="text-xs font-semibold text-slate-500 leading-snug">
+              {workforceSummaryText}
+            </p>
+          </div>
+
+          {/* Slider controls */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => scrollSlider("left")}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition shadow-sm cursor-pointer"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={() => scrollSlider("right")}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition shadow-sm cursor-pointer"
+            >
+              <ChevronRight size={16} />
+            </button>
           </div>
         </div>
-        <p className="text-xs text-slate-500 mb-6 font-medium">
-          Confidence check monitoring status, activities, and escalations across your digital workforce.
-        </p>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-          {workforce.map((ai) => (
+        {/* 2. Compact Workforce Slider */}
+        {workforce.length > 0 ? (
+          <div className="relative overflow-hidden w-full">
             <div
-              key={ai.name}
-              className="flex flex-col justify-between rounded-xl border border-slate-150/60 bg-white/80 p-4.5 shadow-sm transition hover:shadow-md border-t-2 border-t-slate-200"
+              ref={sliderRef}
+              className="flex overflow-x-auto scroll-smooth snap-x snap-mandatory scrollbar-none gap-4 pb-3"
+              style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
             >
-              <div>
-                <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-3">
-                  <h3 className="text-xs font-bold text-slate-900">{ai.role}</h3>
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold border uppercase ${
-                    ai.status === "Healthy"
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                      : ai.status === "Needs Attention"
-                      ? "bg-amber-50 text-amber-700 border-amber-100"
-                      : ai.status === "Paused"
-                      ? "bg-slate-100 text-slate-600 border-slate-200"
-                      : "bg-blue-50 text-blue-700 border-blue-100"
-                  }`}>
-                    <span className={`h-1 w-1 rounded-full ${
-                      ai.status === "Healthy"
-                        ? "bg-emerald-500"
-                        : ai.status === "Needs Attention"
-                        ? "bg-amber-500 animate-pulse"
-                        : ai.status === "Paused"
-                        ? "bg-slate-400"
-                        : "bg-blue-500"
-                    }`} />
-                    {ai.status}
-                  </span>
-                </div>
-                
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
-                  Status Description
-                </p>
-                <p className="text-[11px] font-semibold text-slate-800 leading-snug mb-3">
-                  {getHealthStatusText(ai.status)}
-                </p>
-                
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
-                  Workload Status
-                </p>
-                <p className="text-[11px] font-medium text-slate-600 leading-snug mb-2 italic">
-                  "{ai.workload}"
-                </p>
-              </div>
+              {workforce.map((ai) => (
+                <div
+                  key={ai.name}
+                  className="snap-start shrink-0 w-full sm:w-[calc(50%-8px)] lg:w-[calc(33.333%-11px)] flex flex-col justify-between rounded-xl border border-slate-150 bg-white/85 p-5 shadow-sm transition hover:shadow-md border-t-2 border-t-slate-200"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-3">
+                      <h3 className="text-xs font-bold text-slate-900">{ai.role}</h3>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold border uppercase ${
+                        ai.status === "Healthy"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                          : ai.status === "Busy"
+                          ? "bg-blue-50 text-blue-700 border-blue-100"
+                          : ai.status === "Needs Attention"
+                          ? "bg-amber-50 text-amber-700 border-amber-100"
+                          : "bg-slate-100 text-slate-600 border-slate-200"
+                      }`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${
+                          ai.status === "Healthy"
+                            ? "bg-emerald-500"
+                            : ai.status === "Busy"
+                            ? "bg-blue-500"
+                            : ai.status === "Needs Attention"
+                            ? "bg-amber-500 animate-pulse"
+                            : "bg-slate-400"
+                        }`} />
+                        {ai.status}
+                      </span>
+                    </div>
+                    
+                    <p className="text-[11px] font-semibold text-slate-700 leading-snug">
+                      {ai.focus}
+                    </p>
+                  </div>
 
-              <div className="mt-4 pt-2.5 border-t border-slate-100 flex flex-col gap-1 text-[10px] font-bold text-slate-400">
-                <div className="flex items-center justify-between">
-                  <span>Pulse:</span>
-                  <span className="text-slate-600 font-medium">{ai.lastActive}</span>
+                  <div className="mt-4.5 pt-3 border-t border-slate-100/60 flex items-center justify-between text-[10px] font-bold text-slate-400">
+                    <span className={ai.status === "Needs Attention" ? "text-amber-600 font-semibold" : "text-slate-500"}>
+                      {ai.escalations > 0 ? `${ai.escalations} escalations awaiting review` : "0 escalations pending"}
+                    </span>
+                    <span className="text-slate-500 font-medium">{ai.lastActivity}</span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span>Escalations:</span>
-                  <span className={ai.escalations > 0 ? "text-amber-600" : "text-slate-500"}>
-                    {ai.escalations} pending
-                  </span>
-                </div>
-              </div>
+              ))}
             </div>
-          ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-250 bg-slate-50/45 p-5 text-slate-600">
+            <p className="text-xs font-bold text-slate-850 mb-2">
+              Your AI workforce is ready to support future business activity.
+            </p>
+            <p className="text-[11px] font-semibold text-slate-500">
+              Configure your first AI workflows to begin delegation.
+            </p>
+          </div>
+        )}
+
+        {/* 3. View Workforce CTA */}
+        <div className="mt-6 border-t border-slate-100/60 pt-4 flex justify-end">
+          <button
+            onClick={() => router.push("/ai-training?tab=workforce" as any)}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 hover:translate-x-0.5 transition duration-150 py-1.5 px-3 rounded-lg bg-blue-50/50 hover:bg-blue-50 font-sans cursor-pointer"
+          >
+            View Full Workforce
+            <ChevronRight size={14} />
+          </button>
         </div>
       </section>
     </div>

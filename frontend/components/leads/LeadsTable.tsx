@@ -15,17 +15,26 @@ type Lead = {
   stage: string
   lastMessage?: string | null
   unreadCount?: number
+  isHumanActive?: boolean
 }
 
 type LeadRealtimePatch = {
   lastMessage?: string | null
   unreadCount?: number
   stage?: string
+  isHumanActive?: boolean
 }
 
 type NewMessagePayload = {
   leadId: string
   content: string
+}
+
+function getAssignedAIStatus(lead: Lead): "AI Managing" | "Founder Review Required" | "Human Override" | "Closing Soon" {
+  if (lead.isHumanActive) return "Human Override";
+  if (lead.stage === "READY_TO_BUY" || lead.stage === "WON") return "Closing Soon";
+  if (lead.stage === "QUALIFIED" && lead.unreadCount && lead.unreadCount > 0) return "Founder Review Required";
+  return "AI Managing";
 }
 
 function PlatformBadge({ platform }: { platform?: string | null }) {
@@ -187,9 +196,16 @@ export default function LeadsTable({
           <div className="flex-1 min-w-0 transition-all duration-300">
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-2">
               {tableLeads.map((lead) => {
-                const intel = opportunityData[lead.id] || getLeadOpportunityIntelligence(lead)
                 const isSelected = lead.id === selectedLeadId
-                const isWhyExpanded = lead.id === expandedWhyLeadId
+                const assignedStatus = getAssignedAIStatus(lead)
+                let statusColor = "bg-sky-50 text-sky-700 border-sky-100"
+                if (assignedStatus === "Human Override") {
+                  statusColor = "bg-amber-50 text-amber-700 border-amber-100"
+                } else if (assignedStatus === "Founder Review Required") {
+                  statusColor = "bg-rose-50 text-rose-700 border-rose-100"
+                } else if (assignedStatus === "Closing Soon") {
+                  statusColor = "bg-emerald-50 text-emerald-700 border-emerald-100"
+                }
 
                 return (
                   <button
@@ -231,79 +247,19 @@ export default function LeadsTable({
                       </div>
                     </div>
 
-                    {/* Middle: Probability & Revenue */}
-                    <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
-                      <div>
-                        <span className="text-slate-400 inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-[9px]">
-                          Close Probability
-                          <span className="brand-tooltip cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]">
-                            ⓘ
-                            <span className="brand-tooltip-text">
-                              Calculated using pipeline stage and interaction velocity.
-                            </span>
-                          </span>
-                        </span>
-                        <span className="text-slate-900 font-bold text-sm block">
-                          {intel.closeProbability}%
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-slate-400 inline-flex items-center gap-1 font-semibold uppercase tracking-wider text-[9px]">
-                          Estimated Opportunity
-                          <span className="brand-tooltip cursor-help text-slate-300 font-bold hover:text-blue-500 transition text-[9px]">
-                            ⓘ
-                            <span className="brand-tooltip-text">
-                              Calculated using current opportunity signals.
-                            </span>
-                          </span>
-                        </span>
-                        <span className="text-emerald-700 font-bold text-sm block">
-                          ₹{intel.revenuePotential.toLocaleString('en-IN')}
-                        </span>
-                      </div>
+                    {/* Assigned AI Status */}
+                    <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Assigned Status</span>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold border uppercase ${statusColor}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${
+                          assignedStatus === "AI Managing" ? "bg-sky-500" :
+                          assignedStatus === "Human Override" ? "bg-amber-500" :
+                          assignedStatus === "Founder Review Required" ? "bg-rose-500 animate-pulse" :
+                          "bg-emerald-500"
+                        }`} />
+                        {assignedStatus}
+                      </span>
                     </div>
-
-                    {/* Footer: Sales AI Recommendation */}
-                    <div className="mt-3.5 bg-blue-50/50 rounded-xl p-3 border border-blue-100/40">
-                      <div className="flex items-start gap-1.5">
-                        <Bot size={14} className="text-blue-600 shrink-0 mt-0.5" />
-                        <div className="min-w-0 flex-1">
-                          <span className="text-[9px] font-bold text-blue-800 uppercase tracking-wider block">
-                            Sales AI Recommendation
-                          </span>
-                          <p className="text-xs text-slate-800 font-semibold mt-0.5 leading-normal">
-                            "{intel.aiRecommendation}"
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Why CTA Toggle (hidden on mobile, accordion on tablet/desktop) */}
-                      <div className="mt-2 text-left hidden sm:block">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation(); // prevent selecting the card
-                            setExpandedWhyLeadId(isWhyExpanded ? null : lead.id);
-                          }}
-                          className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition"
-                        >
-                          <span>Why This Matters</span>
-                          <span className="text-[9px]">{isWhyExpanded ? "▲" : "▼"}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Inline WHY signals accordion (tablet & desktop only) */}
-                    {isWhyExpanded && (
-                      <div className="mt-3 p-3 bg-slate-50/40 rounded-xl border border-slate-200/40 space-y-1.5 text-xs text-slate-650 hidden sm:block animate-in slide-in-from-top duration-200">
-                        {intel.whySignals?.map((signal, idx) => (
-                          <div key={idx} className="flex items-start gap-1.5 font-medium leading-relaxed">
-                            <span className="text-emerald-500 font-bold">✓</span>
-                            <span>{signal}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </button>
                 )
               })}

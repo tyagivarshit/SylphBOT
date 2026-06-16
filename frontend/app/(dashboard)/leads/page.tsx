@@ -166,28 +166,6 @@ function LeadsPageContent(){
 
         <FeatureGate feature="CRM">
 
-          {/* SECTION 1: Lead OS Overview */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              title="Hot Opportunities"
-              value={overviewMetrics.hotCount}
-              icon={<Flame size={20} className="text-orange-600" />}
-              trend={`₹${overviewMetrics.hotRevenue.toLocaleString('en-IN')} Est. Opportunity`}
-            />
-            <StatCard
-              title="Needs Attention"
-              value={overviewMetrics.attentionCount}
-              icon={<AlertCircle size={20} className="text-amber-600" />}
-              trend={`₹${overviewMetrics.attentionRevenue.toLocaleString('en-IN')} Est. Opportunity`}
-            />
-            <StatCard
-              title="Active Opportunities"
-              value={overviewMetrics.activeCount}
-              icon={<TrendingUp size={20} className="text-emerald-600" />}
-              trend={`₹${overviewMetrics.activeRevenue.toLocaleString('en-IN')} Est. Opportunity`}
-            />
-          </div>
-
           <div className="brand-section-shell rounded-[30px] p-4 sm:p-5 lg:p-6">
             <div className="mb-5 flex flex-col gap-4 border-b border-slate-200/70 pb-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-2">

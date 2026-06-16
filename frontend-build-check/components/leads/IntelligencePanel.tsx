@@ -270,7 +270,7 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: { le
                   <ShieldAlert size={16} className="text-amber-600 shrink-0 mt-0.5" />
                   <div>
                     <h4 className="text-xs font-bold text-slate-855">Review / Intervention Required</h4>
-                    <p className="text-[11px] text-slate-650 mt-1 leading-relaxed">
+                    <p className="text-[11px] text-slate-655 mt-1 leading-relaxed">
                       {lead.isHumanActive 
                         ? "Respond to escalation."
                         : "Review contract request."
@@ -335,7 +335,7 @@ export default function IntelligencePanel({ lead, onClose, onStageUpdate }: { le
               </div>
             ) : messages.length > 0 ? (
               <div className="rounded-2xl border border-slate-150 bg-white p-4.5 text-xs text-slate-655 space-y-2.5">
-                <p className="font-bold text-slate-850">Autonomy Status</p>
+                <p className="font-bold text-slate-855">Autonomy Status</p>
                 <div className="flex items-center gap-2 text-slate-700 font-medium">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                   AI currently managing this opportunity independently.

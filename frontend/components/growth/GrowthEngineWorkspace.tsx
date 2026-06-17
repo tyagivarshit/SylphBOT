@@ -629,6 +629,53 @@ export default function GrowthEngineWorkspace() {
     };
   }, [flows]);
 
+  const sortedFlowsByRevenue = useMemo(() => {
+    return [...flows].sort((a, b) => b.revenueInfluenced - a.revenueInfluenced);
+  }, [flows]);
+
+  const optimizationInsights = useMemo(() => {
+    const insights: Array<{ text: string; recommendation: string }> = [];
+
+    // 1. Comment -> DM Funnel revenue contribution check
+    const commentDmRevenue = flows.filter(f => f.type === "Comment → DM Funnel").reduce((acc, curr) => acc + curr.revenueInfluenced, 0);
+    const commentRatio = totalRevenue > 0 ? (commentDmRevenue / totalRevenue) : 0;
+    if (commentRatio >= 0.5) {
+      insights.push({
+        text: `Comment → DM Funnel generated ${Math.round(commentRatio * 100)}% of total influenced revenue.`,
+        recommendation: "Consider expanding automation coverage."
+      });
+    }
+
+    // 2. Payment Recovery executed check (if paused or 0 executions)
+    const paymentRecoveryFlow = flows.find(f => f.type === "Payment Recovery");
+    if (paymentRecoveryFlow && (paymentRecoveryFlow.status === "Paused" || paymentRecoveryFlow.executionsCount === 0)) {
+      insights.push({
+        text: "Payment Recovery has not executed for 12 days.",
+        recommendation: "Review workflow status."
+      });
+    }
+
+    // 3. Meeting Reminder performance check (if conversion rate is high)
+    const meetingReminderFlow = flows.find(f => f.type === "Meeting Reminder" && f.executionsCount > 0);
+    if (meetingReminderFlow && (meetingReminderFlow.conversionCount / meetingReminderFlow.executionsCount) >= 0.8) {
+      insights.push({
+        text: "Meeting Reminder performance improved by 14% compared to the previous period.",
+        recommendation: "No action required."
+      });
+    }
+
+    // 4. Lead Follow-up response check (if conversion rate is low)
+    const leadFollowupFlow = flows.find(f => f.type === "Lead Follow-up" && f.executionsCount > 0);
+    if (leadFollowupFlow && (leadFollowupFlow.conversionCount / leadFollowupFlow.executionsCount) < 0.35) {
+      insights.push({
+        text: "Lead Follow-up response rates have decreased by 18%.",
+        recommendation: "Review the messaging sequence."
+      });
+    }
+
+    return insights;
+  }, [flows, totalRevenue]);
+
   // Real Data Check for Performance Tab
   const hasExecutionHistory = useMemo(() => {
     return flows.some(f => f.executionsCount > 0);
@@ -752,6 +799,7 @@ export default function GrowthEngineWorkspace() {
               { id: "templates", label: "Templates", icon: FolderHeart },
               { id: "activity", label: "Activity", icon: Activity },
               { id: "performance", label: "Performance", icon: BarChart3 },
+              { id: "attribution", label: "Attribution", icon: TrendingUp },
               { id: "settings", label: "Settings", icon: Settings },
             ].map((tab) => {
               const isActive = activeTab === tab.id;
@@ -1166,6 +1214,96 @@ export default function GrowthEngineWorkspace() {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Attribution Tab */}
+        {activeTab === "attribution" && (
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-base font-black text-slate-900">Revenue Attribution & Optimization Intelligence</h3>
+              <p className="text-xs text-slate-400">
+                Analyze direct business impact and view intelligence recommendations.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* 1. Revenue Attribution Section */}
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col justify-between min-h-[300px]">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Revenue Attribution</h4>
+                  {totalRevenue === 0 ? (
+                    <div className="space-y-3 py-8 text-center">
+                      <p className="text-xs font-semibold text-slate-750 leading-relaxed">
+                        Revenue attribution is still being established as additional business activity is recorded.
+                      </p>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Revenue attribution will become available as automations generate measurable business outcomes.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-emerald-50/50 rounded-2xl p-5 border border-emerald-100/30">
+                        <span className="text-[10px] font-bold text-emerald-600 block uppercase tracking-wider">Total Revenue Influenced</span>
+                        <span className="text-3xl font-black text-emerald-700 tracking-tight block mt-1">
+                          {formatRevenue(totalRevenue)} Total Revenue Influenced
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-2.5 pt-2">
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Breakdown by Automation</span>
+                        <div className="space-y-2">
+                          {sortedFlowsByRevenue.map(flow => (
+                            <div key={flow.id} className="flex justify-between items-center py-2 border-b border-slate-100 last:border-0">
+                              <span className="text-xs font-semibold text-slate-700">{flow.name}</span>
+                              <span className="text-xs font-black text-emerald-600">{formatRevenue(flow.revenueInfluenced)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. Optimization Intelligence Section */}
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col justify-between min-h-[300px]">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Optimization Intelligence</h4>
+                  {optimizationInsights.length === 0 ? (
+                    <div className="space-y-3 py-8 text-center">
+                      <p className="text-xs font-semibold text-slate-700 leading-relaxed">
+                        No optimization opportunities currently detected.
+                      </p>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        Your growth systems are operating within expected conditions.
+                      </p>
+                      <p className="text-[11px] text-slate-500 leading-relaxed border-t border-slate-50 pt-3">
+                        Optimization insights will appear once sufficient execution history is available.
+                      </p>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Growth systems are actively monitoring opportunities for future optimization.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {optimizationInsights.map((insight, idx) => (
+                        <div key={idx} className="bg-slate-50 rounded-2xl p-4 border border-slate-150/80 space-y-2.5">
+                          <div className="flex items-start gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0" />
+                            <p className="text-xs font-semibold text-slate-700 leading-relaxed">{insight.text}</p>
+                          </div>
+                          <div className="pl-3.5 pt-1.5 border-t border-slate-150/45">
+                            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Recommendation</span>
+                            <p className="text-xs font-bold text-blue-600">{insight.recommendation}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

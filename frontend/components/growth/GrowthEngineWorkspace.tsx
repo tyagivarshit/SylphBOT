@@ -48,6 +48,13 @@ interface FlowCardData {
   conversionCount: number;
   revenueInfluenced: number;
   lastExecuted: string;
+  objective?: string;
+  aiStatus?: string;
+  recentActivity?: string;
+  aiDecision?: string;
+  confidence?: number;
+  recentEvents?: { time: string; event: string }[];
+  recommendation?: string;
 }
 
 const INITIAL_FLOWS: FlowCardData[] = [
@@ -61,6 +68,16 @@ const INITIAL_FLOWS: FlowCardData[] = [
     conversionCount: 48,
     revenueInfluenced: 360000,
     lastExecuted: "15 minutes ago",
+    objective: "Recover inactive leads automatically.",
+    aiStatus: "Monitoring conversations",
+    recentActivity: "Customer replied",
+    aiDecision: "Follow-up delayed based on customer activity.",
+    recentEvents: [
+      { time: "2 min ago", event: "Customer replied" },
+      { time: "15 min ago", event: "Trigger activated" },
+      { time: "28 min ago", event: "AI started follow-up" }
+    ],
+    recommendation: "Review this automation."
   },
   {
     id: "flow-2",
@@ -72,6 +89,14 @@ const INITIAL_FLOWS: FlowCardData[] = [
     conversionCount: 22,
     revenueInfluenced: 120000,
     lastExecuted: "3 hours ago",
+    objective: "Convert Instagram comments into qualified conversations.",
+    aiStatus: "Waiting for trigger",
+    recentActivity: "Trigger detected",
+    aiDecision: "Execution paused because trigger conditions are not met.",
+    recentEvents: [
+      { time: "3 hours ago", event: "Trigger detected" }
+    ],
+    recommendation: "Reconnect Instagram."
   },
   {
     id: "flow-3",
@@ -83,6 +108,14 @@ const INITIAL_FLOWS: FlowCardData[] = [
     conversionCount: 198,
     revenueInfluenced: 1485000,
     lastExecuted: "45 minutes ago",
+    objective: "Reduce appointment no-shows automatically.",
+    aiStatus: "Ready for next execution",
+    recentActivity: "Meeting booked",
+    aiDecision: "Campaign running normally.",
+    recentEvents: [
+      { time: "45 min ago", event: "Meeting booked" }
+    ],
+    recommendation: ""
   },
   {
     id: "flow-4",
@@ -94,6 +127,14 @@ const INITIAL_FLOWS: FlowCardData[] = [
     conversionCount: 12,
     revenueInfluenced: 90000,
     lastExecuted: "1 day ago",
+    objective: "Re-engage cold leads via automated outreach.",
+    aiStatus: "Learning customer behaviour",
+    recentActivity: "Last message sent",
+    aiDecision: "Waiting because customer requested callback.",
+    recentEvents: [
+      { time: "1 day ago", event: "Last message sent" }
+    ],
+    recommendation: "Increase wait duration."
   },
   {
     id: "flow-5",
@@ -105,6 +146,14 @@ const INITIAL_FLOWS: FlowCardData[] = [
     conversionCount: 22,
     revenueInfluenced: 165000,
     lastExecuted: "2 days ago",
+    objective: "Recover overdue invoices automatically.",
+    aiStatus: "Paused by founder",
+    recentActivity: "Flow paused",
+    aiDecision: "No optimization required.",
+    recentEvents: [
+      { time: "2 days ago", event: "Flow paused" }
+    ],
+    recommendation: "Resume paused workflow."
   },
   {
     id: "flow-6",
@@ -116,22 +165,225 @@ const INITIAL_FLOWS: FlowCardData[] = [
     conversionCount: 0,
     revenueInfluenced: 0,
     lastExecuted: "Never",
+    objective: "Collect feedback and generate positive reviews.",
+    aiStatus: "No active execution at the moment.",
+    recentActivity: "No recent activity.",
+    aiDecision: "No AI decisions available.",
+    recentEvents: [],
+    recommendation: ""
   },
 ];
 
 const LOCAL_STORAGE_KEY = "automexia.growth_engine.flows.v3";
 
-const deriveFlowHealth = (flow: FlowCardData): "Healthy" | "Needs Optimization" | "Paused" | "Attention Required" => {
+const getObjectiveForType = (type: FlowType): string => {
+  switch (type) {
+    case "Lead Follow-up":
+      return "Recover inactive leads automatically.";
+    case "Comment → DM Funnel":
+      return "Convert Instagram comments into qualified conversations.";
+    case "Meeting Reminder":
+      return "Reduce appointment no-shows automatically.";
+    case "Lead Reactivation":
+      return "Re-engage cold leads via automated outreach.";
+    case "Payment Recovery":
+      return "Recover overdue invoices automatically.";
+    case "Review Request Campaign":
+      return "Collect feedback and generate positive reviews.";
+    default:
+      return "Automate growth operations.";
+  }
+};
+
+const getAIStatusForFlow = (flow: FlowCardData): string => {
+  if (flow.status === "Paused") {
+    return "Paused by founder";
+  }
+  if (flow.executionsCount === 0) {
+    return "No active execution at the moment.";
+  }
+  switch (flow.type) {
+    case "Lead Follow-up":
+      return "Monitoring conversations";
+    case "Comment → DM Funnel":
+      return "Waiting for trigger";
+    case "Meeting Reminder":
+      return "Ready for next execution";
+    case "Lead Reactivation":
+      return "Learning customer behaviour";
+    case "Payment Recovery":
+      return "Recovering abandoned leads";
+    case "Review Request Campaign":
+      return "Ready for next execution";
+    default:
+      return "Ready for next execution";
+  }
+};
+
+const getRecentActivityForFlow = (flow: FlowCardData): string => {
+  if (flow.executionsCount === 0) {
+    return "No recent activity.";
+  }
+  switch (flow.type) {
+    case "Lead Follow-up":
+      return "Customer replied";
+    case "Comment → DM Funnel":
+      return "Trigger detected";
+    case "Meeting Reminder":
+      return "Meeting booked";
+    case "Lead Reactivation":
+      return "Last message sent";
+    case "Payment Recovery":
+      return "Flow paused";
+    default:
+      return "No recent activity.";
+  }
+};
+
+const getAIDecisionForFlow = (flow: FlowCardData): string => {
+  if (flow.status === "Paused") {
+    return "Execution paused because trigger conditions are not met.";
+  }
+  if (flow.executionsCount === 0) {
+    return "No AI decisions available.";
+  }
+  switch (flow.type) {
+    case "Lead Follow-up":
+      return "Follow-up delayed based on customer activity.";
+    case "Comment → DM Funnel":
+      return "Execution paused because trigger conditions are not met.";
+    case "Meeting Reminder":
+      return "Campaign running normally.";
+    case "Lead Reactivation":
+      return "Waiting because customer requested callback.";
+    case "Payment Recovery":
+      return "No optimization required.";
+    default:
+      return "Campaign running normally.";
+  }
+};
+
+const getRecommendationForFlow = (flow: FlowCardData): string => {
+  if (flow.status === "Paused") {
+    return "Resume paused workflow.";
+  }
+  if (flow.executionsCount === 0) {
+    return "Review this automation.";
+  }
+  switch (flow.type) {
+    case "Comment → DM Funnel":
+      return "Reconnect Instagram.";
+    case "Lead Reactivation":
+      return "Increase wait duration.";
+    case "Lead Follow-up":
+      return "Review this automation.";
+    default:
+      return "No action required.";
+  }
+};
+
+const getRecentEventsForFlow = (flow: FlowCardData): { time: string; event: string }[] => {
+  if (flow.executionsCount === 0) {
+    return [];
+  }
+  switch (flow.type) {
+    case "Lead Follow-up":
+      return [
+        { time: "2 min ago", event: "Customer replied" },
+        { time: "15 min ago", event: "Trigger activated" },
+        { time: "28 min ago", event: "AI started follow-up" }
+      ];
+    case "Comment → DM Funnel":
+      return [
+        { time: "3 hours ago", event: "Trigger detected" }
+      ];
+    case "Meeting Reminder":
+      return [
+        { time: "45 min ago", event: "Meeting booked" }
+      ];
+    case "Lead Reactivation":
+      return [
+        { time: "1 day ago", event: "Last message sent" }
+      ];
+    case "Payment Recovery":
+      return [
+        { time: "2 days ago", event: "Flow paused" }
+      ];
+    default:
+      return [];
+  }
+};
+
+const getContextualKPI = (flow: FlowCardData) => {
+  let label = "Conversions";
+  switch (flow.type) {
+    case "Lead Follow-up":
+      label = "Recovered Leads";
+      break;
+    case "Comment → DM Funnel":
+      label = "Qualified Conversations";
+      break;
+    case "Meeting Reminder":
+      label = "Meetings Protected";
+      break;
+    case "Lead Reactivation":
+      label = "Reactivated Leads";
+      break;
+    case "Payment Recovery":
+      label = "Recovered Payments";
+      break;
+    case "Review Request Campaign":
+      label = "Reviews Generated";
+      break;
+  }
+
+  if (flow.executionsCount === 0) {
+    return {
+      label,
+      value: "No completed executions yet."
+    };
+  }
+
+  return {
+    label,
+    value: flow.conversionCount.toLocaleString()
+  };
+};
+
+const deriveFlowHealth = (flow: FlowCardData): "Healthy" | "Needs Attention" | "Paused" | "Disabled" | "Learning" => {
   if (flow.status === "Paused") {
     return "Paused";
   }
+  if (flow.status === "Draft") {
+    return "Disabled";
+  }
   if (flow.executionsCount > 50 && flow.conversionCount === 0) {
-    return "Attention Required";
+    return "Needs Attention";
   }
   if (flow.executionsCount > 0 && (flow.conversionCount / flow.executionsCount) < 0.15) {
-    return "Needs Optimization";
+    return "Needs Attention";
+  }
+  if (flow.type === "Lead Reactivation") {
+    return "Learning";
   }
   return "Healthy";
+};
+
+const getHealthBadgeStyle = (health: "Healthy" | "Needs Attention" | "Paused" | "Disabled" | "Learning") => {
+  switch (health) {
+    case "Healthy":
+      return "bg-emerald-50 text-emerald-700 border-emerald-100";
+    case "Needs Attention":
+      return "bg-rose-50 text-rose-700 border-rose-100";
+    case "Paused":
+      return "bg-slate-50 text-slate-500 border-slate-200";
+    case "Disabled":
+      return "bg-slate-100 text-slate-400 border-slate-200";
+    case "Learning":
+      return "bg-indigo-50 text-indigo-700 border-indigo-100";
+    default:
+      return "bg-slate-50 text-slate-500 border-slate-200";
+  }
 };
 
 interface FlowCardProps {
@@ -142,80 +394,158 @@ interface FlowCardProps {
 }
 
 const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowCardProps) => {
-  const formatCardRevenue = (val: number) => {
-    if (val === 0) return "₹0";
-    if (val >= 100000) {
-      return `₹${(val / 100000).toFixed(1)}L`;
-    }
-    return `₹${val.toLocaleString()}`;
-  };
+  const objective = flow.objective || getObjectiveForType(flow.type);
+  const aiStatus = flow.aiStatus || getAIStatusForFlow(flow);
+  const recentActivity = flow.recentActivity || getRecentActivityForFlow(flow);
+  const aiDecision = flow.aiDecision || getAIDecisionForFlow(flow);
+  const recommendation = flow.recommendation || getRecommendationForFlow(flow);
+  const recentEvents = flow.recentEvents || getRecentEventsForFlow(flow);
+  const kpi = getContextualKPI(flow);
+  const health = deriveFlowHealth(flow);
 
   return (
     <div 
       onClick={() => onOpenDetail(flow)}
-      className="group relative rounded-3xl border border-slate-200/80 bg-white/90 p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-blue-200 flex flex-col justify-between min-h-[300px] cursor-pointer"
+      className="group relative rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-blue-200 flex flex-col justify-between gap-5 cursor-pointer min-h-[460px]"
     >
-      <div className="space-y-4">
-        {/* 1. Flow Name */}
-        <h4 className="font-bold text-slate-900 text-base truncate group-hover:text-blue-600 transition-colors">
-          {flow.name}
-        </h4>
-
-        {/* 2. Trigger Type */}
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-          {flow.triggerType}
-        </p>
-
-        {/* 3. Revenue Influenced (Visually Dominant) */}
-        <div className="py-2.5 border-y border-slate-100/80 my-1">
-          <span className="block text-2xl font-black tracking-tight text-emerald-600">
-            {formatCardRevenue(flow.revenueInfluenced)}
-          </span>
-          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
-            Revenue Influenced
-          </span>
-        </div>
-
-        {/* 4. Last Executed */}
-        <div className="text-xs text-slate-650">
-          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            Last Executed
-          </span>
-          <span className="font-semibold mt-0.5 block text-slate-700">{flow.lastExecuted}</span>
-        </div>
-
-        {/* 5. Health Status */}
-        <div className="text-xs">
-          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            Health Status
-          </span>
-          <div className="mt-1">
-            <span
-              className={`inline-block text-[9px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
-                deriveFlowHealth(flow) === "Healthy"
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                  : deriveFlowHealth(flow) === "Needs Optimization"
-                  ? "bg-amber-50 text-amber-700 border-amber-100"
-                  : deriveFlowHealth(flow) === "Paused"
-                  ? "bg-slate-50 text-slate-500 border-slate-200"
-                  : "bg-rose-50 text-rose-700 border-rose-100"
-              }`}
-            >
-              {deriveFlowHealth(flow)}
+      <div className="space-y-4 flex-1 flex flex-col justify-between">
+        <div className="space-y-4">
+          {/* Header: Flow Name + Health Badge */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[70%]">
+              {flow.name}
+            </span>
+            <span className={`inline-block text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${getHealthBadgeStyle(health)}`}>
+              {health}
             </span>
           </div>
+
+          {/* Objective: Most Visible Text */}
+          <div className="space-y-1">
+            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              Objective
+            </span>
+            <h4 className="text-base font-extrabold text-slate-900 leading-snug tracking-tight group-hover:text-blue-600 transition-colors">
+              {objective}
+            </h4>
+          </div>
+
+          {/* Current AI Status */}
+          <div className="space-y-1">
+            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              Current AI Status
+            </span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
+              <span className="relative flex h-2 w-2">
+                {flow.status === "Active" && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                  flow.status === "Active" ? "bg-blue-600" : "bg-slate-400"
+                }`}></span>
+              </span>
+              <span className="text-xs font-black text-slate-800">
+                {aiStatus}
+              </span>
+            </div>
+          </div>
+
+          {/* Recent Activity */}
+          <div className="space-y-1">
+            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              Recent Activity
+            </span>
+            <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {recentActivity}
+            </p>
+          </div>
+
+          {/* Contextual KPI */}
+          <div className="py-2.5 px-3 rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-100 space-y-0.5">
+            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              {kpi.label}
+            </span>
+            <span className={`block font-black tracking-tight ${
+              kpi.value === "No completed executions yet."
+                ? "text-xs font-semibold text-slate-400 italic mt-0.5"
+                : "text-2xl text-emerald-600"
+            }`}>
+              {kpi.value}
+            </span>
+          </div>
+
+          {/* AI Decision Panel */}
+          <div className="p-3 rounded-2xl bg-blue-50/20 border border-blue-100/40 space-y-1">
+            <span className="block text-[9px] font-bold text-blue-600 uppercase tracking-wider">
+              AI Decision
+            </span>
+            <p className="text-xs font-semibold text-slate-700 leading-normal">
+              {aiDecision}
+            </p>
+          </div>
+
+          {/* Confidence (if present) */}
+          {flow.confidence !== undefined && (
+            <div className="flex items-center justify-between text-xs border-t border-slate-100 pt-2">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Confidence</span>
+              <span className="font-extrabold text-blue-600">{flow.confidence}%</span>
+            </div>
+          )}
+
+          {/* Recent Timeline */}
+          <div className="space-y-1.5">
+            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              Recent Timeline
+            </span>
+            {recentEvents.length === 0 ? (
+              <p className="text-xs font-medium text-slate-400 italic">No recent events.</p>
+            ) : (
+              <div className="relative border-l border-slate-200 pl-3.5 space-y-2 py-0.5 ml-1">
+                {recentEvents.map((evt, idx) => (
+                  <div key={idx} className="relative">
+                    <span className="absolute -left-[18.5px] top-1.5 w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-white" />
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="text-xs font-semibold text-slate-700">{evt.event}</p>
+                      <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap">{evt.time}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Founder Recommendation */}
+        <div className="p-3 rounded-2xl bg-amber-50/20 border border-amber-100/40 space-y-1 mt-2">
+          <span className="block text-[9px] font-bold text-amber-700 uppercase tracking-wider">
+            Recommended Action
+          </span>
+          <p className="text-xs font-semibold text-slate-750">
+            {recommendation || "No action required."}
+          </p>
         </div>
       </div>
 
-      {/* 6. Actions */}
-      <div className="mt-5 pt-4 border-t border-slate-100 flex gap-2">
+      {/* Quick Actions (View, Pause/Resume, Edit) */}
+      <div className="pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 mt-auto">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDetail(flow);
+          }}
+          className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
+        >
+          View
+        </button>
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onOpenEdit(flow);
           }}
-          className="flex-1 h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition cursor-pointer"
+          className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
         >
           Edit
         </button>
@@ -225,7 +555,7 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
             e.stopPropagation();
             onToggleStatus(flow.id);
           }}
-          className={`flex-1 h-8 rounded-lg text-xs font-bold transition cursor-pointer ${
+          className={`h-8 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center ${
             flow.status === "Active"
               ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/50"
               : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/50"
@@ -369,93 +699,6 @@ export default function GrowthEngineWorkspace() {
     return flows.reduce((acc, curr) => acc + curr.revenueInfluenced, 0);
   }, [flows]);
 
-  const actionsToday = useMemo(() => {
-    let total = 0;
-    flows.forEach((f) => {
-      if (
-        f.lastExecuted.toLowerCase().includes("minute") ||
-        f.lastExecuted.toLowerCase().includes("hour") ||
-        f.lastExecuted.toLowerCase().includes("just now") ||
-        f.lastExecuted.toLowerCase().includes("today")
-      ) {
-        if (f.id.startsWith("comment-trigger-")) {
-          total += f.executionsCount;
-        } else {
-          total += Math.max(1, Math.round(f.executionsCount * 0.1));
-        }
-      }
-    });
-    return total;
-  }, [flows]);
-
-  // Dynamic Growth Health Derivation
-  const growthHealth = useMemo(() => {
-    if (flows.length === 0) {
-      return {
-        status: "Paused",
-        explanation: "Most workflows are currently paused."
-      };
-    }
-
-    const activeCount = flows.filter((f) => f.status === "Active").length;
-    const pausedCount = flows.filter((f) => f.status === "Paused").length;
-
-    // ATTENTION REQUIRED: Critical automation failures exist
-    // Derived condition: An active flow has runs but zero conversions
-    const hasCriticalFailure = flows.some(
-      (f) => f.status === "Active" && f.executionsCount > 50 && f.conversionCount === 0
-    );
-    if (hasCriticalFailure) {
-      return {
-        status: "Attention Required",
-        explanation: "Critical workflow review required."
-      };
-    }
-
-    // PAUSED: Majority of flows paused
-    if (pausedCount > activeCount) {
-      return {
-        status: "Paused",
-        explanation: "Most workflows are currently paused."
-      };
-    }
-
-    // NEEDS OPTIMIZATION: Performance degradation detected
-    // Derived condition: Any active flow has low conversion rate
-    const hasPerformanceDegradation = flows.some(
-      (f) =>
-        f.status === "Active" &&
-        f.executionsCount > 0 &&
-        f.conversionCount / f.executionsCount < 0.15
-    );
-    if (hasPerformanceDegradation) {
-      return {
-        status: "Needs Optimization",
-        explanation: "Performance review recommended."
-      };
-    }
-
-    // HEALTHY: All systems operating normally. No optimization flags.
-    return {
-      status: "Healthy",
-      explanation: "All systems operating normally."
-    };
-  }, [flows]);
-
-  const getHealthBadgeStyle = (status: string) => {
-    switch (status) {
-      case "Healthy":
-        return "bg-emerald-50 text-emerald-700 border-emerald-200";
-      case "Needs Optimization":
-        return "bg-amber-50 text-amber-700 border-amber-200";
-      case "Paused":
-        return "bg-slate-50 text-slate-600 border-slate-200";
-      case "Attention Required":
-        return "bg-rose-50 text-rose-700 border-rose-200";
-      default:
-        return "bg-slate-50 text-slate-600 border-slate-200";
-    }
-  };
 
   // Filter & Search Logic
   const filteredFlows = useMemo(() => {
@@ -727,68 +970,7 @@ export default function GrowthEngineWorkspace() {
         </div>
       </div>
 
-      {/* Growth Snapshot */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* 1. Active Automations */}
-        <div className="rounded-3xl border border-slate-200/80 bg-white/90 px-6 py-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Active Automations
-          </p>
-          <h3 className="mt-2.5 text-2xl font-black text-slate-900">
-            {activeAutomationsCount}
-          </h3>
-          <p className="mt-1.5 text-[11px] text-slate-400 font-medium">
-            AI systems running live
-          </p>
-        </div>
 
-        {/* 2. Revenue Influenced */}
-        <div className="rounded-3xl border border-slate-200/80 bg-white/90 px-6 py-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Revenue Influenced
-          </p>
-          <h3 className="mt-2.5 text-2xl font-black text-emerald-600">
-            {formatRevenue(totalRevenue)}
-          </h3>
-          <p className="mt-1.5 text-[11px] text-slate-400 font-medium leading-relaxed">
-            {totalRevenue === 0
-              ? "Revenue influence will appear as customers engage with active automations."
-              : "Attributed pipeline growth"}
-          </p>
-        </div>
-
-        {/* 3. AI Actions Today */}
-        <div className="rounded-3xl border border-slate-200/80 bg-white/90 px-6 py-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            AI Actions Today
-          </p>
-          <h3 className="mt-2.5 text-xl font-black text-slate-900">
-            {actionsToday > 0 ? `${actionsToday} Actions Executed` : "No actions executed today."}
-          </h3>
-          <p className="mt-1.5 text-[11px] text-slate-400 font-medium">
-            {actionsToday > 0 ? "Successful automation executions today" : "No actions executed today."}
-          </p>
-        </div>
-
-        {/* 4. Growth Health */}
-        <div className="rounded-3xl border border-slate-200/80 bg-white/90 px-6 py-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Growth Health
-          </p>
-          <div className="mt-2.5 flex items-center">
-            <span
-              className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full border ${getHealthBadgeStyle(
-                growthHealth.status
-              )}`}
-            >
-              {growthHealth.status}
-            </span>
-          </div>
-          <p className="mt-1.5 text-[11px] text-slate-550 font-semibold">
-            {growthHealth.explanation}
-          </p>
-        </div>
-      </div>
 
       {/* Navigation Tabs */}
       <div className="sticky top-0 z-10 w-full bg-slate-50/90 pb-2 border-b border-slate-200/80 backdrop-blur-md">
@@ -1664,8 +1846,6 @@ export default function GrowthEngineWorkspace() {
           </div>
         </div>
       )}
-
-      {/* Flow Detail Side Drawer */}
       {selectedFlowForDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-950/45 backdrop-blur-sm">
           <div className="w-full max-w-md h-full bg-white shadow-2xl p-6 overflow-y-auto flex flex-col justify-between transition-transform duration-300">
@@ -1688,6 +1868,16 @@ export default function GrowthEngineWorkspace() {
                 </button>
               </div>
 
+              {/* Objective */}
+              <div className="space-y-1">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Objective
+                </span>
+                <p className="text-sm font-extrabold text-slate-800 leading-snug">
+                  {selectedFlowForDetail.objective || getObjectiveForType(selectedFlowForDetail.type)}
+                </p>
+              </div>
+
               {/* Health Status */}
               <div className="space-y-1.5">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -1695,30 +1885,69 @@ export default function GrowthEngineWorkspace() {
                 </span>
                 <div>
                   <span
-                    className={`inline-block text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border ${
-                      deriveFlowHealth(selectedFlowForDetail) === "Healthy"
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        : deriveFlowHealth(selectedFlowForDetail) === "Needs Optimization"
-                        ? "bg-amber-50 text-amber-700 border-amber-200"
-                        : deriveFlowHealth(selectedFlowForDetail) === "Paused"
-                        ? "bg-slate-50 text-slate-600 border-slate-200"
-                        : "bg-rose-50 text-rose-700 border-rose-200"
-                    }`}
+                    className={`inline-block text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border ${getHealthBadgeStyle(deriveFlowHealth(selectedFlowForDetail))}`}
                   >
                     {deriveFlowHealth(selectedFlowForDetail)}
                   </span>
                 </div>
               </div>
 
-              {/* Revenue Influenced */}
+              {/* Contextual KPI */}
+              {(() => {
+                const kpi = getContextualKPI(selectedFlowForDetail);
+                return (
+                  <div className="space-y-1">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {kpi.label}
+                    </span>
+                    <span className={`tracking-tight block font-black ${
+                      kpi.value === "No completed executions yet."
+                        ? "text-sm text-slate-400 italic font-medium mt-1"
+                        : "text-3xl text-emerald-600"
+                    }`}>
+                      {kpi.value}
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Current AI Status */}
               <div className="space-y-1">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Revenue Influenced
+                  Current AI Status
                 </span>
-                <span className="text-3xl font-black text-emerald-600 tracking-tight block">
-                  {formatRevenue(selectedFlowForDetail.revenueInfluenced)}
-                </span>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
+                  <span className="relative flex h-2 w-2">
+                    {selectedFlowForDetail.status === "Active" && (
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    )}
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                      selectedFlowForDetail.status === "Active" ? "bg-blue-600" : "bg-slate-400"
+                    }`}></span>
+                  </span>
+                  <span className="text-xs font-black text-slate-800">
+                    {selectedFlowForDetail.aiStatus || getAIStatusForFlow(selectedFlowForDetail)}
+                  </span>
+                </div>
               </div>
+
+              {/* AI Decision Panel */}
+              <div className="p-3 rounded-2xl bg-blue-50/20 border border-blue-100/40 space-y-1">
+                <span className="block text-[10px] font-bold text-blue-600 uppercase tracking-wider">
+                  AI Decision
+                </span>
+                <p className="text-xs font-semibold text-slate-700 leading-normal">
+                  {selectedFlowForDetail.aiDecision || getAIDecisionForFlow(selectedFlowForDetail)}
+                </p>
+              </div>
+
+              {/* Confidence (if present) */}
+              {selectedFlowForDetail.confidence !== undefined && (
+                <div className="flex items-center justify-between text-xs border-t border-slate-100 pt-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Confidence</span>
+                  <span className="font-extrabold text-blue-600">{selectedFlowForDetail.confidence}%</span>
+                </div>
+              )}
 
               {/* Execution Stats */}
               <div className="space-y-2">
@@ -1741,70 +1970,42 @@ export default function GrowthEngineWorkspace() {
                 </div>
               </div>
 
-              {/* Recent Activity */}
-              <div className="space-y-2">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Recent Activity
-                </span>
-                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
-                  <div className="flex justify-between text-xs font-semibold">
-                    <span className="text-slate-500">Trigger:</span>
-                    <span className="text-slate-800">{selectedFlowForDetail.triggerType}</span>
+              {/* Recent Timeline */}
+              {(() => {
+                const recentEvents = selectedFlowForDetail.recentEvents || getRecentEventsForFlow(selectedFlowForDetail);
+                return (
+                  <div className="space-y-2">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Recent Timeline
+                    </span>
+                    {recentEvents.length === 0 ? (
+                      <p className="text-xs font-medium text-slate-400 italic">No recent events.</p>
+                    ) : (
+                      <div className="relative border-l border-slate-200 pl-3.5 space-y-2 py-0.5 ml-1">
+                        {recentEvents.map((evt, idx) => (
+                          <div key={idx} className="relative">
+                            <span className="absolute -left-[18.5px] top-1.5 w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-white" />
+                            <div className="flex items-baseline justify-between gap-2">
+                              <p className="text-xs font-semibold text-slate-700">{evt.event}</p>
+                              <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap">{evt.time}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex justify-between text-xs font-semibold">
-                    <span className="text-slate-500">Last Executed:</span>
-                    <span className="text-slate-800">{selectedFlowForDetail.lastExecuted}</span>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
-              {/* Optimization Suggestions */}
+              {/* Recommended Action */}
               <div className="space-y-2">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Optimization Suggestions
+                  Recommended Action
                 </span>
-                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                  {deriveFlowHealth(selectedFlowForDetail) === "Healthy" && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-slate-700 leading-relaxed">
-                        No optimization opportunities currently detected.
-                        Your growth systems are operating within expected conditions.
-                      </p>
-                      <div className="text-xs font-bold text-slate-500 mt-2">
-                        Recommendation: <span className="text-slate-800">No action required.</span>
-                      </div>
-                    </div>
-                  )}
-                  {deriveFlowHealth(selectedFlowForDetail) === "Needs Optimization" && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-slate-700 leading-relaxed">
-                        Conversion rate is currently below threshold (15%). Performance improvement of 14% compared to the previous period is recommended.
-                      </p>
-                      <div className="text-xs font-bold text-slate-500 mt-2">
-                        Recommendation: <span className="text-blue-600">Review message templates and conversion path metrics.</span>
-                      </div>
-                    </div>
-                  )}
-                  {deriveFlowHealth(selectedFlowForDetail) === "Paused" && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-slate-700 leading-relaxed">
-                        This workflow is currently paused and not monitoring growth events.
-                      </p>
-                      <div className="text-xs font-bold text-slate-500 mt-2">
-                        Recommendation: <span className="text-amber-600">Resume the workflow to begin monitoring growth opportunities.</span>
-                      </div>
-                    </div>
-                  )}
-                  {deriveFlowHealth(selectedFlowForDetail) === "Attention Required" && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-slate-700 leading-relaxed">
-                        Critical failure state. Flow is active but generating zero conversions despite high runs.
-                      </p>
-                      <div className="text-xs font-bold text-slate-500 mt-2">
-                        Recommendation: <span className="text-rose-600">Check incoming payload structures and review diagnostic logs immediately.</span>
-                      </div>
-                    </div>
-                  )}
+                <div className="p-3 rounded-2xl bg-amber-50/20 border border-amber-100/40 space-y-1">
+                  <p className="text-xs font-semibold text-slate-750">
+                    {selectedFlowForDetail.recommendation || getRecommendationForFlow(selectedFlowForDetail) || "No action required."}
+                  </p>
                 </div>
               </div>
             </div>

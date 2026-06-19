@@ -318,7 +318,7 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
         <div className="space-y-5">
           {/* Header: Flow Name + Health Badge */}
           <div className="flex items-center justify-between gap-2.5">
-            <h3 className="text-sm font-semibold text-slate-850 truncate max-w-[70%]">
+            <h3 className="text-xs font-semibold text-slate-500 truncate max-w-[75%]">
               {flow.name}
             </h3>
             <span className={`inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-md border ${getHealthBadgeStyle(health)}`}>
@@ -327,7 +327,7 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
           </div>
 
           {/* 1. Objective */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Objective
             </span>
@@ -337,7 +337,7 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
           </div>
 
           {/* 2. Current AI Status */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Current AI Status
             </span>
@@ -357,7 +357,7 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
           </div>
 
           {/* 3. Latest Activity */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Latest Activity
             </span>
@@ -368,14 +368,16 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
           </div>
 
           {/* 4. Next AI Action */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Next AI Action
             </span>
-            <p className="text-xs font-normal text-slate-650 flex items-center gap-1.5 text-left">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
-              {nextAction}
-            </p>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200/80">
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" />
+              <span className="text-xs font-medium text-slate-800 text-left">
+                {nextAction}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -876,7 +878,7 @@ export default function GrowthEngineWorkspace() {
             <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
               
               {/* Search */}
-              <div className="relative w-full sm:max-w-xs">
+              <div className="relative w-full sm:max-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <input
                   type="text"
@@ -965,7 +967,7 @@ export default function GrowthEngineWorkspace() {
         {activeTab === "templates" && (
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-1 max-w-md">
-              <h3 className="text-base font-black text-slate-900">Proven Growth Blueprints</h3>
+              <h3 className="text-base font-semibold text-slate-900">Proven Growth Blueprints</h3>
               <p className="text-xs text-slate-400">
                 Deploy tested, deterministic workflows immediately onto your active channels.
               </p>
@@ -1044,8 +1046,8 @@ export default function GrowthEngineWorkspace() {
         {/* Activity Tab */}
         {activeTab === "activity" && (
           <div className="flex flex-col gap-6 max-w-2xl">
-            <div className="flex flex-col gap-1">
-              <h3 className="text-base font-black text-slate-900">Recent Growth Events</h3>
+            <div className="flex flex-col gap-1 max-w-md">
+              <h3 className="text-base font-semibold text-slate-900">Recent Growth Events</h3>
               <p className="text-xs text-slate-400">
                 A clean, chronological record of your autonomous system actions.
               </p>
@@ -1354,8 +1356,8 @@ export default function GrowthEngineWorkspace() {
         {/* Settings Tab */}
         {activeTab === "settings" && (
           <div className="flex flex-col gap-6 max-w-2xl">
-            <div className="flex flex-col gap-1">
-              <h3 className="text-base font-black text-slate-900">Engine Safety & Guardrails</h3>
+            <div className="flex flex-col gap-1 max-w-md">
+              <h3 className="text-base font-semibold text-slate-900">Engine Safety & Guardrails</h3>
               <p className="text-xs text-slate-400">
                 Configure backoffice parameters, limits, and fallback routines.
               </p>
@@ -1732,7 +1734,7 @@ export default function GrowthEngineWorkspace() {
               </div>
 
               {/* 1. Objective */}
-              <div className="space-y-1 text-left">
+              <div className="space-y-1.5 text-left">
                 <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Objective
                 </span>
@@ -1759,7 +1761,7 @@ export default function GrowthEngineWorkspace() {
               </div>
 
               {/* 2. Current AI Status */}
-              <div className="space-y-1 text-left">
+              <div className="space-y-1.5 text-left">
                 <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Current AI Status
                 </span>
@@ -1779,25 +1781,27 @@ export default function GrowthEngineWorkspace() {
               </div>
 
               {/* 3. Latest Activity */}
-              <div className="space-y-1 text-left">
+              <div className="space-y-1.5 text-left">
                 <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Latest Activity
                 </span>
-                <p className="text-xs font-normal text-slate-650 flex items-center gap-1.5 text-left">
+                <p className="text-xs font-normal text-slate-655 flex items-center gap-1.5 text-left">
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getLatestActivity(selectedFlowForDetail) === "No recent activity." ? "bg-slate-300" : "bg-emerald-500 animate-pulse"}`} />
                   {getLatestActivity(selectedFlowForDetail)}
                 </p>
               </div>
 
               {/* 4. Next AI Action */}
-              <div className="space-y-1 text-left">
+              <div className="space-y-1.5 text-left">
                 <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Next AI Action
                 </span>
-                <p className="text-xs font-normal text-slate-650 flex items-center gap-1.5 text-left">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
-                  {getNextAIAction(selectedFlowForDetail)}
-                </p>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" />
+                  <span className="text-xs font-medium text-slate-800 text-left">
+                    {getNextAIAction(selectedFlowForDetail)}
+                  </span>
+                </div>
               </div>
             </div>
 

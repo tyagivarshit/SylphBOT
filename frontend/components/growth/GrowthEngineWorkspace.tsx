@@ -239,7 +239,7 @@ const getNextAIAction = (flow: FlowCardData): string => {
     return "No further actions until resumed.";
   }
   if (flow.executionsCount === 0) {
-    return "Starts automatically when conditions are met.";
+    return "Starts automatically when trigger conditions are met.";
   }
   switch (flow.type) {
     case "Lead Follow-up":
@@ -280,15 +280,15 @@ const deriveFlowHealth = (flow: FlowCardData): "Healthy" | "Needs Attention" | "
 const getHealthBadgeStyle = (health: "Healthy" | "Needs Attention" | "Paused" | "Disabled" | "Learning") => {
   switch (health) {
     case "Healthy":
-      return "bg-emerald-50 text-emerald-700 border-emerald-100";
+      return "bg-emerald-50 text-emerald-700 border-emerald-150";
     case "Needs Attention":
-      return "bg-rose-50 text-rose-700 border-rose-100";
+      return "bg-rose-50 text-rose-700 border-rose-150";
     case "Paused":
-      return "bg-slate-50 text-slate-500 border-slate-200";
+      return "bg-amber-50 text-amber-700 border-amber-150";
     case "Disabled":
-      return "bg-slate-100 text-slate-400 border-slate-200";
+      return "bg-slate-50 text-slate-500 border-slate-200";
     case "Learning":
-      return "bg-indigo-50 text-indigo-700 border-indigo-100";
+      return "bg-blue-50 text-blue-700 border-blue-150";
     default:
       return "bg-slate-50 text-slate-500 border-slate-200";
   }
@@ -307,49 +307,50 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
   const latestActivity = getLatestActivity(flow);
   const nextAction = getNextAIAction(flow);
   const health = deriveFlowHealth(flow);
+  const displayHealth = health === "Learning" ? "Running" : health;
 
   return (
     <div 
       onClick={() => onOpenDetail(flow)}
-      className="group relative rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-blue-200 flex flex-col justify-between gap-5 cursor-pointer h-full"
+      className="group relative rounded-[20px] border border-slate-200/80 bg-white p-6 shadow-sm transition hover:shadow-md hover:border-slate-350 flex flex-col justify-between gap-6 cursor-pointer h-full"
     >
-      <div className="space-y-4 flex-1 flex flex-col justify-between">
-        <div className="space-y-4">
+      <div className="flex-1 flex flex-col justify-between space-y-5">
+        <div className="space-y-5">
           {/* Header: Flow Name + Health Badge */}
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[70%]">
+          <div className="flex items-center justify-between gap-2.5">
+            <h3 className="text-sm font-semibold text-slate-850 truncate max-w-[70%]">
               {flow.name}
-            </span>
-            <span className={`inline-block text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${getHealthBadgeStyle(health)}`}>
-              {health}
+            </h3>
+            <span className={`inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-md border ${getHealthBadgeStyle(health)}`}>
+              {displayHealth}
             </span>
           </div>
 
           {/* 1. Objective */}
           <div className="space-y-1">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+            <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Objective
             </span>
-            <h4 className="text-sm font-extrabold text-slate-900 leading-snug tracking-tight group-hover:text-blue-600 transition-colors">
+            <p className="text-sm font-normal text-slate-800 leading-relaxed text-left group-hover:text-blue-600 transition-colors">
               {objective}
-            </h4>
+            </p>
           </div>
 
           {/* 2. Current AI Status */}
           <div className="space-y-1">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+            <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Current AI Status
             </span>
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="relative flex h-2 w-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-150">
+              <span className="relative flex h-1.5 w-1.5 shrink-0">
                 {flow.status === "Active" && (
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                 )}
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
                   flow.status === "Active" ? "bg-blue-600" : "bg-slate-400"
                 }`}></span>
               </span>
-              <span className="text-xs font-black text-slate-800">
+              <span className="text-xs font-normal text-slate-750 text-left">
                 {aiStatus}
               </span>
             </div>
@@ -357,37 +358,37 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
 
           {/* 3. Latest Activity */}
           <div className="space-y-1">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+            <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Latest Activity
             </span>
-            <p className="text-xs font-semibold text-slate-750 flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${latestActivity === "No recent activity." ? "bg-slate-350" : "bg-emerald-500 animate-pulse"}`} />
+            <p className="text-xs font-normal text-slate-650 flex items-center gap-1.5 text-left">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${latestActivity === "No recent activity." ? "bg-slate-300" : "bg-emerald-500 animate-pulse"}`} />
               {latestActivity}
             </p>
           </div>
 
           {/* 4. Next AI Action */}
           <div className="space-y-1">
-            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+            <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Next AI Action
             </span>
-            <p className="text-xs font-semibold text-slate-750 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+            <p className="text-xs font-normal text-slate-650 flex items-center gap-1.5 text-left">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
               {nextAction}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Quick Actions (View, Pause/Resume, Edit) */}
-      <div className="pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 mt-auto">
+      {/* Quick Actions (View, Edit, Pause/Resume) */}
+      <div className="pt-4 border-t border-slate-100 grid grid-cols-3 gap-2 mt-auto">
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onOpenDetail(flow);
           }}
-          className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-650 hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
+          className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-650 hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
         >
           View
         </button>
@@ -397,7 +398,7 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
             e.stopPropagation();
             onOpenEdit(flow);
           }}
-          className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-650 hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
+          className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-650 hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
         >
           Edit
         </button>
@@ -407,7 +408,7 @@ const FlowCard = memo(({ flow, onToggleStatus, onOpenEdit, onOpenDetail }: FlowC
             e.stopPropagation();
             onToggleStatus(flow.id);
           }}
-          className={`h-8 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center ${
+          className={`h-8 rounded-lg text-xs font-medium transition cursor-pointer flex items-center justify-center ${
             flow.status === "Active"
               ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/50"
               : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/50"
@@ -530,6 +531,34 @@ export default function GrowthEngineWorkspace() {
   }, []);
 
   // Snapshot calculations
+  const activeNormalCount = useMemo(() => {
+    return flows.filter(f => f.status === "Active" && (deriveFlowHealth(f) === "Healthy" || deriveFlowHealth(f) === "Learning")).length;
+  }, [flows]);
+
+  const pausedCount = useMemo(() => {
+    return flows.filter(f => f.status === "Paused").length;
+  }, [flows]);
+
+  const needsAttentionCount = useMemo(() => {
+    return flows.filter(f => f.status === "Active" && deriveFlowHealth(f) === "Needs Attention").length;
+  }, [flows]);
+
+  const headerDescription = useMemo(() => {
+    if (!flows || flows.length === 0) {
+      return "No automations are currently running.";
+    }
+    if (needsAttentionCount > 0) {
+      return needsAttentionCount === 1 
+        ? "1 automation requires founder attention." 
+        : `${needsAttentionCount} automations require founder attention.`;
+    }
+    if (activeNormalCount > 0) {
+      return `Your AI workforce is currently managing ${activeNormalCount} active automation${activeNormalCount > 1 ? "s" : ""}.`;
+    }
+    return "All automation systems are operating normally.";
+  }, [flows, needsAttentionCount, activeNormalCount]);
+
+  // Keep existing variables for compatibility
   const activeAutomationsCount = useMemo(() => {
     return flows.filter((f) => f.status === "Active").length;
   }, [flows]);
@@ -779,20 +808,31 @@ export default function GrowthEngineWorkspace() {
   return (
     <div className="flex flex-col gap-6 w-full min-h-0 bg-transparent">
       
-      {/* 👑 Minimalist Operations Header */}
+      {/* 👑 Lightweight Operations Header */}
       <div className="brand-info-strip rounded-[26px] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+        <div className="space-y-1 text-left">
+          <h1 className="text-base font-semibold text-slate-900 leading-normal">
             Growth Operations Center
-          </p>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            Deploy and supervise autonomous systems to automatically follow up, reactivate cold leads, and recover unpaid checkouts. 
-            Currently running <strong>{activeAutomationsCount}</strong> active growth systems.
+          </h1>
+          <p className="text-sm text-slate-500 font-normal mt-1 leading-relaxed">
+            {headerDescription}
           </p>
         </div>
-        <div className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 border border-slate-200/80 px-3.5 py-1 text-[10px] font-bold text-slate-600 uppercase tracking-wider h-fit">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          Guardrails Operational
+        <div className="flex items-center gap-2 text-xs font-normal text-slate-600 h-fit flex-wrap">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100/80 border border-slate-200/80 px-3.5 py-1 text-xs font-normal text-slate-650">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Active {activeNormalCount}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100/80 border border-slate-200/80 px-3.5 py-1 text-xs font-normal text-slate-650">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Paused {pausedCount}
+          </span>
+          {needsAttentionCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 border border-rose-150 px-3.5 py-1 text-xs font-normal text-rose-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+              Needs Attention {needsAttentionCount}
+            </span>
+          )}
         </div>
       </div>
 
@@ -1668,17 +1708,18 @@ export default function GrowthEngineWorkspace() {
           </div>
         </div>
       )}
+
       {selectedFlowForDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-950/45 backdrop-blur-sm">
           <div className="w-full max-w-md h-full bg-white shadow-2xl p-6 overflow-y-auto flex flex-col justify-between transition-transform duration-300">
             <div className="space-y-6">
               {/* Header */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                <div className="text-left">
+                  <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                     AI Growth Operation Details
                   </span>
-                  <h3 className="text-lg font-black text-slate-900 mt-1">
+                  <h3 className="text-base font-semibold text-slate-900 mt-1">
                     {selectedFlowForDetail.name}
                   </h3>
                 </div>
@@ -1691,67 +1732,70 @@ export default function GrowthEngineWorkspace() {
               </div>
 
               {/* 1. Objective */}
-              <div className="space-y-1">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <div className="space-y-1 text-left">
+                <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Objective
                 </span>
-                <p className="text-sm font-extrabold text-slate-800 leading-snug">
+                <p className="text-sm font-normal text-slate-800 leading-relaxed">
                   {selectedFlowForDetail.objective || getObjectiveForType(selectedFlowForDetail.type)}
                 </p>
               </div>
 
               {/* Health Status */}
-              <div className="space-y-1.5">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <div className="space-y-1.5 text-left">
+                <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Health Status
                 </span>
                 <div>
                   <span
-                    className={`inline-block text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border ${getHealthBadgeStyle(deriveFlowHealth(selectedFlowForDetail))}`}
+                    className={`inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-md border ${getHealthBadgeStyle(deriveFlowHealth(selectedFlowForDetail))}`}
                   >
-                    {deriveFlowHealth(selectedFlowForDetail)}
+                    {(() => {
+                      const h = deriveFlowHealth(selectedFlowForDetail);
+                      return h === "Learning" ? "Running" : h;
+                    })()}
                   </span>
                 </div>
               </div>
 
               {/* 2. Current AI Status */}
-              <div className="space-y-1">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <div className="space-y-1 text-left">
+                <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Current AI Status
                 </span>
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="relative flex h-2 w-2">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-150">
+                  <span className="relative flex h-1.5 w-1.5 shrink-0">
                     {selectedFlowForDetail.status === "Active" && (
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                     )}
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                    <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
                       selectedFlowForDetail.status === "Active" ? "bg-blue-600" : "bg-slate-400"
                     }`}></span>
                   </span>
-                  <span className="text-xs font-black text-slate-800">
+                  <span className="text-xs font-normal text-slate-750 text-left">
                     {getAIStatus(selectedFlowForDetail)}
                   </span>
                 </div>
               </div>
 
               {/* 3. Latest Activity */}
-              <div className="space-y-1">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <div className="space-y-1 text-left">
+                <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Latest Activity
                 </span>
-                <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full ${getLatestActivity(selectedFlowForDetail) === "No recent activity." ? "bg-slate-350" : "bg-emerald-500 animate-pulse"}`} />
+                <p className="text-xs font-normal text-slate-650 flex items-center gap-1.5 text-left">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getLatestActivity(selectedFlowForDetail) === "No recent activity." ? "bg-slate-300" : "bg-emerald-500 animate-pulse"}`} />
                   {getLatestActivity(selectedFlowForDetail)}
                 </p>
               </div>
 
               {/* 4. Next AI Action */}
-              <div className="space-y-1">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <div className="space-y-1 text-left">
+                <span className="block text-[10px] font-medium text-slate-400 uppercase tracking-wider">
                   Next AI Action
                 </span>
-                <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <p className="text-xs font-normal text-slate-650 flex items-center gap-1.5 text-left">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
                   {getNextAIAction(selectedFlowForDetail)}
                 </p>
               </div>

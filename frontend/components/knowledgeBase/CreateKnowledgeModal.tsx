@@ -9,7 +9,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
 
   const [title,setTitle] = useState("")
   const [content,setContent] = useState("")
-  const [category, setCategory] = useState("Business Information")
+  const [category, setCategory] = useState("Company")
   const [source, setSource] = useState("Manual")
   const [status, setStatus] = useState("Ready")
   const [loading,setLoading] = useState(false)
@@ -23,13 +23,13 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     if(selected){
       const parsed = parseKnowledge(selected)
       setTitle(parsed.title || "")
-      setCategory(parsed.category || "Business Information")
+      setCategory(parsed.category || "Company")
       setSource(parsed.source || "Manual")
       setStatus(parsed.status || "Ready")
       setContent(selected.content || "")
     }else{
       setTitle("")
-      setCategory("Business Information")
+      setCategory("Company")
       setSource("Manual")
       setStatus("Ready")
       setContent("")
@@ -120,7 +120,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
             <input
               value={title}
               onChange={(e)=>setTitle(e.target.value)}
-              placeholder="e.g. Base Pricing Plan"
+              placeholder="e.g. Company Mission Statement"
               className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
             />
           </div>
@@ -135,15 +135,15 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e)=>setCategory(e.target.value)}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
               >
-                <option value="Business Information">Business Information</option>
-                <option value="Products & Services">Products & Services</option>
-                <option value="Pricing">Pricing</option>
-                <option value="FAQs">FAQs</option>
-                <option value="Policies">Policies</option>
-                <option value="Scripts">Scripts</option>
-                <option value="Documents">Documents</option>
-                <option value="Website Knowledge">Website Knowledge</option>
-                <option value="Custom Knowledge">Custom Knowledge</option>
+                <option value="Company">Company</option>
+                <option value="Products">Products</option>
+                <option value="Sales">Sales</option>
+                <option value="Support">Support</option>
+                <option value="Marketing">Marketing</option>
+                <option value="Operations">Operations</option>
+                <option value="Legal">Legal</option>
+                <option value="Resources">Resources</option>
+                <option value="Custom">Custom</option>
               </select>
             </div>
 

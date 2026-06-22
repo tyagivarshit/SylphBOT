@@ -8,7 +8,7 @@ import { X, Upload, Globe, FileText } from "lucide-react"
 export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, clientId = "" }: any) {
   const [sourceType, setSourceType] = useState<"Document" | "Website">("Document")
   const [sourceName, setSourceName] = useState("")
-  const [category, setCategory] = useState("Documents")
+  const [category, setCategory] = useState("Resources")
   const [content, setContent] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -106,7 +106,7 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
           <h2 className="text-base font-semibold text-slate-900">
             Import Business Knowledge
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-650 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -121,7 +121,7 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
           <button
             onClick={() => {
               setSourceType("Document")
-              setCategory("Documents")
+              setCategory("Resources")
               setSourceName("")
               setContent("")
               setFileDetails(null)
@@ -136,7 +136,7 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
           <button
             onClick={() => {
               setSourceType("Website")
-              setCategory("Website Knowledge")
+              setCategory("Resources")
               setSourceName("")
               setContent("")
               setFileDetails(null)
@@ -217,15 +217,15 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
               onChange={(e) => setCategory(e.target.value)}
               className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
             >
-              <option value="Business Information">Business Information</option>
-              <option value="Products & Services">Products & Services</option>
-              <option value="Pricing">Pricing</option>
-              <option value="FAQs">FAQs</option>
-              <option value="Policies">Policies</option>
-              <option value="Scripts">Scripts</option>
-              <option value="Documents">Documents</option>
-              <option value="Website Knowledge">Website Knowledge</option>
-              <option value="Custom Knowledge">Custom Knowledge</option>
+              <option value="Company">Company</option>
+              <option value="Products">Products</option>
+              <option value="Sales">Sales</option>
+              <option value="Support">Support</option>
+              <option value="Marketing">Marketing</option>
+              <option value="Operations">Operations</option>
+              <option value="Legal">Legal</option>
+              <option value="Resources">Resources</option>
+              <option value="Custom">Custom</option>
             </select>
           </div>
           <div>

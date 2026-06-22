@@ -9,18 +9,23 @@ import { api } from "@/lib/api"
 import { 
   Search, 
   Plus, 
-  Folder, 
   X, 
   ArrowRight, 
   FileText, 
   Globe, 
   BookOpen, 
-  SlidersHorizontal,
-  ChevronDown
+  Briefcase, 
+  ShoppingBag, 
+  DollarSign, 
+  HelpCircle, 
+  Megaphone, 
+  Settings, 
+  ShieldCheck, 
+  Folder
 } from "lucide-react"
 
 /* =====================================================
-METADATA SERIALIZATION & PARSING HELPERS
+METADATA SERIALIZATION & PARSING HELPERS (WITH AUTO-MAPPING)
 ===================================================== */
 interface KnowledgeMetadata {
   title: string
@@ -33,7 +38,7 @@ export function parseKnowledge(item: any): KnowledgeMetadata {
   if (!item) {
     return {
       title: "",
-      category: "Business Information",
+      category: "Company",
       source: "Manual",
       status: "Ready",
     }
@@ -55,7 +60,7 @@ export function parseKnowledge(item: any): KnowledgeMetadata {
       })
       
       return {
-        category: meta.category || "Business Information",
+        category: meta.category || "Company",
         source: meta.source || "Manual",
         status: meta.status || "Ready",
         title: actualTitle || "Untitled Entry",
@@ -63,19 +68,90 @@ export function parseKnowledge(item: any): KnowledgeMetadata {
     }
   }
 
-  // Fallback parsing for legacy titles
-  let category = "Business Information"
-  const lowerTitle = rawTitle.toLowerCase()
-  if (lowerTitle.includes("pricing") || lowerTitle.includes("plan") || lowerTitle.includes("cost")) {
-    category = "Pricing"
-  } else if (lowerTitle.includes("faq") || lowerTitle.includes("question") || lowerTitle.includes("q&a")) {
-    category = "FAQs"
-  } else if (lowerTitle.includes("policy") || lowerTitle.includes("term") || lowerTitle.includes("legal")) {
-    category = "Policies"
-  } else if (lowerTitle.includes("script") || lowerTitle.includes("sales")) {
-    category = "Scripts"
-  } else if (lowerTitle.includes("product") || lowerTitle.includes("service")) {
-    category = "Products & Services"
+  // Frontend Auto Mapping for legacy database records
+  const titleText = rawTitle.toLowerCase()
+  const contentText = (item.content || "").toLowerCase()
+  const fullText = `${titleText} ${contentText}`
+
+  let category = "Custom"
+  if (
+    fullText.includes("privacy") || 
+    fullText.includes("terms") || 
+    fullText.includes("legal") || 
+    fullText.includes("compliance") || 
+    fullText.includes("agreement") ||
+    fullText.includes("refund policy")
+  ) {
+    category = "Legal"
+  } else if (
+    fullText.includes("pricing") || 
+    fullText.includes("plan") || 
+    fullText.includes("price") || 
+    fullText.includes("product") || 
+    fullText.includes("service") || 
+    fullText.includes("feature") || 
+    fullText.includes("cost")
+  ) {
+    category = "Products"
+  } else if (
+    fullText.includes("sales") || 
+    fullText.includes("script") || 
+    fullText.includes("objection") || 
+    fullText.includes("offer") || 
+    fullText.includes("competitor") || 
+    fullText.includes("comparison") || 
+    fullText.includes("pitch")
+  ) {
+    category = "Sales"
+  } else if (
+    fullText.includes("faq") || 
+    fullText.includes("question") || 
+    fullText.includes("support") || 
+    fullText.includes("refund") || 
+    fullText.includes("customer") || 
+    fullText.includes("help") || 
+    fullText.includes("workflow")
+  ) {
+    category = "Support"
+  } else if (
+    fullText.includes("marketing") || 
+    fullText.includes("campaign") || 
+    fullText.includes("brand guideline") || 
+    fullText.includes("messaging") || 
+    fullText.includes("social media") || 
+    fullText.includes("tone")
+  ) {
+    category = "Marketing"
+  } else if (
+    fullText.includes("sop") || 
+    fullText.includes("operation") || 
+    fullText.includes("process") || 
+    fullText.includes("team instruction") || 
+    fullText.includes("internal")
+  ) {
+    category = "Operations"
+  } else if (
+    fullText.includes("company") || 
+    fullText.includes("overview") || 
+    fullText.includes("mission") || 
+    fullText.includes("vision") || 
+    fullText.includes("brand voice") || 
+    fullText.includes("about us") || 
+    fullText.includes("contact") || 
+    fullText.includes("hours")
+  ) {
+    category = "Company"
+  } else if (
+    fullText.includes("pdf") || 
+    fullText.includes("docx") || 
+    fullText.includes("uploaded") || 
+    fullText.includes("import") || 
+    fullText.includes("website") || 
+    fullText.includes("file") || 
+    fullText.includes("document") || 
+    fullText.includes("txt")
+  ) {
+    category = "Resources"
   }
 
   return {
@@ -91,19 +167,54 @@ export function serializeKnowledgeTitle(title: string, category: string, source:
 }
 
 /* =====================================================
-CATEGORIES LIST FOR LEFT SIDEBAR
+BUSINESS-FIRST CATEGORY DEFINITIONS FOR SIDEBAR
 ===================================================== */
-const CATEGORIES = [
-  "All Knowledge",
-  "Business Information",
-  "Products & Services",
-  "Pricing",
-  "FAQs",
-  "Policies",
-  "Scripts",
-  "Documents",
-  "Website Knowledge",
-  "Custom Knowledge"
+const CATEGORY_DEFS = [
+  {
+    name: "Company",
+    description: "Business identity & brand information",
+    icon: Briefcase
+  },
+  {
+    name: "Products",
+    description: "Products, services, plans & pricing details",
+    icon: ShoppingBag
+  },
+  {
+    name: "Sales",
+    description: "Sales scripts, objections & offers",
+    icon: DollarSign
+  },
+  {
+    name: "Support",
+    description: "Knowledge used to help customers",
+    icon: HelpCircle
+  },
+  {
+    name: "Marketing",
+    description: "Campaign messaging & brand guidelines",
+    icon: Megaphone
+  },
+  {
+    name: "Operations",
+    description: "Internal SOPs & team workflows",
+    icon: Settings
+  },
+  {
+    name: "Legal",
+    description: "Policies, terms & compliance rules",
+    icon: ShieldCheck
+  },
+  {
+    name: "Resources",
+    description: "Imported documents & external content",
+    icon: FileText
+  },
+  {
+    name: "Custom",
+    description: "Uncategorized business facts",
+    icon: Folder
+  }
 ]
 
 type KnowledgeListProps = {
@@ -249,7 +360,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
       <div className="min-w-0 space-y-4">
         {/* Simple Header Actions for embedded widget */}
         <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
-          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest">
+          <h3 className="text-xs font-bold text-slate-850 uppercase tracking-widest">
             Company Knowledge
           </h3>
           <button
@@ -257,7 +368,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
               setSelected(null)
               setOpen(true)
             }}
-            className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-all"
+            className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-55 rounded-lg transition-all"
           >
             <Plus className="w-3.5 h-3.5 mr-1" />
             Add Entry
@@ -343,7 +454,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         <div className="flex items-center gap-3">
           <button
             onClick={() => setImportOpen(true)}
-            className="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-lg transition-all shadow-sm"
+            className="inline-flex items-center justify-center px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-350 rounded-lg transition-all shadow-sm"
           >
             <Plus className="w-4 h-4 mr-1.5" />
             Import
@@ -353,7 +464,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
               setSelected(null)
               setOpen(true)
             }}
-            className="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all shadow-sm"
+            className="inline-flex items-center justify-center px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all shadow-sm border border-slate-950"
           >
             <Plus className="w-4 h-4 mr-1.5" />
             Add Knowledge
@@ -365,24 +476,47 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
         
         {/* Left Side: Navigation Sidebar */}
-        <div className="lg:col-span-1 space-y-1 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm">
-          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-3 mb-2">
+        <div className="lg:col-span-1 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-3">
             Categories
           </div>
-          <div className="space-y-0.5">
-            {CATEGORIES.map((category) => (
-              <button
-                key={category}
-                onClick={() => setSelectedCategory(category)}
-                className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-between ${
-                  selectedCategory === category
-                    ? "bg-slate-900 text-white shadow-sm"
-                    : "text-slate-650 hover:bg-slate-50 hover:text-slate-900"
-                }`}
-              >
-                <span>{category}</span>
-              </button>
-            ))}
+          <div className="space-y-1.5">
+            {/* All Knowledge Option */}
+            <button
+              onClick={() => setSelectedCategory("All Knowledge")}
+              className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-start gap-3 border ${
+                selectedCategory === "All Knowledge"
+                  ? "bg-slate-900 border-slate-900 text-white shadow-sm"
+                  : "bg-transparent border-transparent text-slate-650 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-100"
+              }`}
+            >
+              <BookOpen className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <div className="text-xs font-semibold">All Knowledge</div>
+                <div className="text-[10px] opacity-70 mt-0.5">Show all business context and details</div>
+              </div>
+            </button>
+
+            {CATEGORY_DEFS.map((cat) => {
+              const IconComp = cat.icon
+              return (
+                <button
+                  key={cat.name}
+                  onClick={() => setSelectedCategory(cat.name)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-start gap-3 border ${
+                    selectedCategory === cat.name
+                      ? "bg-slate-900 border-slate-900 text-white shadow-sm"
+                      : "bg-transparent border-transparent text-slate-650 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-100"
+                  }`}
+                >
+                  <IconComp className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="text-xs font-semibold">{cat.name}</div>
+                    <div className="text-[10px] opacity-70 mt-0.5 leading-snug">{cat.description}</div>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -395,7 +529,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search knowledge..."
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white hover:border-slate-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-900 transition-all shadow-sm"
+              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white hover:border-slate-350 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-900 transition-all shadow-sm"
             />
           </div>
 
@@ -460,22 +594,34 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                     setSelected(null)
                     setOpen(true)
                   }}
-                  className="w-full sm:w-auto px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition-all"
+                  className="w-full sm:w-auto px-5 py-2.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition-all border border-slate-950"
                 >
                   Add Knowledge
                 </button>
                 <button
                   onClick={() => setImportOpen(true)}
-                  className="w-full sm:w-auto px-5 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-sm transition-all"
+                  className="w-full sm:w-auto px-5 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-sm transition-all"
                 >
                   Import
                 </button>
               </div>
             </div>
           ) : filteredKnowledge.length === 0 ? (
-            <div className="text-center py-16 bg-white border border-slate-200/80 rounded-2xl shadow-sm">
-              <p className="text-sm font-semibold text-slate-900">No matching knowledge entries found</p>
-              <p className="text-xs text-slate-500 mt-1">Try clearing your search query or selecting a different category.</p>
+            <div className="flex flex-col items-center justify-center text-center p-12 bg-white border border-slate-200/80 rounded-2xl min-h-[250px] shadow-sm max-w-md mx-auto my-8">
+              <p className="text-sm font-semibold text-slate-900">
+                No knowledge added yet.
+              </p>
+              <div className="mt-4">
+                <button
+                  onClick={() => {
+                    setSelected(null)
+                    setOpen(true)
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition-all border border-slate-950"
+                >
+                  Add Knowledge
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
@@ -547,7 +693,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                 </span>
                 <button
                   onClick={() => setSelectedPreview(null)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-50 transition-all"
+                  className="text-slate-400 hover:text-slate-650 p-1 rounded hover:bg-slate-50 transition-all"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -610,7 +756,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                     setSelectedPreview(null)
                     await handleDelete(id)
                   }}
-                  className="px-4 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-55 rounded-lg transition-colors"
+                  className="px-4 py-2 text-sm font-semibold text-rose-650 hover:bg-rose-55 rounded-lg transition-colors"
                 >
                   Delete
                 </button>
@@ -620,7 +766,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                     setSelectedPreview(null)
                     handleEdit(item)
                   }}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all inline-flex items-center gap-1.5 shadow-sm"
+                  className="px-5 py-2 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all inline-flex items-center gap-1.5 shadow-sm border border-slate-950"
                 >
                   Edit Entry
                 </button>

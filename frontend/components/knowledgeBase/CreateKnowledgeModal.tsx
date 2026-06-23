@@ -3,17 +3,267 @@
 import { useState, useEffect } from "react"
 import { api } from "@/lib/api"
 import { parseKnowledge, serializeKnowledgeTitle, getFallbackPurpose } from "./KnowledgeList"
-import { X } from "lucide-react"
+import { X, Sparkles } from "lucide-react"
 
-export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "", onDelete }: any){
+export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "", onDelete, knowledge = [] }: any){
 
-  const [title,setTitle] = useState("")
-  const [content,setContent] = useState("")
-  const [category, setCategory] = useState("Company")
-  const [source, setSource] = useState("Manual")
-  const [status, setStatus] = useState("Ready")
-  const [loading,setLoading] = useState(false)
-  const [error,setError] = useState("")
+  const [formType, setFormType] = useState("custom")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [isAIImproving, setIsAIImproving] = useState(false)
+  const [categorySuggestion, setCategorySuggestion] = useState<string | null>(null)
+  
+  // Duplicate warning states
+  const [duplicateFound, setDuplicateFound] = useState<any | null>(null)
+  const [statusToSave, setStatusToSave] = useState("Ready")
+
+  // Company fields
+  const [companyName, setCompanyName] = useState("")
+  const [companyAbout, setCompanyAbout] = useState("")
+  const [companyMission, setCompanyMission] = useState("")
+  const [companyBrandVoice, setCompanyBrandVoice] = useState("")
+
+  // Product fields
+  const [productName, setProductName] = useState("")
+  const [productDescription, setProductDescription] = useState("")
+  const [productFeatures, setProductFeatures] = useState("")
+
+  // Pricing fields
+  const [pricingPlanName, setPricingPlanName] = useState("")
+  const [pricingPrice, setPricingPrice] = useState("")
+  const [pricingBillingCycle, setPricingBillingCycle] = useState("monthly")
+  const [pricingFeatures, setPricingFeatures] = useState("")
+
+  // FAQ fields
+  const [faqQuestion, setFaqQuestion] = useState("")
+  const [faqAnswer, setFaqAnswer] = useState("")
+
+  // Policies fields
+  const [policyName, setPolicyName] = useState("")
+  const [policyContent, setPolicyContent] = useState("")
+
+  // Scripts fields
+  const [scriptScenario, setScriptScenario] = useState("")
+  const [scriptText, setScriptText] = useState("")
+
+  // Documents fields
+  const [documentTitle, setDocumentTitle] = useState("")
+  const [documentNotes, setDocumentNotes] = useState("")
+
+  // Website fields
+  const [websiteUrl, setWebsiteUrl] = useState("")
+  const [websiteCrawlScope, setWebsiteCrawlScope] = useState("domain")
+  const [websiteNotes, setWebsiteNotes] = useState("")
+
+  // Custom fields
+  const [customTitle, setCustomTitle] = useState("")
+  const [customKnowledge, setCustomKnowledge] = useState("")
+  const [customCategory, setCustomCategory] = useState("Custom")
+
+  const source = "Manual"
+  const status = "Ready"
+
+  const resetFormStates = () => {
+    setCompanyName("")
+    setCompanyAbout("")
+    setCompanyMission("")
+    setCompanyBrandVoice("")
+
+    setProductName("")
+    setProductDescription("")
+    setProductFeatures("")
+
+    setPricingPlanName("")
+    setPricingPrice("")
+    setPricingBillingCycle("monthly")
+    setPricingFeatures("")
+
+    setFaqQuestion("")
+    setFaqAnswer("")
+
+    setPolicyName("")
+    setPolicyContent("")
+
+    setScriptScenario("")
+    setScriptText("")
+
+    setDocumentTitle("")
+    setDocumentNotes("")
+
+    setWebsiteUrl("")
+    setWebsiteCrawlScope("domain")
+    setWebsiteNotes("")
+
+    setCustomTitle("")
+    setCustomKnowledge("")
+    setCustomCategory("Custom")
+  }
+
+  const getFieldsState = () => {
+    return {
+      companyName, companyAbout, companyMission, companyBrandVoice,
+      productName, productDescription, productFeatures,
+      pricingPlanName, pricingPrice, pricingBillingCycle, pricingFeatures,
+      faqQuestion, faqAnswer,
+      policyName, policyContent,
+      scriptScenario, scriptText,
+      documentTitle, documentNotes,
+      websiteUrl, websiteCrawlScope, websiteNotes,
+      customTitle, customKnowledge, customCategory
+    }
+  }
+
+  const compileForm = (type: string, fields: any) => {
+    let compiledTitle = ""
+    let compiledContent = ""
+    let compiledCategory = "Custom"
+    
+    switch(type) {
+      case "company":
+        compiledTitle = fields.companyName || "Untitled Company"
+        compiledContent = `Company Name: ${fields.companyName || ""}\nAbout: ${fields.companyAbout || ""}\nMission: ${fields.companyMission || ""}\nBrand Voice: ${fields.companyBrandVoice || ""}`
+        compiledCategory = "Company"
+        break
+      case "product":
+        compiledTitle = fields.productName || "Untitled Product"
+        compiledContent = `Product Name: ${fields.productName || ""}\nDescription: ${fields.productDescription || ""}\nFeatures: ${fields.productFeatures || ""}`
+        compiledCategory = "Products"
+        break
+      case "pricing":
+        compiledTitle = fields.pricingPlanName || "Untitled Plan"
+        compiledContent = `Plan Name: ${fields.pricingPlanName || ""}\nPrice: ${fields.pricingPrice || ""}\nBilling Cycle: ${fields.pricingBillingCycle || ""}\nIncluded Features: ${fields.pricingFeatures || ""}`
+        compiledCategory = "Products"
+        break
+      case "faq":
+        compiledTitle = fields.faqQuestion || "Untitled FAQ"
+        compiledContent = `Question: ${fields.faqQuestion || ""}\nAnswer: ${fields.faqAnswer || ""}`
+        compiledCategory = "Support"
+        break
+      case "policy":
+        compiledTitle = fields.policyName || "Untitled Policy"
+        compiledContent = `Policy Name: ${fields.policyName || ""}\nPolicy Content: ${fields.policyContent || ""}`
+        compiledCategory = "Legal"
+        break
+      case "script":
+        compiledTitle = fields.scriptScenario || "Untitled Script"
+        compiledContent = `Scenario: ${fields.scriptScenario || ""}\nScript: ${fields.scriptText || ""}`
+        compiledCategory = "Sales"
+        break
+      case "document":
+        compiledTitle = fields.documentTitle || "Untitled Document"
+        compiledContent = `Title: ${fields.documentTitle || ""}\nNotes: ${fields.documentNotes || ""}`
+        compiledCategory = "Resources"
+        break
+      case "website":
+        compiledTitle = fields.websiteUrl || "Untitled Website"
+        compiledContent = `Website URL: ${fields.websiteUrl || ""}\nCrawl Scope: ${fields.websiteCrawlScope || ""}\nNotes: ${fields.websiteNotes || ""}`
+        compiledCategory = "Resources"
+        break
+      case "custom":
+      default:
+        compiledTitle = fields.customTitle || "Untitled Entry"
+        compiledContent = fields.customKnowledge || ""
+        compiledCategory = fields.customCategory || "Custom"
+        break
+    }
+    return { title: compiledTitle, content: compiledContent, category: compiledCategory }
+  }
+
+  const parseFields = (rawContent: string, rawTitle: string, rawCategory: string): { type: string; fields: Record<string, string> } => {
+    const lines = (rawContent || "").split("\n")
+    const getVal = (prefix: string) => {
+      const line = lines.find(l => l.startsWith(prefix))
+      return line ? line.substring(prefix.length).trim() : ""
+    }
+
+    if (rawContent.startsWith("Company Name:")) {
+      return {
+        type: "company",
+        fields: {
+          companyName: getVal("Company Name:"),
+          companyAbout: getVal("About:"),
+          companyMission: getVal("Mission:"),
+          companyBrandVoice: getVal("Brand Voice:")
+        }
+      }
+    }
+    if (rawContent.startsWith("Product Name:")) {
+      return {
+        type: "product",
+        fields: {
+          productName: getVal("Product Name:"),
+          productDescription: getVal("Description:"),
+          productFeatures: getVal("Features:")
+        }
+      }
+    }
+    if (rawContent.startsWith("Plan Name:")) {
+      return {
+        type: "pricing",
+        fields: {
+          pricingPlanName: getVal("Plan Name:"),
+          pricingPrice: getVal("Price:"),
+          pricingBillingCycle: getVal("Billing Cycle:"),
+          pricingFeatures: getVal("Included Features:")
+        }
+      }
+    }
+    if (rawContent.startsWith("Question:")) {
+      return {
+        type: "faq",
+        fields: {
+          faqQuestion: getVal("Question:"),
+          faqAnswer: getVal("Answer:")
+        }
+      }
+    }
+    if (rawContent.startsWith("Policy Name:")) {
+      return {
+        type: "policy",
+        fields: {
+          policyName: getVal("Policy Name:"),
+          policyContent: getVal("Policy Content:")
+        }
+      }
+    }
+    if (rawContent.startsWith("Scenario:")) {
+      return {
+        type: "script",
+        fields: {
+          scriptScenario: getVal("Scenario:"),
+          scriptText: getVal("Script:")
+        }
+      }
+    }
+    if (rawContent.startsWith("Website URL:")) {
+      return {
+        type: "website",
+        fields: {
+          websiteUrl: getVal("Website URL:"),
+          websiteCrawlScope: getVal("Crawl Scope:"),
+          websiteNotes: getVal("Notes:")
+        }
+      }
+    }
+    if (rawContent.startsWith("Title:") && rawCategory === "Resources") {
+      return {
+        type: "document",
+        fields: {
+          documentTitle: getVal("Title:"),
+          documentNotes: getVal("Notes:")
+        }
+      }
+    }
+    
+    return {
+      type: "custom",
+      fields: {
+        customTitle: rawTitle || "",
+        customKnowledge: rawContent || "",
+        customCategory: rawCategory || "Custom"
+      }
+    }
+  }
 
   /* ============================= */
   /* PREFILL (EDIT MODE) */
@@ -22,65 +272,233 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
   useEffect(()=>{
     if(selected){
       const parsed = parseKnowledge(selected)
-      setTitle(parsed.title || "")
-      setCategory(parsed.category || "Company")
-      setSource(parsed.source || "Manual")
-      setStatus(parsed.status || "Ready")
-      setContent(selected.content || "")
-    }else{
-      setTitle("")
-      setCategory("Company")
-      setSource("Manual")
-      setStatus("Ready")
-      setContent("")
+      const decompiled = parseFields(selected.content || "", parsed.title, parsed.category)
+      
+      resetFormStates()
+      setFormType(decompiled.type)
+      
+      if (decompiled.type === "company") {
+        setCompanyName(decompiled.fields.companyName || "")
+        setCompanyAbout(decompiled.fields.companyAbout || "")
+        setCompanyMission(decompiled.fields.companyMission || "")
+        setCompanyBrandVoice(decompiled.fields.companyBrandVoice || "")
+      } else if (decompiled.type === "product") {
+        setProductName(decompiled.fields.productName || "")
+        setProductDescription(decompiled.fields.productDescription || "")
+        setProductFeatures(decompiled.fields.productFeatures || "")
+      } else if (decompiled.type === "pricing") {
+        setPricingPlanName(decompiled.fields.pricingPlanName || "")
+        setPricingPrice(decompiled.fields.pricingPrice || "")
+        setPricingBillingCycle(decompiled.fields.pricingBillingCycle || "monthly")
+        setPricingFeatures(decompiled.fields.pricingFeatures || "")
+      } else if (decompiled.type === "faq") {
+        setFaqQuestion(decompiled.fields.faqQuestion || "")
+        setFaqAnswer(decompiled.fields.faqAnswer || "")
+      } else if (decompiled.type === "policy") {
+        setPolicyName(decompiled.fields.policyName || "")
+        setPolicyContent(decompiled.fields.policyContent || "")
+      } else if (decompiled.type === "script") {
+        setScriptScenario(decompiled.fields.scriptScenario || "")
+        setScriptText(decompiled.fields.scriptText || "")
+      } else if (decompiled.type === "document") {
+        setDocumentTitle(decompiled.fields.documentTitle || "")
+        setDocumentNotes(decompiled.fields.documentNotes || "")
+      } else if (decompiled.type === "website") {
+        setWebsiteUrl(decompiled.fields.websiteUrl || "")
+        setWebsiteCrawlScope(decompiled.fields.websiteCrawlScope || "domain")
+        setWebsiteNotes(decompiled.fields.websiteNotes || "")
+      } else {
+        setCustomTitle(decompiled.fields.customTitle || "")
+        setCustomKnowledge(decompiled.fields.customKnowledge || "")
+        setCustomCategory(decompiled.fields.customCategory || "Custom")
+      }
+    } else {
+      setFormType("custom")
+      resetFormStates()
     }
     setError("")
+    setDuplicateFound(null)
+    setCategorySuggestion(null)
   },[selected, open])
+
+  /* ============================= */
+  /* AUTO CATEGORY SUGGESTION */
+  /* ============================= */
+  useEffect(() => {
+    if (selected) return
+
+    const textToAnalyze = (
+      formType === "company" ? companyName :
+      formType === "product" ? productName :
+      formType === "pricing" ? pricingPlanName :
+      formType === "faq" ? faqQuestion :
+      formType === "policy" ? policyName :
+      formType === "script" ? scriptScenario :
+      formType === "document" ? documentTitle :
+      formType === "website" ? websiteUrl :
+      customTitle
+    ).toLowerCase()
+
+    if (textToAnalyze.length < 4) {
+      setCategorySuggestion(null)
+      return
+    }
+
+    let suggested: string | null = null
+    if (textToAnalyze.includes("pricing") || textToAnalyze.includes("price") || textToAnalyze.includes("plan") || textToAnalyze.includes("billing") || textToAnalyze.includes("cost")) {
+      suggested = "pricing"
+    } else if (textToAnalyze.includes("faq") || textToAnalyze.includes("question") || textToAnalyze.includes("support") || textToAnalyze.includes("how to") || textToAnalyze.includes("help")) {
+      suggested = "faq"
+    } else if (textToAnalyze.includes("policy") || textToAnalyze.includes("rules") || textToAnalyze.includes("legal") || textToAnalyze.includes("terms") || textToAnalyze.includes("refund")) {
+      suggested = "policy"
+    } else if (textToAnalyze.includes("script") || textToAnalyze.includes("pitch") || textToAnalyze.includes("objection") || textToAnalyze.includes("sales")) {
+      suggested = "script"
+    } else if (textToAnalyze.includes("http") || textToAnalyze.includes("www.") || textToAnalyze.includes(".com") || textToAnalyze.includes("url")) {
+      suggested = "website"
+    } else if (textToAnalyze.includes("about us") || textToAnalyze.includes("mission") || textToAnalyze.includes("vision") || textToAnalyze.includes("our company") || textToAnalyze.includes("brand voice")) {
+      suggested = "company"
+    } else if (textToAnalyze.includes("pdf") || textToAnalyze.includes("docx") || textToAnalyze.includes("document") || textToAnalyze.includes("file")) {
+      suggested = "document"
+    }
+
+    if (suggested && suggested !== formType) {
+      setCategorySuggestion(suggested)
+    } else {
+      setCategorySuggestion(null)
+    }
+  }, [companyName, productName, pricingPlanName, faqQuestion, policyName, scriptScenario, documentTitle, websiteUrl, customTitle, formType, selected])
 
   if(!open) return null
 
   /* ============================= */
-  /* CREATE / UPDATE */
+  /* AI ASSIST (IMPROVE TEXT) */
   /* ============================= */
+  const handleImproveWithAI = () => {
+    const cleanText = (text: string) => {
+      if (!text) return ""
+      let cleaned = text
+        .replace(/\bw\/\b/gi, "with")
+        .replace(/\bco\b/gi, "company")
+        .replace(/\bpls\b/gi, "please")
+        .replace(/\basap\b/gi, "as soon as possible")
+        .replace(/\bmgmt\b/gi, "management")
+        .replace(/\binfo\b/gi, "information")
+        .replace(/\bkb\b/gi, "knowledge base")
+        .replace(/\bcust\b/gi, "customer")
+        .replace(/\bqa\b/gi, "questions and answers")
+      
+      // Capitalize first letter of sentences
+      cleaned = cleaned.replace(/(^\s*|[.!?]\s+)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase())
+      return cleaned.trim()
+    }
 
-  const handleSubmit = async (overrideStatus?: string) => {
-    if(!title.trim() || !content.trim()){
-      setError("Title and content are required")
+    setIsAIImproving(true)
+    setTimeout(() => {
+      if (formType === "company") {
+        setCompanyName(prev => cleanText(prev))
+        setCompanyAbout(prev => cleanText(prev))
+        setCompanyMission(prev => cleanText(prev))
+        setCompanyBrandVoice(prev => cleanText(prev))
+      } else if (formType === "product") {
+        setProductName(prev => cleanText(prev))
+        setProductDescription(prev => cleanText(prev))
+        setProductFeatures(prev => cleanText(prev))
+      } else if (formType === "pricing") {
+        setPricingPlanName(prev => cleanText(prev))
+        setPricingPrice(prev => cleanText(prev))
+        setPricingBillingCycle(prev => cleanText(prev))
+        setPricingFeatures(prev => cleanText(prev))
+      } else if (formType === "faq") {
+        setFaqQuestion(prev => cleanText(prev))
+        setFaqAnswer(prev => cleanText(prev))
+      } else if (formType === "policy") {
+        setPolicyName(prev => cleanText(prev))
+        setPolicyContent(prev => cleanText(prev))
+      } else if (formType === "script") {
+        setScriptScenario(prev => cleanText(prev))
+        setScriptText(prev => cleanText(prev))
+      } else if (formType === "document") {
+        setDocumentTitle(prev => cleanText(prev))
+        setDocumentNotes(prev => cleanText(prev))
+      } else if (formType === "website") {
+        setWebsiteUrl(prev => cleanText(prev))
+        setWebsiteCrawlScope(prev => cleanText(prev))
+        setWebsiteNotes(prev => cleanText(prev))
+      } else {
+        setCustomTitle(prev => cleanText(prev))
+        setCustomKnowledge(prev => cleanText(prev))
+      }
+      setIsAIImproving(false)
+    }, 800)
+  }
+
+  /* ============================= */
+  /* SAVE ATTEMPT & DUPLICATE CHECK */
+  /* ============================= */
+  const handleSaveAttempt = (statusOverride?: string) => {
+    const { title: finalTitle, content: finalContent, category: finalCategory } = compileForm(formType, getFieldsState())
+
+    if (!finalTitle.trim() || finalTitle === "Untitled Company" || finalTitle === "Untitled Product" || finalTitle === "Untitled Plan" || finalTitle === "Untitled FAQ" || finalTitle === "Untitled Policy" || finalTitle === "Untitled Script" || finalTitle === "Untitled Document" || finalTitle === "Untitled Website" || finalTitle === "Untitled Entry") {
+      setError("Please fill out the primary field/title.")
+      return
+    }
+    if (finalContent.trim().length < 8) {
+      setError("Please enter complete knowledge details (minimum 8 characters).")
       return
     }
 
-    try{
+    // Check duplicate similar titles or content
+    const dup = (knowledge || []).find((k: any) => {
+      if (selected && k.id === selected.id) return false
+      const parsedK = parseKnowledge(k)
+      const titleMatch = parsedK.title.toLowerCase().trim() === finalTitle.toLowerCase().trim()
+      const contentMatch = (k.content || "").toLowerCase().trim().includes(finalContent.toLowerCase().trim()) ||
+                           finalContent.toLowerCase().trim().includes((k.content || "").toLowerCase().trim())
+      return titleMatch || contentMatch
+    })
+
+    if (dup) {
+      setDuplicateFound(dup)
+      setStatusToSave(statusOverride || "Ready")
+    } else {
+      executeSave(finalTitle, finalContent, finalCategory, statusOverride || "Ready")
+    }
+  }
+
+  const executeSave = async (titleVal: string, contentVal: string, categoryVal: string, statusVal: string, idToUpdate?: string) => {
+    try {
       setLoading(true)
       setError("")
 
-      const finalStatus = overrideStatus || status || "Ready"
-      const generatedPurpose = getFallbackPurpose(title, category)
-      const serializedTitle = serializeKnowledgeTitle(title, category, source, finalStatus, generatedPurpose)
+      const generatedPurpose = getFallbackPurpose(titleVal, categoryVal)
+      const serializedTitle = serializeKnowledgeTitle(titleVal, categoryVal, source, statusVal, generatedPurpose)
+      
+      const finalId = idToUpdate || (selected ? selected.id : null)
 
-      if(selected){
-        await api.put(`/api/knowledge/${selected.id}`,{
+      if (finalId) {
+        await api.put(`/api/knowledge/${finalId}`, {
           title: serializedTitle,
-          content,
+          content: contentVal,
           clientId: clientId || undefined
         })
-      }else{
-        await api.post("/api/knowledge",{
+      } else {
+        await api.post("/api/knowledge", {
           title: serializedTitle,
-          content,
+          content: contentVal,
           clientId: clientId || undefined
         })
       }
 
-      setTitle("")
-      setContent("")
+      resetFormStates()
+      setDuplicateFound(null)
       onClose()
-    }catch(err:any){
-      console.error("Error saving knowledge:", err)
+    } catch (err: any) {
+      console.error("Save error:", err)
       setError(
         err?.response?.data?.message ||
-        "Something went wrong"
+        "Failed to save knowledge"
       )
-    }finally{
+    } finally {
       setLoading(false)
     }
   }
@@ -105,37 +523,375 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     }
   }
 
-  return(
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[4px] flex items-center justify-center z-50 px-4">
-      <div className="w-full max-w-xl h-[90vh] max-h-[720px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
-        {/* Fixed Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
-          <h2 className="text-base font-semibold text-slate-900">
-            {selected ? "Edit Knowledge Entry" : "Add Knowledge Entry"}
-          </h2>
-          <button onClick={onClose} className="text-slate-450 hover:text-slate-650 transition-colors p-1 hover:bg-slate-50 rounded">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+  /* ============================= */
+  /* REAL-TIME AI PREVIEW */
+  /* ============================= */
+  const generateLiveSummary = () => {
+    const { title: tVal, content: cVal } = compileForm(formType, getFieldsState())
+    if (!tVal.trim() || cVal.trim().length < 4) {
+      return "Start typing details on the left to see what the AI will learn..."
+    }
 
-        {/* Scrollable Form Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-          {error && (
-            <p className="text-xs text-rose-650 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
-              {error}
-            </p>
-          )}
+    switch (formType) {
+      case "company":
+        return `The AI will learn that the business is named "${companyName || "(Not specified)"}". It will understand that: "${companyAbout || "(Not specified)"}". It will introduce the business using the mission statement: "${companyMission || "(Not specified)"}", and communicate in a "${companyBrandVoice || "(Not specified)"}" tone.`
+      case "product":
+        return `The AI will learn about the product "${productName || "(Not specified)"}". It will explain: "${productDescription || "(Not specified)"}" and highlight the features: "${productFeatures || "(Not specified)"}".`
+      case "pricing":
+        return `The AI will know about the plan "${pricingPlanName || "(Not specified)"}" priced at "${pricingPrice || "(Not specified)"}" on a ${pricingBillingCycle} cycle. It will explain it includes features: "${pricingFeatures || "(Not specified)"}".`
+      case "faq":
+        return `When asked "${faqQuestion || "(Not specified)"}", the AI will answer directly: "${faqAnswer || "(Not specified)"}".`
+      case "policy":
+        return `The AI will master the policy "${policyName || "(Not specified)"}": "${policyContent || "(Not specified)"}" and apply it when questions arise.`
+      case "script":
+        return `For the scenario "${scriptScenario || "(Not specified)"}", the AI will follow the script: "${scriptText || "(Not specified)"}".`
+      case "document":
+        return `The AI will refer to document "${documentTitle || "(Not specified)"}" with internal notes: "${documentNotes || "(Not specified)"}".`
+      case "website":
+        return `The AI will reference content crawling at "${websiteUrl || "(Not specified)"}" matching scope "${websiteCrawlScope}" with notes: "${websiteNotes || "(Not specified)"}".`
+      case "custom":
+      default:
+        return `The AI will learn about "${customTitle || "(Not specified)"}": "${customKnowledge || "(Not specified)"}".`
+    }
+  }
 
-          <div className="space-y-6">
-            {/* Category Select */}
+  const renderCategoryForm = () => {
+    switch (formType) {
+      case "company":
+        return (
+          <div className="space-y-4">
             <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
-                Category
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Company Name
+              </label>
+              <input
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="e.g. Acme Corp"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                About
+              </label>
+              <textarea
+                value={companyAbout}
+                onChange={(e) => setCompanyAbout(e.target.value)}
+                placeholder="e.g. Acme Corp is a global leader in providing premium enterprise widgets..."
+                rows={3}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Mission
+              </label>
+              <textarea
+                value={companyMission}
+                onChange={(e) => setCompanyMission(e.target.value)}
+                placeholder="e.g. To accelerate the transition to sustainable materials..."
+                rows={2}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Brand Voice
+              </label>
+              <input
+                value={companyBrandVoice}
+                onChange={(e) => setCompanyBrandVoice(e.target.value)}
+                placeholder="e.g. Professional, authoritative, yet warm and accessible"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "product":
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Product Name
+              </label>
+              <input
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
+                placeholder="e.g. Premium Widget Pro"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Description
+              </label>
+              <textarea
+                value={productDescription}
+                onChange={(e) => setProductDescription(e.target.value)}
+                placeholder="e.g. High-performance industrial grade widgets designed for modern systems..."
+                rows={4}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Features
+              </label>
+              <textarea
+                value={productFeatures}
+                onChange={(e) => setProductFeatures(e.target.value)}
+                placeholder="e.g. 10x durability, water resistant, lifetime warranty"
+                rows={3}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "pricing":
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Plan Name
+              </label>
+              <input
+                value={pricingPlanName}
+                onChange={(e) => setPricingPlanName(e.target.value)}
+                placeholder="e.g. Enterprise Plan"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Price
+                </label>
+                <input
+                  value={pricingPrice}
+                  onChange={(e) => setPricingPrice(e.target.value)}
+                  placeholder="e.g. $99/mo"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Billing Cycle
+                </label>
+                <select
+                  value={pricingBillingCycle}
+                  onChange={(e) => setPricingBillingCycle(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                  <option value="one-time">One-time</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Included Features
+              </label>
+              <textarea
+                value={pricingFeatures}
+                onChange={(e) => setPricingFeatures(e.target.value)}
+                placeholder="e.g. Custom integration, Dedicated manager, 99.9% uptime SLA"
+                rows={3}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "faq":
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Question
+              </label>
+              <input
+                value={faqQuestion}
+                onChange={(e) => setFaqQuestion(e.target.value)}
+                placeholder="e.g. What is your return policy?"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Answer
+              </label>
+              <textarea
+                value={faqAnswer}
+                onChange={(e) => setFaqAnswer(e.target.value)}
+                placeholder="e.g. Customers can return any unused item within 30 days for a full refund..."
+                rows={7}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "policy":
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Policy Name
+              </label>
+              <input
+                value={policyName}
+                onChange={(e) => setPolicyName(e.target.value)}
+                placeholder="e.g. Refund & Exchange Policy"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Policy Content
+              </label>
+              <textarea
+                value={policyContent}
+                onChange={(e) => setPolicyContent(e.target.value)}
+                placeholder="e.g. Detailed rules governing refunds, exchanges, restocking fees..."
+                rows={7}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "script":
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Scenario
+              </label>
+              <input
+                value={scriptScenario}
+                onChange={(e) => setScriptScenario(e.target.value)}
+                placeholder="e.g. Customer objects to yearly lock-in"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Script
+              </label>
+              <textarea
+                value={scriptText}
+                onChange={(e) => setScriptText(e.target.value)}
+                placeholder="e.g. I completely understand. However, the yearly commitment allows us to..."
+                rows={7}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "document":
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Title
+              </label>
+              <input
+                value={documentTitle}
+                onChange={(e) => setDocumentTitle(e.target.value)}
+                placeholder="e.g. Q3 Sales Performance Deck Summary"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Notes
+              </label>
+              <textarea
+                value={documentNotes}
+                onChange={(e) => setDocumentNotes(e.target.value)}
+                placeholder="e.g. Core takeaways and metrics from the performance slides..."
+                rows={7}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "website":
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Website URL
+              </label>
+              <input
+                value={websiteUrl}
+                onChange={(e) => setWebsiteUrl(e.target.value)}
+                placeholder="e.g. https://example.com/docs"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Crawl Scope
               </label>
               <select
-                value={category}
-                onChange={(e)=>setCategory(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer"
+                value={websiteCrawlScope}
+                onChange={(e) => setWebsiteCrawlScope(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
+              >
+                <option value="domain">Entire Domain</option>
+                <option value="subpath">Only this subpath</option>
+                <option value="single">Single Page Only</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Notes
+              </label>
+              <textarea
+                value={websiteNotes}
+                onChange={(e) => setWebsiteNotes(e.target.value)}
+                placeholder="e.g. Ignore blog posts, crawl support docs only..."
+                rows={3}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+          </div>
+        )
+      case "custom":
+      default:
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Title
+              </label>
+              <input
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="e.g. Uncategorized Business Fact"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Knowledge
+              </label>
+              <textarea
+                value={customKnowledge}
+                onChange={(e) => setCustomKnowledge(e.target.value)}
+                placeholder="Enter facts, workflows, or answers..."
+                rows={8}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Target Category (Hidden Tag)
+              </label>
+              <select
+                value={customCategory}
+                onChange={(e)=>setCustomCategory(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
               >
                 <option value="Company">Company</option>
                 <option value="Products">Products</option>
@@ -148,33 +904,209 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 <option value="Custom">Custom</option>
               </select>
             </div>
+          </div>
+        )
+    }
+  }
 
-            {/* Title (Notion Style) */}
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
-                Title
-              </label>
-              <input
-                value={title}
-                onChange={(e)=>setTitle(e.target.value)}
-                placeholder="Untitled Entry"
-                className="w-full text-lg font-bold text-slate-900 placeholder-slate-300 focus:outline-none py-1 border-b border-transparent focus:border-slate-100 transition-all"
-              />
-            </div>
-
-            {/* Richer Editor for Knowledge Content */}
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
-                Knowledge Content
-              </label>
-              <textarea
-                value={content}
-                onChange={(e)=>setContent(e.target.value)}
-                placeholder="Write specific facts, processes, scripts, or guidelines here..."
-                className="w-full min-h-[300px] border border-slate-200/80 rounded-xl p-4 text-[14px] leading-relaxed text-slate-800 bg-slate-50/30 hover:bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-900 transition-all placeholder-slate-400 resize-y font-normal"
-              />
+  return(
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[4px] flex items-center justify-center z-50 px-4">
+      <div className="w-full max-w-5xl h-[90vh] max-h-[750px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden relative">
+        
+        {/* Duplicate Warning Prompt */}
+        {duplicateFound && (
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4">
+              <h3 className="text-base font-bold text-slate-900">
+                Potential Duplicate Detected
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                A similar entry titled <span className="font-semibold text-slate-800">"{parseKnowledge(duplicateFound).title}"</span> already exists in your library.
+              </p>
+              <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-[11px] text-slate-650 max-h-32 overflow-y-auto font-mono whitespace-pre-wrap">
+                {duplicateFound.content}
+              </div>
+              <div className="flex flex-col gap-2 pt-2">
+                <button
+                  onClick={() => {
+                    executeSave(
+                      compileForm(formType, getFieldsState()).title,
+                      compileForm(formType, getFieldsState()).content,
+                      compileForm(formType, getFieldsState()).category,
+                      statusToSave,
+                      duplicateFound.id
+                    )
+                  }}
+                  className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer"
+                >
+                  Update Existing Entry
+                </button>
+                <button
+                  onClick={() => {
+                    executeSave(
+                      compileForm(formType, getFieldsState()).title,
+                      compileForm(formType, getFieldsState()).content,
+                      compileForm(formType, getFieldsState()).category,
+                      statusToSave
+                    )
+                  }}
+                  className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Create New Entry
+                </button>
+                <button
+                  onClick={() => setDuplicateFound(null)}
+                  className="w-full py-2 text-slate-500 hover:text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
+        )}
+
+        {/* Fixed Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
+          <h2 className="text-base font-semibold text-slate-900">
+            {selected ? "Edit Knowledge Entry" : "Add Knowledge Entry"}
+          </h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-655 transition-colors p-1 hover:bg-slate-50 rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Scrollable Form + Preview Body */}
+        <div className="flex-1 overflow-y-auto flex flex-col md:flex-row p-6 gap-6">
+          
+          {/* Left Column (Forms) */}
+          <div className="flex-1 space-y-6 md:pr-6 md:border-r border-slate-100">
+            {error && (
+              <p className="text-xs text-rose-650 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
+                {error}
+              </p>
+            )}
+
+            {/* Template Select Dropdown */}
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
+                Knowledge Template
+              </label>
+              <select
+                value={formType}
+                onChange={(e)=>{
+                  setFormType(e.target.value)
+                  setError("")
+                }}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-semibold"
+              >
+                <option value="company">Company Profile (About, Voice, Mission)</option>
+                <option value="product">Standard Product (Description, Features)</option>
+                <option value="pricing">Pricing Plan (Price, Billing Cycle, Limits)</option>
+                <option value="faq">FAQ (Customer Question & Answer)</option>
+                <option value="policy">Business Policy (Terms, Refunds, Exchanges)</option>
+                <option value="script">Outbound/Sales Script (Scenarios, Responses)</option>
+                <option value="document">Offline Document Summary (Title, Internal Notes)</option>
+                <option value="website">External Website (URL, Crawling Instructions)</option>
+                <option value="custom">Custom Fact (Freeform Text)</option>
+              </select>
+            </div>
+
+            {/* Subform rendering */}
+            <div className="pt-2">
+              {renderCategoryForm()}
+            </div>
+          </div>
+
+          {/* Right Column (AI Panel & Live Preview) */}
+          <div className="w-full md:w-80 shrink-0 flex flex-col gap-5">
+            
+            {/* AI Assist Action Card */}
+            <div className="bg-slate-50/50 border border-slate-200/80 rounded-xl p-4 space-y-3">
+              <div>
+                <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600 fill-purple-100" />
+                  AI Assist
+                </h3>
+                <p className="text-[10px] text-slate-450 mt-1">
+                  Draft rough notes. Improve formatting, grammar, and layouts instantly.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleImproveWithAI}
+                disabled={isAIImproving}
+                className={`w-full py-2 px-3 border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all text-slate-700 shadow-sm cursor-pointer ${
+                  isAIImproving ? "animate-pulse border-purple-200 text-purple-600 bg-purple-50/50" : ""
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                {isAIImproving ? "Improving text..." : "Improve with AI"}
+              </button>
+            </div>
+
+            {/* Auto Category Suggestions Notice */}
+            {categorySuggestion && (
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 space-y-1.5 shadow-sm">
+                <div className="font-semibold flex items-center gap-1">
+                  <span>💡 Auto-suggesting Category</span>
+                </div>
+                <p className="text-[11px] text-amber-700">
+                  Based on your input, this text matches <span className="font-bold text-amber-800">"{categorySuggestion.toUpperCase()}"</span>.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const currentPrimaryValue = (
+                      formType === "company" ? companyName :
+                      formType === "product" ? productName :
+                      formType === "pricing" ? pricingPlanName :
+                      formType === "faq" ? faqQuestion :
+                      formType === "policy" ? policyName :
+                      formType === "script" ? scriptScenario :
+                      formType === "document" ? documentTitle :
+                      formType === "website" ? websiteUrl :
+                      customTitle
+                    )
+                    
+                    setFormType(categorySuggestion)
+                    
+                    if (categorySuggestion === "company") setCompanyName(currentPrimaryValue)
+                    else if (categorySuggestion === "product") setProductName(currentPrimaryValue)
+                    else if (categorySuggestion === "pricing") setPricingPlanName(currentPrimaryValue)
+                    else if (categorySuggestion === "faq") setFaqQuestion(currentPrimaryValue)
+                    else if (categorySuggestion === "policy") setPolicyName(currentPrimaryValue)
+                    else if (categorySuggestion === "script") setScriptScenario(currentPrimaryValue)
+                    else if (categorySuggestion === "document") setDocumentTitle(currentPrimaryValue)
+                    else if (categorySuggestion === "website") setWebsiteUrl(currentPrimaryValue)
+                    
+                    setCategorySuggestion(null)
+                  }}
+                  className="text-[10px] font-bold underline text-amber-900 hover:text-amber-950 transition-colors cursor-pointer"
+                >
+                  Switch Category Form
+                </button>
+              </div>
+            )}
+
+            {/* What your AI will learn real-time preview card */}
+            <div className="bg-slate-900 border border-slate-950 rounded-xl p-4 flex-1 flex flex-col justify-between text-white shadow-inner">
+              <div className="space-y-2">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
+                  What your AI will learn
+                </span>
+                <div className="text-xs text-slate-300 leading-relaxed font-normal whitespace-pre-wrap max-h-[160px] md:max-h-none overflow-y-auto">
+                  {generateLiveSummary()}
+                </div>
+              </div>
+              <div className="pt-3 border-t border-slate-800 text-[10px] text-slate-400 mt-4 flex items-center gap-1 shrink-0 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Live Brain Preview
+              </div>
+            </div>
+
+          </div>
+
         </div>
 
         {/* Fixed Footer Actions */}
@@ -184,7 +1116,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               type="button"
               onClick={handleDeleteClick}
               disabled={loading}
-              className="mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-all text-center"
+              className="mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-55 hover:text-rose-700 transition-all text-center cursor-pointer"
             >
               Delete
             </button>
@@ -193,23 +1125,23 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
           <button
             onClick={onClose}
             disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-50 text-slate-700 hover:bg-slate-100 transition-all"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-50 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer border border-slate-200/50"
           >
             Cancel
           </button>
 
           <button
-            onClick={() => handleSubmit("Draft")}
+            onClick={() => handleSaveAttempt("Draft")}
             disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all cursor-pointer"
           >
             Save Draft
           </button>
 
           <button
-            onClick={() => handleSubmit("Ready")}
+            onClick={() => handleSaveAttempt("Ready")}
             disabled={loading}
-            className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 transition-all shadow-sm border border-slate-950"
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 transition-all shadow-sm border border-slate-950 cursor-pointer"
           >
             {selected ? "Save Changes" : "Save Knowledge"}
           </button>

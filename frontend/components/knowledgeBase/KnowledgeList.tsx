@@ -458,6 +458,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
           selected={selected}
           clientId={clientId}
           onDelete={handleDelete}
+          knowledge={knowledge}
         />
 
         <ImportKnowledgeModal
@@ -700,6 +701,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         selected={selected}
         clientId={clientId}
         onDelete={handleDelete}
+        knowledge={knowledge}
       />
 
       <ImportKnowledgeModal

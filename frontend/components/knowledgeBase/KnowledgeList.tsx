@@ -588,6 +588,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
           onClose={handleImportClose}
           onImportSuccess={fetchKnowledge}
           clientId={clientId}
+          knowledge={knowledge}
         />
 
         {/* Sliding Panel Details */}
@@ -868,6 +869,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         onClose={handleImportClose}
         onImportSuccess={fetchKnowledge}
         clientId={clientId}
+        knowledge={knowledge}
       />
 
       {/* Sliding Panel Details */}

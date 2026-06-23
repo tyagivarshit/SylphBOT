@@ -3,11 +3,81 @@
 import { useState, useEffect } from "react"
 import { api } from "@/lib/api"
 import { parseKnowledge, serializeKnowledgeTitle, getFallbackPurpose } from "./KnowledgeList"
-import { X, Sparkles } from "lucide-react"
+import { 
+  X, 
+  Sparkles, 
+  Briefcase, 
+  ShoppingBag, 
+  DollarSign, 
+  HelpCircle, 
+  ShieldCheck, 
+  Megaphone, 
+  FileText, 
+  Globe, 
+  Folder 
+} from "lucide-react"
 
-export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "", onDelete, knowledge = [] }: any){
+const KNOWLEDGE_TYPES = [
+  {
+    type: "company",
+    title: "Company",
+    desc: "Teach your AI about your business identity, mission, and brand voice.",
+    icon: Briefcase
+  },
+  {
+    type: "product",
+    title: "Products",
+    desc: "Teach your AI about your products, features, and core service details.",
+    icon: ShoppingBag
+  },
+  {
+    type: "pricing",
+    title: "Pricing",
+    desc: "Teach your AI about plans, billing cycle, price lists, and pricing tiers.",
+    icon: DollarSign
+  },
+  {
+    type: "faq",
+    title: "FAQ",
+    desc: "Teach your AI answers to frequently asked customer questions.",
+    icon: HelpCircle
+  },
+  {
+    type: "policy",
+    title: "Policies",
+    desc: "Teach your AI business rules, refund guidelines, and terms.",
+    icon: ShieldCheck
+  },
+  {
+    type: "script",
+    title: "Scripts",
+    desc: "Teach your AI sales scripts, outbound responses, and pitches.",
+    icon: Megaphone
+  },
+  {
+    type: "document",
+    title: "Documents",
+    desc: "Ingest and summarize offline files, spreadsheets, and manuals.",
+    icon: FileText
+  },
+  {
+    type: "website",
+    title: "Website",
+    desc: "Crawl web links to import public pages directly into AI memory.",
+    icon: Globe
+  },
+  {
+    type: "custom",
+    title: "Custom Knowledge",
+    desc: "Configure general custom facts, custom lists, and notes.",
+    icon: Folder
+  }
+]
+
+export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "", onDelete, knowledge = [], initialType = null }: any){
 
   const [formType, setFormType] = useState("custom")
+  const [selectedType, setSelectedType] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [isAIImproving, setIsAIImproving] = useState(false)
@@ -279,6 +349,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       
       resetFormStates()
       setFormType(decompiled.type)
+      setSelectedType(decompiled.type)
       
       if (decompiled.type === "company") {
         setCompanyName(decompiled.fields.companyName || "")
@@ -316,14 +387,20 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
         setCustomCategory(decompiled.fields.customCategory || "Custom")
       }
     } else {
-      setFormType("custom")
+      if (initialType) {
+        setFormType(initialType)
+        setSelectedType(initialType)
+      } else {
+        setFormType("custom")
+        setSelectedType(null)
+      }
       resetFormStates()
     }
     setError("")
     setDuplicateFound(null)
     setCategorySuggestion(null)
     setShowDeleteConfirm(false)
-  },[selected, open])
+  },[selected, open, initialType])
 
   /* ============================= */
   /* AUTO CATEGORY SUGGESTION */
@@ -391,7 +468,6 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
         .replace(/\bcust\b/gi, "customer")
         .replace(/\bqa\b/gi, "questions and answers")
       
-      // Capitalize first letter of sentences
       cleaned = cleaned.replace(/(^\s*|[.!?]\s+)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase())
       return cleaned.trim()
     }
@@ -451,7 +527,6 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       return
     }
 
-    // Check duplicate similar titles or content
     const dup = (knowledge || []).find((k: any) => {
       if (selected && k.id === selected.id) return false
       const parsedK = parseKnowledge(k)
@@ -495,6 +570,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
 
       resetFormStates()
       setDuplicateFound(null)
+      setSelectedType(null)
       onClose()
     } catch (err: any) {
       console.error("Save error:", err)
@@ -612,7 +688,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
             </div>
             <div>
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                About
+                About Company
               </label>
               <textarea
                 value={companyAbout}
@@ -629,20 +705,21 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               <textarea
                 value={companyMission}
                 onChange={(e) => setCompanyMission(e.target.value)}
-                placeholder="e.g. To accelerate the transition to sustainable materials..."
+                placeholder="e.g. To accelerate the transition to sustainable widgets..."
                 rows={2}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
             <div>
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                Brand Voice
+                Vision
               </label>
-              <input
-                value={companyBrandVoice}
+              <textarea
+                value={companyBrandVoice} // Reused vision / voice fields safely
                 onChange={(e) => setCompanyBrandVoice(e.target.value)}
-                placeholder="e.g. Professional, authoritative, yet warm and accessible"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                placeholder="e.g. To make high-performance widgets accessible to every business."
+                rows={2}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -913,7 +990,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
             </div>
             <div>
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                Knowledge
+                Knowledge Content
               </label>
               <textarea
                 value={customKnowledge}
@@ -950,7 +1027,9 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
 
   return(
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[4px] flex items-center justify-center z-50 px-4">
-      <div className="w-full max-w-5xl h-[90vh] max-h-[750px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden relative">
+      <div className={`w-full bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden relative transition-all duration-300 ${
+        selectedType === null ? "max-w-3xl" : "max-w-5xl h-[90vh] max-h-[750px] flex flex-col"
+      }`}>
         
         {/* Duplicate Warning Prompt */}
         {duplicateFound && (
@@ -989,7 +1068,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                       statusToSave
                     )
                   }}
-                  className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-55 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                 >
                   Create New Entry
                 </button>
@@ -1048,187 +1127,241 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
           </div>
         )}
 
-        {/* Fixed Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
-          <h2 className="text-base font-semibold text-slate-900">
-            {selected ? "Edit Knowledge Entry" : "Add Knowledge Entry"}
-          </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-655 transition-colors p-1 hover:bg-slate-50 rounded">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Scrollable Form + Preview Body */}
-        <div className="flex-1 overflow-y-auto flex flex-col md:flex-row p-6 gap-6">
-          
-          {/* Left Column (Forms) */}
-          <div className="flex-1 space-y-6 md:pr-6 md:border-r border-slate-100">
-            {error && (
-              <p className="text-xs text-rose-650 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
-                {error}
-              </p>
-            )}
-
-            {/* Template Select Dropdown */}
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
-                Knowledge Template
-              </label>
-              <select
-                value={formType}
-                onChange={(e)=>{
-                  setFormType(e.target.value)
-                  setError("")
-                }}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-semibold"
-              >
-                <option value="company">Company Profile (About, Voice, Mission)</option>
-                <option value="product">Standard Product (Description, Features)</option>
-                <option value="pricing">Pricing Plan (Price, Billing Cycle, Limits)</option>
-                <option value="faq">FAQ (Customer Question & Answer)</option>
-                <option value="policy">Business Policy (Terms, Refunds, Exchanges)</option>
-                <option value="script">Outbound/Sales Script (Scenarios, Responses)</option>
-                <option value="document">Offline Document Summary (Title, Internal Notes)</option>
-                <option value="website">External Website (URL, Crawling Instructions)</option>
-                <option value="custom">Custom Fact (Freeform Text)</option>
-              </select>
-            </div>
-
-            {/* Subform rendering */}
-            <div className="pt-2">
-              {renderCategoryForm()}
-            </div>
-          </div>
-
-          {/* Right Column (AI Panel & Live Preview) */}
-          <div className="w-full md:w-80 shrink-0 flex flex-col gap-5">
-            
-            {/* AI Assist Action Card */}
-            <div className="bg-slate-50/50 border border-slate-200/80 rounded-xl p-4 space-y-3">
+        {/* =====================================================
+        STEP 1: CHOOSE KNOWLEDGE TYPE
+        ===================================================== */}
+        {selectedType === null ? (
+          <div className="flex flex-col h-full max-h-[85vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
               <div>
-                <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-purple-650 fill-purple-100" />
-                  AI Assist
-                </h3>
-                <p className="text-[10px] text-slate-450 mt-1">
-                  Draft rough notes. Improve formatting, grammar, and layouts instantly.
-                </p>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">Step 1 of 2</span>
+                <h2 className="text-base font-bold text-slate-900 mt-0.5">
+                  Choose Knowledge Type
+                </h2>
               </div>
-
-              <button
-                type="button"
-                onClick={handleImproveWithAI}
-                disabled={isAIImproving}
-                className={`w-full py-2 px-3 border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all text-slate-700 shadow-sm cursor-pointer ${
-                  isAIImproving ? "animate-pulse border-purple-200 text-purple-600 bg-purple-50/50" : ""
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                {isAIImproving ? "Improving text..." : "Improve with AI"}
+              <button onClick={onClose} className="text-slate-400 hover:text-slate-650 p-1 rounded hover:bg-slate-50">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Auto Category Suggestions Notice */}
-            {categorySuggestion && (
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 space-y-1.5 shadow-sm">
-                <div className="font-semibold flex items-center gap-1">
-                  <span>💡 Auto-suggesting Category</span>
+            {/* Selection Grid */}
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {KNOWLEDGE_TYPES.map((typeObj) => {
+                const IconComp = typeObj.icon
+                return (
+                  <div
+                    key={typeObj.type}
+                    onClick={() => {
+                      setFormType(typeObj.type)
+                      setSelectedType(typeObj.type)
+                      setError("")
+                    }}
+                    className="p-4 border border-slate-200 hover:border-slate-400 hover:shadow-sm rounded-xl cursor-pointer transition-all flex flex-col items-start gap-3 bg-white"
+                  >
+                    <div className="p-2 rounded-lg bg-slate-50 text-slate-800 border border-slate-100">
+                      <IconComp className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">{typeObj.title}</h4>
+                      <p className="text-[10px] text-slate-450 leading-relaxed mt-1">{typeObj.desc}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Guidance: Pick the template that matches your facts.</span>
+              <button 
+                onClick={onClose}
+                className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* =====================================================
+          STEP 2: FOCUSED EDITOR
+          ===================================================== */
+          <div className="h-full flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                {!selected && (
+                  <button 
+                    onClick={() => {
+                      setSelectedType(null)
+                      setError("")
+                    }}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 mr-2 hover:bg-slate-50 px-2 py-1 rounded transition-all cursor-pointer"
+                  >
+                    ← Back
+                  </button>
+                )}
+                <div>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-slate-450 block">
+                    {selected ? "Edit Entry" : "Step 2 of 2"}
+                  </span>
+                  <h2 className="text-sm font-bold text-slate-900 mt-0.5 capitalize">
+                    {formType} Editor
+                  </h2>
                 </div>
-                <p className="text-[11px] text-amber-700">
-                  Based on your input, this text matches <span className="font-bold text-amber-800">"{categorySuggestion.toUpperCase()}"</span>.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const currentPrimaryValue = (
-                      formType === "company" ? companyName :
-                      formType === "product" ? productName :
-                      formType === "pricing" ? pricingPlanName :
-                      formType === "faq" ? faqQuestion :
-                      formType === "policy" ? policyName :
-                      formType === "script" ? scriptScenario :
-                      formType === "document" ? documentTitle :
-                      formType === "website" ? websiteUrl :
-                      customTitle
-                    )
-                    
-                    setFormType(categorySuggestion)
-                    
-                    if (categorySuggestion === "company") setCompanyName(currentPrimaryValue)
-                    else if (categorySuggestion === "product") setProductName(currentPrimaryValue)
-                    else if (categorySuggestion === "pricing") setPricingPlanName(currentPrimaryValue)
-                    else if (categorySuggestion === "faq") setFaqQuestion(currentPrimaryValue)
-                    else if (categorySuggestion === "policy") setPolicyName(currentPrimaryValue)
-                    else if (categorySuggestion === "script") setScriptScenario(currentPrimaryValue)
-                    else if (categorySuggestion === "document") setDocumentTitle(currentPrimaryValue)
-                    else if (categorySuggestion === "website") setWebsiteUrl(currentPrimaryValue)
-                    
-                    setCategorySuggestion(null)
-                  }}
-                  className="text-[10px] font-bold underline text-amber-900 hover:text-amber-950 transition-colors cursor-pointer"
-                >
-                  Switch Category Form
-                </button>
               </div>
-            )}
-
-            {/* What your AI will learn real-time preview card */}
-            <div className="bg-slate-900 border border-slate-950 rounded-xl p-4 flex-1 flex flex-col justify-between text-white shadow-inner">
-              <div className="space-y-2">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
-                  What your AI will learn
-                </span>
-                <div className="text-xs text-slate-300 leading-relaxed font-normal whitespace-pre-wrap max-h-[160px] md:max-h-none overflow-y-auto">
-                  {generateLiveSummary()}
-                </div>
-              </div>
-              <div className="pt-3 border-t border-slate-800 text-[10px] text-slate-400 mt-4 flex items-center gap-1 shrink-0 font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Live Brain Preview
-              </div>
+              <button onClick={onClose} className="text-slate-400 hover:text-slate-655 p-1 rounded hover:bg-slate-50">
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
+            {/* Ingestion Split Panels */}
+            <div className="flex-1 overflow-y-auto flex flex-col md:flex-row p-6 gap-6">
+              
+              {/* Left Column (Forms) */}
+              <div className="flex-1 space-y-6 md:pr-6 md:border-r border-slate-100">
+                {error && (
+                  <p className="text-xs text-rose-650 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2 shrink-0 font-medium">
+                    {error}
+                  </p>
+                )}
+
+                <div className="pt-1">
+                  {renderCategoryForm()}
+                </div>
+              </div>
+
+              {/* Right Column (AI Panel & Live Preview) */}
+              <div className="w-full md:w-80 shrink-0 flex flex-col gap-5">
+                
+                {/* AI Assist Action Card */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-650 fill-purple-100" />
+                      AI Assist
+                    </h3>
+                    <p className="text-[10px] text-slate-450 mt-1">
+                      Draft rough notes. Improve formatting, vision layout, and syntax instantly.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleImproveWithAI}
+                    disabled={isAIImproving}
+                    className={`w-full py-2 px-3 border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all text-slate-700 shadow-sm cursor-pointer ${
+                      isAIImproving ? "animate-pulse border-purple-200 text-purple-600 bg-purple-50/50" : ""
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-purple-650" />
+                    {isAIImproving ? "Refining facts..." : "Improve with AI"}
+                  </button>
+                </div>
+
+                {/* Auto Category Suggestions Notice */}
+                {categorySuggestion && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 space-y-1.5 shadow-sm">
+                    <div className="font-semibold flex items-center gap-1">
+                      <span>💡 Suggested category change</span>
+                    </div>
+                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                      Matches the template <span className="font-bold text-amber-900">"{categorySuggestion.toUpperCase()}"</span>.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const currentPrimaryValue = (
+                          formType === "company" ? companyName :
+                          formType === "product" ? productName :
+                          formType === "pricing" ? pricingPlanName :
+                          formType === "faq" ? faqQuestion :
+                          formType === "policy" ? policyName :
+                          formType === "script" ? scriptScenario :
+                          formType === "document" ? documentTitle :
+                          formType === "website" ? websiteUrl :
+                          customTitle
+                        )
+                        
+                        setFormType(categorySuggestion)
+                        setSelectedType(categorySuggestion)
+                        
+                        if (categorySuggestion === "company") setCompanyName(currentPrimaryValue)
+                        else if (categorySuggestion === "product") setProductName(currentPrimaryValue)
+                        else if (categorySuggestion === "pricing") setPricingPlanName(currentPrimaryValue)
+                        else if (categorySuggestion === "faq") setFaqQuestion(currentPrimaryValue)
+                        else if (categorySuggestion === "policy") setPolicyName(currentPrimaryValue)
+                        else if (categorySuggestion === "script") setScriptScenario(currentPrimaryValue)
+                        else if (categorySuggestion === "document") setDocumentTitle(currentPrimaryValue)
+                        else if (categorySuggestion === "website") setWebsiteUrl(currentPrimaryValue)
+                        
+                        setCategorySuggestion(null)
+                      }}
+                      className="text-[10px] font-bold underline text-amber-900 hover:text-amber-950 transition-colors cursor-pointer"
+                    >
+                      Apply template switch
+                    </button>
+                  </div>
+                )}
+
+                {/* What your AI will learn real-time preview card */}
+                <div className="bg-slate-900 border border-slate-950 rounded-xl p-4 flex-1 flex flex-col justify-between text-white shadow-inner">
+                  <div className="space-y-2">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
+                      What your AI will learn
+                    </span>
+                    <div className="text-xs text-slate-300 leading-relaxed font-normal whitespace-pre-wrap max-h-[160px] md:max-h-none overflow-y-auto">
+                      {generateLiveSummary()}
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t border-slate-800 text-[10px] text-slate-400 mt-4 flex items-center gap-1 shrink-0 font-medium font-sans">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Live Brain Preview
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Fixed Footer Actions */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
+              {selected && (
+                <button
+                  type="button"
+                  onClick={handleDeleteClick}
+                  disabled={loading}
+                  className="mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-650 hover:bg-rose-50 hover:text-rose-700 transition-all text-center cursor-pointer"
+                >
+                  Delete
+                </button>
+              )}
+
+              <button
+                onClick={onClose}
+                disabled={loading}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-50 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer border border-slate-200/50"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => handleSaveAttempt("Draft")}
+                disabled={loading}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all cursor-pointer"
+              >
+                Save Draft
+              </button>
+
+              <button
+                onClick={() => handleSaveAttempt("Ready")}
+                disabled={loading}
+                className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 transition-all shadow-sm border border-slate-950 cursor-pointer"
+              >
+                {selected ? "Save Changes" : "Save Knowledge"}
+              </button>
+            </div>
           </div>
-
-        </div>
-
-        {/* Fixed Footer Actions */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
-          {selected && (
-            <button
-              type="button"
-              onClick={handleDeleteClick}
-              disabled={loading}
-              className="mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-650 hover:bg-rose-50 hover:text-rose-700 transition-all text-center cursor-pointer"
-            >
-              Delete
-            </button>
-          )}
-
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-50 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer border border-slate-200/50"
-          >
-            Cancel
-          </button>
-
-          <button
-            onClick={() => handleSaveAttempt("Draft")}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all cursor-pointer"
-          >
-            Save Draft
-          </button>
-
-          <button
-            onClick={() => handleSaveAttempt("Ready")}
-            disabled={loading}
-            className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 transition-all shadow-sm border border-slate-950 cursor-pointer"
-          >
-            {selected ? "Save Changes" : "Save Knowledge"}
-          </button>
-        </div>
+        )}
       </div>
     </div>
   )

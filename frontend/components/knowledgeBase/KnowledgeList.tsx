@@ -19,7 +19,9 @@ import {
   Settings, 
   ShieldCheck, 
   Folder,
-  FileText
+  FileText,
+  Globe,
+  Activity
 } from "lucide-react"
 
 /* =====================================================
@@ -191,6 +193,32 @@ export function parseKnowledge(item: any): KnowledgeMetadata {
   }
 }
 
+export function getTemplateType(item: any): string {
+  const parsed = parseKnowledge(item)
+  const rawContent = item.content || ""
+  const rawCategory = parsed.category
+  
+  if (rawContent.startsWith("Company Name:")) return "company"
+  if (rawContent.startsWith("Product Name:")) return "product"
+  if (rawContent.startsWith("Plan Name:")) return "pricing"
+  if (rawContent.startsWith("Question:")) return "faq"
+  if (rawContent.startsWith("Policy Name:")) return "policy"
+  if (rawContent.startsWith("Scenario:")) return "script"
+  if (rawContent.startsWith("Website URL:")) return "website"
+  if (rawContent.startsWith("Title:") && rawCategory === "Resources") return "document"
+
+  // Fallbacks for categories
+  const cat = (rawCategory || "").toLowerCase()
+  if (cat === "company") return "company"
+  if (cat === "products") return "product"
+  if (cat === "sales") return "script"
+  if (cat === "support") return "faq"
+  if (cat === "legal") return "policy"
+  if (cat === "resources") return "document"
+  
+  return "custom"
+}
+
 export function serializeKnowledgeTitle(title: string, category: string, source: string, status: string, purpose: string = ""): string {
   const escapedPurpose = (purpose || "").replace(/\|/g, " ").replace(/:/g, " ")
   return `__KB__category:${category}|source:${source}|status:${status}|purpose:${escapedPurpose}__KB__${title}`
@@ -201,48 +229,57 @@ BUSINESS-FIRST CATEGORY DEFINITIONS FOR SIDEBAR
 ===================================================== */
 const CATEGORY_DEFS = [
   {
+    type: "company",
     name: "Company",
     description: "Business identity & brand information",
     icon: Briefcase
   },
   {
+    type: "product",
     name: "Products",
-    description: "Products, services, plans & pricing details",
+    description: "Products, services & core details",
     icon: ShoppingBag
   },
   {
-    name: "Sales",
-    description: "Sales scripts, objections & offers",
+    type: "pricing",
+    name: "Pricing",
+    description: "Plans, billing cycle, and pricing lists",
     icon: DollarSign
   },
   {
-    name: "Support",
-    description: "Knowledge used to help customers",
+    type: "faq",
+    name: "FAQ",
+    description: "Common customer questions & answers",
     icon: HelpCircle
   },
   {
-    name: "Marketing",
-    description: "Campaign messaging & brand guidelines",
-    icon: Megaphone
-  },
-  {
-    name: "Operations",
-    description: "Internal SOPs & team workflows",
-    icon: Settings
-  },
-  {
-    name: "Legal",
-    description: "Policies, terms & compliance rules",
+    type: "policy",
+    name: "Policies",
+    description: "Business rules, refund policies, & terms",
     icon: ShieldCheck
   },
   {
-    name: "Resources",
-    description: "Imported documents & external content",
+    type: "script",
+    name: "Scripts",
+    description: "Sales scripts & conversation scenario dialogs",
+    icon: Megaphone
+  },
+  {
+    type: "document",
+    name: "Documents",
+    description: "Imported files and offline sheets/manuals",
     icon: FileText
   },
   {
+    type: "website",
+    name: "Website",
+    description: "Crawled website links and online pages",
+    icon: Globe
+  },
+  {
+    type: "custom",
     name: "Custom",
-    description: "Uncategorized business facts",
+    description: "Custom facts and notes",
     icon: Folder
   }
 ]
@@ -262,6 +299,10 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   const [knowledge,setKnowledge] = useState<any[]>([])
   const [loading,setLoading] = useState(false)
   const [deletingId,setDeletingId] = useState<string | null>(null)
+
+  // Drawer & Suggestion State
+  const [showHealthDrawer, setShowHealthDrawer] = useState(false)
+  const [activeInitialType, setActiveInitialType] = useState<string | null>(null)
 
   // Filters & State
   const [selectedCategory, setSelectedCategory] = useState("All Knowledge")
@@ -296,6 +337,45 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
     score += Math.min(5, (knowledge || []).length * 1)
     return Math.min(100, score)
+  }
+
+  const getMissingSuggestions = () => {
+    const suggestions = []
+    const allText = (knowledge || []).map(k => {
+      const parsed = parseKnowledge(k)
+      return `${parsed.title} ${k.content || ""}`.toLowerCase()
+    })
+
+    const hasCompany = allText.some(t => t.includes("company profile") || t.includes("company name:") || t.includes("about:") || t.includes("mission") || t.includes("brand voice"))
+    const hasPricing = allText.some(t => t.includes("pricing") || t.includes("plan name:") || t.includes("billing cycle:"))
+    const hasFaq = allText.some(t => t.includes("faq") || t.includes("question:") || t.includes("frequently asked"))
+    const hasRefundPolicy = allText.some(t => t.includes("refund policy") || t.includes("return policy") || t.includes("refunds"))
+    const hasSalesScript = allText.some(t => t.includes("sales script") || t.includes("conversation script") || t.includes("scenario:") || t.includes("script:"))
+    const hasShippingPolicy = allText.some(t => t.includes("shipping policy") || t.includes("shipping guidelines"))
+
+    if (!hasRefundPolicy) {
+      suggestions.push({ id: "refund", label: "Refund Policy", type: "policy" })
+    }
+    if (!hasPricing) {
+      suggestions.push({ id: "pricing", label: "Pricing", type: "pricing" })
+    }
+    if (!hasFaq) {
+      suggestions.push({ id: "faq", label: "Frequently Asked Questions", type: "faq" })
+    }
+    if (!hasSalesScript) {
+      suggestions.push({ id: "script", label: "Sales Script", type: "script" })
+    }
+    if (!hasShippingPolicy) {
+      suggestions.push({ id: "shipping", label: "Shipping Policy", type: "policy" })
+    }
+
+    return suggestions
+  }
+
+  const handleAddSuggestion = (type: string) => {
+    setSelected(null)
+    setActiveInitialType(type)
+    setOpen(true)
   }
 
   const analyzeMissingKnowledge = () => {
@@ -441,6 +521,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   const handleClose = () => {
     setOpen(false)
     setSelected(null)
+    setActiveInitialType(null)
     fetchKnowledge()
   }
 
@@ -457,7 +538,12 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
     // 1. Category Search
     if (selectedCategory !== "All Knowledge") {
-      if (meta.category !== selectedCategory) return false
+      const matchedCat = CATEGORY_DEFS.find(c => c.name === selectedCategory)
+      if (matchedCat) {
+        if (getTemplateType(item) !== matchedCat.type) return false
+      } else {
+        if (meta.category !== selectedCategory) return false
+      }
     }
 
     // 2. Global Text Search
@@ -581,6 +667,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
           clientId={clientId}
           onDelete={handleDelete}
           knowledge={knowledge}
+          initialType={activeInitialType}
         />
 
         <ImportKnowledgeModal
@@ -603,7 +690,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   
   // Group logic for "All Knowledge"
   const groupedSections = CATEGORY_DEFS.reduce((acc, cat) => {
-    const items = sortedKnowledge.filter(item => parseKnowledge(item).category === cat.name)
+    const items = sortedKnowledge.filter(item => getTemplateType(item) === cat.type)
     if (items.length > 0) {
       acc.push({ category: cat, items })
     }
@@ -630,8 +717,9 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
           </button>
           <button
             onClick={() => {
-              setSelected(null)
-              setOpen(true)
+              setSelected(null);
+              setActiveInitialType(null);
+              setOpen(true);
             }}
             className="inline-flex items-center justify-center px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all shadow-sm border border-slate-950"
           >
@@ -680,43 +768,6 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                 </button>
               )
             })}
-          </div>
-
-          {/* AI Memory Status Widget */}
-          <div className="mt-6 pt-6 border-t border-slate-100 space-y-4">
-            <div className="px-3">
-              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
-                Memory Completeness
-              </span>
-              <div className="flex items-baseline gap-1.5 mt-1">
-                <span className="text-xl font-bold text-slate-900">
-                  {calculateCompleteness()}%
-                </span>
-                <span className="text-xs text-slate-400 font-medium">Complete</span>
-              </div>
-              <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
-                <div 
-                  className="bg-slate-900 h-full rounded-full transition-all duration-500" 
-                  style={{ width: `${calculateCompleteness()}%` }}
-                />
-              </div>
-            </div>
-
-            {/* AI Diagnostics Warnings */}
-            {analyzeMissingKnowledge().length > 0 && (
-              <div className="px-3 space-y-2">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
-                  AI Memory Diagnostic
-                </span>
-                <div className="space-y-1.5">
-                  {analyzeMissingKnowledge().map((warning, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-200/50 rounded-lg p-2.5 text-[10px] text-slate-600 leading-normal font-medium">
-                      {warning}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -779,23 +830,154 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
             </div>
           </div>
 
+          {/* Knowledge Health Compact Card */}
+          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-center justify-between text-sm transition-all hover:shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
+                <Activity className="w-5 h-5 animate-pulse text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-800">Knowledge Health</h3>
+                <p className="text-xs text-slate-505 mt-0.5">
+                  Verify your AI's coverage & memory readiness.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <span className="text-base font-extrabold text-slate-900">
+                  {calculateCompleteness()}%
+                </span>
+                <span className="text-xs text-slate-450 font-medium ml-1">Complete</span>
+              </div>
+              <button
+                onClick={() => setShowHealthDrawer(true)}
+                className="px-3.5 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-850 transition-colors shadow-sm cursor-pointer"
+              >
+                View Details →
+              </button>
+            </div>
+          </div>
+
+          {/* Suggested Next Knowledge Banner */}
+          {knowledge.length > 0 && getMissingSuggestions().length > 0 && (
+            <div className="bg-purple-50/40 border border-purple-100 rounded-xl p-4 space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-650"></span>
+                  </span>
+                  <h3 className="text-xs font-bold text-purple-950">
+                    Suggested Next Knowledge
+                  </h3>
+                </div>
+                <span className="text-[10px] text-purple-600 font-semibold">
+                  Dynamic missing profiles
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {getMissingSuggestions().map((sugg) => (
+                  <button
+                    key={sugg.id}
+                    onClick={() => handleAddSuggestion(sugg.type)}
+                    className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-purple-200 hover:border-purple-300 text-purple-750 hover:text-purple-900 transition-all shadow-sm cursor-pointer gap-1.5"
+                  >
+                    <Plus className="w-3 h-3 text-purple-400" />
+                    + Add {sugg.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Cards Area & Empty States */}
-          {sortedKnowledge.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center py-20 px-4 bg-white border border-slate-200 rounded-xl max-w-md mx-auto my-8">
-              <p className="text-sm font-medium text-slate-900 mb-4">
-                {searchQuery ? "No matching entries found." : "No knowledge added yet."}
-              </p>
-              {!searchQuery && (
+          {knowledge.length === 0 ? (
+            /* Task 2: Educational Empty State */
+            <div className="bg-white border border-slate-200 rounded-2xl p-8 max-w-2xl mx-auto my-8 shadow-sm flex flex-col items-center text-center space-y-6">
+              <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center text-slate-800 relative">
+                <BookOpen className="w-8 h-8 text-slate-900" />
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-slate-900"></span>
+                </span>
+              </div>
+
+              <div className="space-y-2 max-w-md">
+                <h2 className="text-lg font-bold text-slate-950">
+                  Your AI has no business knowledge yet
+                </h2>
+                <p className="text-xs text-slate-500 leading-relaxed font-normal">
+                  Before your AI employees can answer questions, pitch plans, or resolve customer disputes, they need to learn about your business.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-150 rounded-xl p-5 w-full max-w-md text-left space-y-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-455 block mb-1">
+                  Teach your AI about:
+                </span>
+                <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-slate-700">
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-500 font-bold">✓</span>
+                    <span>Company</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-500 font-bold">✓</span>
+                    <span>Products</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-500 font-bold">✓</span>
+                    <span>Pricing</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-500 font-bold">✓</span>
+                    <span>FAQs</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-500 font-bold">✓</span>
+                    <span>Policies</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-500 font-bold">✓</span>
+                    <span>Documents</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-md pt-2">
                 <button
                   onClick={() => {
-                    setSelected(null)
-                    setOpen(true)
+                    setSelected(null);
+                    setActiveInitialType(null);
+                    setOpen(true);
                   }}
-                  className="inline-flex items-center justify-center px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all border border-slate-950 shadow-sm"
+                  className="w-full sm:flex-1 py-2.5 bg-slate-900 hover:bg-slate-805 text-white text-xs font-semibold rounded-lg shadow-sm border border-slate-950 transition-all cursor-pointer text-center"
                 >
-                  Add Knowledge
+                  Add First Knowledge
                 </button>
-              )}
+                <button
+                  onClick={() => setImportOpen(true)}
+                  className="w-full sm:flex-1 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-750 text-xs font-semibold rounded-lg shadow-sm transition-all cursor-pointer text-center"
+                >
+                  Import Existing Knowledge
+                </button>
+              </div>
+            </div>
+          ) : sortedKnowledge.length === 0 ? (
+            <div className="flex flex-col items-center justify-center text-center py-20 px-4 bg-white border border-slate-200 rounded-xl max-w-md mx-auto my-8">
+              <p className="text-sm font-medium text-slate-900 mb-4">
+                No matching entries found.
+              </p>
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setSourceFilter("All");
+                  setStatusFilter("All");
+                }}
+                className="text-xs font-bold text-slate-900 underline hover:text-slate-700"
+              >
+                Clear Search & Filters
+              </button>
             </div>
           ) : selectedCategory === "All Knowledge" ? (
             /* Grouped by selected category when All Knowledge is selected */
@@ -862,6 +1044,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         clientId={clientId}
         onDelete={handleDelete}
         knowledge={knowledge}
+        initialType={activeInitialType}
       />
 
       <ImportKnowledgeModal
@@ -874,6 +1057,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
       {/* Sliding Panel Details */}
       {renderPreviewDrawer()}
+      {renderHealthDrawer()}
     </div>
   )
 
@@ -1055,6 +1239,209 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
               </div>
             )
           })()}
+        </div>
+      </>
+    )
+  }
+
+  function renderHealthDrawer() {
+    return (
+      <>
+        {/* Backdrop overlay */}
+        {showHealthDrawer && (
+          <div
+            onClick={() => setShowHealthDrawer(false)}
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-40 transition-opacity duration-300"
+          />
+        )}
+
+        {/* Drawer Panel */}
+        <div
+          className={`fixed inset-y-0 right-0 w-full sm:w-[500px] bg-white border-l border-slate-200 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col ${
+            showHealthDrawer ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="h-full flex flex-col justify-between">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Knowledge Health Center
+              </span>
+              <button
+                onClick={() => setShowHealthDrawer(false)}
+                className="text-slate-400 hover:text-slate-655 p-1 rounded hover:bg-slate-50 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+              
+              {/* Memory Completeness score */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Memory Completeness
+                </label>
+                <div className="flex items-baseline gap-1.5 mt-2">
+                  <span className="text-3xl font-extrabold text-slate-900">
+                    {calculateCompleteness()}%
+                  </span>
+                  <span className="text-xs text-slate-500 font-semibold">Complete</span>
+                </div>
+                <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden border border-slate-200/50">
+                  <div 
+                    className="bg-slate-900 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${calculateCompleteness()}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Knowledge Coverage breakdown */}
+              <div className="border-t border-slate-100 pt-5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-3">
+                  Knowledge Coverage
+                </label>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  {CATEGORY_DEFS.map((cat) => {
+                    const count = knowledge.filter(k => getTemplateType(k) === cat.type).length
+                    const IconComp = cat.icon
+                    return (
+                      <div 
+                        key={cat.type} 
+                        className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200/50 rounded-xl"
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <IconComp className="w-4 h-4 text-slate-500 shrink-0" />
+                          <span className="font-semibold text-slate-700 truncate">{cat.name}</span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                          count > 0 
+                            ? "bg-slate-900 text-white" 
+                            : "bg-slate-200/80 text-slate-500"
+                        }`}>
+                          {count}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* AI Diagnostics Warnings & Missing Knowledge */}
+              <div className="border-t border-slate-100 pt-5 space-y-3">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  AI Diagnostics & Warnings
+                </label>
+                {analyzeMissingKnowledge().length === 0 ? (
+                  <p className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-xl p-3.5 font-semibold">
+                    ✓ All checks passed! No missing basic knowledge profiles detected.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {analyzeMissingKnowledge().map((warning, idx) => (
+                      <div 
+                        key={idx} 
+                        className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700 leading-relaxed font-medium"
+                      >
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Recommended Next Steps */}
+              <div className="border-t border-slate-100 pt-5 space-y-3">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Recommended Next Steps
+                </label>
+                <div className="space-y-2">
+                  {getMissingSuggestions().length === 0 ? (
+                    <p className="text-xs text-slate-500 italic font-normal">
+                      Your business knowledge is fully covered. Keep importing or adding custom facts as your business grows.
+                    </p>
+                  ) : (
+                    getMissingSuggestions().slice(0, 3).map((sugg) => (
+                      <div 
+                        key={sugg.id}
+                        className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="space-y-0.5">
+                          <span className="text-xs font-bold text-slate-800">Teach {sugg.label}</span>
+                          <p className="text-[10px] text-slate-400 font-normal">Fill in the missing memory gaps.</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setShowHealthDrawer(false)
+                            handleAddSuggestion(sugg.type)
+                          }}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-[10px] rounded-lg transition-colors cursor-pointer"
+                        >
+                          + Teach
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Recent Improvements */}
+              <div className="border-t border-slate-100 pt-5 space-y-3">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Recent Improvements
+                </label>
+                {knowledge.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic font-normal">No edits yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {[...knowledge]
+                      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+                      .slice(0, 3)
+                      .map((item) => {
+                        const parsed = parseKnowledge(item)
+                        return (
+                          <div 
+                            key={item.id} 
+                            className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-150 rounded-xl text-xs"
+                          >
+                            <div className="truncate pr-4">
+                              <span className="font-bold text-slate-800 truncate block">
+                                {parsed.title}
+                              </span>
+                              <span className="text-[10px] text-slate-405 font-normal">
+                                Updated {new Date(item.updatedAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setShowHealthDrawer(false)
+                                handleEdit(item)
+                              }}
+                              className="text-xs text-slate-900 hover:text-slate-700 underline font-bold shrink-0 cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        )
+                      })
+                    }
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end shrink-0">
+              <button
+                onClick={() => setShowHealthDrawer(false)}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors shadow-sm cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       </>
     )

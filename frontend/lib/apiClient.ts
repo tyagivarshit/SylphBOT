@@ -103,7 +103,6 @@ const handleServerErrorResponse = (
 export const apiClient = axios.create({
   baseURL: getApiBaseUrl(),
   withCredentials: true,
-  timeout: REQUEST_TIMEOUT_MS,
   headers: {
     "Content-Type": "application/json",
   },

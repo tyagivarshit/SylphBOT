@@ -581,7 +581,8 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               title: serializedTitle,
               content: contentVal,
               clientId: clientId || undefined
-            })
+            }),
+            timeoutMs: 60000
           })
         : await apiFetch("/api/knowledge", {
             method: "POST",
@@ -589,7 +590,8 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               title: serializedTitle,
               content: contentVal,
               clientId: clientId || undefined
-            })
+            }),
+            timeoutMs: 60000
           });
 
       if (!res.success) {

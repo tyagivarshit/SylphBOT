@@ -320,7 +320,8 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
                 title: serialized,
                 content: block.content,
                 clientId: clientId || undefined
-              })
+              }),
+              timeoutMs: 60000
             })
           } else if (block.decision === "Merge" && block.duplicateId) {
             const existing = knowledge.find((k: any) => k.id === block.duplicateId)
@@ -333,7 +334,8 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
                 title: serialized,
                 content: mergedText,
                 clientId: clientId || undefined
-              })
+              }),
+              timeoutMs: 60000
             })
           } else {
             res = await apiFetch("/api/knowledge", {
@@ -342,7 +344,8 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
                 title: serialized,
                 content: block.content,
                 clientId: clientId || undefined
-              })
+              }),
+              timeoutMs: 60000
             })
           }
 
@@ -836,12 +839,20 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
                 ))}
               </div>
 
-              {report.failed > 0 && (
+              {report.failed > 0 ? (
                 <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-800 leading-normal flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
                   <div>
-                    <span className="font-bold block">Operational Conflict</span>
-                    {report.failed} entries failed to ingest due to database write constraints.
+                    <span className="font-bold block text-rose-900">Operational Conflict</span>
+                    <span className="text-rose-700">{report.failed} entries failed to ingest due to database write constraints.</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3 text-xs text-slate-800 leading-normal flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+                  <div>
+                    <span className="font-bold block text-slate-900">Operational Conflict</span>
+                    <span className="text-slate-500">none</span>
                   </div>
                 </div>
               )}

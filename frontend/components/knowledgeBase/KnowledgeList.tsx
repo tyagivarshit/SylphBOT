@@ -270,6 +270,128 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   const [statusFilter, setStatusFilter] = useState("All")
   const [sortBy, setSortBy] = useState("Recently Updated")
 
+  /* =====================================================
+  KNOWLEDGE GRAPH ANALYSIS & RELATIONAL LINKING HELPERS
+  ===================================================== */
+  const calculateCompleteness = () => {
+    let score = 30
+    const allTitlesAndContent = (knowledge || []).map(k => {
+      const parsed = parseKnowledge(k)
+      return `${parsed.title} ${k.content || ""}`.toLowerCase()
+    })
+
+    const hasCompany = allTitlesAndContent.some(txt => txt.includes("company name:") || txt.includes("about:") || txt.includes("mission"))
+    const hasProducts = allTitlesAndContent.some(txt => txt.includes("product name:") || txt.includes("description:") || txt.includes("features:"))
+    const hasPricing = allTitlesAndContent.some(txt => txt.includes("plan name:") || txt.includes("price:") || txt.includes("billing cycle:"))
+    const hasFaq = allTitlesAndContent.some(txt => txt.includes("question:") || txt.includes("answer:") || txt.includes("faq"))
+    const hasPolicy = allTitlesAndContent.some(txt => txt.includes("policy name:") || txt.includes("policy content:") || txt.includes("refund"))
+    const hasScript = allTitlesAndContent.some(txt => txt.includes("scenario:") || txt.includes("script:"))
+
+    if (hasCompany) score += 15
+    if (hasProducts) score += 15
+    if (hasPricing) score += 15
+    if (hasFaq) score += 10
+    if (hasPolicy) score += 10
+    if (hasScript) score += 10
+
+    score += Math.min(5, (knowledge || []).length * 1)
+    return Math.min(100, score)
+  }
+
+  const analyzeMissingKnowledge = () => {
+    const warnings: string[] = []
+    const allTitlesAndContent = (knowledge || []).map(k => {
+      const parsed = parseKnowledge(k)
+      return {
+        id: k.id,
+        title: parsed.title,
+        category: parsed.category,
+        text: `${parsed.title} ${k.content || ""}`.toLowerCase()
+      }
+    })
+
+    const hasCompany = allTitlesAndContent.some(x => x.text.includes("company name:") || x.text.includes("about:") || x.text.includes("mission"))
+    const hasProducts = allTitlesAndContent.some(x => x.category === "Products")
+    const hasPricing = allTitlesAndContent.some(x => x.text.includes("plan name:") || x.text.includes("price:") || x.text.includes("billing cycle:"))
+    const hasFaq = allTitlesAndContent.some(x => x.category === "Support")
+    const hasRefundPolicy = allTitlesAndContent.some(x => x.text.includes("refund") || x.text.includes("return policy"))
+    const hasScript = allTitlesAndContent.some(x => x.category === "Sales")
+
+    if (!hasCompany) {
+      warnings.push("⚠️ Missing Company Profile: The AI lacks general context about your business mission.")
+    }
+    if (hasProducts && !hasPricing) {
+      warnings.push("⚠️ This product has no pricing: You have configured products but no active pricing plans.")
+    }
+    if (!hasRefundPolicy) {
+      warnings.push("⚠️ Missing Refund Policy: Return scenarios are undefined. AI cannot answer customer return questions.")
+    }
+    if (hasFaq && !hasProducts) {
+      warnings.push("⚠️ This service has no FAQ: FAQ entries lack product details or service link dependencies.")
+    }
+    if (hasScript && !allTitlesAndContent.some(x => x.category === "Products")) {
+      warnings.push("⚠️ This script has no related product: Sales scripts exist but product configurations are missing.")
+    }
+    if (!hasFaq) {
+      warnings.push("💡 Missing FAQ: Add commonly asked customer questions to support your support bot.")
+    }
+
+    return warnings.slice(0, 3)
+  }
+
+  const getUsedByBots = (category: string) => {
+    switch (category) {
+      case "Company":
+        return ["Sales AI", "Support AI", "Booking AI", "Marketing AI"]
+      case "Products":
+        return ["Sales AI", "Support AI"]
+      case "Sales":
+        return ["Sales AI"]
+      case "Support":
+        return ["Support AI"]
+      case "Legal":
+        return ["Support AI", "Booking AI"]
+      case "Resources":
+        return ["Support AI", "Marketing AI"]
+      default:
+        return ["Support AI"]
+    }
+  }
+
+  const getRelatedKnowledge = (currentItem: any) => {
+    if (!currentItem) return []
+    const currentMeta = parseKnowledge(currentItem)
+    const currentText = `${currentMeta.title} ${currentItem.content || ""}`.toLowerCase()
+    
+    const keywords = ["pricing", "price", "plan", "product", "features", "refund", "return", "policy", "hours", "script", "sales", "support", "faq"]
+    const matchedKeywords = keywords.filter(k => currentText.includes(k))
+
+    return (knowledge || [])
+      .filter(k => k.id !== currentItem.id)
+      .map(k => {
+        const meta = parseKnowledge(k)
+        const text = `${meta.title} ${k.content || ""}`.toLowerCase()
+        let score = 0
+        
+        if (meta.category === currentMeta.category) score += 3
+        
+        matchedKeywords.forEach(k => {
+          if (text.includes(k)) score += 2
+        })
+        
+        const wordsCurrent = new Set(currentText.split(/\s+/).filter(w => w.length > 4))
+        const wordsTarget = text.split(/\s+/).filter(w => w.length > 4)
+        wordsTarget.forEach(w => {
+          if (wordsCurrent.has(w)) score += 1
+        })
+        
+        return { item: k, score, title: meta.title, category: meta.category }
+      })
+      .filter(res => res.score > 1)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+  }
+
   /* ============================= */
   /* FETCH KNOWLEDGE */
   /* ============================= */
@@ -558,6 +680,43 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
               )
             })}
           </div>
+
+          {/* AI Memory Status Widget */}
+          <div className="mt-6 pt-6 border-t border-slate-100 space-y-4">
+            <div className="px-3">
+              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
+                Memory Completeness
+              </span>
+              <div className="flex items-baseline gap-1.5 mt-1">
+                <span className="text-xl font-bold text-slate-900">
+                  {calculateCompleteness()}%
+                </span>
+                <span className="text-xs text-slate-400 font-medium">Complete</span>
+              </div>
+              <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
+                <div 
+                  className="bg-slate-900 h-full rounded-full transition-all duration-500" 
+                  style={{ width: `${calculateCompleteness()}%` }}
+                />
+              </div>
+            </div>
+
+            {/* AI Diagnostics Warnings */}
+            {analyzeMissingKnowledge().length > 0 && (
+              <div className="px-3 space-y-2">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
+                  AI Memory Diagnostic
+                </span>
+                <div className="space-y-1.5">
+                  {analyzeMissingKnowledge().map((warning, idx) => (
+                    <div key={idx} className="bg-slate-50 border border-slate-200/50 rounded-lg p-2.5 text-[10px] text-slate-600 leading-normal font-medium">
+                      {warning}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Side: Main Work Area */}
@@ -826,6 +985,49 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                       }`} />
                       {parsed.status}
                     </span>
+                  </div>
+
+                  {/* Used By (Cross References) */}
+                  <div className="border-t border-slate-100 pt-4">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
+                      Used By
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {getUsedByBots(parsed.category).map((bot, idx) => (
+                        <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-50 text-slate-700 border border-slate-150">
+                          {bot}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Related Memory Nodes (Auto Linking) */}
+                  <div className="border-t border-slate-100 pt-4">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
+                      Related Memory Nodes
+                    </label>
+                    {getRelatedKnowledge(selectedPreview).length === 0 ? (
+                      <span className="text-[11px] text-slate-400 mt-2 block italic">
+                        No related knowledge nodes detected yet.
+                      </span>
+                    ) : (
+                      <div className="space-y-1.5 mt-2">
+                        {getRelatedKnowledge(selectedPreview).map((rel, idx) => (
+                          <div 
+                            key={idx}
+                            onClick={() => setSelectedPreview(rel.item)}
+                            className="flex items-center justify-between p-2 rounded-lg border border-slate-200/60 bg-slate-50/30 hover:bg-slate-50 hover:border-slate-300 cursor-pointer transition-all"
+                          >
+                            <span className="text-[11px] font-semibold text-slate-800 truncate max-w-[240px]">
+                              {rel.title}
+                            </span>
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                              {rel.category}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

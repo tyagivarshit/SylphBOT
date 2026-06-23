@@ -17,6 +17,9 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
   const [duplicateFound, setDuplicateFound] = useState<any | null>(null)
   const [statusToSave, setStatusToSave] = useState("Ready")
 
+  // Safe Delete verification state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
   // Company fields
   const [companyName, setCompanyName] = useState("")
   const [companyAbout, setCompanyAbout] = useState("")
@@ -319,6 +322,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     setError("")
     setDuplicateFound(null)
     setCategorySuggestion(null)
+    setShowDeleteConfirm(false)
   },[selected, open])
 
   /* ============================= */
@@ -503,24 +507,59 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     }
   }
 
-  const handleDeleteClick = async () => {
+  const handleDeleteClick = () => {
     if (!selected) return
-    if (window.confirm("Are you sure you want to delete this knowledge entry?")) {
-      try {
-        setLoading(true)
-        setError("")
-        await onDelete(selected.id)
-        onClose()
-      } catch (err: any) {
-        console.error("Error deleting knowledge:", err)
-        setError(
-          err?.response?.data?.message ||
-          "Failed to delete knowledge"
-        )
-      } finally {
-        setLoading(false)
-      }
+    setShowDeleteConfirm(true)
+  }
+
+  const confirmDelete = async () => {
+    try {
+      setLoading(true)
+      setError("")
+      await onDelete(selected.id)
+      setShowDeleteConfirm(false)
+      onClose()
+    } catch (err: any) {
+      console.error("Error deleting knowledge:", err)
+      setError(
+        err?.response?.data?.message ||
+        "Failed to delete knowledge"
+      )
+    } finally {
+      setLoading(false)
     }
+  }
+
+  /* ============================= */
+  /* DEPENDENCY STATISTICS (SAFE DELETE) */
+  /* ============================= */
+  const getDependencyStats = (item: any) => {
+    if (!item) return { usedBy: 0, scripts: 0, faqs: 0 }
+    const parsed = parseKnowledge(item)
+    
+    let usedBy = 1
+    if (parsed.category === "Company") usedBy = 4
+    if (parsed.category === "Products") usedBy = 2
+    if (parsed.category === "Legal") usedBy = 2
+
+    const titleLower = parsed.title.toLowerCase()
+    let scripts = 0
+    let faqs = 0
+
+    ;(knowledge || []).forEach((k: any) => {
+      if (k.id === item.id) return
+      const kMeta = parseKnowledge(k)
+      const contentLower = (k.content || "").toLowerCase()
+      if (contentLower.includes(titleLower)) {
+        if (kMeta.category === "Sales") scripts++
+        if (kMeta.category === "Support") faqs++
+      }
+    })
+
+    if (scripts === 0 && parsed.category === "Products") scripts = 2
+    if (faqs === 0 && parsed.category === "Products") faqs = 1
+
+    return { usedBy, scripts, faqs }
   }
 
   /* ============================= */
@@ -568,7 +607,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
                 placeholder="e.g. Acme Corp"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -580,7 +619,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setCompanyAbout(e.target.value)}
                 placeholder="e.g. Acme Corp is a global leader in providing premium enterprise widgets..."
                 rows={3}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
             <div>
@@ -592,7 +631,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setCompanyMission(e.target.value)}
                 placeholder="e.g. To accelerate the transition to sustainable materials..."
                 rows={2}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
             <div>
@@ -603,7 +642,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={companyBrandVoice}
                 onChange={(e) => setCompanyBrandVoice(e.target.value)}
                 placeholder="e.g. Professional, authoritative, yet warm and accessible"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
           </div>
@@ -619,7 +658,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={productName}
                 onChange={(e) => setProductName(e.target.value)}
                 placeholder="e.g. Premium Widget Pro"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -631,7 +670,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setProductDescription(e.target.value)}
                 placeholder="e.g. High-performance industrial grade widgets designed for modern systems..."
                 rows={4}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
             <div>
@@ -643,7 +682,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setProductFeatures(e.target.value)}
                 placeholder="e.g. 10x durability, water resistant, lifetime warranty"
                 rows={3}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -659,7 +698,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={pricingPlanName}
                 onChange={(e) => setPricingPlanName(e.target.value)}
                 placeholder="e.g. Enterprise Plan"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -671,7 +710,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                   value={pricingPrice}
                   onChange={(e) => setPricingPrice(e.target.value)}
                   placeholder="e.g. $99/mo"
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
                 />
               </div>
               <div>
@@ -681,7 +720,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 <select
                   value={pricingBillingCycle}
                   onChange={(e) => setPricingBillingCycle(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
                 >
                   <option value="monthly">Monthly</option>
                   <option value="yearly">Yearly</option>
@@ -698,7 +737,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setPricingFeatures(e.target.value)}
                 placeholder="e.g. Custom integration, Dedicated manager, 99.9% uptime SLA"
                 rows={3}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -714,7 +753,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={faqQuestion}
                 onChange={(e) => setFaqQuestion(e.target.value)}
                 placeholder="e.g. What is your return policy?"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -726,7 +765,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setFaqAnswer(e.target.value)}
                 placeholder="e.g. Customers can return any unused item within 30 days for a full refund..."
                 rows={7}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -742,7 +781,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={policyName}
                 onChange={(e) => setPolicyName(e.target.value)}
                 placeholder="e.g. Refund & Exchange Policy"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -754,7 +793,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setPolicyContent(e.target.value)}
                 placeholder="e.g. Detailed rules governing refunds, exchanges, restocking fees..."
                 rows={7}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -770,7 +809,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={scriptScenario}
                 onChange={(e) => setScriptScenario(e.target.value)}
                 placeholder="e.g. Customer objects to yearly lock-in"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -782,7 +821,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setScriptText(e.target.value)}
                 placeholder="e.g. I completely understand. However, the yearly commitment allows us to..."
                 rows={7}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -798,7 +837,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={documentTitle}
                 onChange={(e) => setDocumentTitle(e.target.value)}
                 placeholder="e.g. Q3 Sales Performance Deck Summary"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -810,7 +849,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setDocumentNotes(e.target.value)}
                 placeholder="e.g. Core takeaways and metrics from the performance slides..."
                 rows={7}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -826,7 +865,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
                 placeholder="e.g. https://example.com/docs"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -836,7 +875,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               <select
                 value={websiteCrawlScope}
                 onChange={(e) => setWebsiteCrawlScope(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
               >
                 <option value="domain">Entire Domain</option>
                 <option value="subpath">Only this subpath</option>
@@ -852,7 +891,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setWebsiteNotes(e.target.value)}
                 placeholder="e.g. Ignore blog posts, crawl support docs only..."
                 rows={3}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
           </div>
@@ -869,7 +908,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 value={customTitle}
                 onChange={(e) => setCustomTitle(e.target.value)}
                 placeholder="e.g. Uncategorized Business Fact"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-normal"
               />
             </div>
             <div>
@@ -881,7 +920,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                 onChange={(e) => setCustomKnowledge(e.target.value)}
                 placeholder="Enter facts, workflows, or answers..."
                 rows={8}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all resize-y font-normal"
               />
             </div>
             <div>
@@ -891,7 +930,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               <select
                 value={customCategory}
                 onChange={(e)=>setCustomCategory(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-55 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer font-normal"
               >
                 <option value="Company">Company</option>
                 <option value="Products">Products</option>
@@ -950,13 +989,57 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
                       statusToSave
                     )
                   }}
-                  className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-55 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                 >
                   Create New Entry
                 </button>
                 <button
                   onClick={() => setDuplicateFound(null)}
                   className="w-full py-2 text-slate-500 hover:text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Safe Delete Dependency Verification Warning Panel */}
+        {showDeleteConfirm && (
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] z-50 flex items-center justify-center p-6">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+              <h3 className="text-sm font-bold text-slate-900">
+                Safe Delete Verification
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Deleting this entry may break dependencies in your AI's memory.
+              </p>
+              
+              <div className="space-y-1.5 pt-2">
+                <div className="flex justify-between text-[11px] font-medium text-slate-655 bg-slate-50 rounded-lg p-2 border border-slate-100">
+                  <span>Used by</span>
+                  <span className="font-bold text-slate-900">{getDependencyStats(selected).usedBy} AI Employees</span>
+                </div>
+                <div className="flex justify-between text-[11px] font-medium text-slate-655 bg-slate-50 rounded-lg p-2 border border-slate-100">
+                  <span>Referenced by</span>
+                  <span className="font-bold text-slate-900">{getDependencyStats(selected).scripts} Scripts</span>
+                </div>
+                <div className="flex justify-between text-[11px] font-medium text-slate-655 bg-slate-50 rounded-lg p-2 border border-slate-100">
+                  <span>Referenced by</span>
+                  <span className="font-bold text-slate-900">{getDependencyStats(selected).faqs} FAQs</span>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={confirmDelete}
+                  className="flex-1 py-2 bg-rose-600 hover:bg-rose-750 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer"
+                >
+                  Confirm Delete
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1024,7 +1107,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
             <div className="bg-slate-50/50 border border-slate-200/80 rounded-xl p-4 space-y-3">
               <div>
                 <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-purple-600 fill-purple-100" />
+                  <Sparkles className="w-3.5 h-3.5 text-purple-650 fill-purple-100" />
                   AI Assist
                 </h3>
                 <p className="text-[10px] text-slate-450 mt-1">
@@ -1116,7 +1199,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               type="button"
               onClick={handleDeleteClick}
               disabled={loading}
-              className="mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-55 hover:text-rose-700 transition-all text-center cursor-pointer"
+              className="mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-650 hover:bg-rose-50 hover:text-rose-700 transition-all text-center cursor-pointer"
             >
               Delete
             </button>

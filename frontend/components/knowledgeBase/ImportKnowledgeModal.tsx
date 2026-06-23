@@ -107,7 +107,7 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
       let suggestedCategory = "Custom"
       const textLower = text.toLowerCase()
       if (textLower.includes("pricing") || textLower.includes("price") || textLower.includes("plan") || textLower.includes("billing") || textLower.includes("cost")) {
-        suggestedCategory = "Products"
+        suggestedCategory = "Pricing"
       } else if (textLower.includes("about") || textLower.includes("mission") || textLower.includes("vision") || textLower.includes("our company") || textLower.includes("contact")) {
         suggestedCategory = "Company"
       } else if (textLower.includes("faq") || textLower.includes("question") || textLower.includes("support") || textLower.includes("how to")) {
@@ -735,12 +735,14 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
                           >
                             <option value="Company">Company</option>
                             <option value="Products">Products</option>
+                            <option value="Pricing">Pricing</option>
                             <option value="Sales">Sales</option>
                             <option value="Support">Support</option>
                             <option value="Marketing">Marketing</option>
                             <option value="Operations">Operations</option>
                             <option value="Legal">Legal</option>
                             <option value="Resources">Resources</option>
+                            <option value="Website">Website</option>
                             <option value="Custom">Custom</option>
                           </select>
                         </div>

@@ -214,10 +214,12 @@ export function getTemplateType(item: any): string {
   const cat = (rawCategory || "").toLowerCase()
   if (cat === "company") return "company"
   if (cat === "products") return "product"
+  if (cat === "pricing") return "pricing"
   if (cat === "sales") return "script"
   if (cat === "support") return "faq"
   if (cat === "legal") return "policy"
   if (cat === "resources") return "document"
+  if (cat === "website") return "website"
   
   return "custom"
 }

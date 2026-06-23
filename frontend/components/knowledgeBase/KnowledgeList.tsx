@@ -10,9 +10,6 @@ import {
   Search, 
   Plus, 
   X, 
-  ArrowRight, 
-  FileText, 
-  Globe, 
   BookOpen, 
   Briefcase, 
   ShoppingBag, 
@@ -21,17 +18,39 @@ import {
   Megaphone, 
   Settings, 
   ShieldCheck, 
-  Folder
+  Folder,
+  FileText
 } from "lucide-react"
 
 /* =====================================================
 METADATA SERIALIZATION & PARSING HELPERS (WITH AUTO-MAPPING)
 ===================================================== */
-interface KnowledgeMetadata {
+export interface KnowledgeMetadata {
   title: string
   category: string
   source: string
   status: string
+  purpose: string
+}
+
+export function getFallbackPurpose(title: string, category: string): string {
+  const t = (title || "").toLowerCase()
+  if (t.includes("pricing") || t.includes("price") || t.includes("plan") || t.includes("cost")) {
+    return "Used when customer pricing questions are asked."
+  }
+  if (t.includes("refund") || t.includes("return") || t.includes("cancel")) {
+    return "Used when refund questions are asked."
+  }
+  if (t.includes("hour") || t.includes("availability") || t.includes("open") || t.includes("schedule")) {
+    return "Used when customers ask availability."
+  }
+  if (t.includes("script") || t.includes("pitch") || t.includes("objection") || t.includes("sales")) {
+    return "Used during outbound conversations."
+  }
+  if (t.includes("mission") || t.includes("vision") || t.includes("about") || t.includes("overview")) {
+    return "Used when AI introduces the company."
+  }
+  return `Used when customers ask about ${title || 'this topic'}.`
 }
 
 export function parseKnowledge(item: any): KnowledgeMetadata {
@@ -41,6 +60,7 @@ export function parseKnowledge(item: any): KnowledgeMetadata {
       category: "Company",
       source: "Manual",
       status: "Ready",
+      purpose: "",
     }
   }
 
@@ -59,10 +79,18 @@ export function parseKnowledge(item: any): KnowledgeMetadata {
         }
       })
       
+      const category = meta.category || "Company"
+      let status = meta.status || "Ready"
+      if (status !== "Ready" && status !== "Processing" && status !== "Draft") {
+        status = "Draft"
+      }
+      const purpose = meta.purpose || getFallbackPurpose(actualTitle, category)
+      
       return {
-        category: meta.category || "Company",
+        category,
         source: meta.source || "Manual",
-        status: meta.status || "Ready",
+        status,
+        purpose,
         title: actualTitle || "Untitled Entry",
       }
     }
@@ -159,11 +187,13 @@ export function parseKnowledge(item: any): KnowledgeMetadata {
     category,
     source: "Manual",
     status: "Ready",
+    purpose: getFallbackPurpose(rawTitle, category)
   }
 }
 
-export function serializeKnowledgeTitle(title: string, category: string, source: string, status: string): string {
-  return `__KB__category:${category}|source:${source}|status:${status}__KB__${title}`
+export function serializeKnowledgeTitle(title: string, category: string, source: string, status: string, purpose: string = ""): string {
+  const escapedPurpose = (purpose || "").replace(/\|/g, " ").replace(/:/g, " ")
+  return `__KB__category:${category}|source:${source}|status:${status}|purpose:${escapedPurpose}__KB__${title}`
 }
 
 /* =====================================================
@@ -271,6 +301,9 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         params: clientId ? { clientId } : undefined
       })
       setKnowledge(prev => prev.filter(item => item.id !== id))
+      if (selectedPreview?.id === id) {
+        setSelectedPreview(null)
+      }
     }catch(err){
       console.error("Delete error:", err)
     }finally{
@@ -341,11 +374,11 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   // Loading Placeholder
   if (loading) {
     return (
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
         {Array.from({length:3}).map((_,i)=>(
           <div
             key={i}
-            className="h-44 rounded-xl border border-slate-200/80 bg-white/50 animate-pulse"
+            className="h-44 rounded-xl border border-slate-200 bg-slate-50 animate-pulse"
           />
         ))}
       </div>
@@ -359,7 +392,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
     return (
       <div className="min-w-0 space-y-4">
         {/* Simple Header Actions for embedded widget */}
-        <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
           <h3 className="text-xs font-bold text-slate-850 uppercase tracking-widest">
             Company Knowledge
           </h3>
@@ -368,7 +401,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
               setSelected(null)
               setOpen(true)
             }}
-            className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-55 rounded-lg transition-all"
+            className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-all"
           >
             <Plus className="w-3.5 h-3.5 mr-1" />
             Add Entry
@@ -383,13 +416,13 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search knowledge..."
-              className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none"
+              className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 hover:bg-white focus:outline-none"
             />
           </div>
           <select
             value={sourceFilter}
             onChange={(e) => setSourceFilter(e.target.value)}
-            className="border border-slate-200 rounded-lg text-xs px-3 py-2 bg-slate-50/50 focus:outline-none text-slate-700"
+            className="border border-slate-200 rounded-lg text-xs px-3 py-2 bg-slate-50 focus:outline-none text-slate-700"
           >
             <option value="All">All Sources</option>
             <option value="Manual">Manual</option>
@@ -399,7 +432,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         </div>
 
         {knowledge.length === 0 ? (
-          <div className="text-center p-8 bg-slate-50/50 border border-dashed border-slate-200 rounded-xl">
+          <div className="text-center p-8 bg-slate-55 border border-dashed border-slate-200 rounded-xl">
             <p className="text-xs text-slate-500 font-medium">No knowledge entries configured yet</p>
           </div>
         ) : filteredKnowledge.length === 0 ? (
@@ -413,6 +446,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                 key={item.id}
                 item={item}
                 onOpenPreview={setSelectedPreview}
+                onEdit={handleEdit}
               />
             ))}
           </div>
@@ -423,6 +457,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
           onClose={handleClose}
           selected={selected}
           clientId={clientId}
+          onDelete={handleDelete}
         />
 
         <ImportKnowledgeModal
@@ -441,14 +476,24 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   /* =====================================================
   REDESIGNED WORKSPACE FULL VIEW
   ===================================================== */
+  
+  // Group logic for "All Knowledge"
+  const groupedSections = CATEGORY_DEFS.reduce((acc, cat) => {
+    const items = sortedKnowledge.filter(item => parseKnowledge(item).category === cat.name)
+    if (items.length > 0) {
+      acc.push({ category: cat, items })
+    }
+    return acc
+  }, [] as { category: typeof CATEGORY_DEFS[0]; items: any[] }[])
+
   return (
     <div className="min-w-0 space-y-6">
       {/* 🚀 PAGE HEADER */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200/60 pb-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200 pb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Knowledge Base</h1>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Knowledge Base</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Teach your AI everything it needs to know about your business.
+            Configure the facts, pricing, and workflows taught directly to your AI.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -476,7 +521,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
         
         {/* Left Side: Navigation Sidebar */}
-        <div className="lg:col-span-1 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm">
+        <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-3">
             Categories
           </div>
@@ -506,7 +551,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                   className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-start gap-3 border ${
                     selectedCategory === cat.name
                       ? "bg-slate-900 border-slate-900 text-white shadow-sm"
-                      : "bg-transparent border-transparent text-slate-650 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-100"
+                      : "bg-transparent border-transparent text-slate-650 hover:bg-slate-55 hover:text-slate-900 hover:border-slate-100"
                   }`}
                 >
                   <IconComp className="w-4 h-4 mt-0.5 shrink-0" />
@@ -534,7 +579,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
           </div>
 
           {/* Filters Control Row */}
-          <div className="flex flex-wrap items-center gap-4 bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-sm text-xs">
+          <div className="flex flex-wrap items-center gap-4 bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm text-xs">
             {/* Source */}
             <div className="flex items-center gap-1.5">
               <span className="font-semibold text-slate-400">Source</span>
@@ -561,7 +606,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                 <option value="All">All</option>
                 <option value="Ready">Ready</option>
                 <option value="Processing">Processing</option>
-                <option value="Failed">Failed</option>
+                <option value="Draft">Draft</option>
               </select>
             </div>
 
@@ -580,56 +625,66 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
           </div>
 
           {/* Cards Area & Empty States */}
-          {knowledge.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center p-12 bg-white border border-slate-200/80 rounded-2xl min-h-[350px] shadow-sm max-w-2xl mx-auto my-8">
-              <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
-                Your AI doesn't know anything about your business yet.
-              </h3>
-              <p className="text-sm text-slate-500 mt-2 max-w-md">
-                Start by creating your first knowledge entry or importing existing business information.
+          {sortedKnowledge.length === 0 ? (
+            <div className="flex flex-col items-center justify-center text-center py-20 px-4 bg-white border border-slate-200 rounded-xl max-w-md mx-auto my-8">
+              <p className="text-sm font-medium text-slate-900 mb-4">
+                {searchQuery ? "No matching entries found." : "No knowledge added yet."}
               </p>
-              <div className="mt-6 flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+              {!searchQuery && (
                 <button
                   onClick={() => {
                     setSelected(null)
                     setOpen(true)
                   }}
-                  className="w-full sm:w-auto px-5 py-2.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition-all border border-slate-950"
+                  className="inline-flex items-center justify-center px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all border border-slate-950 shadow-sm"
                 >
                   Add Knowledge
                 </button>
-                <button
-                  onClick={() => setImportOpen(true)}
-                  className="w-full sm:w-auto px-5 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-sm transition-all"
-                >
-                  Import
-                </button>
-              </div>
+              )}
             </div>
-          ) : filteredKnowledge.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center p-12 bg-white border border-slate-200/80 rounded-2xl min-h-[250px] shadow-sm max-w-md mx-auto my-8">
-              <p className="text-sm font-semibold text-slate-900">
-                No knowledge added yet.
-              </p>
-              <div className="mt-4">
-                <button
-                  onClick={() => {
-                    setSelected(null)
-                    setOpen(true)
-                  }}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition-all border border-slate-950"
-                >
-                  Add Knowledge
-                </button>
-              </div>
+          ) : selectedCategory === "All Knowledge" ? (
+            /* Grouped by selected category when All Knowledge is selected */
+            <div className="space-y-10">
+              {groupedSections.map(({ category, items }) => (
+                <div key={category.name} className="space-y-4">
+                  <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                      {category.name}
+                    </h2>
+                    <span className="text-xs text-slate-400 font-medium ml-1">
+                      ({items.length})
+                    </span>
+                  </div>
+                  <div className="grid gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+                    {items.map((item) => (
+                      <div key={item.id} className="relative min-w-0">
+                        <KnowledgeCard
+                          item={item}
+                          onOpenPreview={setSelectedPreview}
+                          onEdit={handleEdit}
+                        />
+
+                        {/* DELETE LOADING COVERLAY */}
+                        {deletingId === item.id && (
+                          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/70 backdrop-blur-sm text-xs font-semibold text-slate-700">
+                            Deleting...
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
-            <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+            /* Selected category view: list cards for selected category only */
+            <div className="grid gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
               {sortedKnowledge.map((item) => (
                 <div key={item.id} className="relative min-w-0">
                   <KnowledgeCard
                     item={item}
                     onOpenPreview={setSelectedPreview}
+                    onEdit={handleEdit}
                   />
 
                   {/* DELETE LOADING COVERLAY */}
@@ -650,6 +705,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         onClose={handleClose}
         selected={selected}
         clientId={clientId}
+        onDelete={handleDelete}
       />
 
       <ImportKnowledgeModal
@@ -674,105 +730,131 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
         {selectedPreview && (
           <div
             onClick={() => setSelectedPreview(null)}
-            className="fixed inset-0 bg-slate-900/30 backdrop-blur-[2px] z-40 transition-opacity duration-300"
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-40 transition-opacity duration-300"
           />
         )}
 
         {/* Drawer Panel */}
         <div
-          className={`fixed inset-y-0 right-0 w-full sm:w-[480px] bg-white border-l border-slate-200/80 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col ${
+          className={`fixed inset-y-0 right-0 w-full sm:w-[500px] bg-white border-l border-slate-200 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col ${
             selectedPreview ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          {selectedPreview && (
-            <div className="h-full flex flex-col justify-between">
-              {/* Drawer Header */}
-              <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Knowledge Base Entry
-                </span>
-                <button
-                  onClick={() => setSelectedPreview(null)}
-                  className="text-slate-400 hover:text-slate-650 p-1 rounded hover:bg-slate-50 transition-all"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+          {selectedPreview && (() => {
+            const parsed = parseKnowledge(selectedPreview)
+            return (
+              <div className="h-full flex flex-col justify-between">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Knowledge Memory View
+                  </span>
+                  <button
+                    onClick={() => setSelectedPreview(null)}
+                    className="text-slate-400 hover:text-slate-650 p-1 rounded hover:bg-slate-55 transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
 
-              {/* Drawer Body (Read-only Preview Panel) */}
-              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-                <div>
-                  <h2 className="text-xl font-bold tracking-tight text-slate-900 break-words leading-tight">
-                    {parseKnowledge(selectedPreview).title}
-                  </h2>
-                  
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
-                      {parseKnowledge(selectedPreview).category}
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+                  {/* Title */}
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Title
+                    </label>
+                    <h2 className="text-lg font-bold tracking-tight text-slate-900 break-words leading-tight mt-1">
+                      {parsed.title}
+                    </h2>
+                  </div>
+
+                  {/* Category */}
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Category
+                    </label>
+                    <div className="mt-1">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
+                        {parsed.category}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Purpose */}
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Purpose
+                    </label>
+                    <p className="text-sm text-slate-700 font-medium mt-1 leading-relaxed">
+                      {parsed.purpose}
+                    </p>
+                  </div>
+
+                  {/* Content */}
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Content
+                    </label>
+                    <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto mt-1 font-normal">
+                      {selectedPreview.content}
+                    </div>
+                  </div>
+
+                  {/* Last Updated */}
+                  <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-4">
+                    <span>Last Updated</span>
+                    <span className="font-semibold text-slate-750">
+                      {new Date(selectedPreview.updatedAt).toLocaleDateString("en-US", {
+                        month: "long",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
                     </span>
+                  </div>
+
+                  {/* Status */}
+                  <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-4">
+                    <span>Status</span>
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                      parseKnowledge(selectedPreview).status === 'Ready' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/10' :
-                      parseKnowledge(selectedPreview).status === 'Processing' ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-600/10 animate-pulse' :
-                      'bg-rose-50 text-rose-700 ring-1 ring-rose-600/10'
+                      parsed.status === 'Ready' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/10' :
+                      parsed.status === 'Processing' ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-600/10 animate-pulse' :
+                      'bg-slate-100 text-slate-700 ring-1 ring-slate-600/10'
                     }`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${
-                        parseKnowledge(selectedPreview).status === 'Ready' ? 'bg-emerald-500' :
-                        parseKnowledge(selectedPreview).status === 'Processing' ? 'bg-amber-500' :
-                        'bg-rose-500'
+                        parsed.status === 'Ready' ? 'bg-emerald-500' :
+                        parsed.status === 'Processing' ? 'bg-amber-500' :
+                        'bg-slate-400'
                       }`} />
-                      {parseKnowledge(selectedPreview).status}
+                      {parsed.status}
                     </span>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    Content Preview
-                  </label>
-                  <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-[350px] overflow-y-auto font-normal">
-                    {selectedPreview.content}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-4">
-                  <span>Last Updated</span>
-                  <span className="font-semibold text-slate-750">
-                    {new Date(selectedPreview.updatedAt).toLocaleDateString("en-US", {
-                      month: "long",
-                      day: "numeric",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    })}
-                  </span>
+                {/* Footer Buttons */}
+                <div className="px-6 py-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+                  <button
+                    onClick={() => setSelectedPreview(null)}
+                    className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors shadow-sm"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => {
+                      const item = selectedPreview
+                      setSelectedPreview(null)
+                      handleEdit(item)
+                    }}
+                    className="px-5 py-2 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all inline-flex items-center gap-1.5 shadow-sm border border-slate-950"
+                  >
+                    Edit
+                  </button>
                 </div>
               </div>
-
-              {/* Drawer Footer (Edit Trigger & Delete only) */}
-              <div className="px-6 py-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
-                <button
-                  onClick={async () => {
-                    const id = selectedPreview.id
-                    setSelectedPreview(null)
-                    await handleDelete(id)
-                  }}
-                  className="px-4 py-2 text-sm font-semibold text-rose-650 hover:bg-rose-55 rounded-lg transition-colors"
-                >
-                  Delete
-                </button>
-                <button
-                  onClick={() => {
-                    const item = selectedPreview
-                    setSelectedPreview(null)
-                    handleEdit(item)
-                  }}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all inline-flex items-center gap-1.5 shadow-sm border border-slate-950"
-                >
-                  Edit Entry
-                </button>
-              </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
       </>
     )

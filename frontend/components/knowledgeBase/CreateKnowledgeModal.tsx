@@ -5,9 +5,10 @@ import { api } from "@/lib/api"
 import { parseKnowledge, serializeKnowledgeTitle } from "./KnowledgeList"
 import { X } from "lucide-react"
 
-export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "" }: any){
+export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "", onDelete }: any){
 
   const [title,setTitle] = useState("")
+  const [purpose,setPurpose] = useState("")
   const [content,setContent] = useState("")
   const [category, setCategory] = useState("Company")
   const [source, setSource] = useState("Manual")
@@ -23,12 +24,14 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     if(selected){
       const parsed = parseKnowledge(selected)
       setTitle(parsed.title || "")
+      setPurpose(parsed.purpose || "")
       setCategory(parsed.category || "Company")
       setSource(parsed.source || "Manual")
       setStatus(parsed.status || "Ready")
       setContent(selected.content || "")
     }else{
       setTitle("")
+      setPurpose("")
       setCategory("Company")
       setSource("Manual")
       setStatus("Ready")
@@ -44,18 +47,16 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
   /* ============================= */
 
   const handleSubmit = async () => {
-
     if(!title.trim() || !content.trim()){
       setError("Title and content are required")
       return
     }
 
     try{
-
       setLoading(true)
       setError("")
 
-      const serializedTitle = serializeKnowledgeTitle(title, category, source, status)
+      const serializedTitle = serializeKnowledgeTitle(title, category, source, status, purpose)
 
       if(selected){
         await api.put(`/api/knowledge/${selected.id}`,{
@@ -72,30 +73,43 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       }
 
       setTitle("")
+      setPurpose("")
       setContent("")
       onClose()
-
     }catch(err:any){
-
       console.error("Error saving knowledge:", err)
-
       setError(
         err?.response?.data?.message ||
         "Something went wrong"
       )
-
     }finally{
       setLoading(false)
     }
+  }
 
+  const handleDeleteClick = async () => {
+    if (!selected) return
+    if (window.confirm("Are you sure you want to delete this knowledge entry?")) {
+      try {
+        setLoading(true)
+        setError("")
+        await onDelete(selected.id)
+        onClose()
+      } catch (err: any) {
+        console.error("Error deleting knowledge:", err)
+        setError(
+          err?.response?.data?.message ||
+          "Failed to delete knowledge"
+        )
+      } finally {
+        setLoading(false)
+      }
+    }
   }
 
   return(
-
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[4px] flex items-center justify-center z-50 px-4">
-
       <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl space-y-6">
-
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <h2 className="text-base font-semibold text-slate-900">
             {selected ? "Edit Knowledge Entry" : "Add Knowledge Entry"}
@@ -121,6 +135,18 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               value={title}
               onChange={(e)=>setTitle(e.target.value)}
               placeholder="e.g. Company Mission Statement"
+              className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
+            />
+          </div>
+
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Purpose (one sentence)
+            </label>
+            <input
+              value={purpose}
+              onChange={(e)=>setPurpose(e.target.value)}
+              placeholder="e.g. Used when AI introduces the company."
               className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
             />
           </div>
@@ -173,7 +199,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               >
                 <option value="Ready">Ready</option>
                 <option value="Processing">Processing</option>
-                <option value="Failed">Failed</option>
+                <option value="Draft">Draft</option>
               </select>
             </div>
           </div>
@@ -192,7 +218,17 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
           </div>
         </div>
 
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end border-t border-slate-100 pt-4">
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end border-t border-slate-100 pt-4 w-full">
+          {selected && (
+            <button
+              type="button"
+              onClick={handleDeleteClick}
+              disabled={loading}
+              className="w-full sm:w-auto sm:mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-all text-center"
+            >
+              Delete
+            </button>
+          )}
 
           <button
             onClick={onClose}
@@ -209,13 +245,8 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
           >
             {loading ? "Saving..." : selected ? "Update" : "Save"}
           </button>
-
         </div>
-
       </div>
-
     </div>
-
   )
-
 }

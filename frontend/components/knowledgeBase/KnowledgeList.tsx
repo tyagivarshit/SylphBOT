@@ -529,17 +529,14 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
             {/* All Knowledge Option */}
             <button
               onClick={() => setSelectedCategory("All Knowledge")}
-              className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-start gap-3 border ${
+              className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-center gap-3 border ${
                 selectedCategory === "All Knowledge"
                   ? "bg-slate-900 border-slate-900 text-white shadow-sm"
                   : "bg-transparent border-transparent text-slate-650 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-100"
               }`}
             >
-              <BookOpen className="w-4 h-4 mt-0.5 shrink-0" />
-              <div>
-                <div className="text-xs font-semibold">All Knowledge</div>
-                <div className="text-[10px] opacity-70 mt-0.5">Show all business context and details</div>
-              </div>
+              <BookOpen className="w-4 h-4 shrink-0" />
+              <span className="text-xs font-semibold">All Knowledge</span>
             </button>
 
             {CATEGORY_DEFS.map((cat) => {
@@ -548,17 +545,14 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                 <button
                   key={cat.name}
                   onClick={() => setSelectedCategory(cat.name)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-start gap-3 border ${
+                  className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-center gap-3 border ${
                     selectedCategory === cat.name
                       ? "bg-slate-900 border-slate-900 text-white shadow-sm"
                       : "bg-transparent border-transparent text-slate-650 hover:bg-slate-55 hover:text-slate-900 hover:border-slate-100"
                   }`}
                 >
-                  <IconComp className="w-4 h-4 mt-0.5 shrink-0" />
-                  <div>
-                    <div className="text-xs font-semibold">{cat.name}</div>
-                    <div className="text-[10px] opacity-70 mt-0.5 leading-snug">{cat.description}</div>
-                  </div>
+                  <IconComp className="w-4 h-4 shrink-0" />
+                  <span className="text-xs font-semibold">{cat.name}</span>
                 </button>
               )
             })}

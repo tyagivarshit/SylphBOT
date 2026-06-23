@@ -2,13 +2,12 @@
 
 import { useState, useEffect } from "react"
 import { api } from "@/lib/api"
-import { parseKnowledge, serializeKnowledgeTitle } from "./KnowledgeList"
+import { parseKnowledge, serializeKnowledgeTitle, getFallbackPurpose } from "./KnowledgeList"
 import { X } from "lucide-react"
 
 export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "", onDelete }: any){
 
   const [title,setTitle] = useState("")
-  const [purpose,setPurpose] = useState("")
   const [content,setContent] = useState("")
   const [category, setCategory] = useState("Company")
   const [source, setSource] = useState("Manual")
@@ -24,14 +23,12 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     if(selected){
       const parsed = parseKnowledge(selected)
       setTitle(parsed.title || "")
-      setPurpose(parsed.purpose || "")
       setCategory(parsed.category || "Company")
       setSource(parsed.source || "Manual")
       setStatus(parsed.status || "Ready")
       setContent(selected.content || "")
     }else{
       setTitle("")
-      setPurpose("")
       setCategory("Company")
       setSource("Manual")
       setStatus("Ready")
@@ -46,7 +43,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
   /* CREATE / UPDATE */
   /* ============================= */
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (overrideStatus?: string) => {
     if(!title.trim() || !content.trim()){
       setError("Title and content are required")
       return
@@ -56,7 +53,9 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       setLoading(true)
       setError("")
 
-      const serializedTitle = serializeKnowledgeTitle(title, category, source, status, purpose)
+      const finalStatus = overrideStatus || status || "Ready"
+      const generatedPurpose = getFallbackPurpose(title, category)
+      const serializedTitle = serializeKnowledgeTitle(title, category, source, finalStatus, generatedPurpose)
 
       if(selected){
         await api.put(`/api/knowledge/${selected.id}`,{
@@ -73,7 +72,6 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       }
 
       setTitle("")
-      setPurpose("")
       setContent("")
       onClose()
     }catch(err:any){
@@ -109,57 +107,35 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
 
   return(
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[4px] flex items-center justify-center z-50 px-4">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl space-y-6">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+      <div className="w-full max-w-xl h-[90vh] max-h-[720px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
+        {/* Fixed Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
           <h2 className="text-base font-semibold text-slate-900">
             {selected ? "Edit Knowledge Entry" : "Add Knowledge Entry"}
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button onClick={onClose} className="text-slate-450 hover:text-slate-650 transition-colors p-1 hover:bg-slate-50 rounded">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {error && (
-          <p className="text-xs text-rose-650 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
-            {error}
-          </p>
-        )}
+        {/* Scrollable Form Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+          {error && (
+            <p className="text-xs text-rose-650 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
+              {error}
+            </p>
+          )}
 
-        {/* Form Grid */}
-        <div className="space-y-4">
-          <div>
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              Title
-            </label>
-            <input
-              value={title}
-              onChange={(e)=>setTitle(e.target.value)}
-              placeholder="e.g. Company Mission Statement"
-              className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-            />
-          </div>
-
-          <div>
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              Purpose (one sentence)
-            </label>
-            <input
-              value={purpose}
-              onChange={(e)=>setPurpose(e.target.value)}
-              placeholder="e.g. Used when AI introduces the company."
-              className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="space-y-6">
+            {/* Category Select */}
             <div>
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
                 Category
               </label>
               <select
                 value={category}
                 onChange={(e)=>setCategory(e.target.value)}
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all cursor-pointer"
               >
                 <option value="Company">Company</option>
                 <option value="Products">Products</option>
@@ -173,58 +149,42 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
               </select>
             </div>
 
+            {/* Title (Notion Style) */}
             <div>
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Source Type
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
+                Title
               </label>
-              <select
-                value={source}
-                onChange={(e)=>setSource(e.target.value)}
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-              >
-                <option value="Manual">Manual</option>
-                <option value="Document">Document</option>
-                <option value="Website">Website</option>
-              </select>
+              <input
+                value={title}
+                onChange={(e)=>setTitle(e.target.value)}
+                placeholder="Untitled Entry"
+                className="w-full text-lg font-bold text-slate-900 placeholder-slate-300 focus:outline-none py-1 border-b border-transparent focus:border-slate-100 transition-all"
+              />
             </div>
 
+            {/* Richer Editor for Knowledge Content */}
             <div>
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Status
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
+                Knowledge Content
               </label>
-              <select
-                value={status}
-                onChange={(e)=>setStatus(e.target.value)}
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-              >
-                <option value="Ready">Ready</option>
-                <option value="Processing">Processing</option>
-                <option value="Draft">Draft</option>
-              </select>
+              <textarea
+                value={content}
+                onChange={(e)=>setContent(e.target.value)}
+                placeholder="Write specific facts, processes, scripts, or guidelines here..."
+                className="w-full min-h-[300px] border border-slate-200/80 rounded-xl p-4 text-[14px] leading-relaxed text-slate-800 bg-slate-50/30 hover:bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/5 focus:border-slate-900 transition-all placeholder-slate-400 resize-y font-normal"
+              />
             </div>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              Knowledge Content
-            </label>
-            <textarea
-              value={content}
-              onChange={(e)=>setContent(e.target.value)}
-              placeholder="Enter specific facts, responses, context, or documents for your AI..."
-              className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-slate-50/50 hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-              rows={6}
-            />
           </div>
         </div>
 
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end border-t border-slate-100 pt-4 w-full">
+        {/* Fixed Footer Actions */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
           {selected && (
             <button
               type="button"
               onClick={handleDeleteClick}
               disabled={loading}
-              className="w-full sm:w-auto sm:mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-all text-center"
+              className="mr-auto px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-all text-center"
             >
               Delete
             </button>
@@ -233,17 +193,25 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
           <button
             onClick={onClose}
             disabled={loading}
-            className="w-full sm:w-auto px-4 py-2 rounded-lg text-sm font-semibold bg-slate-50 text-slate-700 hover:bg-slate-100 transition-all"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-50 text-slate-700 hover:bg-slate-100 transition-all"
           >
             Cancel
           </button>
 
           <button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit("Draft")}
             disabled={loading}
-            className="w-full sm:w-auto px-5 py-2 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 transition-all shadow-sm"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all"
           >
-            {loading ? "Saving..." : selected ? "Update" : "Save"}
+            Save Draft
+          </button>
+
+          <button
+            onClick={() => handleSubmit("Ready")}
+            disabled={loading}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-60 transition-all shadow-sm border border-slate-950"
+          >
+            {selected ? "Save Changes" : "Save Knowledge"}
           </button>
         </div>
       </div>

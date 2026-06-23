@@ -7,6 +7,8 @@ import KnowledgeCard from "./KnowledgeCard"
 import CreateKnowledgeModal from "./CreateKnowledgeModal"
 import ImportKnowledgeModal from "./ImportKnowledgeModal"
 import { api } from "@/lib/api"
+import { apiFetch } from "@/lib/apiClient"
+import { notify } from "@/lib/toast"
 import { 
   Search, 
   Plus, 
@@ -495,8 +497,9 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   /* FETCH KNOWLEDGE */
   /* ============================= */
   const fetchKnowledge = async () => {
+    const isInitial = knowledge.length === 0
     try{
-      setLoading(true)
+      if (isInitial) setLoading(true)
       const res = await api.get("/api/knowledge", {
         params: clientId ? { clientId } : undefined
       })
@@ -504,7 +507,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
     }catch(err){
       console.error("Fetch knowledge error:", err)
     }finally{
-      setLoading(false)
+      if (isInitial) setLoading(false)
     }
   }
 
@@ -518,15 +521,19 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   const handleDelete = async (id: string) => {
     try{
       setDeletingId(id)
-      await api.delete(`/api/knowledge/${id}`, {
-        params: clientId ? { clientId } : undefined
+      const res = await apiFetch(`/api/knowledge/${id}${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`, {
+        method: "DELETE"
       })
+      if (!res.success) {
+        throw new Error(res.message || "Failed to delete knowledge")
+      }
       setKnowledge(prev => prev.filter(item => item.id !== id))
       if (selectedPreview?.id === id) {
         setSelectedPreview(null)
       }
     }catch(err){
       console.error("Delete error:", err)
+      throw err
     }finally{
       setDeletingId(null)
     }

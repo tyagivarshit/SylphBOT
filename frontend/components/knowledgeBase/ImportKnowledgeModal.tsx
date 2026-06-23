@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { api } from "@/lib/api"
+import { apiFetch } from "@/lib/apiClient"
 import { serializeKnowledgeTitle, getFallbackPurpose, parseKnowledge } from "./KnowledgeList"
 import { X, Upload, Globe, FileText, Sparkles, CheckCircle, AlertTriangle, Play, HelpCircle, Layers, Cloud } from "lucide-react"
 
@@ -311,30 +312,49 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
         const serialized = serializeKnowledgeTitle(block.title, block.selectedCategory, "Document", "Ready", generatedPurpose)
 
         try {
+          let res;
           if (block.decision === "Replace" && block.duplicateId) {
-            await api.put(`/api/knowledge/${block.duplicateId}`, {
-              title: serialized,
-              content: block.content,
-              clientId: clientId || undefined
+            res = await apiFetch(`/api/knowledge/${block.duplicateId}`, {
+              method: "PUT",
+              body: JSON.stringify({
+                title: serialized,
+                content: block.content,
+                clientId: clientId || undefined
+              })
             })
-            createdCount++
           } else if (block.decision === "Merge" && block.duplicateId) {
             const existing = knowledge.find((k: any) => k.id === block.duplicateId)
             const currentText = existing ? existing.content || "" : ""
             const mergedText = `${currentText}\n\n[Ingested Update]:\n${block.content}`
             
-            await api.put(`/api/knowledge/${block.duplicateId}`, {
-              title: serialized,
-              content: mergedText,
-              clientId: clientId || undefined
+            res = await apiFetch(`/api/knowledge/${block.duplicateId}`, {
+              method: "PUT",
+              body: JSON.stringify({
+                title: serialized,
+                content: mergedText,
+                clientId: clientId || undefined
+              })
             })
+          } else {
+            res = await apiFetch("/api/knowledge", {
+              method: "POST",
+              body: JSON.stringify({
+                title: serialized,
+                content: block.content,
+                clientId: clientId || undefined
+              })
+            })
+          }
+
+          if (!res.success) {
+            throw new Error(res.message || "Failed to save knowledge block");
+          }
+
+          if (block.decision === "Replace" && block.duplicateId) {
+            createdCount++
+          } else if (block.decision === "Merge" && block.duplicateId) {
             mergedCount++
           } else {
-            await api.post("/api/knowledge", {
-              title: serialized,
-              content: block.content,
-              clientId: clientId || undefined
-            })
             createdCount++
           }
         } catch (err) {

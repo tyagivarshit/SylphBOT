@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { api } from "@/lib/api"
+import { apiFetch } from "@/lib/apiClient"
+import { notify } from "@/lib/toast"
 import { parseKnowledge, serializeKnowledgeTitle, getFallbackPurpose } from "./KnowledgeList"
 import { 
   X, 
@@ -572,19 +574,29 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       
       const finalId = idToUpdate || (selected ? selected.id : null)
 
-      if (finalId) {
-        await api.put(`/api/knowledge/${finalId}`, {
-          title: serializedTitle,
-          content: contentVal,
-          clientId: clientId || undefined
-        })
-      } else {
-        await api.post("/api/knowledge", {
-          title: serializedTitle,
-          content: contentVal,
-          clientId: clientId || undefined
-        })
+      const res = finalId
+        ? await apiFetch(`/api/knowledge/${finalId}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              title: serializedTitle,
+              content: contentVal,
+              clientId: clientId || undefined
+            })
+          })
+        : await apiFetch("/api/knowledge", {
+            method: "POST",
+            body: JSON.stringify({
+              title: serializedTitle,
+              content: contentVal,
+              clientId: clientId || undefined
+            })
+          });
+
+      if (!res.success) {
+        throw new Error(res.message || "Failed to save knowledge");
       }
+
+      notify.success(finalId ? "Knowledge updated successfully" : "Knowledge saved successfully")
 
       resetFormStates()
       setDuplicateFound(null)
@@ -592,10 +604,9 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       onClose()
     } catch (err: any) {
       console.error("Save error:", err)
-      setError(
-        err?.response?.data?.message ||
-        "Failed to save knowledge"
-      )
+      const msg = err?.message || "Failed to save knowledge"
+      setError(msg)
+      notify.error(msg)
     } finally {
       setLoading(false)
     }
@@ -611,14 +622,14 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
       setLoading(true)
       setError("")
       await onDelete(selected.id)
+      notify.success("Knowledge deleted successfully")
       setShowDeleteConfirm(false)
       onClose()
     } catch (err: any) {
       console.error("Error deleting knowledge:", err)
-      setError(
-        err?.response?.data?.message ||
-        "Failed to delete knowledge"
-      )
+      const msg = err?.message || "Failed to delete knowledge"
+      setError(msg)
+      notify.error(msg)
     } finally {
       setLoading(false)
     }

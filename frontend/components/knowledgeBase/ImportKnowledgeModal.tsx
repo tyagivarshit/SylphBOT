@@ -1,11 +1,30 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createPortal } from "react-dom"
 import { api } from "@/lib/api"
 import { serializeKnowledgeTitle, getFallbackPurpose, parseKnowledge } from "./KnowledgeList"
 import { X, Upload, Globe, FileText, Sparkles, CheckCircle, AlertTriangle, Play, HelpCircle, Layers, Cloud } from "lucide-react"
 
 export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, clientId = "", knowledge = [] }: any) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
+
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden"
+    } else {
+      document.body.style.overflow = ""
+    }
+    return () => {
+      document.body.style.overflow = ""
+    }
+  }, [open])
+
   const [sourceType, setSourceType] = useState<"Document" | "Website">("Document")
   const [websiteUrl, setWebsiteUrl] = useState("")
   const [files, setFiles] = useState<File[]>([])
@@ -29,7 +48,7 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
     failed: number
   } | null>(null)
 
-  if (!open) return null
+  if (!open || !mounted) return null
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -351,11 +370,18 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
     setProcessedBlocks(prev => prev.map((b, i) => i === idx ? { ...b, decision: dec } : b))
   }
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[4px] flex items-center justify-center z-50 px-4">
-      <div className={`w-full bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden flex flex-col relative transition-all duration-300 ${
-        step === "PREVIEW_DECISION" ? "max-w-5xl h-[85vh] max-h-[700px]" : "max-w-xl max-h-[90vh]"
-      }`}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      {/* Overlay */}
+      <div 
+        onClick={() => {
+          resetFormStates()
+          onClose()
+        }}
+        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+      />
+      {/* Modal Container */}
+      <div className="relative z-10 w-full max-w-[1200px] h-[90vh] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-y-auto flex flex-col transition-all duration-300">
         
         {/* Sticky Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
@@ -817,7 +843,8 @@ export default function ImportKnowledgeModal({ open, onClose, onImportSuccess, c
 
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 
   function resetFormStates() {

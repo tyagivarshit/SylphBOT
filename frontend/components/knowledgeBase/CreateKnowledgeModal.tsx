@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { createPortal } from "react-dom"
 import { api } from "@/lib/api"
 import { parseKnowledge, serializeKnowledgeTitle, getFallbackPurpose } from "./KnowledgeList"
 import { 
@@ -75,6 +76,23 @@ const KNOWLEDGE_TYPES = [
 ]
 
 export default function CreateKnowledgeModal({ open, onClose, selected, clientId = "", onDelete, knowledge = [], initialType = null }: any){
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
+
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden"
+    } else {
+      document.body.style.overflow = ""
+    }
+    return () => {
+      document.body.style.overflow = ""
+    }
+  }, [open])
 
   const [formType, setFormType] = useState("custom")
   const [selectedType, setSelectedType] = useState<string | null>(null)
@@ -449,7 +467,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     }
   }, [companyName, productName, pricingPlanName, faqQuestion, policyName, scriptScenario, documentTitle, websiteUrl, customTitle, formType, selected])
 
-  if(!open) return null
+  if (!open || !mounted) return null
 
   /* ============================= */
   /* AI ASSIST (IMPROVE TEXT) */
@@ -1025,11 +1043,15 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
     }
   }
 
-  return(
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[4px] flex items-center justify-center z-50 px-4">
-      <div className={`w-full bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden relative transition-all duration-300 ${
-        selectedType === null ? "max-w-3xl" : "max-w-5xl h-[90vh] max-h-[750px] flex flex-col"
-      }`}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      {/* Overlay */}
+      <div 
+        onClick={onClose} 
+        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+      />
+      {/* Modal Container */}
+      <div className="relative z-10 w-full max-w-[1200px] h-[90vh] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-y-auto flex flex-col relative transition-all duration-300">
         
         {/* Duplicate Warning Prompt */}
         {duplicateFound && (
@@ -1363,6 +1385,7 @@ export default function CreateKnowledgeModal({ open, onClose, selected, clientId
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

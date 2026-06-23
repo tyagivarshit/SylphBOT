@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import { usePathname } from "next/navigation"
 import KnowledgeCard from "./KnowledgeCard"
 import CreateKnowledgeModal from "./CreateKnowledgeModal"
@@ -300,9 +301,27 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   const [loading,setLoading] = useState(false)
   const [deletingId,setDeletingId] = useState<string | null>(null)
 
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
+
   // Drawer & Suggestion State
   const [showHealthDrawer, setShowHealthDrawer] = useState(false)
   const [activeInitialType, setActiveInitialType] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (selectedPreview || showHealthDrawer) {
+      document.body.style.overflow = "hidden"
+    } else {
+      document.body.style.overflow = ""
+    }
+    return () => {
+      document.body.style.overflow = ""
+    }
+  }, [selectedPreview, showHealthDrawer])
 
   // Filters & State
   const [selectedCategory, setSelectedCategory] = useState("All Knowledge")
@@ -1065,202 +1084,192 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
   SLIDING PREVIEW DRAWER (FOR READING ONLY)
   ===================================================== */
   function renderPreviewDrawer() {
-    return (
-      <>
+    if (!mounted || !selectedPreview) return null
+
+    const parsed = parseKnowledge(selectedPreview)
+
+    return createPortal(
+      <div className="fixed inset-0 z-[9999] flex justify-end">
         {/* Backdrop overlay */}
-        {selectedPreview && (
-          <div
-            onClick={() => setSelectedPreview(null)}
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-40 transition-opacity duration-300"
-          />
-        )}
+        <div
+          onClick={() => setSelectedPreview(null)}
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+        />
 
         {/* Drawer Panel */}
-        <div
-          className={`fixed inset-y-0 right-0 w-full sm:w-[500px] bg-white border-l border-slate-200 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col ${
-            selectedPreview ? "translate-x-0" : "translate-x-full"
-          }`}
-        >
-          {selectedPreview && (() => {
-            const parsed = parseKnowledge(selectedPreview)
-            return (
-              <div className="h-full flex flex-col justify-between">
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    Knowledge Memory View
+        <div className="relative z-10 w-full sm:w-[500px] bg-white border-l border-slate-200 shadow-2xl h-full flex flex-col">
+          <div className="h-full flex flex-col justify-between">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Knowledge Memory View
+              </span>
+              <button
+                onClick={() => setSelectedPreview(null)}
+                className="text-slate-400 hover:text-slate-650 p-1 rounded hover:bg-slate-55 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+              {/* Title */}
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Title
+                </label>
+                <h2 className="text-lg font-bold tracking-tight text-slate-900 break-words leading-tight mt-1">
+                  {parsed.title}
+                </h2>
+              </div>
+
+              {/* Category */}
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Category
+                </label>
+                <div className="mt-1">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
+                    {parsed.category}
                   </span>
-                  <button
-                    onClick={() => setSelectedPreview(null)}
-                    className="text-slate-400 hover:text-slate-650 p-1 rounded hover:bg-slate-55 transition-all"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-                  {/* Title */}
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Title
-                    </label>
-                    <h2 className="text-lg font-bold tracking-tight text-slate-900 break-words leading-tight mt-1">
-                      {parsed.title}
-                    </h2>
-                  </div>
-
-                  {/* Category */}
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Category
-                    </label>
-                    <div className="mt-1">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
-                        {parsed.category}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Purpose */}
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Purpose
-                    </label>
-                    <p className="text-sm text-slate-700 font-medium mt-1 leading-relaxed">
-                      {parsed.purpose}
-                    </p>
-                  </div>
-
-                  {/* Content */}
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Content
-                    </label>
-                    <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto mt-1 font-normal">
-                      {selectedPreview.content}
-                    </div>
-                  </div>
-
-                  {/* Last Updated */}
-                  <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-4">
-                    <span>Last Updated</span>
-                    <span className="font-semibold text-slate-750">
-                      {new Date(selectedPreview.updatedAt).toLocaleDateString("en-US", {
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit"
-                      })}
-                    </span>
-                  </div>
-
-                  {/* Status */}
-                  <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-4">
-                    <span>Status</span>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                      parsed.status === 'Ready' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/10' :
-                      parsed.status === 'Processing' ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-600/10 animate-pulse' :
-                      'bg-slate-100 text-slate-700 ring-1 ring-slate-600/10'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        parsed.status === 'Ready' ? 'bg-emerald-500' :
-                        parsed.status === 'Processing' ? 'bg-amber-500' :
-                        'bg-slate-400'
-                      }`} />
-                      {parsed.status}
-                    </span>
-                  </div>
-
-                  {/* Used By (Cross References) */}
-                  <div className="border-t border-slate-100 pt-4">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
-                      Used By
-                    </label>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {getUsedByBots(parsed.category).map((bot, idx) => (
-                        <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-50 text-slate-700 border border-slate-150">
-                          {bot}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Related Memory Nodes (Auto Linking) */}
-                  <div className="border-t border-slate-100 pt-4">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
-                      Related Memory Nodes
-                    </label>
-                    {getRelatedKnowledge(selectedPreview).length === 0 ? (
-                      <span className="text-[11px] text-slate-400 mt-2 block italic">
-                        No related knowledge nodes detected yet.
-                      </span>
-                    ) : (
-                      <div className="space-y-1.5 mt-2">
-                        {getRelatedKnowledge(selectedPreview).map((rel, idx) => (
-                          <div 
-                            key={idx}
-                            onClick={() => setSelectedPreview(rel.item)}
-                            className="flex items-center justify-between p-2 rounded-lg border border-slate-200/60 bg-slate-50/30 hover:bg-slate-50 hover:border-slate-300 cursor-pointer transition-all"
-                          >
-                            <span className="text-[11px] font-semibold text-slate-800 truncate max-w-[240px]">
-                              {rel.title}
-                            </span>
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                              {rel.category}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Footer Buttons */}
-                <div className="px-6 py-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
-                  <button
-                    onClick={() => setSelectedPreview(null)}
-                    className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors shadow-sm"
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={() => {
-                      const item = selectedPreview
-                      setSelectedPreview(null)
-                      handleEdit(item)
-                    }}
-                    className="px-5 py-2 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all inline-flex items-center gap-1.5 shadow-sm border border-slate-950"
-                  >
-                    Edit
-                  </button>
                 </div>
               </div>
-            )
-          })()}
+
+              {/* Purpose */}
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Purpose
+                </label>
+                <p className="text-sm text-slate-700 font-medium mt-1 leading-relaxed">
+                  {parsed.purpose}
+                </p>
+              </div>
+
+              {/* Content */}
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Content
+                </label>
+                <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto mt-1 font-normal">
+                  {selectedPreview.content}
+                </div>
+              </div>
+
+              {/* Last Updated */}
+              <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-4">
+                <span>Last Updated</span>
+                <span className="font-semibold text-slate-750">
+                  {new Date(selectedPreview.updatedAt).toLocaleDateString("en-US", {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit"
+                  })}
+                </span>
+              </div>
+
+              {/* Status */}
+              <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-4">
+                <span>Status</span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                  parsed.status === 'Ready' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/10' :
+                  parsed.status === 'Processing' ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-600/10 animate-pulse' :
+                  'bg-slate-100 text-slate-700 ring-1 ring-slate-600/10'
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    parsed.status === 'Ready' ? 'bg-emerald-500' :
+                    parsed.status === 'Processing' ? 'bg-amber-500' :
+                    'bg-slate-400'
+                  }`} />
+                  {parsed.status}
+                </span>
+              </div>
+
+              {/* Used By (Cross References) */}
+              <div className="border-t border-slate-100 pt-4">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
+                  Used By
+                </label>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {getUsedByBots(parsed.category).map((bot, idx) => (
+                    <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-50 text-slate-700 border border-slate-150">
+                      {bot}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Related Memory Nodes (Auto Linking) */}
+              <div className="border-t border-slate-100 pt-4">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
+                  Related Memory Nodes
+                </label>
+                {getRelatedKnowledge(selectedPreview).length === 0 ? (
+                  <span className="text-[11px] text-slate-400 mt-2 block italic">
+                    No related knowledge nodes detected yet.
+                  </span>
+                ) : (
+                  <div className="space-y-1.5 mt-2">
+                    {getRelatedKnowledge(selectedPreview).map((rel, idx) => (
+                      <div 
+                        key={idx}
+                        onClick={() => setSelectedPreview(rel.item)}
+                        className="flex items-center justify-between p-2 rounded-lg border border-slate-200/60 bg-slate-50/30 hover:bg-slate-50 hover:border-slate-300 cursor-pointer transition-all"
+                      >
+                        <span className="text-[11px] font-semibold text-slate-800 truncate max-w-[240px]">
+                          {rel.title}
+                        </span>
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                          {rel.category}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="px-6 py-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setSelectedPreview(null)}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors shadow-sm"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  const item = selectedPreview
+                  setSelectedPreview(null)
+                  handleEdit(item)
+                }}
+                className="px-5 py-2 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-all inline-flex items-center gap-1.5 shadow-sm border border-slate-950"
+              >
+                Edit
+              </button>
+            </div>
+          </div>
         </div>
-      </>
+      </div>,
+      document.body
     )
   }
 
   function renderHealthDrawer() {
-    return (
-      <>
+    if (!mounted || !showHealthDrawer) return null
+
+    return createPortal(
+      <div className="fixed inset-0 z-[9999] flex justify-end">
         {/* Backdrop overlay */}
-        {showHealthDrawer && (
-          <div
-            onClick={() => setShowHealthDrawer(false)}
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-40 transition-opacity duration-300"
-          />
-        )}
+        <div
+          onClick={() => setShowHealthDrawer(false)}
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+        />
 
         {/* Drawer Panel */}
-        <div
-          className={`fixed inset-y-0 right-0 w-full sm:w-[500px] bg-white border-l border-slate-200 shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col ${
-            showHealthDrawer ? "translate-x-0" : "translate-x-full"
-          }`}
-        >
+        <div className="relative z-10 w-full sm:w-[500px] bg-white border-l border-slate-200 shadow-2xl h-full flex flex-col">
           <div className="h-full flex flex-col justify-between">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
@@ -1284,7 +1293,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
                   Memory Completeness
                 </label>
                 <div className="flex items-baseline gap-1.5 mt-2">
-                  <span className="text-3xl font-extrabold text-slate-900">
+                  <span className="text-3xl font-extrabold text-slate-950">
                     {calculateCompleteness()}%
                   </span>
                   <span className="text-xs text-slate-500 font-semibold">Complete</span>
@@ -1299,7 +1308,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
               {/* Knowledge Coverage breakdown */}
               <div className="border-t border-slate-100 pt-5">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-3">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block mb-3">
                   Knowledge Coverage
                 </label>
                 <div className="grid grid-cols-2 gap-3 text-xs">
@@ -1330,7 +1339,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
               {/* AI Diagnostics Warnings & Missing Knowledge */}
               <div className="border-t border-slate-100 pt-5 space-y-3">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
                   AI Diagnostics & Warnings
                 </label>
                 {analyzeMissingKnowledge().length === 0 ? (
@@ -1353,19 +1362,19 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
               {/* Recommended Next Steps */}
               <div className="border-t border-slate-100 pt-5 space-y-3">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
                   Recommended Next Steps
                 </label>
                 <div className="space-y-2">
                   {getMissingSuggestions().length === 0 ? (
-                    <p className="text-xs text-slate-500 italic font-normal">
+                    <p className="text-xs text-slate-505 italic font-normal">
                       Your business knowledge is fully covered. Keep importing or adding custom facts as your business grows.
                     </p>
                   ) : (
                     getMissingSuggestions().slice(0, 3).map((sugg) => (
                       <div 
                         key={sugg.id}
-                        className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                        className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:bg-slate-55 transition-colors"
                       >
                         <div className="space-y-0.5">
                           <span className="text-xs font-bold text-slate-800">Teach {sugg.label}</span>
@@ -1388,7 +1397,7 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
 
               {/* Recent Improvements */}
               <div className="border-t border-slate-100 pt-5 space-y-3">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 block">
                   Recent Improvements
                 </label>
                 {knowledge.length === 0 ? (
@@ -1436,14 +1445,15 @@ export default function KnowledgeList({ clientId = "" }: KnowledgeListProps){
             <div className="px-6 py-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end shrink-0">
               <button
                 onClick={() => setShowHealthDrawer(false)}
-                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors shadow-sm cursor-pointer"
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-55 rounded-lg transition-colors shadow-sm cursor-pointer"
               >
                 Close
               </button>
             </div>
           </div>
         </div>
-      </>
+      </div>,
+      document.body
     )
   }
 }

@@ -16,6 +16,19 @@ import {
   PromptCompiler,
   ReasoningFramework
 } from "../intelligence";
+import {
+  ToolRegistry,
+  ValidationEngine,
+  PermissionEngine,
+  PolicyEngine,
+  ApprovalEngine,
+  CircuitBreakerEngine,
+  RetryManager,
+  ExecutionTracker,
+  ResourceScheduler,
+  ToolExecutor
+} from "../execution";
+
 
 
 export interface BootstrapOptions {
@@ -187,6 +200,40 @@ export class Bootstrapper {
     this.diContainer.registerInstance("ILearningRegistry", learningRegistry);
     this.diContainer.registerInstance("IPromptCompiler", promptCompiler);
     this.diContainer.registerInstance("IReasoningFramework", reasoningFramework);
+
+    // Register Execution Layer Infrastructure
+    const toolRegistry = new ToolRegistry();
+    const validationEngine = new ValidationEngine();
+    const permissionEngine = new PermissionEngine();
+    const policyEngine = new PolicyEngine();
+    const approvalEngine = new ApprovalEngine();
+    const circuitBreaker = new CircuitBreakerEngine();
+    const retryManager = new RetryManager();
+    const executionTracker = new ExecutionTracker();
+    const resourceScheduler = new ResourceScheduler();
+    const toolExecutor = new ToolExecutor(
+      this.diContainer,
+      toolRegistry,
+      validationEngine,
+      permissionEngine,
+      policyEngine,
+      approvalEngine,
+      executionTracker,
+      circuitBreaker,
+      retryManager,
+      resourceScheduler
+    );
+
+    this.diContainer.registerInstance("IToolRegistry", toolRegistry);
+    this.diContainer.registerInstance("IValidationEngine", validationEngine);
+    this.diContainer.registerInstance("IPermissionEngine", permissionEngine);
+    this.diContainer.registerInstance("IPolicyEngine", policyEngine);
+    this.diContainer.registerInstance("IApprovalEngine", approvalEngine);
+    this.diContainer.registerInstance("ICircuitBreakerEngine", circuitBreaker);
+    this.diContainer.registerInstance("IRetryManager", retryManager);
+    this.diContainer.registerInstance("IExecutionTracker", executionTracker);
+    this.diContainer.registerInstance("IResourceScheduler", resourceScheduler);
+    this.diContainer.registerInstance("IToolExecutor", toolExecutor);
   }
 }
 

@@ -80,6 +80,8 @@ import { messageDualWriteTests } from "./messageDualWrite.test";
 import { messageReadCutoverATests } from "./messageReadCutoverA.test";
 import { runtimeCoreTests } from "./runtimeCore.test";
 import { runtimeIntelligenceTests } from "./runtimeIntelligence.test";
+import { runtimeExecutionTests } from "./runtimeExecution.test";
+
 
 
 type TestCase = {
@@ -905,6 +907,7 @@ const tests: TestCase[] = [
   ...messageReadCutoverATests,
   ...runtimeCoreTests,
   ...runtimeIntelligenceTests,
+  ...runtimeExecutionTests,
 ];
 
 let failures = 0;

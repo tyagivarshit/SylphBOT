@@ -5,6 +5,18 @@ import { HealthRegistry } from "./healthRegistry";
 import { StateManager } from "./stateManager";
 import { FeatureFlagEngine } from "./featureFlags";
 import { RuntimeManifest, ManifestModuleInfo } from "./manifest";
+import {
+  ContextBudgetManager,
+  ContextIntelligenceEngine,
+  MemoryEngine,
+  MemorySelectionEngine,
+  KnowledgeSelectionEngine,
+  LearningRegistry,
+  ConstitutionIntegrationLayer,
+  PromptCompiler,
+  ReasoningFramework
+} from "../intelligence";
+
 
 export interface BootstrapOptions {
   skipValidation?: boolean;
@@ -154,6 +166,27 @@ export class Bootstrapper {
     this.diContainer.registerInstance("IStateManager", this.stateManager);
     this.diContainer.registerInstance("IFeatureFlagEngine", this.featureFlagEngine);
     this.diContainer.registerInstance("IRuntimeManifest", this.runtimeManifest);
+
+    // Register Intelligence Layer Infrastructure
+    const constitutionLayer = new ConstitutionIntegrationLayer();
+    const budgetManager = new ContextBudgetManager();
+    const contextEngine = new ContextIntelligenceEngine(budgetManager);
+    const memoryEngine = new MemoryEngine();
+    const memorySelection = new MemorySelectionEngine(this.diContainer);
+    const knowledgeSelection = new KnowledgeSelectionEngine(this.diContainer);
+    const learningRegistry = new LearningRegistry();
+    const promptCompiler = new PromptCompiler(constitutionLayer);
+    const reasoningFramework = new ReasoningFramework(this.diContainer, contextEngine, budgetManager, promptCompiler);
+
+    this.diContainer.registerInstance("IConstitutionIntegrationLayer", constitutionLayer);
+    this.diContainer.registerInstance("IContextBudgetManager", budgetManager);
+    this.diContainer.registerInstance("IContextIntelligenceEngine", contextEngine);
+    this.diContainer.registerInstance("IMemoryEngine", memoryEngine);
+    this.diContainer.registerInstance("IMemorySelectionEngine", memorySelection);
+    this.diContainer.registerInstance("IKnowledgeSelectionEngine", knowledgeSelection);
+    this.diContainer.registerInstance("ILearningRegistry", learningRegistry);
+    this.diContainer.registerInstance("IPromptCompiler", promptCompiler);
+    this.diContainer.registerInstance("IReasoningFramework", reasoningFramework);
   }
 }
 

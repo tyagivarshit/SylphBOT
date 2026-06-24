@@ -16,3 +16,5 @@ export * from "../interfaces";
 export { HealthStatus } from "../kernel/healthRegistry";
 export * from "../communication";
 export { EventCallback } from "../communication/eventBus";
+export * from "../intelligence";
+

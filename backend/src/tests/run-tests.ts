@@ -79,6 +79,8 @@ import { bcryptMigrationTests } from "./bcryptMigration.test";
 import { messageDualWriteTests } from "./messageDualWrite.test";
 import { messageReadCutoverATests } from "./messageReadCutoverA.test";
 import { runtimeCoreTests } from "./runtimeCore.test";
+import { runtimeIntelligenceTests } from "./runtimeIntelligence.test";
+
 
 type TestCase = {
   name: string;
@@ -902,6 +904,7 @@ const tests: TestCase[] = [
   ...messageDualWriteTests,
   ...messageReadCutoverATests,
   ...runtimeCoreTests,
+  ...runtimeIntelligenceTests,
 ];
 
 let failures = 0;

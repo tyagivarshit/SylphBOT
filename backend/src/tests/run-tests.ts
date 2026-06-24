@@ -81,6 +81,10 @@ import { messageReadCutoverATests } from "./messageReadCutoverA.test";
 import { runtimeCoreTests } from "./runtimeCore.test";
 import { runtimeIntelligenceTests } from "./runtimeIntelligence.test";
 import { runtimeExecutionTests } from "./runtimeExecution.test";
+import { runtimeObservabilityTests } from "./runtimeObservability.test";
+import { runtimeSandboxTests } from "./runtimeSandbox.test";
+
+
 
 
 
@@ -908,6 +912,8 @@ const tests: TestCase[] = [
   ...runtimeCoreTests,
   ...runtimeIntelligenceTests,
   ...runtimeExecutionTests,
+  ...runtimeObservabilityTests,
+  ...runtimeSandboxTests,
 ];
 
 let failures = 0;

@@ -28,6 +28,32 @@ import {
   ResourceScheduler,
   ToolExecutor
 } from "../execution";
+import {
+  TelemetryEngine,
+  TracingEngine,
+  ReasoningTraceEngine,
+  CostTracker,
+  MetricsEngine,
+  HealthMonitor,
+  AuditEngine,
+  EventAnalyticsEngine,
+  AlertEngine,
+  ObservabilityAPILayer
+} from "../observability";
+import {
+  SandboxRuntime,
+  SandboxMemory,
+  ShadowModeManager,
+  SimulationEngine,
+  ReplayEngine,
+  ExperimentFramework,
+  ScenarioGenerator,
+  SafetyEvaluator,
+  DecisionComparator,
+  CertificationEngine
+} from "../sandbox";
+
+
 
 
 
@@ -234,6 +260,62 @@ export class Bootstrapper {
     this.diContainer.registerInstance("IExecutionTracker", executionTracker);
     this.diContainer.registerInstance("IResourceScheduler", resourceScheduler);
     this.diContainer.registerInstance("IToolExecutor", toolExecutor);
+
+    // Register Observability Layer Infrastructure
+    const telemetryEngine = new TelemetryEngine();
+    const tracingEngine = new TracingEngine();
+    const reasoningTraceEngine = new ReasoningTraceEngine();
+    const costTracker = new CostTracker();
+    const metricsEngine = new MetricsEngine();
+    const healthMonitor = new HealthMonitor(this.diContainer);
+    const auditEngine = new AuditEngine();
+    const eventAnalyticsEngine = new EventAnalyticsEngine();
+    const alertEngine = new AlertEngine();
+    const observabilityApi = new ObservabilityAPILayer(
+      this.diContainer,
+      telemetryEngine,
+      tracingEngine,
+      reasoningTraceEngine,
+      costTracker,
+      metricsEngine,
+      healthMonitor,
+      auditEngine,
+      alertEngine
+    );
+
+    this.diContainer.registerInstance("ITelemetryEngine", telemetryEngine);
+    this.diContainer.registerInstance("ITracingEngine", tracingEngine);
+    this.diContainer.registerInstance("IReasoningTraceEngine", reasoningTraceEngine);
+    this.diContainer.registerInstance("ICostTracker", costTracker);
+    this.diContainer.registerInstance("IMetricsEngine", metricsEngine);
+    this.diContainer.registerInstance("IHealthMonitor", healthMonitor);
+    this.diContainer.registerInstance("IAuditEngine", auditEngine);
+    this.diContainer.registerInstance("IEventAnalyticsEngine", eventAnalyticsEngine);
+    this.diContainer.registerInstance("IAlertEngine", alertEngine);
+    this.diContainer.registerInstance("IObservabilityAPILayer", observabilityApi);
+
+    // Register Sandbox Layer Infrastructure
+    const sandboxRuntime = new SandboxRuntime();
+    const sandboxMemory = new SandboxMemory();
+    const shadowModeManager = new ShadowModeManager();
+    const simulationEngine = new SimulationEngine();
+    const replayEngine = new ReplayEngine();
+    const experimentFramework = new ExperimentFramework();
+    const scenarioGenerator = new ScenarioGenerator();
+    const safetyEvaluator = new SafetyEvaluator();
+    const decisionComparator = new DecisionComparator();
+    const certificationEngine = new CertificationEngine();
+
+    this.diContainer.registerInstance("ISandboxManager", sandboxRuntime);
+    this.diContainer.registerInstance("ISandboxMemory", sandboxMemory);
+    this.diContainer.registerInstance("IShadowModeManager", shadowModeManager);
+    this.diContainer.registerInstance("ISimulationEngine", simulationEngine);
+    this.diContainer.registerInstance("IReplayEngine", replayEngine);
+    this.diContainer.registerInstance("IExperimentFramework", experimentFramework);
+    this.diContainer.registerInstance("IScenarioGenerator", scenarioGenerator);
+    this.diContainer.registerInstance("ISafetyEvaluator", safetyEvaluator);
+    this.diContainer.registerInstance("IDecisionComparator", decisionComparator);
+    this.diContainer.registerInstance("ICertificationEngine", certificationEngine);
   }
 }
 

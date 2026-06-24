@@ -10,6 +10,13 @@ import { RuntimeManifest } from "../runtime/kernel/manifest";
 import { Bootstrapper } from "../runtime/kernel/bootstrap";
 import { CapabilityRegistry } from "../runtime/core/capabilityRegistry";
 import { CompatibilityEngine } from "../runtime/core/compatibilityMetadata";
+import { ContractRegistry } from "../runtime/communication/contractRegistry";
+import { CorrelationEngine } from "../runtime/communication/correlationEngine";
+import { EventScheduler } from "../runtime/communication/eventScheduler";
+import { DeadLetterQueue } from "../runtime/communication/deadLetterQueue";
+import { IdentityEngine } from "../runtime/communication/identityEngine";
+import { RoutingEngine } from "../runtime/communication/routingEngine";
+import { EventBus } from "../runtime/communication/eventBus";
 
 export const runtimeCoreTests: any[] = [
   {
@@ -349,6 +356,179 @@ export const runtimeCoreTests: any[] = [
       await boot.shutdown();
       assert.equal(lifecycle.getState(), "Stopped");
       assert.equal(health.getAggregateHealth().health, "Unavailable");
+    }
+  },
+  {
+    name: "Contract Registry & Event Bus: validates event payloads against schema and runs callbacks",
+    run: async () => {
+      const cr = new ContractRegistry();
+      const cor = new CorrelationEngine();
+      const es = new EventScheduler();
+      const dlq = new DeadLetterQueue();
+      const bus = new EventBus(cr, cor, es, dlq);
+
+      cr.registerContract({
+        name: "payment.processed",
+        version: "1.0.0",
+        schema: {
+          amount: "number",
+          success: "boolean"
+        }
+      });
+
+      let receivedEnvelope: any = null;
+      bus.subscribe("payment.processed", (env) => {
+        receivedEnvelope = env;
+      });
+
+      // Publish valid event payload
+      const eventId = await bus.publish("payment.processed", "1.0.0", { amount: 150.5, success: true }, { tenantId: "tenant_1" });
+      assert.ok(eventId);
+      
+      // Allow async event loop execution
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok(receivedEnvelope);
+      assert.equal(receivedEnvelope.payload.amount, 150.5);
+      assert.equal(receivedEnvelope.metadata.status, "completed");
+
+      // Publish invalid payload
+      await assert.rejects(async () => {
+        await bus.publish("payment.processed", "1.0.0", { amount: "150.5", success: true }, { tenantId: "tenant_1" });
+      }, /Contract Validation Failed/);
+    }
+  },
+  {
+    name: "Identity Engine: links multi-channel mappings and merges unified profiles",
+    run: () => {
+      const engine = new IdentityEngine();
+
+      // Resolve initial WhatsApp identity
+      const id1 = engine.resolveIdentity("tenant_1", "WhatsApp", "wa_999");
+      assert.ok(id1.unifiedId);
+      assert.equal(id1.channels.get("WhatsApp"), "wa_999");
+
+      // Link Instagram to WhatsApp unified ID
+      const id2 = engine.linkIdentity(id1.unifiedId, "tenant_1", "Instagram", "ig_999");
+      assert.equal(id2.unifiedId, id1.unifiedId);
+      assert.equal(id2.channels.get("Instagram"), "ig_999");
+
+      // Resolve another email identity
+      const id3 = engine.resolveIdentity("tenant_1", "Email", "mail_999");
+      assert.notEqual(id3.unifiedId, id1.unifiedId);
+
+      // Link/Merge Email unified ID with the original
+      const merged = engine.mergeIdentities(id1.unifiedId, id3.unifiedId, "tenant_1");
+      assert.equal(merged.unifiedId, id1.unifiedId);
+      assert.equal(merged.channels.get("Email"), "mail_999");
+
+      // Bypassed looking up deleted ID
+      const lookupDeleted = engine.lookup(id3.unifiedId);
+      assert.equal(lookupDeleted, null);
+    }
+  },
+  {
+    name: "Routing Engine: routes dynamically based on capabilities and owner health states",
+    run: () => {
+      const capRegistry = new CapabilityRegistry();
+      const healthRegistry = new HealthRegistry();
+      const routing = new RoutingEngine(capRegistry, healthRegistry);
+
+      capRegistry.register({
+        name: "Refund",
+        version: "1.0.0",
+        ownerId: "FinanceAI",
+        permissionsRequired: [],
+        metadata: {},
+        health: "Healthy",
+        status: "Active"
+      });
+
+      // Resolve route
+      const r1 = routing.route("Refund");
+      assert.ok(r1);
+      assert.equal(r1.destinationOwner, "FinanceAI");
+
+      // Set FinanceAI health to Unavailable
+      healthRegistry.setHealth("FinanceAI", {
+        health: "Unavailable",
+        readiness: "Not Ready",
+        liveness: "Dead",
+        startup: "Failed",
+        dependencyHealth: "Dependency Unavailable"
+      });
+
+      // Routing to unavailable owner fails
+      const r2 = routing.route("Refund");
+      assert.equal(r2, null);
+
+      // Register fallback route
+      routing.registerFallback("Refund", "CEOAI");
+      const r3 = routing.route("Refund");
+      assert.ok(r3);
+      assert.equal(r3.destinationOwner, "CEOAI");
+    }
+  },
+  {
+    name: "Correlation Engine: propagates parent span scopes, lineages and event steps",
+    run: () => {
+      const engine = new CorrelationEngine();
+
+      const context1 = engine.createContext();
+      assert.ok(context1.correlationId);
+      assert.equal(context1.parentCorrelationId, undefined);
+
+      // Test extending the context within the same execution path
+      const context2 = engine.extendContext(context1, "step_two", "evt_1");
+      assert.equal(context2.correlationId, context1.correlationId);
+      assert.equal(context2.parentCorrelationId, context1.parentCorrelationId);
+      assert.equal(context2.executionChain[0], "step_two");
+      assert.equal(context2.lineage[0], "evt_1");
+
+      // Test creating a child context representing a new span boundary
+      const childContext = engine.createContext(context1);
+      assert.equal(childContext.correlationId, context1.correlationId);
+      assert.equal(childContext.parentCorrelationId, context1.correlationId);
+    }
+  },
+  {
+    name: "Dead Letter Queue: quarantines payloads and manages retry limits",
+    run: () => {
+      const dlq = new DeadLetterQueue();
+
+      const id = dlq.quarantine("topic.a", { text: "err" }, "corr_123", "NullPointerException");
+      assert.ok(id);
+      
+      const list = dlq.listQuarantined();
+      assert.equal(list.length, 1);
+      assert.equal(list[0].id, id);
+      assert.equal(list[0].errorReason, "NullPointerException");
+
+      // Retry
+      const r1 = dlq.retry(id);
+      assert.equal(r1.success, true);
+      assert.equal(r1.topic, "topic.a");
+
+      // Simulate failure loop and verify quarantine limit block
+      dlq.retry(id);
+      const r3 = dlq.retry(id);
+      assert.equal(r3.success, false);
+    }
+  },
+  {
+    name: "Event Scheduler: manages future trigger queues and tics delayed jobs",
+    run: () => {
+      const es = new EventScheduler();
+
+      const id = es.schedule("topic.delayed", { data: 1 }, 50);
+      assert.ok(id);
+
+      const jobs1 = es.tick(new Date(Date.now() + 10));
+      assert.equal(jobs1.length, 0); // Not ready yet
+
+      const jobs2 = es.tick(new Date(Date.now() + 60));
+      assert.equal(jobs2.length, 1);
+      assert.equal(jobs2[0].topic, "topic.delayed");
+      assert.equal(jobs2[0].status, "executed");
     }
   }
 ];

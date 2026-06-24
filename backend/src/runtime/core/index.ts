@@ -14,3 +14,5 @@ export * from "./capabilityRegistry";
 export * from "./compatibilityMetadata";
 export * from "../interfaces";
 export { HealthStatus } from "../kernel/healthRegistry";
+export * from "../communication";
+export { EventCallback } from "../communication/eventBus";

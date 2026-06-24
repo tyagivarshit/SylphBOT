@@ -78,6 +78,7 @@ import { clearWorkspaceIdentityCache } from "../services/tenant.service";
 import { bcryptMigrationTests } from "./bcryptMigration.test";
 import { messageDualWriteTests } from "./messageDualWrite.test";
 import { messageReadCutoverATests } from "./messageReadCutoverA.test";
+import { runtimeCoreTests } from "./runtimeCore.test";
 
 type TestCase = {
   name: string;
@@ -900,6 +901,7 @@ const tests: TestCase[] = [
   ...bcryptMigrationTests,
   ...messageDualWriteTests,
   ...messageReadCutoverATests,
+  ...runtimeCoreTests,
 ];
 
 let failures = 0;

@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+import { container } from "../runtime/core";
+import { IModelManager } from "../runtime/interfaces/core";
 import { pipeline } from "@xenova/transformers";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { markAiRuntimeReady } from "../runtime/startupIsolation.service";
@@ -106,9 +107,7 @@ const EMBEDDING_BATCH_CONCURRENCY = parsePositiveInt(
   4
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+
 
 let extractorPromise: Promise<any> | null = null;
 let modelReady = false;
@@ -530,17 +529,13 @@ const computeEmbeddingsForTexts = async (
     return vectors;
   }
 
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: texts,
-  });
-
-  const rows = Array.isArray(response.data) ? response.data : [];
-  const vectors: number[][] = [];
-
-  for (let index = 0; index < texts.length; index += 1) {
-    vectors.push(sanitizeVector(rows[index]?.embedding || []));
-  }
+  const modelManager = container.resolve<IModelManager>("IModelManager");
+  const vectors: number[][] = await Promise.all(
+    texts.map(async (text) => {
+      const vector = await modelManager.embed(text, { model: "text-embedding-3-small" });
+      return sanitizeVector(vector);
+    })
+  );
 
   return vectors;
 };

@@ -116,7 +116,7 @@ export const runtimeIntelligenceTests: any[] = [
       }, /Access denied/);
 
       // Retention cleanup
-      const deletedCount = await memory.applyRetentionPolicy("tenant-1", new Date(), 0.92);
+      const deletedCount = await memory.applyRetentionPolicy("tenant-1", new Date(Date.now() - 60000), 0.92);
       assert.equal(deletedCount, 1); // removes key1 v1 because confidence is 0.9 (< 0.92)
 
       // Search memory

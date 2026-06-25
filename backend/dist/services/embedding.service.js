@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isEmbeddingRuntimeReady = exports.getEmbeddingRuntimeState = exports.warmupEmbeddingRuntime = exports.createEmbeddingsBatch = exports.createEmbedding = void 0;
-const openai_1 = __importDefault(require("openai"));
+const core_1 = require("../runtime/core");
 const transformers_1 = require("@xenova/transformers");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
 const startupIsolation_service_1 = require("../runtime/startupIsolation.service");
@@ -27,9 +27,6 @@ const EMBEDDING_COMPUTE_BUDGET_MS = parsePositiveInt(process.env.EMBEDDING_COMPU
 const EMBEDDING_LOCAL_YIELD_EVERY = parsePositiveInt(process.env.EMBEDDING_LOCAL_YIELD_EVERY, 2);
 const EMBEDDING_BATCH_MAX_ITEMS = parsePositiveInt(process.env.EMBEDDING_BATCH_MAX_ITEMS, 64);
 const EMBEDDING_BATCH_CONCURRENCY = parsePositiveInt(process.env.EMBEDDING_BATCH_CONCURRENCY, 4);
-const openai = new openai_1.default({
-    apiKey: process.env.OPENAI_API_KEY,
-});
 let extractorPromise = null;
 let modelReady = false;
 const embeddingWarmupState = {
@@ -356,15 +353,11 @@ const computeEmbeddingsForTexts = async (texts, context) => {
         }
         return vectors;
     }
-    const response = await openai.embeddings.create({
-        model: "text-embedding-3-small",
-        input: texts,
-    });
-    const rows = Array.isArray(response.data) ? response.data : [];
-    const vectors = [];
-    for (let index = 0; index < texts.length; index += 1) {
-        vectors.push(sanitizeVector(rows[index]?.embedding || []));
-    }
+    const modelManager = core_1.container.resolve("IModelManager");
+    const vectors = await Promise.all(texts.map(async (text) => {
+        const vector = await modelManager.embed(text, { model: "text-embedding-3-small" });
+        return sanitizeVector(vector);
+    }));
     return vectors;
 };
 const resolveVariantEmbeddings = async (variants) => {

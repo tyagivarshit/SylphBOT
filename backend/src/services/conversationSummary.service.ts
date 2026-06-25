@@ -1,10 +1,6 @@
-import OpenAI from "openai";
+import { container } from "../runtime/core";
+import { IModelManager } from "../runtime/interfaces/core";
 import prisma from "../config/prisma";
-
-const openai = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1",
-});
 
 /*
 =====================================================
@@ -50,42 +46,35 @@ export const generateConversationSummary = async (leadId: string) => {
     GENERATE SUMMARY
     ------------------------------------------------ */
 
-    const prompt = `
-Summarize this customer conversation for CRM storage.
+    const compiler = container.resolve<any>("IPromptCompiler");
+    const compiled = compiler.compile(
+      "default_tenant",
+      "conversation_summary",
+      "1.0.0",
+      {
+        input: "",
+      },
+      {
+        conversationText,
+      }
+    );
 
-Focus on extracting:
-
-- Customer intent
-- Budget information
-- Interested services
-- Objections or concerns
-- Buying signals
-- Important personal information
-
-Return a concise structured summary.
-
-Conversation:
-${conversationText}
-`;
-
-    const response = await openai.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+    const modelManager = container.resolve<IModelManager>("IModelManager");
+    const response = await modelManager.generateCompletion([
+      {
+        role: "system",
+        content: compiled.system,
+      },
+      {
+        role: "user",
+        content: compiled.user,
+      },
+    ], {
+      model: "llama3-70b-8192",
       temperature: 0.2,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You summarize conversations for CRM memory systems. Be concise and factual.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
     });
 
-    const summary =
-      response.choices?.[0]?.message?.content?.trim() || "";
+    const summary = response.content?.trim() || "";
 
     if (!summary) return;
 

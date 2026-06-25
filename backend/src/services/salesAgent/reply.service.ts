@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+import { container } from "../../runtime/core";
+import { IModelManager } from "../../runtime/interfaces/core";
 import { selectBestAction } from "./decisionEngine.service";
 import { buildSalesAgentContext } from "./intelligence.service";
 import {
@@ -26,10 +27,7 @@ import type {
   SalesProgressionState,
 } from "./types";
 
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1",
-});
+
 
 type ReplyInput = {
   businessId: string;
@@ -605,15 +603,14 @@ const createAIReply = async (input: ReplyInput): Promise<SalesAgentReply> => {
   const promptMessages = buildSalesAgentMessages(optimizedContext);
 
   try {
-    const response = await groq.chat.completions.create({
-      model: process.env.SALES_AGENT_MODEL || "llama-3.1-8b-instant",
+    const modelManager = container.resolve<IModelManager>("IModelManager");
+    const response = await modelManager.generateCompletion(promptMessages as any, {
+      model: "llama3-70b-8192", // Map standard Groq model in registry
       temperature: optimizedContext.planKey === "ELITE" ? 0.35 : 0.28,
-      max_tokens: optimizedContext.planKey === "ELITE" ? 180 : 140,
-      messages: promptMessages as any,
+      maxTokens: optimizedContext.planKey === "ELITE" ? 180 : 140,
     });
 
-    const rawReply =
-      response.choices?.[0]?.message?.content?.trim() || "";
+    const rawReply = response.content?.trim() || "";
     const parsed =
       parseSalesAgentReply(rawReply, optimizedContext) ||
       buildFallbackSalesReply(optimizedContext);

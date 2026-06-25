@@ -10,6 +10,7 @@ import { RetryManager } from "./retryManager";
 import { ResourceScheduler } from "./resourceScheduler";
 import { ExecutionContext } from "./types";
 import { DIContainer, container } from "../kernel/diContainer";
+import { RuntimeGuard } from "../kernel/runtimeGuard";
 
 export class ToolExecutor implements IToolExecutor {
   private diContainer: DIContainer;
@@ -55,6 +56,7 @@ export class ToolExecutor implements IToolExecutor {
     args: Record<string, unknown>,
     context: any
   ): Promise<ToolExecutionResult> {
+    RuntimeGuard.enforceToolExecution(name);
     const correlationId = context?.correlationId || context?.requestId || `corr_${Date.now()}`;
     const tenantId = context?.tenantId || context?.businessId || "default_tenant";
     

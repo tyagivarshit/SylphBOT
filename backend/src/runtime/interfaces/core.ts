@@ -27,6 +27,22 @@ export interface IModelManager {
     messages: MessageDTO[],
     options?: CompletionOptions
   ): Promise<CompletionResult>;
+
+  generate(
+    prompt: string | MessageDTO[],
+    options?: CompletionOptions
+  ): Promise<CompletionResult>;
+
+  embed(
+    text: string,
+    options?: { model?: string }
+  ): Promise<number[]>;
+
+  classify(
+    text: string,
+    categories: string[],
+    options?: { model?: string }
+  ): Promise<string>;
 }
 
 export interface EmbeddingResult {

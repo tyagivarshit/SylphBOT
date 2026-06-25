@@ -52,6 +52,30 @@ import {
   DecisionComparator,
   CertificationEngine
 } from "../sandbox";
+import {
+  ContractRegistry,
+  CorrelationEngine,
+  EventScheduler,
+  DeadLetterQueue,
+  RoutingEngine,
+  EventBus
+} from "../communication";
+import { CapabilityRegistry } from "../core/capabilityRegistry";
+import {
+  ModelRegistry,
+  ProviderRegistry,
+  ModelRouter,
+  FallbackManager,
+  ModelHealthMonitor,
+  ModelCostManager,
+  ModelManager,
+  OpenAIAdapter,
+  AnthropicAdapter,
+  GeminiAdapter,
+  GroqAdapter,
+  OpenRouterAdapter,
+  OllamaAdapter
+} from "../models";
 
 
 
@@ -229,6 +253,72 @@ export class Bootstrapper {
 
     // Register Execution Layer Infrastructure
     const toolRegistry = new ToolRegistry();
+    toolRegistry.registerTool({
+      name: "automation_step",
+      description: "Executes automation step",
+      schema: { type: "object", properties: {} },
+      execute: async (context: any, args: any) => {
+        const { step, trigger, message, businessId, leadId } = args;
+        const prisma = (await import("../../config/prisma")).default;
+        const { executionId, flowId } = trigger;
+
+        if (!step) return null;
+
+        if (step.stepType === "MESSAGE" || step.stepType === "SEND_MESSAGE") {
+          if (!step.message) return null;
+          if (step.nextStep) {
+            await prisma.automationExecution.update({
+              where: { id: executionId },
+              data: { currentStep: step.nextStep },
+            });
+          } else {
+            await prisma.automationExecution.update({
+              where: { id: executionId },
+              data: { status: "COMPLETED" },
+            });
+          }
+          return step.message;
+        }
+
+        if (step.stepType === "CONDITION") {
+          const cleanMessage = message.toLowerCase().replace(/[^\w\s]/g, "");
+          const condition = step.condition?.toLowerCase().replace(/[^\w\s]/g, "");
+          if (!condition) return null;
+          const regex = new RegExp(`\\b${condition}\\b`);
+          const matched = regex.test(cleanMessage);
+          if (!matched) return null;
+
+          const nextStep = await prisma.automationStep.findFirst({
+            where: { flowId, stepKey: step.nextStep || "" },
+          });
+          if (!nextStep) return null;
+
+          await prisma.automationExecution.update({
+            where: { id: executionId },
+            data: { currentStep: nextStep.stepKey },
+          });
+
+          if (nextStep.stepType === "MESSAGE" || nextStep.stepType === "SEND_MESSAGE") {
+            return nextStep.message || null;
+          }
+          return null;
+        }
+
+        if (step.stepType === "DELAY") {
+          return null;
+        }
+
+        if (step.stepType === "END") {
+          await prisma.automationExecution.update({
+            where: { id: executionId },
+            data: { status: "COMPLETED" },
+          });
+          return null;
+        }
+
+        return null;
+      }
+    });
     const validationEngine = new ValidationEngine();
     const permissionEngine = new PermissionEngine();
     const policyEngine = new PolicyEngine();
@@ -316,6 +406,56 @@ export class Bootstrapper {
     this.diContainer.registerInstance("ISafetyEvaluator", safetyEvaluator);
     this.diContainer.registerInstance("IDecisionComparator", decisionComparator);
     this.diContainer.registerInstance("ICertificationEngine", certificationEngine);
+
+    // Register Communication Layer Infrastructure
+    const capabilityRegistry = new CapabilityRegistry();
+    const contractRegistry = new ContractRegistry();
+    const correlationEngine = new CorrelationEngine();
+    const eventScheduler = new EventScheduler();
+    const dlq = new DeadLetterQueue();
+    const routingEngine = new RoutingEngine(capabilityRegistry, this.healthRegistry);
+    const eventBus = new EventBus(contractRegistry, correlationEngine, eventScheduler, dlq, routingEngine);
+
+    this.diContainer.registerInstance("ICapabilityRegistry", capabilityRegistry);
+    this.diContainer.registerInstance("IContractRegistry", contractRegistry);
+    this.diContainer.registerInstance("ICorrelationEngine", correlationEngine);
+    this.diContainer.registerInstance("IEventScheduler", eventScheduler);
+    this.diContainer.registerInstance("IDeadLetterQueue", dlq);
+    this.diContainer.registerInstance("IRoutingEngine", routingEngine);
+    this.diContainer.registerInstance("IEventBus", eventBus);
+
+    // Register Models Layer Infrastructure
+    const modelRegistry = new ModelRegistry();
+    const providerRegistry = new ProviderRegistry();
+    const modelHealthMonitor = new ModelHealthMonitor();
+    const modelRouter = new ModelRouter(modelRegistry, modelHealthMonitor);
+    const fallbackManager = new FallbackManager();
+    const modelCostManager = new ModelCostManager(modelRegistry);
+
+    // Register all default provider adapters
+    providerRegistry.registerProvider({ id: "openai", health: "Healthy", status: "active" }, new OpenAIAdapter({ id: "openai", health: "Healthy", status: "active" }));
+    providerRegistry.registerProvider({ id: "anthropic", health: "Healthy", status: "active" }, new AnthropicAdapter({ id: "anthropic", health: "Healthy", status: "active" }));
+    providerRegistry.registerProvider({ id: "gemini", health: "Healthy", status: "active" }, new GeminiAdapter({ id: "gemini", health: "Healthy", status: "active" }));
+    providerRegistry.registerProvider({ id: "groq", health: "Healthy", status: "active" }, new GroqAdapter({ id: "groq", health: "Healthy", status: "active" }));
+    providerRegistry.registerProvider({ id: "openrouter", health: "Healthy", status: "active" }, new OpenRouterAdapter({ id: "openrouter", health: "Healthy", status: "active" }));
+    providerRegistry.registerProvider({ id: "ollama", health: "Healthy", status: "active" }, new OllamaAdapter({ id: "ollama", health: "Healthy", status: "active" }));
+
+    const modelManager = new ModelManager(
+      modelRegistry,
+      providerRegistry,
+      modelRouter,
+      fallbackManager,
+      modelHealthMonitor,
+      modelCostManager
+    );
+
+    this.diContainer.registerInstance("IModelRegistry", modelRegistry);
+    this.diContainer.registerInstance("IProviderRegistry", providerRegistry);
+    this.diContainer.registerInstance("IModelRouter", modelRouter);
+    this.diContainer.registerInstance("IFallbackManager", fallbackManager);
+    this.diContainer.registerInstance("IModelHealthMonitor", modelHealthMonitor);
+    this.diContainer.registerInstance("IModelCostManager", modelCostManager);
+    this.diContainer.registerInstance("IModelManager", modelManager);
   }
 }
 

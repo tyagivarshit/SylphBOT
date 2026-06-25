@@ -3,6 +3,8 @@ import { CorrelationEngine, CorrelationContext } from "./correlationEngine";
 import { EventScheduler } from "./eventScheduler";
 import { DeadLetterQueue } from "./deadLetterQueue";
 import { RoutingEngine } from "./routingEngine";
+import { RetirementEnforcer } from "../kernel/retirementEnforcer";
+import { RuntimeGuard } from "../kernel/runtimeGuard";
 
 export interface EventEnvelope {
   id: string;
@@ -64,6 +66,8 @@ export class EventBus {
       delayMs?: number;
     }
   ): Promise<string> {
+    RetirementEnforcer.enforce("Direct event routing");
+    RuntimeGuard.enforceEventRouting(topic);
     const eventId = "evt_" + Math.random().toString(36).substring(2, 12);
     const priority = options.priority || "medium";
 

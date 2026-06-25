@@ -6,13 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateRAGReply = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const knowledgeSearch_service_1 = require("./knowledgeSearch.service");
-const openai_1 = __importDefault(require("openai"));
+const core_1 = require("../runtime/core");
 const redis_1 = __importDefault(require("../config/redis"));
 const clientScope_service_1 = require("./clientScope.service");
-const groq = new openai_1.default({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: "https://api.groq.com/openai/v1",
-});
 /* ---------------- INTENT ---------------- */
 const detectIntent = (message) => {
     const msg = message.toLowerCase();
@@ -198,39 +194,28 @@ const generateRAGReply = async (businessId, message, leadId) => {
             READY: "Push toward conversion.",
             GENERAL: "Be helpful and guide user.",
         };
-        const prompt = `
-Business:
-${businessData.businessInfo || ""}
-
-Pricing:
-${businessData.pricingInfo || ""}
-
-Tone:
-${businessData.aiTone || "Friendly"}
-
-Instructions:
-${businessData.salesInstructions || ""}
-
-Knowledge:
-${finalContext}
-
-User:
-${message}
-
-Intent:
-${intentMap[intent]}
-`;
-        /* ================= AI CALL ================= */
-        const response = await groq.chat.completions.create({
-            model: "llama-3.1-8b-instant",
-            temperature: 0.2,
-            max_tokens: 200,
-            messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: prompt },
-            ],
+        const compiler = core_1.container.resolve("IPromptCompiler");
+        const compiled = compiler.compile("default_tenant", "rag_prompt", "1.0.0", {
+            input: "",
+        }, {
+            businessInfo: businessData.businessInfo || "",
+            pricingInfo: businessData.pricingInfo || "",
+            aiTone: businessData.aiTone || "Friendly",
+            salesInstructions: businessData.salesInstructions || "",
+            finalContext: finalContext || "",
+            message: message || "",
+            intentDescription: intentMap[intent] || "",
         });
-        let reply = response?.choices?.[0]?.message?.content?.trim();
+        const modelManager = core_1.container.resolve("IModelManager");
+        const response = await modelManager.generateCompletion([
+            { role: "system", content: compiled.system },
+            { role: "user", content: compiled.user },
+        ], {
+            model: "llama3-70b-8192",
+            temperature: 0.2,
+            maxTokens: 200,
+        });
+        let reply = response.content?.trim() || "";
         /* =================================================
         🔥 APPLY SALES BRAIN (NEW)
         ================================================= */

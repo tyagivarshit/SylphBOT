@@ -20,6 +20,7 @@ export * from "../intelligence";
 export * from "../execution";
 export * from "../observability";
 export * from "../sandbox";
+export * from "../models";
 
 
 

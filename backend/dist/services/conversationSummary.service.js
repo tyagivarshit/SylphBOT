@@ -4,12 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateConversationSummary = void 0;
-const openai_1 = __importDefault(require("openai"));
+const core_1 = require("../runtime/core");
 const prisma_1 = __importDefault(require("../config/prisma"));
-const openai = new openai_1.default({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: "https://api.groq.com/openai/v1",
-});
 /*
 =====================================================
 CONFIG
@@ -44,38 +40,27 @@ const generateConversationSummary = async (leadId) => {
         /* ------------------------------------------------
         GENERATE SUMMARY
         ------------------------------------------------ */
-        const prompt = `
-Summarize this customer conversation for CRM storage.
-
-Focus on extracting:
-
-- Customer intent
-- Budget information
-- Interested services
-- Objections or concerns
-- Buying signals
-- Important personal information
-
-Return a concise structured summary.
-
-Conversation:
-${conversationText}
-`;
-        const response = await openai.chat.completions.create({
-            model: "llama-3.1-8b-instant",
-            temperature: 0.2,
-            messages: [
-                {
-                    role: "system",
-                    content: "You summarize conversations for CRM memory systems. Be concise and factual.",
-                },
-                {
-                    role: "user",
-                    content: prompt,
-                },
-            ],
+        const compiler = core_1.container.resolve("IPromptCompiler");
+        const compiled = compiler.compile("default_tenant", "conversation_summary", "1.0.0", {
+            input: "",
+        }, {
+            conversationText,
         });
-        const summary = response.choices?.[0]?.message?.content?.trim() || "";
+        const modelManager = core_1.container.resolve("IModelManager");
+        const response = await modelManager.generateCompletion([
+            {
+                role: "system",
+                content: compiled.system,
+            },
+            {
+                role: "user",
+                content: compiled.user,
+            },
+        ], {
+            model: "llama3-70b-8192",
+            temperature: 0.2,
+        });
+        const summary = response.content?.trim() || "";
         if (!summary)
             return;
         /* ------------------------------------------------

@@ -11,6 +11,9 @@ export interface IMemoryEngine {
     facts: MemoryFact[];
     summary: string;
   }>;
+  getStoredMemoryFacts(leadId: string): Promise<any[]>;
+  createMemoryFact(leadId: string, key: string, value: string, confidence: number, source: string): Promise<any>;
+  updateMemoryFact(id: string, value: string, confidence: number, source: string): Promise<any>;
 }
 
 export interface TimelineMessage {

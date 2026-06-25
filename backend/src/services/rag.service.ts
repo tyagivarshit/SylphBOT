@@ -1,13 +1,9 @@
 import prisma from "../config/prisma";
 import { searchKnowledge } from "./knowledgeSearch.service";
-import OpenAI from "openai";
+import { container } from "../runtime/core";
+import { IModelManager } from "../runtime/interfaces/core";
 import redis from "../config/redis";
 import { getSystemClient } from "./clientScope.service";
-
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1",
-});
 
 /* ---------------- INTENT ---------------- */
 
@@ -246,42 +242,36 @@ export const generateRAGReply = async (
       GENERAL: "Be helpful and guide user.",
     };
 
-    const prompt = `
-Business:
-${businessData.businessInfo || ""}
+    const compiler = container.resolve<any>("IPromptCompiler");
+    const compiled = compiler.compile(
+      "default_tenant",
+      "rag_prompt",
+      "1.0.0",
+      {
+        input: "",
+      },
+      {
+        businessInfo: businessData.businessInfo || "",
+        pricingInfo: businessData.pricingInfo || "",
+        aiTone: businessData.aiTone || "Friendly",
+        salesInstructions: businessData.salesInstructions || "",
+        finalContext: finalContext || "",
+        message: message || "",
+        intentDescription: intentMap[intent] || "",
+      }
+    );
 
-Pricing:
-${businessData.pricingInfo || ""}
-
-Tone:
-${businessData.aiTone || "Friendly"}
-
-Instructions:
-${businessData.salesInstructions || ""}
-
-Knowledge:
-${finalContext}
-
-User:
-${message}
-
-Intent:
-${intentMap[intent]}
-`;
-
-    /* ================= AI CALL ================= */
-
-    const response: any = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+    const modelManager = container.resolve<IModelManager>("IModelManager");
+    const response = await modelManager.generateCompletion([
+      { role: "system", content: compiled.system },
+      { role: "user", content: compiled.user },
+    ], {
+      model: "llama3-70b-8192",
       temperature: 0.2,
-      max_tokens: 200,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt },
-      ],
+      maxTokens: 200,
     });
 
-    let reply = response?.choices?.[0]?.message?.content?.trim();
+    let reply = response.content?.trim() || "";
 
     /* =================================================
     🔥 APPLY SALES BRAIN (NEW)

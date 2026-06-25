@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+import { container } from "../../runtime/core";
+import { IModelManager } from "../../runtime/interfaces/core";
 import { buildFallbackStructuredSalesOutput } from "../salesAgent/output.service";
 import {
   buildFallbackSalesReply,
@@ -24,10 +25,7 @@ import type {
   RevenueBrainStateResult,
 } from "./types";
 
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1",
-});
+
 
 const MODEL_NAME = process.env.REVENUE_BRAIN_MODEL || "llama-3.1-8b-instant";
 
@@ -244,26 +242,24 @@ export const composeRevenueSalesReply = async ({
       reservation = (await beforeAIReply()) || undefined;
     }
 
-    const completion = await groq.chat.completions.create({
-      model: MODEL_NAME,
+    const modelManager = container.resolve<IModelManager>("IModelManager");
+    const completion = await modelManager.generateCompletion(buildRevenueSalesPrompt({
+      context,
+      intent,
+      state,
+      decision,
+      coupon,
+    }) as any, {
+      model: "llama3-70b-8192", // Map standard Groq model in registry
       temperature: 0,
-      response_format: {
-        type: "json_object",
-      } as any,
-      messages: buildRevenueSalesPrompt({
-        context,
-        intent,
-        state,
-        decision,
-        coupon,
-      }) as any,
-    } as any);
+      jsonMode: true,
+    });
 
     apiCallCompleted = true;
     await reservation?.finalize?.();
 
     rawPayload = parseStrictJson(
-      completion.choices?.[0]?.message?.content?.trim() || ""
+      completion.content?.trim() || ""
     );
   } catch {
     if (!apiCallCompleted) {

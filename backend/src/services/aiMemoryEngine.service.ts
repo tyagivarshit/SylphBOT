@@ -1,5 +1,6 @@
 import prisma from "../config/prisma";
-import OpenAI from "openai";
+import { container } from "../runtime/core";
+import { IModelManager } from "../runtime/interfaces/core";
 import {
   areMemoryValuesEquivalent,
   clampMemoryConfidence,
@@ -7,11 +8,6 @@ import {
   selectRelevantMemoryFacts,
   summarizeMemoryFacts,
 } from "./revenueBrain/memory.utils";
-
-const openai = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1",
-});
 
 type ExtractedMemoryFact = {
   key: string;
@@ -44,21 +40,10 @@ const getConversationSummary = async (leadId: string) => {
   return summary?.summary || "";
 };
 
-const getStoredMemoryFacts = async (leadId: string) =>
-  prisma.memory.findMany({
-    where: { leadId },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      key: true,
-      value: true,
-      confidence: true,
-      source: true,
-      lastObservedAt: true,
-      updatedAt: true,
-      createdAt: true,
-    },
-  });
+const getStoredMemoryFacts = async (leadId: string) => {
+  const runtimeMemory = container.resolve<any>("IMemoryEngine");
+  return runtimeMemory.getStoredMemoryFacts(leadId);
+};
 
 const buildFact = (
   key: string,
@@ -250,26 +235,36 @@ const extractFactsWithModel = async (
   }
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      temperature: 0,
-      response_format: {
-        type: "json_object",
-      } as any,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Extract stable CRM facts from the latest user message. Return only JSON. Prefer keys name, budget, service, timeline. Each fact should include value and confidence between 0 and 1.",
-        },
-        {
-          role: "user",
-          content: `Return JSON using either { "facts": [{ "key": "...", "value": "...", "confidence": 0.0 }] } or a keyed object. Message: ${message}`,
-        },
-      ],
-    } as any);
+    const compiler = container.resolve<any>("IPromptCompiler");
+    const compiled = compiler.compile(
+      "default_tenant",
+      "crm_fact_extraction",
+      "1.0.0",
+      {
+        input: "",
+      },
+      {
+        message,
+      }
+    );
 
-    const content = response.choices?.[0]?.message?.content?.trim() || "";
+    const modelManager = container.resolve<IModelManager>("IModelManager");
+    const response = await modelManager.generateCompletion([
+      {
+        role: "system",
+        content: compiled.system,
+      },
+      {
+        role: "user",
+        content: compiled.user,
+      },
+    ], {
+      model: "llama3-70b-8192",
+      temperature: 0,
+      jsonMode: true,
+    });
+
+    const content = response.content?.trim() || "";
 
     if (!content) {
       return [];
@@ -296,27 +291,26 @@ const storeMemory = async (leadId: string, facts: ExtractedMemoryFact[]) => {
     return;
   }
 
+  // Phase 2: Flow writes through the Runtime Memory Engine
+  if (container.has("IMemoryEngine")) {
+    const runtimeMemory = container.resolve<any>("IMemoryEngine");
+    for (const fact of facts) {
+      runtimeMemory.writeMemory(leadId, "customer", fact.key, fact.value, fact.confidence, ["admin"], { source: fact.source }).catch(() => {});
+    }
+  }
+
   const existingMemories = await getStoredMemoryFacts(leadId);
   const collapsed = collapseMemoryFacts(existingMemories);
   const existingByKey = new Map(collapsed.map((fact) => [fact.key, fact]));
-  const now = new Date();
   const writes: Promise<unknown>[] = [];
+  const runtimeMemory = container.resolve<any>("IMemoryEngine");
 
   for (const fact of facts) {
     const existing = existingByKey.get(fact.key);
 
     if (!existing?.id) {
       writes.push(
-        prisma.memory.create({
-          data: {
-            leadId,
-            key: fact.key,
-            value: fact.value,
-            confidence: fact.confidence,
-            source: fact.source,
-            lastObservedAt: now,
-          },
-        })
+        runtimeMemory.createMemoryFact(leadId, fact.key, fact.value, fact.confidence, fact.source)
       );
       continue;
     }
@@ -324,21 +318,16 @@ const storeMemory = async (leadId: string, facts: ExtractedMemoryFact[]) => {
     const sameValue = areMemoryValuesEquivalent(existing.value, fact.value);
 
     writes.push(
-      prisma.memory.update({
-        where: {
-          id: existing.id,
-        },
-        data: {
-          value: fact.value,
-          confidence: sameValue
-            ? clampMemoryConfidence(
-                Math.max(existing.confidence, fact.confidence) + 0.04
-              )
-            : fact.confidence,
-          source: fact.source,
-          lastObservedAt: now,
-        },
-      })
+      runtimeMemory.updateMemoryFact(
+        existing.id,
+        fact.value,
+        sameValue
+          ? clampMemoryConfidence(
+              Math.max(existing.confidence, fact.confidence) + 0.04
+            )
+          : fact.confidence,
+        fact.source
+      )
     );
   }
 

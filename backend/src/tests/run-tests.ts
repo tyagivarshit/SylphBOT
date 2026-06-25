@@ -83,6 +83,8 @@ import { runtimeIntelligenceTests } from "./runtimeIntelligence.test";
 import { runtimeExecutionTests } from "./runtimeExecution.test";
 import { runtimeObservabilityTests } from "./runtimeObservability.test";
 import { runtimeSandboxTests } from "./runtimeSandbox.test";
+import { runtimeModelsTests } from "./runtimeModels.test";
+import { runtimeContainmentTests } from "./runtimeContainment.test";
 
 
 
@@ -914,6 +916,8 @@ const tests: TestCase[] = [
   ...runtimeExecutionTests,
   ...runtimeObservabilityTests,
   ...runtimeSandboxTests,
+  ...runtimeModelsTests,
+  ...runtimeContainmentTests,
 ];
 
 let failures = 0;

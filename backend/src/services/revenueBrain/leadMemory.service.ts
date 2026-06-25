@@ -2,6 +2,7 @@ import prisma from "../../config/prisma";
 import type { SalesAgentContext } from "../salesAgent/types";
 import { collapseMemoryFacts } from "./memory.utils";
 import type { RevenueBrainLeadMemorySnapshot } from "./types";
+import { container } from "../../runtime/core";
 
 const buildSnapshotFromSalesContext = async (
   leadId: string,
@@ -67,24 +68,7 @@ export const getLeadMemorySnapshot = async ({
         followupCount: true,
       },
     }),
-    prisma.memory.findMany({
-      where: {
-        leadId,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      select: {
-        id: true,
-        key: true,
-        value: true,
-        confidence: true,
-        source: true,
-        lastObservedAt: true,
-        updatedAt: true,
-        createdAt: true,
-      },
-    }),
+    container.resolve<any>("IMemoryEngine").getStoredMemoryFacts(leadId),
   ]);
 
   return {

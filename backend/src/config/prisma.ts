@@ -240,6 +240,13 @@ const invalidateAuthUserFindUniqueL1Cache = (userId?: string | null) => {
 
 const prisma = basePrisma.$extends({
   query: {
+    memory: {
+      async $allOperations({ model, operation, args, query }) {
+        const { RuntimeGuard } = require("../runtime/kernel/runtimeGuard");
+        RuntimeGuard.enforceMemoryAccess(operation);
+        return query(args);
+      }
+    },
     message: {
       async create({ args, query }) {
         const dualWriteEnabled = env.MESSAGE_BUSINESSID_DUALWRITE_ENABLED === true || 

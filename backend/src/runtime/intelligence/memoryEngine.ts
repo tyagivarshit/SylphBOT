@@ -1,5 +1,7 @@
 import { IMemoryEngine, MemoryFact, TimelineMessage, IGraphMemory, MemoryRelation } from "../interfaces/memory";
 import { MemoryType, MemoryRecord, GraphNode, GraphEdge } from "./types";
+import { RetirementEnforcer } from "../kernel/retirementEnforcer";
+import prisma from "../../config/prisma";
 
 
 export class MemoryEngine implements IMemoryEngine, IGraphMemory {
@@ -34,6 +36,7 @@ export class MemoryEngine implements IMemoryEngine, IGraphMemory {
     accessRules?: string[],
     metadata?: Record<string, any>
   ): Promise<MemoryRecord> {
+    RetirementEnforcer.enforce("Direct memory access");
     const storeKey = `${tenantId}:${type}:${key}`;
     const history = this.records.get(storeKey) || [];
     const currentVersion = history.length > 0 ? history[history.length - 1].version : 0;
@@ -348,5 +351,58 @@ export class MemoryEngine implements IMemoryEngine, IGraphMemory {
         ? `Lead Facts Summary:\n- ${summaryParts.join("\n- ")}` 
         : "No context memory captured yet."
     };
+  }
+
+  public async getStoredMemoryFacts(leadId: string): Promise<any[]> {
+    return prisma.memory.findMany({
+      where: { leadId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        key: true,
+        value: true,
+        confidence: true,
+        source: true,
+        lastObservedAt: true,
+        updatedAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  public async createMemoryFact(
+    leadId: string,
+    key: string,
+    value: string,
+    confidence: number,
+    source: string
+  ): Promise<any> {
+    return prisma.memory.create({
+      data: {
+        leadId,
+        key,
+        value,
+        confidence,
+        source,
+        lastObservedAt: new Date(),
+      },
+    });
+  }
+
+  public async updateMemoryFact(
+    id: string,
+    value: string,
+    confidence: number,
+    source: string
+  ): Promise<any> {
+    return prisma.memory.update({
+      where: { id },
+      data: {
+        value,
+        confidence,
+        source,
+        lastObservedAt: new Date(),
+      },
+    });
   }
 }

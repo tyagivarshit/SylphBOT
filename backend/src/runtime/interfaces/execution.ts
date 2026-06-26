@@ -36,6 +36,8 @@ export interface IToolRegistry {
   registerTool(tool: ToolDefinition): void;
   getTool(name: string): ToolDefinition | null;
   listTools(): ToolDefinition[];
+  unregisterTool(name: string): void;
+  destroy(): void;
 }
 
 export interface ToolExecutionResult {

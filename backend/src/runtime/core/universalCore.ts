@@ -7,10 +7,9 @@ import {
   IStateProjectionEngine,
   IDomainPlugin,
   IPluginRegistry,
-  IGraphNode,
-  IGraphEdge,
   IOrganizationGraph
 } from "../interfaces/universal";
+import { OrganizationIntelligenceGraph } from "../oig/oigEngine";
 
 export class StateProjectionEngine implements IStateProjectionEngine {
   public project(events: IValueFlowEvent[]): IStateProjection {
@@ -151,62 +150,6 @@ export class PluginRegistry implements IPluginRegistry {
   }
 }
 
-export class OrganizationGraph implements IOrganizationGraph {
-  private nodes = new Map<string, IGraphNode>();
-  private edges: IGraphEdge[] = [];
-
-  public addNode(node: IGraphNode): void {
-    this.nodes.set(node.id, { ...node });
-  }
-
-  public getNode(id: string): IGraphNode | null {
-    return this.nodes.get(id) || null;
-  }
-
-  public addEdge(edge: IGraphEdge): void {
-    if (!this.nodes.has(edge.sourceId) || !this.nodes.has(edge.targetId)) {
-      throw new Error(`Edge source [${edge.sourceId}] or target [${edge.targetId}] does not exist in graph.`);
-    }
-    this.edges.push({ ...edge });
-  }
-
-  public getNeighbors(nodeId: string): Array<{ node: IGraphNode; edge: IGraphEdge }> {
-    const neighbors: Array<{ node: IGraphNode; edge: IGraphEdge }> = [];
-    for (const edge of this.edges) {
-      if (edge.sourceId === nodeId) {
-        const target = this.nodes.get(edge.targetId);
-        if (target) {
-          neighbors.push({ node: target, edge });
-        }
-      } else if (edge.targetId === nodeId) {
-        const source = this.nodes.get(edge.sourceId);
-        if (source) {
-          neighbors.push({ node: source, edge });
-        }
-      }
-    }
-    return neighbors;
-  }
-
-  public query(criteria: Partial<IGraphNode>): IGraphNode[] {
-    const results: IGraphNode[] = [];
-    for (const node of this.nodes.values()) {
-      let matches = true;
-      if (criteria.type && node.type !== criteria.type) {
-        matches = false;
-      }
-      if (criteria.properties) {
-        for (const [key, val] of Object.entries(criteria.properties)) {
-          if (node.properties[key] !== val) {
-            matches = false;
-            break;
-          }
-        }
-      }
-      if (matches) {
-        results.push({ ...node });
-      }
-    }
-    return results;
-  }
+export class OrganizationGraph extends OrganizationIntelligenceGraph implements IOrganizationGraph {
+  // Inherits all functionality from OrganizationIntelligenceGraph and satisfies backward compatibility
 }

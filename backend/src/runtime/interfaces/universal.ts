@@ -87,7 +87,7 @@ export interface IPluginRegistry {
 
 export interface IGraphNode {
   id: string;
-  type: "Entity" | "Resource" | "Interaction" | "Knowledge" | "Workflow" | "Tool" | "Policy" | "Event" | "Capability" | "Organization";
+  type: string;
   properties: Record<string, any>;
 }
 

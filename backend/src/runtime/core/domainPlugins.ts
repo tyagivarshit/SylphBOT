@@ -203,7 +203,20 @@ export class KnowledgeRuntimePlugin implements IDomainPlugin {
     });
   }
 
-  public async onUnregister(container: DIContainer): Promise<void> {}
+  public async onUnregister(container: DIContainer): Promise<void> {
+    const contractRegistry = container.resolve<any>("IContractRegistry");
+    const toolRegistry = container.resolve<any>("IToolRegistry");
+
+    const contracts = ["knowledge.embedded", "knowledge.indexed", "knowledge.updated", "knowledge.deleted"];
+    for (const c of contracts) {
+      contractRegistry.unregisterContract(c, "1.0.0");
+    }
+
+    const tools = ["search_knowledge", "embed_knowledge", "index_knowledge"];
+    for (const t of tools) {
+      toolRegistry.unregisterTool(t);
+    }
+  }
 }
 
 // ==========================================
@@ -391,7 +404,27 @@ export class CrmRuntimePlugin implements IDomainPlugin {
     });
   }
 
-  public async onUnregister(container: DIContainer): Promise<void> {}
+  public async onUnregister(container: DIContainer): Promise<void> {
+    const contractRegistry = container.resolve<any>("IContractRegistry");
+    const toolRegistry = container.resolve<any>("IToolRegistry");
+
+    const contracts = [
+      "lead.created", "lead.updated", "lead.deleted",
+      "customer.created", "customer.updated", "customer.converted",
+      "pipeline.stage.changed", "deal.created", "deal.won", "deal.lost", "contact.updated"
+    ];
+    for (const c of contracts) {
+      contractRegistry.unregisterContract(c, "1.0.0");
+    }
+
+    const tools = [
+      "search_customer", "create_lead", "update_lead", "qualify_lead",
+      "move_pipeline", "retrieve_customer", "merge_customer", "link_conversation", "attach_knowledge"
+    ];
+    for (const t of tools) {
+      toolRegistry.unregisterTool(t);
+    }
+  }
 }
 
 // ==========================================
@@ -609,7 +642,23 @@ export class ConversationRuntimePlugin implements IDomainPlugin {
     });
   }
 
-  public async onUnregister(container: DIContainer): Promise<void> {}
+  public async onUnregister(container: DIContainer): Promise<void> {
+    const contractRegistry = container.resolve<any>("IContractRegistry");
+    const toolRegistry = container.resolve<any>("IToolRegistry");
+
+    const contracts = ["conversation.updated", "booking.created", "payment.received", "campaign.finished"];
+    for (const c of contracts) {
+      contractRegistry.unregisterContract(c, "1.0.0");
+    }
+
+    const tools = [
+      "retrieve_conversation", "append_message", "search_messages", "summarize_conversation",
+      "update_summary", "attach_context", "retrieve_context", "generate_reply", "handoff_conversation", "close_conversation"
+    ];
+    for (const t of tools) {
+      toolRegistry.unregisterTool(t);
+    }
+  }
 }
 
 // ==========================================
@@ -811,7 +860,36 @@ export class GrowthRuntimePlugin implements IDomainPlugin {
     }, "workflow.completed");
   }
 
-  public async onUnregister(container: DIContainer): Promise<void> {}
+  public async onUnregister(container: DIContainer): Promise<void> {
+    const contractRegistry = container.resolve<any>("IContractRegistry");
+    const toolRegistry = container.resolve<any>("IToolRegistry");
+
+    const contracts = [
+      "growth.acquisition.captured", "growth.attribution.captured", "growth.referral.rewarded",
+      "growth.referral.blocked", "growth.affiliate.flagged", "growth.partner.onboarded",
+      "growth.lifecycle.advanced", "growth.churn.intervention", "growth.expansion.detected",
+      "growth.pricing.experiment_launched", "growth.pricing.rolled_back", "growth.offer.published",
+      "growth.content.generated", "growth.advocacy.rewarded", "growth.channel.saturated",
+      "growth.override.applied", "growth.execution.failed",
+      "workflow.started", "workflow.completed", "workflow.failed", "workflow.cancelled", "workflow.retry"
+    ];
+    for (const c of contracts) {
+      contractRegistry.unregisterContract(c, "1.0.0");
+    }
+
+    const tools = [
+      "apply_growth_policy", "apply_growth_override", "create_growth_campaign", "execute_growth_campaign",
+      "record_acquisition", "record_growth_conversion", "create_referral_code", "credit_referral_conversion",
+      "onboard_growth_partner", "record_affiliate_commission", "settle_partner_payout", "advance_lifecycle_journey",
+      "assess_churn_risk", "detect_expansion_opportunity", "launch_pricing_experiment", "rollback_pricing_experiment",
+      "publish_offer", "publish_content_campaign", "request_review_reward", "record_channel_performance",
+      "start_workflow", "pause_workflow", "resume_workflow", "cancel_workflow", "schedule_workflow", "retry_workflow",
+      "execute_action", "queue_action", "send_email", "send_whatsapp", "send_instagram", "update_crm", "create_task"
+    ];
+    for (const t of tools) {
+      toolRegistry.unregisterTool(t);
+    }
+  }
 }
 
 // ==========================================
@@ -1019,7 +1097,27 @@ export class SchedulingRuntimePlugin implements IDomainPlugin {
     });
   }
 
-  public async onUnregister(container: DIContainer): Promise<void> {}
+  public async onUnregister(container: DIContainer): Promise<void> {
+    const contractRegistry = container.resolve<any>("IContractRegistry");
+    const toolRegistry = container.resolve<any>("IToolRegistry");
+
+    const contracts = [
+      "booking.created", "booking.updated", "booking.confirmed", "booking.cancelled",
+      "booking.completed", "booking.rescheduled", "booking.reminder.sent", "calendar.synced",
+      "availability.updated", "meeting.started", "meeting.finished"
+    ];
+    for (const c of contracts) {
+      contractRegistry.unregisterContract(c, "1.0.0");
+    }
+
+    const tools = [
+      "create_booking", "cancel_booking", "reschedule_booking", "confirm_booking",
+      "retrieve_booking", "search_availability", "sync_calendar", "send_reminder", "generate_slots", "block_time", "unblock_time"
+    ];
+    for (const t of tools) {
+      toolRegistry.unregisterTool(t);
+    }
+  }
 }
 
 // ==========================================
@@ -1196,5 +1294,24 @@ export class FinanceRuntimePlugin implements IDomainPlugin {
     }, "financial.entity.linked");
   }
 
-  public async onUnregister(container: DIContainer): Promise<void> {}
+  public async onUnregister(container: DIContainer): Promise<void> {
+    const contractRegistry = container.resolve<any>("IContractRegistry");
+    const toolRegistry = container.resolve<any>("IToolRegistry");
+
+    const contracts = [
+      "financial.invoice.created", "financial.invoice.updated", "financial.payment.charged",
+      "financial.payment.refunded", "financial.revenue.recorded", "financial.expense.recorded",
+      "financial.budget.created", "financial.entity.linked"
+    ];
+    for (const c of contracts) {
+      contractRegistry.unregisterContract(c, "1.0.0");
+    }
+
+    const tools = [
+      "create_invoice", "charge_payment", "record_revenue", "record_expense", "create_budget", "link_financial_entity"
+    ];
+    for (const t of tools) {
+      toolRegistry.unregisterTool(t);
+    }
+  }
 }

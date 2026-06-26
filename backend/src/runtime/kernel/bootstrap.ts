@@ -92,6 +92,20 @@ import {
   SchedulingRuntimePlugin,
   FinanceRuntimePlugin
 } from "../core/domainPlugins";
+import {
+  WorkflowRegistry,
+  WorkflowMemory,
+  WorkflowObservability,
+  WorkflowTriggerEngine,
+  WorkflowOrchestrator
+} from "../workflow";
+import { OigEventIntegrator } from "../oig/eventIntegration";
+import {
+  RuntimeGovernanceEngine,
+  SemanticResolutionLayer,
+  DecisionMetadataEngine
+} from "../governance";
+
 
 export interface BootstrapOptions {
   skipValidation?: boolean;
@@ -269,72 +283,6 @@ export class Bootstrapper {
 
     // Register Execution Layer Infrastructure
     const toolRegistry = new ToolRegistry();
-    toolRegistry.registerTool({
-      name: "automation_step",
-      description: "Executes automation step",
-      schema: { type: "object", properties: {} },
-      execute: async (context: any, args: any) => {
-        const { step, trigger, message, businessId, leadId } = args;
-        const prisma = (await import("../../config/prisma")).default;
-        const { executionId, flowId } = trigger;
-
-        if (!step) return null;
-
-        if (step.stepType === "MESSAGE" || step.stepType === "SEND_MESSAGE") {
-          if (!step.message) return null;
-          if (step.nextStep) {
-            await prisma.automationExecution.update({
-              where: { id: executionId },
-              data: { currentStep: step.nextStep },
-            });
-          } else {
-            await prisma.automationExecution.update({
-              where: { id: executionId },
-              data: { status: "COMPLETED" },
-            });
-          }
-          return step.message;
-        }
-
-        if (step.stepType === "CONDITION") {
-          const cleanMessage = message.toLowerCase().replace(/[^\w\s]/g, "");
-          const condition = step.condition?.toLowerCase().replace(/[^\w\s]/g, "");
-          if (!condition) return null;
-          const regex = new RegExp(`\\b${condition}\\b`);
-          const matched = regex.test(cleanMessage);
-          if (!matched) return null;
-
-          const nextStep = await prisma.automationStep.findFirst({
-            where: { flowId, stepKey: step.nextStep || "" },
-          });
-          if (!nextStep) return null;
-
-          await prisma.automationExecution.update({
-            where: { id: executionId },
-            data: { currentStep: nextStep.stepKey },
-          });
-
-          if (nextStep.stepType === "MESSAGE" || nextStep.stepType === "SEND_MESSAGE") {
-            return nextStep.message || null;
-          }
-          return null;
-        }
-
-        if (step.stepType === "DELAY") {
-          return null;
-        }
-
-        if (step.stepType === "END") {
-          await prisma.automationExecution.update({
-            where: { id: executionId },
-            data: { status: "COMPLETED" },
-          });
-          return null;
-        }
-
-        return null;
-      }
-    });
     const validationEngine = new ValidationEngine();
     const permissionEngine = new PermissionEngine();
     const policyEngine = new PolicyEngine();
@@ -486,6 +434,60 @@ export class Bootstrapper {
     this.diContainer.registerInstance("IStateProjectionEngine", stateProjectionEngine);
     this.diContainer.registerInstance("IPluginRegistry", pluginRegistry);
     this.diContainer.registerInstance("IOrganizationGraph", organizationGraph);
+    this.diContainer.registerInstance("IOrganizationIntelligenceGraph", organizationGraph);
+
+    // Initialize Event-driven Graph Integration (Phase 7)
+    const oigEventIntegrator = new OigEventIntegrator(organizationGraph, eventBus, this.diContainer);
+    oigEventIntegrator.initialize();
+
+    // Initialize Runtime Governance Engine & Semantic Resolution Layer (Stage 2.9)
+    const runtimeGovernanceEngine = new RuntimeGovernanceEngine(this.diContainer, eventBus);
+    const semanticResolutionLayer = new SemanticResolutionLayer(organizationGraph);
+    const decisionMetadataEngine = new DecisionMetadataEngine(organizationGraph);
+
+    this.diContainer.registerInstance("IRuntimeGovernanceEngine", runtimeGovernanceEngine);
+    this.diContainer.registerInstance("ISemanticResolutionLayer", semanticResolutionLayer);
+    this.diContainer.registerInstance("IDecisionMetadataEngine", decisionMetadataEngine);
+
+    // ==========================================
+    // WORKFLOW RUNTIME LAYER
+    // ==========================================
+    const workflowRegistry = new WorkflowRegistry();
+    const workflowMemory = new WorkflowMemory();
+    const workflowObservability = new WorkflowObservability();
+    const workflowOrchestrator = new WorkflowOrchestrator(
+      this.diContainer,
+      workflowRegistry,
+      workflowMemory,
+      workflowObservability
+    );
+    const workflowTriggerEngine = new WorkflowTriggerEngine(
+      workflowRegistry,
+      workflowMemory,
+      workflowOrchestrator,
+      eventBus
+    );
+
+    this.diContainer.registerInstance("IWorkflowRegistry", workflowRegistry);
+    this.diContainer.registerInstance("IWorkflowMemory", workflowMemory);
+    this.diContainer.registerInstance("IWorkflowObservability", workflowObservability);
+    this.diContainer.registerInstance("IWorkflowOrchestrator", workflowOrchestrator);
+    this.diContainer.registerInstance("IWorkflowTriggerEngine", workflowTriggerEngine);
+
+    // Auto-wiring trigger dynamic eventbus subscriptions
+    const originalRegisterWorkflow = workflowRegistry.registerWorkflow.bind(workflowRegistry);
+    workflowRegistry.registerWorkflow = async (definition) => {
+      await originalRegisterWorkflow(definition);
+      for (const trigger of definition.triggers) {
+        if (trigger.type === "event" && trigger.topic) {
+          eventBus.subscribe(trigger.topic, async (envelope: any) => {
+            const payload = envelope?.payload || envelope || {};
+            await workflowTriggerEngine.handleEvent(trigger.topic!, payload);
+          });
+        }
+      }
+    };
+
 
     // Register all Domain specializations as plugins
     await pluginRegistry.registerPlugin(new KnowledgeRuntimePlugin());

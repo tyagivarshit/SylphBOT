@@ -92,6 +92,8 @@ import { growthIntegrationTests } from "./growthIntegration.test";
 import { schedulingIntegrationTests } from "./schedulingIntegration.test";
 import { financialIntegrationTests } from "./financialIntegration.test";
 import { universalCoreTests } from "./universalCore.test";
+import { workflowRuntimeTests } from "./workflowRuntime.test";
+import { oigTests } from "./oig.test";
 
 
 
@@ -933,6 +935,8 @@ const tests: TestCase[] = [
   ...schedulingIntegrationTests,
   ...financialIntegrationTests,
   ...universalCoreTests,
+  ...workflowRuntimeTests,
+  ...oigTests,
 ];
 
 let failures = 0;

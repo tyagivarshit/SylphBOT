@@ -158,6 +158,32 @@ export class CapabilityRegistry implements ICapabilityRegistry {
     return this.agentCapabilities.get(agentId) || null;
   }
 
+  public unregisterCapability(name: string, version: string): void {
+    const list = this.capabilities.get(name);
+    if (list) {
+      const filtered = list.filter(c => c.version !== version);
+      if (filtered.length === 0) {
+        this.capabilities.delete(name);
+      } else {
+        this.capabilities.set(name, filtered);
+      }
+      console.log(`[Capability Registry] Unregistered capability [${name}] v[${version}]`);
+    }
+  }
+
+  public unregisterAgentCapabilities(agentId: string): void {
+    if (this.agentCapabilities.has(agentId)) {
+      this.agentCapabilities.delete(agentId);
+      console.log(`[Capability Registry] Unregistered agent capabilities for agent [${agentId}]`);
+    }
+  }
+
+  public destroy(): void {
+    this.capabilities.clear();
+    this.agentCapabilities.clear();
+    console.log("[Capability Registry] Destroyed. All capabilities cleared.");
+  }
+
   /**
    * Clear capabilities (for testing).
    */

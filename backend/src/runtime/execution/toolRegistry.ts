@@ -122,6 +122,18 @@ export class ToolRegistry implements IToolRegistry {
     return matched;
   }
 
+  public unregisterTool(name: string): void {
+    if (this.tools.has(name)) {
+      this.tools.delete(name);
+      console.log(`[Tool Registry] Unregistered tool [${name}]`);
+    }
+  }
+
+  public destroy(): void {
+    this.tools.clear();
+    console.log("[Tool Registry] Destroyed. All tools cleared.");
+  }
+
   /**
    * Resets registry contents (useful for testing)
    */

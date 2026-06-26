@@ -122,6 +122,37 @@ export class ContractRegistry {
     return this.checkSchemaCompatibility(oldContract, newContract);
   }
 
+  public unregisterContract(name: string, version: string): void {
+    const key = `${name}:${version}`;
+    if (this.contracts.has(key)) {
+      this.contracts.delete(key);
+      console.log(`[Contract Registry] Unregistered contract [${name}] v[${version}]`);
+    }
+  }
+
+  public destroy(): void {
+    this.contracts.clear();
+    console.log("[Contract Registry] Destroyed. All contracts cleared.");
+  }
+
+  // --- IContractRegistry Legacy Interface Compatibility ---
+  public registerSchema(name: string, schema: Record<string, any>): void {
+    this.registerContract({
+      name,
+      version: "1.0.0",
+      schema: schema as any
+    });
+  }
+
+  public getSchema(name: string): Record<string, any> | null {
+    const contract = this.getContract(name, "1.0.0");
+    return contract ? contract.schema : null;
+  }
+
+  public validatePayload(name: string, payload: any): { isValid: boolean; errors: string[] } {
+    return this.validateEvent(name, "1.0.0", payload);
+  }
+
   /**
    * Reset contracts (for tests).
    */

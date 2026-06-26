@@ -377,6 +377,15 @@ const callSecurityInfluence = async (input: {
   purpose: string;
   metadata?: JsonRecord | null;
 }) => {
+  const { container } = require("../runtime/core");
+  if (container.has("IPermissionEngine")) {
+    const permissionEngine = container.resolve("IPermissionEngine");
+    permissionEngine.authorize(
+      { tenantId: input.tenantId || input.businessId || "default_tenant", roles: ["SYSTEM"] },
+      { name: input.action, ownerTenantId: input.tenantId || input.businessId || "default_tenant", permissions: [input.action] }
+    );
+  }
+
   await enforceSecurityGovernanceInfluence({
     domain: "GROWTH",
     action: input.action,
@@ -403,6 +412,17 @@ const callReliabilityInfluence = async (input: {
   dedupeKey: string;
   metadata?: JsonRecord | null;
 }) => {
+  const { container } = require("../runtime/core");
+  if (container.has("ICircuitBreakerEngine")) {
+    const cb = container.resolve("ICircuitBreakerEngine");
+    cb.canExecute(input.reason);
+    if (input.severity === "P1") {
+      cb.recordFailure(input.reason);
+    } else {
+      cb.recordSuccess(input.reason);
+    }
+  }
+
   await raiseReliabilityAlert({
     businessId: input.businessId || null,
     tenantId: input.tenantId || input.businessId || null,
@@ -675,6 +695,13 @@ const evaluatePolicy = (input: {
 }) => {
   bumpEngine("POLICY_ENGINE");
   bumpEngine("OVERRIDE_ENGINE");
+
+  const { container } = require("../runtime/core");
+  if (container.has("IPolicyEngine")) {
+    const policyEngine = container.resolve("IPolicyEngine");
+    policyEngine.evaluate({ tenantId: input.tenantKey, roles: [] }, input);
+  }
+
   const policy = getActiveGrowthPolicy(input);
   const override = getActiveGrowthOverride(input);
 

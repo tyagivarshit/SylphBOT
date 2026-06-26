@@ -7,3 +7,5 @@ export * from "./execution";
 export * from "./governance";
 export * from "./observability";
 export * from "./sandbox";
+export * from "./connectors";
+export * from "./universal";

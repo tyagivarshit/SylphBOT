@@ -1,4 +1,7 @@
 import prisma from "../config/prisma";
+import { container } from "../runtime/core";
+
+const getMemoryEngine = () => container.has("IMemoryEngine") ? container.resolve<any>("IMemoryEngine") : null;
 
 const uniqueIds = (ids: Array<string | null | undefined>) =>
   Array.from(
@@ -24,19 +27,39 @@ export const markKnowledgeRetrieved = async (knowledgeIds: string[]) => {
     return;
   }
 
-  await prisma.knowledgeBase.updateMany({
-    where: {
+  const memoryEngine = getMemoryEngine();
+  if (memoryEngine) {
+    const firstKb = await prisma.knowledgeBase.findFirst({
+      where: { id: ids[0] },
+      select: { businessId: true }
+    });
+    const businessId = firstKb?.businessId || "default_tenant";
+
+    await memoryEngine.updateManyKnowledge(businessId, {
       id: {
         in: ids,
       },
-    },
-    data: {
+    }, {
       retrievalCount: {
         increment: 1,
       },
       lastRetrievedAt: new Date(),
-    },
-  });
+    });
+  } else {
+    await prisma.knowledgeBase.updateMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+      data: {
+        retrievalCount: {
+          increment: 1,
+        },
+        lastRetrievedAt: new Date(),
+      },
+    });
+  }
 };
 
 export const reinforceKnowledgeHits = async ({
@@ -54,13 +77,17 @@ export const reinforceKnowledgeHits = async ({
 
   const delta = OUTCOME_WEIGHTS[String(outcome || "").trim().toLowerCase()] || 0.05;
 
-  await Promise.all(
-    ids.map((id) =>
-      prisma.knowledgeBase.update({
-        where: {
-          id,
-        },
-        data: {
+  const memoryEngine = getMemoryEngine();
+  if (memoryEngine) {
+    const firstKb = await prisma.knowledgeBase.findFirst({
+      where: { id: ids[0] },
+      select: { businessId: true }
+    });
+    const businessId = firstKb?.businessId || "default_tenant";
+
+    await Promise.all(
+      ids.map((id) =>
+        memoryEngine.updateKnowledge(businessId, id, {
           successCount: {
             increment: 1,
           },
@@ -68,8 +95,27 @@ export const reinforceKnowledgeHits = async ({
             increment: delta,
           },
           lastReinforcedAt: new Date(),
-        },
-      })
-    )
-  );
+        })
+      )
+    );
+  } else {
+    await Promise.all(
+      ids.map((id) =>
+        prisma.knowledgeBase.update({
+          where: {
+            id,
+          },
+          data: {
+            successCount: {
+              increment: 1,
+            },
+            reinforcementScore: {
+              increment: delta,
+            },
+            lastReinforcedAt: new Date(),
+          },
+        })
+      )
+    );
+  }
 };

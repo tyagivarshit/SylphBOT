@@ -640,6 +640,31 @@ export const recordObservabilityEvent = async ({
   eventKey?: string;
   metadata?: JsonRecord | null;
 }) => {
+  // Route growth events to Event Bus and Metrics Engine
+  const { container } = require("../../runtime/core");
+  if (container.has("IEventBus") && eventType.startsWith("growth.")) {
+    const eventBus = container.resolve("IEventBus");
+    const tid = tenantId || businessId || "default_tenant";
+    await eventBus.publish(eventType, "1.0.0", {
+      businessId: businessId || "default_business",
+      tenantId: tid,
+      message,
+      metadata
+    }, {
+      tenantId: tid,
+      priority: severity === "error" || severity === "critical" ? "high" : "medium"
+    }).catch(() => undefined);
+  }
+
+  if (container.has("IMetricsEngine") && eventType.startsWith("growth.")) {
+    const metrics = container.resolve("IMetricsEngine");
+    metrics.recordGrowthMetric("execution_latency", 5);
+    metrics.recordGrowthMetric("growth_execution", 1);
+    if (severity === "error" || severity === "critical") {
+      metrics.recordGrowthMetric("growth_failure", 1);
+    }
+  }
+
   bumpAuditCounter("observability.record");
   await enforceSecurityGovernanceInfluence({
     domain: "OBSERVABILITY",

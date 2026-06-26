@@ -17,7 +17,8 @@ export type MemoryType =
   | "executive"
   | "timeline"
   | "learning"
-  | "future_graph";
+  | "future_graph"
+  | "knowledge";
 
 export interface MemoryRecord {
   id: string;

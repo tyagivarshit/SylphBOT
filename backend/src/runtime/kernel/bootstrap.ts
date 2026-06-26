@@ -58,9 +58,11 @@ import {
   EventScheduler,
   DeadLetterQueue,
   RoutingEngine,
-  EventBus
+  EventBus,
+  IdentityEngine
 } from "../communication";
 import { CapabilityRegistry } from "../core/capabilityRegistry";
+import { CompatibilityEngine } from "../core/compatibilityMetadata";
 import {
   ModelRegistry,
   ProviderRegistry,
@@ -77,9 +79,19 @@ import {
   OllamaAdapter
 } from "../models";
 
-
-
-
+import {
+  StateProjectionEngine,
+  PluginRegistry,
+  OrganizationGraph
+} from "../core/universalCore";
+import {
+  KnowledgeRuntimePlugin,
+  CrmRuntimePlugin,
+  ConversationRuntimePlugin,
+  GrowthRuntimePlugin,
+  SchedulingRuntimePlugin,
+  FinanceRuntimePlugin
+} from "../core/domainPlugins";
 
 export interface BootstrapOptions {
   skipValidation?: boolean;
@@ -128,7 +140,7 @@ export class Bootstrapper {
       this.runtimeManifest = new RuntimeManifest(this.configManager, getModules);
 
       // 2. Register core services in dependency injection container
-      this.registerServices();
+      await this.registerServices();
 
       // 3. Set health to Initializing
       this.healthRegistry.setHealth("runtime.kernel", {
@@ -222,13 +234,17 @@ export class Bootstrapper {
     console.log("[Runtime Kernel] Shutdown complete.");
   }
 
-  private registerServices(): void {
+  private async registerServices(): Promise<void> {
     this.diContainer.registerInstance("IConfigManager", this.configManager);
     this.diContainer.registerInstance("ILifecycleManager", this.lifecycleManager);
     this.diContainer.registerInstance("IHealthRegistry", this.healthRegistry);
     this.diContainer.registerInstance("IStateManager", this.stateManager);
     this.diContainer.registerInstance("IFeatureFlagEngine", this.featureFlagEngine);
     this.diContainer.registerInstance("IRuntimeManifest", this.runtimeManifest);
+
+    // Register Compatibility Engine
+    const compatibilityEngine = new CompatibilityEngine();
+    this.diContainer.registerInstance("ICompatibilityEngine", compatibilityEngine);
 
     // Register Intelligence Layer Infrastructure
     const constitutionLayer = new ConstitutionIntegrationLayer();
@@ -424,6 +440,9 @@ export class Bootstrapper {
     this.diContainer.registerInstance("IRoutingEngine", routingEngine);
     this.diContainer.registerInstance("IEventBus", eventBus);
 
+    const identityEngine = new IdentityEngine();
+    this.diContainer.registerInstance("IIdentityEngineInstance", identityEngine);
+
     // Register Models Layer Infrastructure
     const modelRegistry = new ModelRegistry();
     const providerRegistry = new ProviderRegistry();
@@ -456,6 +475,25 @@ export class Bootstrapper {
     this.diContainer.registerInstance("IModelHealthMonitor", modelHealthMonitor);
     this.diContainer.registerInstance("IModelCostManager", modelCostManager);
     this.diContainer.registerInstance("IModelManager", modelManager);
+
+    // ==========================================
+    // UNIVERSAL CORE RUNTIME LAYER
+    // ==========================================
+    const stateProjectionEngine = new StateProjectionEngine();
+    const pluginRegistry = new PluginRegistry(this.diContainer);
+    const organizationGraph = new OrganizationGraph();
+
+    this.diContainer.registerInstance("IStateProjectionEngine", stateProjectionEngine);
+    this.diContainer.registerInstance("IPluginRegistry", pluginRegistry);
+    this.diContainer.registerInstance("IOrganizationGraph", organizationGraph);
+
+    // Register all Domain specializations as plugins
+    await pluginRegistry.registerPlugin(new KnowledgeRuntimePlugin());
+    await pluginRegistry.registerPlugin(new CrmRuntimePlugin());
+    await pluginRegistry.registerPlugin(new ConversationRuntimePlugin());
+    await pluginRegistry.registerPlugin(new GrowthRuntimePlugin());
+    await pluginRegistry.registerPlugin(new SchedulingRuntimePlugin());
+    await pluginRegistry.registerPlugin(new FinanceRuntimePlugin());
   }
 }
 

@@ -1,3 +1,6 @@
+import { container } from "../kernel/diContainer";
+import { CompatibilityEngine } from "../core/compatibilityMetadata";
+
 export interface EventContract {
   name: string;
   version: string;
@@ -15,9 +18,40 @@ export class ContractRegistry {
    */
   public registerContract(contract: EventContract): void {
     const key = `${contract.name}:${contract.version}`;
+    
     if (this.contracts.has(key)) {
-      throw new Error(`Contract [${contract.name}] version [${contract.version}] is already registered.`);
+      const existing = this.contracts.get(key)!;
+      const existingSchemaStr = JSON.stringify(existing.schema);
+      const newSchemaStr = JSON.stringify(contract.schema);
+      
+      if (existingSchemaStr === newSchemaStr) {
+        console.warn(`[Contract Registry] Idempotent registration: Contract [${contract.name}] v[${contract.version}] already registered with identical schema. Reusing existing.`);
+        return;
+      } else {
+        throw new Error(`Contract [${contract.name}] version [${contract.version}] is already registered with a different schema. Duplicate registration rejected.`);
+      }
     }
+
+    const compEngine = container.has("ICompatibilityEngine")
+      ? container.resolve<CompatibilityEngine>("ICompatibilityEngine")
+      : new CompatibilityEngine();
+
+    if (!compEngine.isContractVersionSupported(contract.version)) {
+      throw new Error(`Contract [${contract.name}] version [${contract.version}] is not supported by CompatibilityEngine.`);
+    }
+
+    // Compatibility check for new versions if other versions exist
+    const otherVersions = Array.from(this.contracts.values()).filter(c => c.name === contract.name);
+    if (otherVersions.length > 0) {
+      // Check schema compatibility against existing versions
+      for (const other of otherVersions) {
+        const isCompatible = this.checkSchemaCompatibility(other, contract);
+        if (!isCompatible) {
+          throw new Error(`Contract [${contract.name}] v[${contract.version}] is incompatible with existing version [${other.version}].`);
+        }
+      }
+    }
+
     this.contracts.set(key, { ...contract });
     console.log(`[Contract Registry] Registered contract for [${contract.name}] v[${contract.version}]`);
   }
@@ -85,15 +119,7 @@ export class ContractRegistry {
       return false;
     }
 
-    // Backward compatibility rule: new schema must contain all fields of the old schema with the same types
-    for (const [key, oldType] of Object.entries(oldContract.schema)) {
-      const newType = newContract.schema[key];
-      if (!newType || newType !== oldType) {
-        return false;
-      }
-    }
-
-    return true;
+    return this.checkSchemaCompatibility(oldContract, newContract);
   }
 
   /**
@@ -102,4 +128,16 @@ export class ContractRegistry {
   public reset(): void {
     this.contracts.clear();
   }
+
+  private checkSchemaCompatibility(oldContract: EventContract, newContract: EventContract): boolean {
+    // Backward compatibility rule: new schema must contain all fields of the old schema with the same types
+    for (const [key, oldType] of Object.entries(oldContract.schema)) {
+      const newType = newContract.schema[key];
+      if (!newType || newType !== oldType) {
+        return false;
+      }
+    }
+    return true;
+  }
 }
+

@@ -1,7 +1,10 @@
 import { IMemoryEngine, MemoryFact, TimelineMessage, IGraphMemory, MemoryRelation } from "../interfaces/memory";
 import { MemoryType, MemoryRecord, GraphNode, GraphEdge } from "./types";
 import { RetirementEnforcer } from "../kernel/retirementEnforcer";
+import { container } from "../kernel/diContainer";
+import { ActorProfile } from "../interfaces/identity";
 import prisma from "../../config/prisma";
+
 
 
 export class MemoryEngine implements IMemoryEngine, IGraphMemory {
@@ -403,6 +406,218 @@ export class MemoryEngine implements IMemoryEngine, IGraphMemory {
         source,
         lastObservedAt: new Date(),
       },
+    });
+  }
+
+  // ==========================================
+  // Knowledge Memory Namespace Integration
+  // ==========================================
+
+  public async fetchKnowledgeCandidates(
+    tenantId: string,
+    where: any,
+    orderBy: any,
+    take: number
+  ): Promise<any[]> {
+    return prisma.knowledgeBase.findMany({
+      where: {
+        ...where,
+        businessId: tenantId,
+      },
+      orderBy,
+      take,
+    });
+  }
+
+  public async findFirstKnowledge(
+    tenantId: string,
+    where: any
+  ): Promise<any | null> {
+    return prisma.knowledgeBase.findFirst({
+      where: {
+        ...where,
+        businessId: tenantId,
+      },
+    });
+  }
+
+  public async readKnowledge(
+    tenantId: string,
+    id: string
+  ): Promise<any | null> {
+    return prisma.knowledgeBase.findFirst({
+      where: {
+        id,
+        businessId: tenantId,
+      },
+    });
+  }
+
+  public async findManyKnowledge(
+    tenantId: string,
+    where: any,
+    orderBy?: any,
+    take?: number
+  ): Promise<any[]> {
+    return prisma.knowledgeBase.findMany({
+      where: {
+        ...where,
+        businessId: tenantId,
+      },
+      orderBy,
+      take,
+    });
+  }
+
+  public async createKnowledge(
+    tenantId: string,
+    data: any,
+    actor?: ActorProfile
+  ): Promise<any> {
+    if (actor && actor.tenantId !== tenantId) {
+      throw new Error("Cross-tenant knowledge creation blocked.");
+    }
+    const record = await prisma.knowledgeBase.create({
+      data: {
+        ...data,
+        businessId: tenantId,
+      },
+    });
+
+    const eventBus = container.has("IEventBus") ? container.resolve<any>("IEventBus") : null;
+    if (eventBus) {
+      const isImport = data.sourceType === "AUTO" || data.sourceType === "AUTO_LEARN";
+      const topic = isImport ? "knowledge.imported" : "knowledge.created";
+      await eventBus.publish(topic, "1.0.0", {
+        knowledgeId: record.id,
+        businessId: tenantId,
+        title: record.title,
+        content: record.content,
+        sourceType: record.sourceType,
+      }, { tenantId }).catch(() => {});
+
+      if (record.embedding) {
+        await eventBus.publish("knowledge.embedded", "1.0.0", {
+          knowledgeId: record.id,
+          businessId: tenantId,
+        }, { tenantId }).catch(() => {});
+        await eventBus.publish("knowledge.indexed", "1.0.0", {
+          knowledgeId: record.id,
+          businessId: tenantId,
+        }, { tenantId }).catch(() => {});
+      }
+    }
+
+    return record;
+  }
+
+  public async updateKnowledge(
+    tenantId: string,
+    id: string,
+    data: any,
+    actor?: ActorProfile
+  ): Promise<any> {
+    if (actor && actor.tenantId !== tenantId) {
+      throw new Error("Cross-tenant knowledge update blocked.");
+    }
+    const record = await prisma.knowledgeBase.update({
+      where: { id },
+      data,
+    });
+
+    const eventBus = container.has("IEventBus") ? container.resolve<any>("IEventBus") : null;
+    if (eventBus) {
+      await eventBus.publish("knowledge.updated", "1.0.0", {
+        knowledgeId: record.id,
+        businessId: tenantId,
+        title: record.title,
+        content: record.content,
+      }, { tenantId }).catch(() => {});
+
+      if (data.embedding) {
+        await eventBus.publish("knowledge.embedded", "1.0.0", {
+          knowledgeId: record.id,
+          businessId: tenantId,
+        }, { tenantId }).catch(() => {});
+        await eventBus.publish("knowledge.indexed", "1.0.0", {
+          knowledgeId: record.id,
+          businessId: tenantId,
+        }, { tenantId }).catch(() => {});
+      }
+    }
+
+    return record;
+  }
+
+  public async deleteKnowledge(
+    tenantId: string,
+    id: string,
+    actor?: ActorProfile
+  ): Promise<any> {
+    if (actor && actor.tenantId !== tenantId) {
+      throw new Error("Cross-tenant knowledge deletion blocked.");
+    }
+    const record = await prisma.knowledgeBase.update({
+      where: { id },
+      data: { isActive: false },
+    });
+
+    const eventBus = container.has("IEventBus") ? container.resolve<any>("IEventBus") : null;
+    if (eventBus) {
+      await eventBus.publish("knowledge.deleted", "1.0.0", {
+        knowledgeId: id,
+        businessId: tenantId,
+      }, { tenantId }).catch(() => {});
+    }
+
+    return record;
+  }
+
+  public async deleteManyKnowledge(
+    tenantId: string,
+    where: any
+  ): Promise<any> {
+    return prisma.knowledgeBase.deleteMany({
+      where: {
+        ...where,
+        businessId: tenantId,
+      },
+    });
+  }
+
+  public async updateManyKnowledge(
+    tenantId: string,
+    where: any,
+    data: any
+  ): Promise<any> {
+    return prisma.knowledgeBase.updateMany({
+      where: {
+        ...where,
+        businessId: tenantId,
+      },
+      data,
+    });
+  }
+
+  // ==========================================
+  // Business Graph Preparation Integration
+  // ==========================================
+
+  public async linkKnowledgeRelation(
+    tenantId: string,
+    relation: {
+      sourceId: string;
+      targetId: string;
+      predicate: string;
+      weight?: number;
+    }
+  ): Promise<void> {
+    await this.linkEntities({
+      sourceId: relation.sourceId,
+      targetId: relation.targetId,
+      predicate: relation.predicate,
+      weight: relation.weight ?? 1.0,
+      tenantId,
     });
   }
 }

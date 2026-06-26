@@ -1,3 +1,5 @@
+import { ICapabilityRegistry, AgentCapability } from "../interfaces/contracts";
+
 export interface CapabilityMetadata {
   name: string; // e.g. LeadQualification, Booking, CampaignLaunch
   version: string;
@@ -8,8 +10,9 @@ export interface CapabilityMetadata {
   status: "Active" | "Inactive";
 }
 
-export class CapabilityRegistry {
+export class CapabilityRegistry implements ICapabilityRegistry {
   private capabilities = new Map<string, CapabilityMetadata[]>();
+  private agentCapabilities = new Map<string, AgentCapability>();
 
   /**
    * Register a capability version.
@@ -20,7 +23,16 @@ export class CapabilityRegistry {
     // Check if version is already registered for this capability
     const exists = list.some(c => c.version === cap.version && c.ownerId === cap.ownerId);
     if (exists) {
-      throw new Error(`Capability [${cap.name}] version [${cap.version}] is already registered for owner [${cap.ownerId}].`);
+      const existing = list.find(c => c.version === cap.version && c.ownerId === cap.ownerId)!;
+      const existingSig = JSON.stringify({ permissionsRequired: existing.permissionsRequired, metadata: existing.metadata });
+      const incomingSig = JSON.stringify({ permissionsRequired: cap.permissionsRequired, metadata: cap.metadata });
+      
+      if (existingSig === incomingSig) {
+        console.warn(`[Capability Registry] Idempotent registration: Capability [${cap.name}] v[${cap.version}] already registered. Reusing.`);
+        return;
+      } else {
+        throw new Error(`Capability [${cap.name}] version [${cap.version}] is already registered with a different signature for owner [${cap.ownerId}].`);
+      }
     }
 
     list.push({ ...cap });
@@ -109,10 +121,49 @@ export class CapabilityRegistry {
     return cap.permissionsRequired.every(scope => actorScopesSet.has(scope));
   }
 
+  // --- ICapabilityRegistry Interface Implementation ---
+
+  public async registerAgentCapabilities(capabilities: AgentCapability): Promise<void> {
+    if (!capabilities.agentId) {
+      throw new Error("Agent capabilities registration failed: agentId is required.");
+    }
+    
+    if (this.agentCapabilities.has(capabilities.agentId)) {
+      const existing = this.agentCapabilities.get(capabilities.agentId)!;
+      const existingSig = JSON.stringify({ intents: existing.intents, platforms: existing.platforms, supportedCtas: existing.supportedCtas });
+      const incomingSig = JSON.stringify({ intents: capabilities.intents, platforms: capabilities.platforms, supportedCtas: capabilities.supportedCtas });
+      
+      if (existingSig === incomingSig) {
+        console.warn(`[Capability Registry] Idempotent agent capabilities registration for agent [${capabilities.agentId}]. Reusing.`);
+        return;
+      } else {
+        throw new Error(`Agent [${capabilities.agentId}] already registered with different capabilities. Duplicate registration rejected.`);
+      }
+    }
+    
+    this.agentCapabilities.set(capabilities.agentId, { ...capabilities });
+    console.log(`[Capability Registry] Registered agent capabilities for [${capabilities.agentId}]`);
+  }
+
+  public async getAgentForIntent(intent: string): Promise<string | null> {
+    for (const [agentId, cap] of this.agentCapabilities.entries()) {
+      if (cap.intents.includes(intent)) {
+        return agentId;
+      }
+    }
+    return null;
+  }
+
+  public async getAgentCapabilities(agentId: string): Promise<AgentCapability | null> {
+    return this.agentCapabilities.get(agentId) || null;
+  }
+
   /**
    * Clear capabilities (for testing).
    */
   public reset(): void {
     this.capabilities.clear();
+    this.agentCapabilities.clear();
   }
 }
+

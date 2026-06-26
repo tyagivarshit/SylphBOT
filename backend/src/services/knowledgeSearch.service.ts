@@ -4,6 +4,11 @@ import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import logger from "../utils/logger";
 import { buildKnowledgeScopeFilter } from "./clientScope.service";
 import { createEmbedding } from "./embedding.service";
+import { container } from "../runtime/core";
+
+const getMemoryEngine = () => container.has("IMemoryEngine") ? container.resolve<any>("IMemoryEngine") : null;
+const getMetricsEngine = () => container.has("IMetricsEngine") ? container.resolve<any>("IMetricsEngine") : null;
+
 
 const cosineSimilarity = require("cosine-similarity");
 
@@ -594,10 +599,15 @@ const fetchCandidateWindow = async (input: {
     })),
   ];
 
+  const memoryEngine = getMemoryEngine();
+  const fetchCandidates = memoryEngine
+    ? (where: any, orderBy: any, take: number) => memoryEngine.fetchKnowledgeCandidates(input.businessId, where, orderBy, take)
+    : (where: any, orderBy: any, take: number) => prisma.knowledgeBase.findMany({ where: { ...where, businessId: input.businessId }, orderBy, take, select: KNOWLEDGE_SELECT });
+
   if (keywordFilters.length) {
     assertWithinBudget(input.context, "candidate_keyword_query");
-    const keywordCandidates = await prisma.knowledgeBase.findMany({
-      where: {
+    const keywordCandidates = await fetchCandidates(
+      {
         ...scopeWhere,
         AND: [
           {
@@ -605,14 +615,13 @@ const fetchCandidateWindow = async (input: {
           },
         ],
       },
-      orderBy: [
+      [
         { retrievalCount: "desc" },
         { successCount: "desc" },
         { updatedAt: "desc" },
       ],
-      take: RETRIEVAL_KEYWORD_WINDOW,
-      select: KNOWLEDGE_SELECT,
-    });
+      RETRIEVAL_KEYWORD_WINDOW
+    );
     appendCandidatesBounded(
       candidateMap,
       keywordCandidates as KnowledgeCandidateRow[],
@@ -622,17 +631,16 @@ const fetchCandidateWindow = async (input: {
 
   if (candidateMap.size < RETRIEVAL_MAX_CANDIDATES) {
     assertWithinBudget(input.context, "candidate_primary_query");
-    const primaryCandidates = await prisma.knowledgeBase.findMany({
-      where: scopeWhere,
-      orderBy: [
+    const primaryCandidates = await fetchCandidates(
+      scopeWhere,
+      [
         { reinforcementScore: "desc" },
         { retrievalCount: "desc" },
         { successCount: "desc" },
         { updatedAt: "desc" },
       ],
-      take: RETRIEVAL_PRIMARY_WINDOW,
-      select: KNOWLEDGE_SELECT,
-    });
+      RETRIEVAL_PRIMARY_WINDOW
+    );
     appendCandidatesBounded(
       candidateMap,
       primaryCandidates as KnowledgeCandidateRow[],
@@ -642,12 +650,11 @@ const fetchCandidateWindow = async (input: {
 
   if (candidateMap.size < RETRIEVAL_MAX_CANDIDATES) {
     assertWithinBudget(input.context, "candidate_recent_query");
-    const recentCandidates = await prisma.knowledgeBase.findMany({
-      where: scopeWhere,
-      orderBy: [{ createdAt: "desc" }],
-      take: RETRIEVAL_RECENT_WINDOW,
-      select: KNOWLEDGE_SELECT,
-    });
+    const recentCandidates = await fetchCandidates(
+      scopeWhere,
+      [{ createdAt: "desc" }],
+      RETRIEVAL_RECENT_WINDOW
+    );
     appendCandidatesBounded(
       candidateMap,
       recentCandidates as KnowledgeCandidateRow[],
@@ -816,16 +823,28 @@ const buildDegradedResults = async (input: {
     },
   };
 
-  const rows = (await prisma.knowledgeBase.findMany({
-    where: scopeWhere,
-    orderBy: [
-      { reinforcementScore: "desc" },
-      { retrievalCount: "desc" },
-      { updatedAt: "desc" },
-    ],
-    take: Math.max(MAX_RESULTS * 2, 12),
-    select: KNOWLEDGE_SELECT,
-  })) as KnowledgeCandidateRow[];
+  const memoryEngine = getMemoryEngine();
+  const rows = (memoryEngine
+    ? await memoryEngine.fetchKnowledgeCandidates(
+        input.businessId,
+        scopeWhere,
+        [
+          { reinforcementScore: "desc" },
+          { retrievalCount: "desc" },
+          { updatedAt: "desc" },
+        ],
+        Math.max(MAX_RESULTS * 2, 12)
+      )
+    : await prisma.knowledgeBase.findMany({
+        where: scopeWhere,
+        orderBy: [
+          { reinforcementScore: "desc" },
+          { retrievalCount: "desc" },
+          { updatedAt: "desc" },
+        ],
+        take: Math.max(MAX_RESULTS * 2, 12),
+        select: KNOWLEDGE_SELECT,
+      })) as KnowledgeCandidateRow[];
 
   if (!rows.length) {
     return [];
@@ -902,9 +921,16 @@ export const searchKnowledge = async (
   }
 
   const run = (async () => {
+    const metrics = getMetricsEngine();
     try {
       const messageEmbedding = await createEmbedding(message);
+      if (metrics) {
+        metrics.recordKnowledgeMetric("embedding_latency", Date.now() - startedAtMs);
+      }
       if (!messageEmbedding.length) {
+        if (metrics) {
+          metrics.recordKnowledgeMetric("embedding_failure", 1);
+        }
         emitRetrievalMetric({
           name: "retrieval_ms",
           value: Date.now() - startedAtMs,
@@ -944,6 +970,16 @@ export const searchKnowledge = async (
       if (computeOutcome.status === "ok") {
         const nowMs = Date.now();
         setCachedRetrieval(cacheKey, computeOutcome.value.results, nowMs);
+        const searchMs = Date.now() - startedAtMs;
+        if (metrics) {
+          metrics.recordKnowledgeMetric("search_latency", searchMs);
+          metrics.recordKnowledgeMetric("retrieval_latency", searchMs);
+          if (computeOutcome.value.results.length > 0) {
+            metrics.recordKnowledgeMetric("hit", 1);
+          } else {
+            metrics.recordKnowledgeMetric("miss", 1);
+          }
+        }
         emitRetrievalMetric({
           name: "candidate_count",
           value: computeOutcome.value.candidateCount,
@@ -987,6 +1023,9 @@ export const searchKnowledge = async (
       }
 
       if (computeOutcome.status === "budget_exceeded") {
+        if (metrics) {
+          metrics.recordKnowledgeMetric("vector_failure", 1);
+        }
         emitRetrievalMetric({
           name: "retrieval_budget_exceeded",
           value: 1,

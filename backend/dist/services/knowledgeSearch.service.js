@@ -10,6 +10,9 @@ const performanceMetrics_1 = require("../observability/performanceMetrics");
 const logger_1 = __importDefault(require("../utils/logger"));
 const clientScope_service_1 = require("./clientScope.service");
 const embedding_service_1 = require("./embedding.service");
+const core_1 = require("../runtime/core");
+const getMemoryEngine = () => core_1.container.has("IMemoryEngine") ? core_1.container.resolve("IMemoryEngine") : null;
+const getMetricsEngine = () => core_1.container.has("IMetricsEngine") ? core_1.container.resolve("IMetricsEngine") : null;
 const cosineSimilarity = require("cosine-similarity");
 const parsePositiveInt = (raw, fallbackValue) => {
     const parsed = Number(raw);
@@ -349,50 +352,39 @@ const fetchCandidateWindow = async (input) => {
             },
         })),
     ];
+    const memoryEngine = getMemoryEngine();
+    const fetchCandidates = memoryEngine
+        ? (where, orderBy, take) => memoryEngine.fetchKnowledgeCandidates(input.businessId, where, orderBy, take)
+        : (where, orderBy, take) => prisma_1.default.knowledgeBase.findMany({ where: { ...where, businessId: input.businessId }, orderBy, take, select: KNOWLEDGE_SELECT });
     if (keywordFilters.length) {
         assertWithinBudget(input.context, "candidate_keyword_query");
-        const keywordCandidates = await prisma_1.default.knowledgeBase.findMany({
-            where: {
-                ...scopeWhere,
-                AND: [
-                    {
-                        OR: keywordFilters,
-                    },
-                ],
-            },
-            orderBy: [
-                { retrievalCount: "desc" },
-                { successCount: "desc" },
-                { updatedAt: "desc" },
+        const keywordCandidates = await fetchCandidates({
+            ...scopeWhere,
+            AND: [
+                {
+                    OR: keywordFilters,
+                },
             ],
-            take: RETRIEVAL_KEYWORD_WINDOW,
-            select: KNOWLEDGE_SELECT,
-        });
+        }, [
+            { retrievalCount: "desc" },
+            { successCount: "desc" },
+            { updatedAt: "desc" },
+        ], RETRIEVAL_KEYWORD_WINDOW);
         appendCandidatesBounded(candidateMap, keywordCandidates, input.context);
     }
     if (candidateMap.size < RETRIEVAL_MAX_CANDIDATES) {
         assertWithinBudget(input.context, "candidate_primary_query");
-        const primaryCandidates = await prisma_1.default.knowledgeBase.findMany({
-            where: scopeWhere,
-            orderBy: [
-                { reinforcementScore: "desc" },
-                { retrievalCount: "desc" },
-                { successCount: "desc" },
-                { updatedAt: "desc" },
-            ],
-            take: RETRIEVAL_PRIMARY_WINDOW,
-            select: KNOWLEDGE_SELECT,
-        });
+        const primaryCandidates = await fetchCandidates(scopeWhere, [
+            { reinforcementScore: "desc" },
+            { retrievalCount: "desc" },
+            { successCount: "desc" },
+            { updatedAt: "desc" },
+        ], RETRIEVAL_PRIMARY_WINDOW);
         appendCandidatesBounded(candidateMap, primaryCandidates, input.context);
     }
     if (candidateMap.size < RETRIEVAL_MAX_CANDIDATES) {
         assertWithinBudget(input.context, "candidate_recent_query");
-        const recentCandidates = await prisma_1.default.knowledgeBase.findMany({
-            where: scopeWhere,
-            orderBy: [{ createdAt: "desc" }],
-            take: RETRIEVAL_RECENT_WINDOW,
-            select: KNOWLEDGE_SELECT,
-        });
+        const recentCandidates = await fetchCandidates(scopeWhere, [{ createdAt: "desc" }], RETRIEVAL_RECENT_WINDOW);
         appendCandidatesBounded(candidateMap, recentCandidates, input.context);
     }
     return Array.from(candidateMap.values());
@@ -519,16 +511,23 @@ const buildDegradedResults = async (input) => {
             in: [...KNOWLEDGE_SOURCE_TYPES],
         },
     };
-    const rows = (await prisma_1.default.knowledgeBase.findMany({
-        where: scopeWhere,
-        orderBy: [
+    const memoryEngine = getMemoryEngine();
+    const rows = (memoryEngine
+        ? await memoryEngine.fetchKnowledgeCandidates(input.businessId, scopeWhere, [
             { reinforcementScore: "desc" },
             { retrievalCount: "desc" },
             { updatedAt: "desc" },
-        ],
-        take: Math.max(MAX_RESULTS * 2, 12),
-        select: KNOWLEDGE_SELECT,
-    }));
+        ], Math.max(MAX_RESULTS * 2, 12))
+        : await prisma_1.default.knowledgeBase.findMany({
+            where: scopeWhere,
+            orderBy: [
+                { reinforcementScore: "desc" },
+                { retrievalCount: "desc" },
+                { updatedAt: "desc" },
+            ],
+            take: Math.max(MAX_RESULTS * 2, 12),
+            select: KNOWLEDGE_SELECT,
+        }));
     if (!rows.length) {
         return [];
     }
@@ -590,9 +589,16 @@ const searchKnowledge = async (businessId, message, options) => {
         return inflight.then((rows) => cloneResults(rows));
     }
     const run = (async () => {
+        const metrics = getMetricsEngine();
         try {
             const messageEmbedding = await (0, embedding_service_1.createEmbedding)(message);
+            if (metrics) {
+                metrics.recordKnowledgeMetric("embedding_latency", Date.now() - startedAtMs);
+            }
             if (!messageEmbedding.length) {
+                if (metrics) {
+                    metrics.recordKnowledgeMetric("embedding_failure", 1);
+                }
                 emitRetrievalMetric({
                     name: "retrieval_ms",
                     value: Date.now() - startedAtMs,
@@ -629,6 +635,17 @@ const searchKnowledge = async (businessId, message, options) => {
             if (computeOutcome.status === "ok") {
                 const nowMs = Date.now();
                 setCachedRetrieval(cacheKey, computeOutcome.value.results, nowMs);
+                const searchMs = Date.now() - startedAtMs;
+                if (metrics) {
+                    metrics.recordKnowledgeMetric("search_latency", searchMs);
+                    metrics.recordKnowledgeMetric("retrieval_latency", searchMs);
+                    if (computeOutcome.value.results.length > 0) {
+                        metrics.recordKnowledgeMetric("hit", 1);
+                    }
+                    else {
+                        metrics.recordKnowledgeMetric("miss", 1);
+                    }
+                }
                 emitRetrievalMetric({
                     name: "candidate_count",
                     value: computeOutcome.value.candidateCount,
@@ -669,6 +686,9 @@ const searchKnowledge = async (businessId, message, options) => {
                 return computeOutcome.value.results;
             }
             if (computeOutcome.status === "budget_exceeded") {
+                if (metrics) {
+                    metrics.recordKnowledgeMetric("vector_failure", 1);
+                }
                 emitRetrievalMetric({
                     name: "retrieval_budget_exceeded",
                     value: 1,

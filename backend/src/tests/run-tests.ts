@@ -85,6 +85,14 @@ import { runtimeObservabilityTests } from "./runtimeObservability.test";
 import { runtimeSandboxTests } from "./runtimeSandbox.test";
 import { runtimeModelsTests } from "./runtimeModels.test";
 import { runtimeContainmentTests } from "./runtimeContainment.test";
+import { knowledgeIntegrationTests } from "./knowledgeIntegration.test";
+import { crmIntegrationTests } from "./crmIntegration.test";
+import { conversationIntegrationTests } from "./conversationIntegration.test";
+import { growthIntegrationTests } from "./growthIntegration.test";
+import { schedulingIntegrationTests } from "./schedulingIntegration.test";
+import { financialIntegrationTests } from "./financialIntegration.test";
+import { universalCoreTests } from "./universalCore.test";
+
 
 
 
@@ -918,6 +926,13 @@ const tests: TestCase[] = [
   ...runtimeSandboxTests,
   ...runtimeModelsTests,
   ...runtimeContainmentTests,
+  ...knowledgeIntegrationTests,
+  ...crmIntegrationTests,
+  ...conversationIntegrationTests,
+  ...growthIntegrationTests,
+  ...schedulingIntegrationTests,
+  ...financialIntegrationTests,
+  ...universalCoreTests,
 ];
 
 let failures = 0;

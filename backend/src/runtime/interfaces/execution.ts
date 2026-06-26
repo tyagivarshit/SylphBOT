@@ -51,6 +51,7 @@ export interface IToolExecutor {
     tools: Array<{ name: string; args: Record<string, unknown> }>,
     context: any
   ): Promise<ToolExecutionResult[]>;
+  execute(actor: any, name: string, args: Record<string, unknown>): Promise<any>;
 }
 
 export interface ScheduledJob {

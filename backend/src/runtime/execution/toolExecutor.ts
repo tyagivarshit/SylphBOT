@@ -206,4 +206,25 @@ export class ToolExecutor implements IToolExecutor {
     const promises = tools.map(t => this.executeTool(t.name, t.args, context));
     return Promise.all(promises);
   }
+
+  /**
+   * Compatibility layer for execute(actor, name, args).
+   */
+  public async execute(
+    actor: any,
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<any> {
+    const context = {
+      actor,
+      tenantId: actor?.tenantId,
+      roles: actor?.roles || (actor?.role ? [actor.role] : []),
+      userId: actor?.actorId
+    };
+    const result = await this.executeTool(name, args, context);
+    if (!result.success) {
+      throw new Error(result.error || `Execution failed for tool [${name}].`);
+    }
+    return result.output;
+  }
 }

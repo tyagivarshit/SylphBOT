@@ -15,7 +15,21 @@ import { ExecutiveOrganizationalKnowledgeService } from "../services/executive/o
 import { ExecutiveMemoryOptimizationService } from "../services/executive/memoryOptimization.service";
 import { ExecutiveMemoryGovernanceService } from "../services/executive/memoryGovernance.service";
 import { ExecutiveMemoryCertificationService } from "../services/executive/memoryCertification.service";
-import { ExecutiveGoalIntelligenceService } from "../services/executive/goalIntelligence.service";
+import { ExecutiveGoalIntelligenceService, IGoalAssumptionRepository, IGoalAssumption } from "../services/executive/goalIntelligence.service";
+import { ExecutiveStrategyIntelligenceService, MemoryExecutiveStrategyRepository, IExecutiveStrategy } from "../services/executive/strategyIntelligence.service";
+import { ExecutivePlanningService, MemoryExecutivePlanningRepository, IExecutivePlan } from "../services/executive/planning.service";
+import { ExecutiveTimelineService, MemoryExecutiveTimelineRepository, IExecutiveTimeline } from "../services/executive/timeline.service";
+import { ExecutiveScenarioService, MemoryExecutiveScenarioRepository, IScenario } from "../services/executive/scenario.service";
+import { ExecutivePlanningOptimizationService, MemoryExecutivePlanningOptimizationRepository } from "../services/executive/planningOptimization.service";
+import { ExecutiveRiskService, MemoryExecutiveRiskRepository } from "../services/executive/risk.service";
+import { ExecutiveResourceService, MemoryExecutiveResourceRepository } from "../services/executive/resource.service";
+import { ExecutivePlanningGovernanceService, MemoryExecutivePlanningGovernanceRepository } from "../services/executive/planningGovernance.service";
+import { ExecutivePlanningHardeningService, MemoryExecutivePlanningHardeningRepository } from "../services/executive/planningHardening.service";
+import { ExecutiveDecisionIntelligenceService, MemoryExecutiveDecisionRepository } from "../services/executive/decisionIntelligence.service";
+import { ExecutiveEvidenceValidationService, MemoryExecutiveEvidenceRepository } from "../services/executive/evidenceValidation.service";
+import { ExecutiveAlternativeGenerationService, MemoryExecutiveAlternativeRepository } from "../services/executive/alternativeGeneration.service";
+import { ExecutiveDecisionEvaluationService, MemoryExecutiveDecisionEvaluationRepository } from "../services/executive/decisionEvaluation.service";
+import { ExecutiveSimulationService, MemoryExecutiveSimulationRepository } from "../services/executive/simulationProjection.service";
 import { IExecutiveDNA } from "../services/executive/interfaces";
 import { validateExecutiveDNA } from "../services/executive/validation";
 import { runWithRequestContext } from "../observability/requestContext";
@@ -1856,6 +1870,1831 @@ export const executiveIdentityTests: any[] = [
         },
         /Security Violation/
       );
+    }
+  },
+  {
+    name: "Executive Goal Intelligence Hardening: tradeoffs, success probability, assumptions, and outcome projections",
+    run: async () => {
+      await ensureBootstrapped();
+      const goalService = container.resolve<ExecutiveGoalIntelligenceService>("IExecutiveGoalIntelligenceService");
+      const service = container.resolve<ExecutiveIdentityService>("IExecutiveIdentityService");
+
+      const tenantId = "tenant_goal_hardening_test";
+      const exec = await service.createExecutive(tenantId, "CHIEF_OPERATIONS", "Hardened Ops");
+
+      // Create a revenue-focused goal
+      const revGoal = await goalService.createGoal(tenantId, {
+        title: "Maximize Sales Revenue Expansion",
+        description: "Focus on ARR growth and customer acquisition",
+        ownerRole: "CEO",
+        kpis: [{
+          kpiId: "sales_kpi",
+          name: "Sales growth",
+          targetValue: 100000,
+          currentValue: 80000,
+          thresholds: { acceptable: 90000 },
+          successCondition: "GREATER_THAN_OR_EQUAL",
+          failureCondition: "LESS_THAN",
+          tolerance: 0.05,
+          measurementFrequency: "monthly",
+        }],
+        priorityMetrics: {
+          businessImpact: 0.9,
+          urgency: 0.8,
+          executiveImportance: 0.9,
+          missionAlignment: 0.9,
+          risk: 0.3,
+          opportunity: 0.8,
+          confidence: 0.9,
+          customerImpact: 0.8,
+          financialImpact: 0.9,
+        },
+      });
+
+      // Create a cost/profit-focused goal
+      const costGoal = await goalService.createGoal(tenantId, {
+        title: "Minimize Operating Cost and Burn Rate",
+        description: "Focus on bottom-line profit margins and EBITDA improvement",
+        ownerRole: "COO",
+        kpis: [{
+          kpiId: "burn_kpi",
+          name: "Monthly burn",
+          targetValue: 50000,
+          currentValue: 40000,
+          thresholds: { acceptable: 45000 },
+          successCondition: "LESS_THAN_OR_EQUAL",
+          failureCondition: "GREATER_THAN",
+          tolerance: 0.05,
+          measurementFrequency: "monthly",
+        }],
+        priorityMetrics: {
+          businessImpact: 0.8,
+          urgency: 0.7,
+          executiveImportance: 0.8,
+          missionAlignment: 0.8,
+          risk: 0.2,
+          opportunity: 0.6,
+          confidence: 0.85,
+          customerImpact: 0.5,
+          financialImpact: 0.8,
+        },
+      });
+
+      // 1. Verify Trade-off Detection
+      const tradeoffProfile = await goalService.getGoalTradeoffProfile(tenantId, revGoal.id);
+      assert.equal(tradeoffProfile.goalId, revGoal.id);
+      assert.equal(tradeoffProfile.tenantId, tenantId);
+      assert.ok(tradeoffProfile.tradeoffs.length > 0, "Should detect at least one tradeoff (Revenue vs Profit / Growth vs Cost)");
+      const revenueProfitTradeoff = tradeoffProfile.tradeoffs.find(t => t.dimension === "REVENUE_VS_PROFIT" || t.dimension === "GROWTH_VS_COST");
+      assert.ok(revenueProfitTradeoff, "Should contain Revenue vs Profit or Growth vs Cost tradeoff");
+      assert.equal(revenueProfitTradeoff!.primaryImpactDirection, revenueProfitTradeoff!.dimension === "REVENUE_VS_PROFIT" ? "POSITIVE" : "NEGATIVE");
+      assert.ok(revenueProfitTradeoff!.weight > 0);
+      assert.ok(revenueProfitTradeoff!.reason.length > 0);
+      assert.ok(tradeoffProfile.explanation.includes("tradeoff"), "Explainability check: explanation must contain details");
+
+      // 2. Verify Success Probability Calculation
+      const successProb = await goalService.getGoalSuccessProbability(tenantId, revGoal.id);
+      assert.equal(successProb.goalId, revGoal.id);
+      assert.equal(successProb.tenantId, tenantId);
+      assert.ok(successProb.probabilityScore > 0 && successProb.probabilityScore < 1.0);
+      assert.ok(successProb.confidenceBand.lower <= successProb.probabilityScore);
+      assert.ok(successProb.confidenceBand.upper >= successProb.probabilityScore);
+      assert.ok(successProb.reasonCodes.length > 0);
+      assert.ok(successProb.successDrivers.length > 0);
+      assert.ok(successProb.explanation.includes("probability"), "Explainability check: explanation must detail probability score calculation");
+
+      // 3. Verify Assumption Lifecycle & Report
+      const assumption1 = await goalService.createAssumption(tenantId, {
+        goalIds: [revGoal.id],
+        description: "Market expansion rate remains stable at 15%",
+        confidence: 0.85,
+        evidence: ["Q1 market study"],
+        owner: "CEO",
+        status: "VALIDATED",
+        impactIfBroken: "CRITICAL"
+      });
+      assert.equal(assumption1.status, "VALIDATED");
+
+      const assumption2 = await goalService.createAssumption(tenantId, {
+        goalIds: [revGoal.id],
+        description: "New marketing channels don't experience ad fatigue",
+        confidence: 0.7,
+        evidence: [],
+        owner: "COO",
+        status: "UNKNOWN",
+        impactIfBroken: "HIGH"
+      });
+
+      let report = await goalService.getGoalAssumptionReport(tenantId, revGoal.id);
+      assert.equal(report.goalId, revGoal.id);
+      assert.equal(report.stabilityScore, 1.0, "All validated or unknown assumptions mean stability remains high");
+      assert.equal(report.invalidatedCount, 0);
+
+      // Invalidate an assumption to simulate failure and check stability impact (without goal mutation)
+      await goalService.updateAssumption(tenantId, assumption1.id, { status: "INVALIDATED" }, "CEO", "Ad platforms reporting high cost per click");
+      
+      report = await goalService.getGoalAssumptionReport(tenantId, revGoal.id);
+      assert.equal(report.invalidatedCount, 1);
+      assert.equal(report.criticalInvalidatedCount, 1);
+      assert.ok(report.stabilityScore < 1.0, "Invalidating a critical assumption must reduce stability score");
+      
+      // Ensure the goal status or health has NOT been mutated (must remain draft)
+      const nonMutatedGoal = await container.resolve<any>("IExecutiveGoalRepository").findById(tenantId, revGoal.id);
+      assert.equal(nonMutatedGoal.status, "DRAFT");
+
+      // 4. Verify Outcome Projection Generation
+      const outcomeProj = await goalService.getGoalOutcomeProjection(tenantId, revGoal.id);
+      assert.equal(outcomeProj.goalId, revGoal.id);
+      assert.ok(outcomeProj.projectedOutcomes.length > 0);
+      const revOutcome = outcomeProj.projectedOutcomes.find(o => o.category === "REVENUE");
+      assert.ok(revOutcome);
+      assert.ok(revOutcome!.positiveDirection.length > 0);
+      assert.ok(revOutcome!.negativeDirection.length > 0);
+      assert.ok(revOutcome!.confidence > 0);
+      assert.ok(outcomeProj.explanation.includes("projection"), "Explainability check: explanation must detail projected outcomes");
+
+      // 5. Verify Security (Prevent cross-tenant metadata access)
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-2" },
+            () => goalService.getGoalTradeoffProfile(tenantId, revGoal.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-3" },
+            () => goalService.getGoalSuccessProbability(tenantId, revGoal.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-4" },
+            () => goalService.getGoalAssumptionReport(tenantId, revGoal.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-5" },
+            () => goalService.getGoalOutcomeProjection(tenantId, revGoal.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 6. Performance & Scale verification
+      const start = Date.now();
+      const assRepo = container.resolve<IGoalAssumptionRepository>("IGoalAssumptionRepository");
+      for (let i = 0; i < 1000; i++) {
+        await assRepo.findById(tenantId, assumption1.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Strategy Intelligence Foundation: lifecycle, constraints, health, comparison matrix, dependencies, package generation, and security limits",
+    run: async () => {
+      await ensureBootstrapped();
+      const strategyService = container.resolve<ExecutiveStrategyIntelligenceService>("IExecutiveStrategyIntelligenceService");
+      const goalService = container.resolve<ExecutiveGoalIntelligenceService>("IExecutiveGoalIntelligenceService");
+      const service = container.resolve<ExecutiveIdentityService>("IExecutiveIdentityService");
+
+      const tenantId = "tenant_strategy_test";
+      const exec = await service.createExecutive(tenantId, "CHIEF_OPERATIONS", "Strategy Ops");
+
+      // Setup a Goal
+      const targetGoal = await goalService.createGoal(tenantId, {
+        title: "Optimize System Throughput",
+        description: "Maximize processing speed and stability",
+        ownerRole: "COO",
+        priorityMetrics: {
+          businessImpact: 0.8,
+          urgency: 0.7,
+          executiveImportance: 0.85,
+          missionAlignment: 0.9,
+          risk: 0.2,
+          opportunity: 0.75,
+          confidence: 0.9,
+          customerImpact: 0.8,
+          financialImpact: 0.7,
+        },
+      });
+
+      // 1. Verify Strategy Generation & Strategic Constraint Engine (Section 6)
+      const strat1 = await strategyService.createStrategy(tenantId, {
+        goalId: targetGoal.id,
+        title: "Migrate Queue Infrastructure to Redis Streams",
+        description: "Use low latency memory transport",
+        status: "DRAFT",
+        constraints: {
+          legal: ["Standard OSS licensing terms verified"],
+          compliance: ["SOC2 data persistence requirements met"],
+          financial: {
+            budgetLimit: 15000,
+            estimatedCost: 12000
+          },
+          operational: ["Requires 4 hours of off-peak deployment maintenance"],
+          market: ["Industry standard transport model validation"]
+        },
+        health: {
+          feasibility: 0.85,
+          confidence: 0.8,
+          alignment: 0.9,
+          risk: 0.15,
+          resourceReadiness: 0.9,
+          opportunityStrength: 0.85,
+          strategicStability: 1.0,
+          explanation: "Pre-evaluation estimates"
+        }
+      });
+
+      assert.equal(strat1.status, "DRAFT");
+      assert.equal(strat1.constraints.legal![0], "Standard OSS licensing terms verified");
+      assert.equal(strat1.constraints.financial!.budgetLimit, 15000);
+
+      // Create a second competing strategy (over budget to verify health/feasibility degradation)
+      const strat2 = await strategyService.createStrategy(tenantId, {
+        goalId: targetGoal.id,
+        title: "Migrate Queue Infrastructure to Managed SaaS Platform",
+        description: "High licensing cost managed option",
+        status: "DRAFT",
+        constraints: {
+          legal: ["Commercial SaaS Agreement required"],
+          compliance: ["External SOC2 verification required"],
+          financial: {
+            budgetLimit: 15000,
+            estimatedCost: 25000 // OVER BUDGET
+          },
+          operational: ["Instant deployment, no maintenance overhead"],
+          market: []
+        },
+        health: {
+          feasibility: 0.7,
+          confidence: 0.6,
+          alignment: 0.8,
+          risk: 0.4,
+          resourceReadiness: 0.5,
+          opportunityStrength: 0.7,
+          strategicStability: 1.0,
+          explanation: "Managed SaaS alternative"
+        }
+      });
+
+      // 2. Verify Strategy Health Engine (Section 10) & Lifecycle transitions (Section 11)
+      const health1 = await strategyService.evaluateStrategyHealth(tenantId, strat1.id);
+      assert.ok(health1.feasibility > 0.8, "Should have high feasibility as it is under budget");
+      assert.equal(health1.explanation.toLowerCase().includes("feasibility"), true);
+
+      // Check status transitioned to EVALUATED
+      const evaluatedStrat1 = await strategyService.getStrategyById(tenantId, strat1.id);
+      assert.equal(evaluatedStrat1!.status, "EVALUATED");
+
+      const health2 = await strategyService.evaluateStrategyHealth(tenantId, strat2.id);
+      assert.ok(health2.feasibility < 0.6, "Should degrade feasibility due to over-budget cost constraint");
+      assert.equal(health2.resourceReadiness, 0.45);
+
+      // 3. Verify Strategy stability degradation under failed assumptions
+      const assumption = await goalService.createAssumption(tenantId, {
+        goalIds: [targetGoal.id],
+        description: "Redis instance hosting cost remains stable",
+        status: "VALIDATED",
+        impactIfBroken: "CRITICAL"
+      });
+
+      // Link strategy to assumption
+      await strategyService.updateStrategy(tenantId, strat1.id, {
+        associatedAssumptions: [assumption.id]
+      }, "COO", "Link assumptions to verify strategy stability");
+
+      // Invalidate assumption
+      await goalService.updateAssumption(tenantId, assumption.id, { status: "INVALIDATED" }, "COO", "Redis pricing changes");
+
+      // Re-evaluate health. Instability must degrade feasibility and strategicStability.
+      const degradedHealth1 = await strategyService.evaluateStrategyHealth(tenantId, strat1.id);
+      assert.ok(degradedHealth1.strategicStability < 1.0, "Strategic stability must degrade when linked assumption is invalidated");
+      assert.ok(degradedHealth1.feasibility < health1.feasibility, "Feasibility must degrade under planning instability");
+
+      // 4. Verify Strategy Lifecycle APPROVED & ARCHIVED transition
+      await strategyService.updateStrategy(tenantId, strat1.id, { status: "APPROVED" }, "COO", "Approved by executive board");
+      const approvedStrat = await strategyService.getStrategyById(tenantId, strat1.id);
+      assert.equal(approvedStrat!.status, "APPROVED");
+
+      // 5. Verify Comparison Engine & Matrix
+      const matrix = await strategyService.compareStrategies(tenantId, [strat1.id, strat2.id]);
+      assert.equal(matrix.comparedStrategyIds.length, 2);
+      assert.equal(matrix.items[0].strategyId, strat1.id, "Redis migration strategy should rank 1st due to budget compliance");
+      assert.ok(matrix.items[0].pros.length > 0);
+      assert.ok(matrix.items[1].cons.length > 0);
+      assert.ok(matrix.explanation.includes("ranks highest"));
+
+      // 6. Verify Executive Strategy Package (Section 12)
+      const stratPkg = await strategyService.generateStrategyPackage(tenantId, exec.id);
+      assert.equal(stratPkg.packageType, "EXECUTIVE_STRATEGY_PACKAGE");
+      assert.equal(stratPkg.executiveId, exec.id);
+      assert.ok(stratPkg.goals.length > 0);
+      assert.ok(stratPkg.strategies.length >= 2);
+      assert.ok(stratPkg.comparisonMatrix);
+      assert.ok(stratPkg.assumptions.length > 0);
+      assert.ok(stratPkg.health.totalStrategies >= 2);
+      assert.ok(stratPkg.explainability.includes("cumulative planning stability index"));
+
+      // 7. Verify Dependencies graph
+      await strategyService.updateStrategy(tenantId, strat2.id, {
+        relations: [{ targetStrategyId: strat1.id, type: "requires" }]
+      }, "COO", "Establish strategy dependency relation");
+
+      const graph = await strategyService.getStrategyDependencyGraph(tenantId, strat2.id);
+      assert.equal(graph.nodes.length, 2);
+      assert.equal(graph.edges[0].from, strat2.id);
+      assert.equal(graph.edges[0].to, strat1.id);
+      assert.equal(graph.edges[0].type, "requires");
+
+      // 7.5. Verify Stage 3.4B+ Engines (Mission Alignment, Diversity, Explainability, Quality)
+      
+      // Setup some DNA values on exec for alignment tests
+      exec.dna = {
+        role: "CHIEF_OPERATIONS",
+        version: "1.0.0",
+        mission: {
+          vision: "Standard operations vision",
+          directives: ["Queue", "Streams", "Redis"],
+          alignmentTargets: ["Operational Efficiency"]
+        },
+        personalityModel: {
+          traits: {
+            riskTolerance: 0.3
+          },
+          decisionSpeed: 0.8,
+          decisionStyle: "analytical",
+          cognitiveBiasesToManage: []
+        }
+      } as any;
+      const identityRepo = container.resolve<any>("IExecutiveRepository");
+      await identityRepo.saveExecutive(exec, exec.version);
+
+      // 1. Independent Mission Alignment Engine (Section 2)
+      const alignmentReport = await strategyService.getStrategyMissionAlignment(tenantId, strat1.id);
+      assert.equal(alignmentReport.strategyId, strat1.id);
+      assert.ok(alignmentReport.alignmentScore > 0.8, "Should align well due to Mission Directives match and risk within tolerance");
+      assert.ok(alignmentReport.reasonCodes.includes("DIRECTIVE_MATCH"));
+      assert.ok(alignmentReport.reasonCodes.includes("RISK_WITHIN_APPETITE"));
+
+      // For strat2 (which has high risk 0.4 > tolerance 0.3, and operational constraints causing delays)
+      const alignmentReport2 = await strategyService.getStrategyMissionAlignment(tenantId, strat2.id);
+      assert.ok(alignmentReport2.alignmentScore < 0.8, "Should drop alignment score due to risk violation and decision speed mismatch");
+      assert.ok(alignmentReport2.misalignmentCauses.length > 0);
+
+      // 2. Strategy Diversity Engine (Prevent variation of one idea)
+      // Provide some technology and operational variations to strat1 and strat2
+      await strategyService.updateStrategy(tenantId, strat1.id, {
+        constraints: {
+          ...strat1.constraints,
+          technology: ["redis", "ioredis"],
+          operational: ["off-peak maintenance"]
+        },
+        supportingMemories: ["mem123"]
+      }, "COO", "Add tech constraints");
+
+      await strategyService.updateStrategy(tenantId, strat2.id, {
+        constraints: {
+          ...strat2.constraints,
+          technology: ["aws-sqs", "lambda"],
+          operational: ["instant SaaS deployment"]
+        }
+      }, "COO", "Add SaaS tech constraints");
+
+      const diversityReport = await strategyService.getStrategyDiversityReport(tenantId, targetGoal.id);
+      assert.equal(diversityReport.comparedStrategyIds.length, 2);
+      assert.ok(diversityReport.technologyDiversity > 0.7, "Should have high technology diversity since tech stacks are different");
+      assert.ok(diversityReport.overallDiversityScore > 0.6, "Overall diversity should indicate non-variation patterns");
+
+      // 3. Strategy Explainability Engine (Section 7)
+      const explainReport = await strategyService.getStrategyExplainability(tenantId, strat1.id);
+      assert.equal(explainReport.strategyId, strat1.id);
+      assert.ok(explainReport.whyNotAnotherStrategy.includes("chosen due to its feasibility score"));
+      assert.ok(explainReport.evidence.includes("mem123"));
+
+      // 4. Strategy Quality Engine (Section 8)
+      const qualityScore = await strategyService.evaluateStrategyQuality(tenantId, strat1.id);
+      assert.equal(qualityScore.strategyId, strat1.id);
+      assert.ok(qualityScore.overallQualityScore > 0.7);
+      assert.ok(qualityScore.metrics.coverage > 0.5);
+      assert.ok(qualityScore.metrics.portfolioDiversity > 0.5);
+      assert.ok(qualityScore.metrics.explainability > 0.8);
+
+      // 5. Opportunity Discovery Engine (Section 3)
+      const opportunityMap = await strategyService.getStrategyOpportunityMap(tenantId, strat1.id);
+      assert.equal(opportunityMap.strategyId, strat1.id);
+      assert.ok(opportunityMap.opportunities.length > 0);
+      assert.ok(opportunityMap.opportunities.some(o => o.opportunity.includes("Technology Leverage")));
+
+      // 6. Capability Gap Engine (Section 4)
+      const capabilityAssessment = await strategyService.assessStrategyCapabilities(tenantId, strat1.id);
+      assert.equal(capabilityAssessment.strategyId, strat1.id);
+      assert.ok(capabilityAssessment.overallReadiness >= 0.7);
+      assert.ok(capabilityAssessment.recommendedCapabilityCategories.length > 0);
+
+      // 7. Strategy Portfolio Engine (Section 5)
+      const portfolioReport = await strategyService.generateStrategyPortfolios(tenantId, [strat1.id, strat2.id]);
+      assert.equal(portfolioReport.portfolios.length, 6);
+      const growthPortfolio = portfolioReport.portfolios.find(p => p.name === "Growth Portfolio");
+      assert.ok(growthPortfolio);
+      assert.ok(growthPortfolio!.strategyWeights[strat1.id] > 0);
+      assert.ok(growthPortfolio!.resourceAllocation[strat1.id] > 0);
+      assert.ok(growthPortfolio!.dependencyMap.length > 0);
+
+      // Verify security limits for new methods
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat-opp" },
+            () => strategyService.getStrategyOpportunityMap(tenantId, strat1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat-cap" },
+            () => strategyService.assessStrategyCapabilities(tenantId, strat1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat-port" },
+            () => strategyService.generateStrategyPortfolios(tenantId, [strat1.id])
+          );
+        },
+        /Security Violation/
+      );
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat-align" },
+            () => strategyService.getStrategyMissionAlignment(tenantId, strat1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat-div" },
+            () => strategyService.getStrategyDiversityReport(tenantId, targetGoal.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat-exp" },
+            () => strategyService.getStrategyExplainability(tenantId, strat1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat-qual" },
+            () => strategyService.evaluateStrategyQuality(tenantId, strat1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 8. Verify Security (Prevent cross-tenant strategy access)
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat1" },
+            () => strategyService.getStrategyById(tenantId, strat1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat2" },
+            () => strategyService.evaluateStrategyHealth(tenantId, strat1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat3" },
+            () => strategyService.compareStrategies(tenantId, [strat1.id])
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-strat4" },
+            () => strategyService.generateStrategyPackage(tenantId, exec.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 9. Performance & Scale verification
+      const start = Date.now();
+      const stratRepo = container.resolve<MemoryExecutiveStrategyRepository>("IExecutiveStrategyRepository");
+      for (let i = 0; i < 1000; i++) {
+        await stratRepo.findById(tenantId, strat1.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 strategy lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Planning Engine (Stage 3.4C): plan formulation, phase planning, task hierarchy, milestones, resource assignments, dependency resolution, execution order, completeness, quality, and security boundaries",
+    run: async () => {
+      await ensureBootstrapped();
+      const strategyService = container.resolve<ExecutiveStrategyIntelligenceService>("IExecutiveStrategyIntelligenceService");
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+
+      const tenantId = "tenant_planning_test";
+
+      // 1. Create a Strategy as input
+      const strategy = await strategyService.createStrategy(tenantId, {
+        title: "Queue Migration Strategy",
+        description: "Migrate infrastructure to Redis Streams"
+      });
+
+      // 2. Plan Creation (Section 2)
+      const plan = await planningService.createPlan(tenantId, {
+        strategyId: strategy.id,
+        title: "Queue Migration Operations Plan",
+        description: "Executing queue infrastructure updates safely"
+      });
+      assert.equal(plan.status, "DRAFT");
+      assert.equal(plan.strategyId, strategy.id);
+
+      // 3. Phase Planning (Section 3)
+      const planWithPhase = await planningService.addPhase(tenantId, plan.id, {
+        title: "Preparation Phase",
+        sequenceNumber: 1,
+        description: "Prepare environment configuration"
+      });
+      const phase1 = planWithPhase.phases[0];
+      assert.equal(phase1.title, "Preparation Phase");
+      assert.equal(phase1.sequenceNumber, 1);
+
+      // Add a second phase
+      const planWithPhase2 = await planningService.addPhase(tenantId, plan.id, {
+        title: "Migration Phase",
+        sequenceNumber: 2,
+        description: "Perform infrastructure rollout"
+      });
+      const phase2 = planWithPhase2.phases[1];
+      assert.equal(phase2.title, "Migration Phase");
+
+      // 4. Task Decomposition & Resources (Section 4 & 6)
+      const planWithTask1 = await planningService.addTask(tenantId, plan.id, phase1.id, {
+        title: "Audit Current Queues",
+        durationDays: 2,
+        assignedResources: [
+          { id: "res1", name: "Ops Lead", role: "Site Reliability Engineer", estimatedCost: 5000 }
+        ]
+      });
+      const task1 = planWithTask1.phases[0].tasks[0];
+      assert.equal(task1.title, "Audit Current Queues");
+      assert.equal(task1.assignedResources[0].role, "Site Reliability Engineer");
+
+      // Add task 2 (which requires task 1)
+      const planWithTask2 = await planningService.addTask(tenantId, plan.id, phase2.id, {
+        title: "Rollout Redis Streams",
+        durationDays: 4,
+        dependencies: [
+          { targetId: task1.id, type: "requires" }
+        ],
+        assignedResources: [
+          { id: "res2", name: "Database Admin", role: "DBA", estimatedCost: 8000 }
+        ]
+      });
+      const task2 = planWithTask2.phases[1].tasks[0];
+      assert.equal(task2.title, "Rollout Redis Streams");
+      assert.equal(task2.dependencies[0].targetId, task1.id);
+
+      // 5. Milestone Engine (Section 5)
+      const planWithMilestone = await planningService.addMilestone(tenantId, plan.id, {
+        title: "Redis Rolled Out",
+        phaseId: phase2.id,
+        taskId: task2.id,
+        isReached: false
+      });
+      assert.equal(planWithMilestone.milestones[0].title, "Redis Rolled Out");
+
+      // 6. Execution Order & Dependency Resolution (Section 7 & 8)
+      const executionGraph = await planningService.resolveExecutionGraph(tenantId, plan.id);
+      assert.ok(executionGraph.order.length >= 2);
+      assert.equal(executionGraph.order[0], task1.id, "Audit task must come first in topological sort");
+      assert.equal(executionGraph.order[1], task2.id, "Rollout task must come second in topological sort");
+
+      // 7. Planning Completeness (Section 8)
+      const completeness = await planningService.evaluateCompleteness(tenantId, plan.id);
+      assert.equal(completeness.isComplete, true);
+      assert.equal(completeness.missingPhases, false);
+      assert.equal(completeness.missingMilestones, false);
+      assert.equal(completeness.missingResources, false);
+
+      // 8. Resource Planning Engine (Section 5)
+      const resources = await planningService.calculateResourceRequirements(tenantId, plan.id);
+      assert.equal(resources.budget, 13000); // 5000 + 8000
+      assert.equal(resources.timeDays, 6);
+
+      // 9. Dependency Resolution Engine (Section 7)
+      const depGraph = await planningService.getPlanningDependencyGraph(tenantId, plan.id);
+      assert.ok(depGraph.nodes.length >= 3);
+      assert.ok(depGraph.edges.length >= 1);
+
+      // 10. Plan Explainability Engine (Section 9)
+      const explainability = await planningService.getPlanExplainability(tenantId, plan.id);
+      assert.ok(explainability.whyExecutionOrderExists.length > 0);
+      assert.ok(explainability.whyResourcesRequired.length > 0);
+
+      // 11. Planning Quality (Section 10)
+      const quality = await planningService.evaluatePlanningQuality(tenantId, plan.id);
+      assert.ok(quality.overallQualityScore > 0.5);
+
+      // 12. Security Isolation (Prevent cross-tenant planning access)
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-plan1" },
+            () => planningService.getPlanById(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-plan2" },
+            () => planningService.addPhase(tenantId, plan.id, { title: "Hacked Phase" })
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-plan3" },
+            () => planningService.addTask(tenantId, plan.id, phase1.id, { title: "Hacked Task" })
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-plan4" },
+            () => planningService.evaluatePlanningQuality(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 13. Performance O(1) repository lookups
+      const start = Date.now();
+      const planRepo = container.resolve<MemoryExecutivePlanningRepository>("IExecutivePlanningRepository");
+      for (let i = 0; i < 1000; i++) {
+        await planRepo.findById(tenantId, plan.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 plan lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Timeline & Scheduling Engine (Stage 3.4D): critical path method, slack float, parallel grouping, business calendar shifts, deadline breaches, dynamic rescheduling simulation, explainability, health auditing, and isolation boundaries",
+    run: async () => {
+      await ensureBootstrapped();
+      const strategyService = container.resolve<ExecutiveStrategyIntelligenceService>("IExecutiveStrategyIntelligenceService");
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+      const timelineService = container.resolve<ExecutiveTimelineService>("IExecutiveTimelineService");
+
+      const tenantId = "tenant_timeline_test";
+
+      // 1. Create Strategy & Plan as inputs
+      const strategy = await strategyService.createStrategy(tenantId, {
+        title: "Database Relocation",
+        description: "Move server pools to primary datacenter"
+      });
+
+      const plan = await planningService.createPlan(tenantId, {
+        strategyId: strategy.id,
+        title: "Relocation Schedule Plan",
+        description: "Timeline planning tasks"
+      });
+
+      // Add a Phase
+      await planningService.addPhase(tenantId, plan.id, {
+        id: "ph1",
+        title: "Primary Relocation",
+        sequenceNumber: 1
+      });
+
+      // Add Tasks with dependency paths
+      await planningService.addTask(tenantId, plan.id, "ph1", {
+        id: "t_audit",
+        title: "Audit Servers",
+        durationDays: 2,
+        assignedResources: [{ id: "res1", name: "SRE", role: "Engineer", estimatedCost: 2000 }]
+      });
+
+      await planningService.addTask(tenantId, plan.id, "ph1", {
+        id: "t_config",
+        title: "Configure Infrastructure",
+        durationDays: 3,
+        dependencies: [{ targetId: "t_audit", type: "requires" }],
+        assignedResources: [{ id: "res2", name: "NetOps", role: "Engineer", estimatedCost: 3000 }]
+      });
+
+      await planningService.addTask(tenantId, plan.id, "ph1", {
+        id: "t_backup",
+        title: "Setup Backup System",
+        durationDays: 1,
+        dependencies: [{ targetId: "t_audit", type: "requires" }],
+        assignedResources: [{ id: "res3", name: "Backup Bot", role: "AI Agent", estimatedCost: 1000 }]
+      });
+
+      // Add a Milestone
+      await planningService.addMilestone(tenantId, plan.id, {
+        id: "m_complete",
+        title: "Relocation Target Achieved",
+        phaseId: "ph1",
+        taskId: "t_config"
+      });
+
+      // 2. Timeline Generation (Section 2)
+      const timeline = await timelineService.generateTimeline(tenantId, plan.id, "2026-06-01T00:00:00.000Z");
+      assert.equal(timeline.planId, plan.id);
+
+      // Verify Business Calendar Engine (Section 7)
+      const auditNode = timeline.nodes.find(n => n.id === "t_audit");
+      const configNode = timeline.nodes.find(n => n.id === "t_config");
+      const backupNode = timeline.nodes.find(n => n.id === "t_backup");
+
+      assert.ok(auditNode);
+      assert.ok(configNode);
+      assert.ok(backupNode);
+
+      assert.equal(auditNode!.earlyStart, "2026-06-01T00:00:00.000Z");
+      assert.equal(auditNode!.earlyFinish, "2026-06-03T00:00:00.000Z");
+
+      assert.equal(configNode!.earlyStart, "2026-06-03T00:00:00.000Z");
+      assert.equal(configNode!.earlyFinish, "2026-06-08T00:00:00.000Z"); // Skip weekend!
+
+      // 3. Slack & Float Engine (Section 4)
+      assert.ok(backupNode!.slackDays > 0);
+      assert.equal(configNode!.slackDays, 0);
+
+      // 4. Critical Path Engine (Section 3)
+      assert.ok(timeline.criticalPath.includes("t_audit"));
+      assert.ok(timeline.criticalPath.includes("t_config"));
+      assert.ok(!timeline.criticalPath.includes("t_backup"));
+
+      // 5. Dynamic Rescheduling (Section 8)
+      const analysis = await timelineService.analyzeRescheduling(tenantId, plan.id, "t_audit", 3);
+      assert.equal(analysis.planId, plan.id);
+      assert.equal(analysis.delayedTaskId, "t_audit");
+      assert.equal(analysis.delayDays, 3);
+      assert.ok(analysis.affectedTasks.length >= 2);
+      assert.ok(analysis.scheduleDriftDays >= 3);
+      assert.ok(analysis.newCompletionDate !== timeline.projectEndDate);
+
+      // Verify original timeline is unmodified
+      const originalTimeline = await timelineService.getTimelineByPlanId(tenantId, plan.id);
+      assert.equal(originalTimeline!.projectEndDate, timeline.projectEndDate);
+
+      // 6. Timeline Health Engine (Section 9)
+      const health = await timelineService.evaluateTimelineHealth(tenantId, plan.id);
+      assert.ok(health.timelineRealism > 0.5);
+      assert.equal(health.deadlineRisk, "LOW");
+
+      // 7. Timeline Explainability Engine (Section 10)
+      const explainability = await timelineService.getTimelineExplainability(tenantId, plan.id);
+      assert.ok(explainability.whyThisDeadline.includes("longest path"));
+      assert.ok(explainability.nodeExplanations["t_config"].whyThisDate.includes("predecessor"));
+
+      // 8. Schedule Quality Engine (Section 11)
+      const quality = await timelineService.evaluateScheduleQuality(tenantId, plan.id);
+      assert.ok(quality.timelineQuality > 0.5);
+
+      // 9. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-time1" },
+            () => timelineService.getTimelineByPlanId(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-time2" },
+            () => timelineService.analyzeRescheduling(tenantId, plan.id, "t_audit", 2)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 10. Performance O(1) repository lookups
+      const start = Date.now();
+      const timelineRepo = container.resolve<MemoryExecutiveTimelineRepository>("IExecutiveTimelineRepository");
+      for (let i = 0; i < 1000; i++) {
+        await timelineRepo.findByPlanId(tenantId, plan.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 timeline lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Scenario Planning Engine (Stage 3.4E): scenario generation, what-if simulation, comparison risk ranking, early warnings, explainability, health, and security boundaries",
+    run: async () => {
+      await ensureBootstrapped();
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+      const scenarioService = container.resolve<ExecutiveScenarioService>("IExecutiveScenarioService");
+
+      const tenantId = "tenant_scenario_test";
+
+      // 1. Create a Plan as parent reference
+      const plan = await planningService.createPlan(tenantId, {
+        title: "Relocation Target Plan",
+        description: "Parent plan for scenario testing"
+      });
+
+      // 2. Scenario Generation (Section 2)
+      const scenarioBase = await scenarioService.generateBusinessScenarios(tenantId, plan.id, {
+        title: "Normal Growth Case",
+        description: "Standard business operating plan",
+        variables: { costMultiplier: 1.0, delayDays: 0 }
+      });
+      assert.equal(scenarioBase.planId, plan.id);
+      assert.equal(scenarioBase.status, "DRAFT");
+
+      // 3. What-if Simulation & Business Impact (Section 3 & 4 & 5)
+      const scenarioSim = await scenarioService.simulateWhatIf(tenantId, plan.id, {
+        costMultiplier: 1.5,
+        delayDays: 5,
+        churnRate: 0.1
+      });
+      assert.ok(scenarioSim.impactMetrics.revenueImpact < 0);
+      assert.equal(scenarioSim.impactMetrics.timelineImpactDays, 5);
+      assert.ok(scenarioSim.impactMetrics.operationalRiskScore > 0.1);
+
+      // 4. Scenario Comparison (Section 6)
+      const comparison = await scenarioService.compareScenarios(tenantId, scenarioBase.id, [scenarioSim.id]);
+      assert.equal(comparison.optimalScenarioId, scenarioBase.id);
+      assert.ok(comparison.recommendation.includes(scenarioBase.id));
+
+      // 5. Early Warning Generation (Section 8)
+      const warningsReport = await scenarioService.generateEarlyWarningReport(tenantId, plan.id);
+      assert.equal(warningsReport.planId, plan.id);
+      assert.ok(warningsReport.warnings.length >= 2);
+      assert.ok(warningsReport.warnings.some(w => w.type === "churn_increase"));
+      assert.ok(warningsReport.warnings.every(w => w.probability > 0));
+
+      // 6. Explainability trace (Section 9)
+      const explainability = await scenarioService.getScenarioExplainability(tenantId, scenarioSim.id);
+      assert.ok(explainability.whyScenarioExists.length > 0);
+      assert.ok(explainability.whyImpactsCalculated.length > 0);
+
+      // 7. Scenario Quality Evaluation (Section 10)
+      const quality = await scenarioService.evaluateScenarioQuality(tenantId, scenarioSim.id);
+      assert.ok(quality.overallScenarioQuality > 0.5);
+
+      // 8. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-scen1" },
+            () => scenarioService.getScenarioExplainability(tenantId, scenarioSim.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-scen2" },
+            () => scenarioService.simulateWhatIf(tenantId, plan.id, { churnRate: 0.2 })
+          );
+        },
+        /Security Violation/
+      );
+
+      // 9. Performance O(1) repository lookups
+      const start = Date.now();
+      const scenarioRepo = container.resolve<MemoryExecutiveScenarioRepository>("IExecutiveScenarioRepository");
+      for (let i = 0; i < 1000; i++) {
+        await scenarioRepo.findById(tenantId, scenarioBase.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 scenario lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Planning Optimization Engine (Stage 3.4F): plan optimization, resource and cost optimization, execution readiness, explainability, quality, and tenant security",
+    run: async () => {
+      await ensureBootstrapped();
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+      const optService = container.resolve<ExecutivePlanningOptimizationService>("IExecutivePlanningOptimizationService");
+
+      const tenantId = "tenant_opt_test";
+
+      // 1. Create a base Plan with a phase & task to ensure readiness
+      const plan = await planningService.createPlan(tenantId, {
+        title: "Relocation Strategy Plan",
+        description: "Parent plan for optimization testing"
+      });
+
+      await planningService.addPhase(tenantId, plan.id, {
+        id: "ph1",
+        title: "Primary Setup",
+        sequenceNumber: 1
+      });
+
+      await planningService.addTask(tenantId, plan.id, "ph1", {
+        id: "t_setup",
+        title: "Setup Node Connections",
+        durationDays: 3
+      });
+
+      // 2. Plan Optimization (Section 2)
+      const opt = await optService.optimizePlan(tenantId, plan.id);
+      assert.equal(opt.planId, plan.id);
+      assert.ok(opt.costSavings > 0);
+
+      // 3. Resource Optimization (Section 3)
+      const resourceOpt = await optService.optimizeResources(tenantId, plan.id);
+      assert.equal(resourceOpt.resourceAllocationEfficiency, 0.98);
+
+      // 4. Cost Optimization (Section 4)
+      const costOpt = await optService.optimizeCosts(tenantId, plan.id);
+      assert.equal(costOpt.costSavings, 4000);
+
+      // 5. Execution Readiness (Section 8)
+      const readiness = await optService.evaluateExecutionReadiness(tenantId, plan.id);
+      assert.equal(readiness.planId, plan.id);
+      assert.equal(readiness.isReady, true);
+      assert.ok(readiness.readinessScore > 0.8);
+
+      // 6. Optimization Explainability (Section 10)
+      const explain = await optService.getOptimizationExplainability(tenantId, plan.id);
+      assert.ok(explain.whyCostIsHigh.includes("SRE"));
+      assert.ok(explain.whyOpportunitiesWereDetected.includes("Redis"));
+
+      // 7. Planning Quality Evaluation (Section 11)
+      const quality = await optService.evaluatePlanningQuality(tenantId, plan.id);
+      assert.ok(quality.overallPlanningQuality > 0.8);
+
+      // 8. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-opt1" },
+            () => optService.evaluateExecutionReadiness(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-opt2" },
+            () => optService.optimizePlan(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 9. Performance O(1) repository lookups
+      const start = Date.now();
+      const optRepo = container.resolve<MemoryExecutivePlanningOptimizationRepository>("IExecutivePlanningOptimizationRepository");
+      for (let i = 0; i < 1000; i++) {
+        await optRepo.findByPlanId(tenantId, plan.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 planning optimization lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Risk & Contingency Engine (Stage 3.4G): risk detection, classification, root cause, propagation, compound risks, contingency planning, explainability, health, quality, and isolation boundaries",
+    run: async () => {
+      await ensureBootstrapped();
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+      const riskService = container.resolve<ExecutiveRiskService>("IExecutiveRiskService");
+
+      const tenantId = "tenant_risk_test";
+
+      // 1. Create a Plan with phase & task as base
+      const plan = await planningService.createPlan(tenantId, {
+        title: "Database Migration Plan",
+        description: "Parent plan for risk testing"
+      });
+
+      await planningService.addPhase(tenantId, plan.id, {
+        id: "ph1",
+        title: "Core Migration Setup",
+        sequenceNumber: 1
+      });
+
+      await planningService.addTask(tenantId, plan.id, "ph1", {
+        id: "t_config",
+        title: "Configure Database",
+        durationDays: 4
+      });
+
+      // 2. Risk Detection & Classification (Section 2 & 3 & 4)
+      const risks = await riskService.detectRisks(tenantId, plan.id);
+      assert.ok(risks.length >= 2);
+      const timelineRisk = risks.find(r => r.category === "TIMELINE");
+      const resourceRisk = risks.find(r => r.category === "RESOURCE");
+
+      assert.ok(timelineRisk);
+      assert.ok(resourceRisk);
+      assert.equal(timelineRisk.severity, "HIGH");
+      assert.ok(timelineRisk.rootCause.length > 0);
+
+      // 3. Contingency Planning (Section 6)
+      const contingency = await riskService.generateContingencyPlan(tenantId, timelineRisk.id, {
+        triggerCondition: "Delay exceeds 5 working days.",
+        mitigationSteps: ["Assign netops contractor."]
+      });
+      assert.equal(contingency.riskId, timelineRisk.id);
+      assert.equal(contingency.status, "APPROVED");
+
+      // 4. Risk Propagation Graph (Section 5 & 7)
+      const propGraph = await riskService.getRiskPropagationGraph(tenantId, plan.id);
+      assert.ok(propGraph.nodes.length >= 2);
+      assert.ok(propGraph.edges.length >= 1);
+      assert.equal(propGraph.edges[0].sourceId, timelineRisk.id);
+      assert.equal(propGraph.edges[0].targetId, resourceRisk.id);
+
+      // 5. Risk Health Auditing (Section 10)
+      const health = await riskService.evaluateRiskHealth(tenantId, plan.id);
+      assert.ok(health.overallRiskIndex > 0.1);
+      assert.ok(health.compoundRiskScore > 1.0);
+
+      // 6. Risk Quality Evaluation (Section 11)
+      const quality = await riskService.evaluateRiskQuality(tenantId, plan.id);
+      assert.ok(quality.riskQualityScore > 0.5);
+
+      // 7. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-risk1" },
+            () => riskService.evaluateRiskHealth(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-risk2" },
+            () => riskService.generateContingencyPlan(tenantId, timelineRisk.id, {})
+          );
+        },
+        /Security Violation/
+      );
+
+      // 8. Performance O(1) repository lookups
+      const start = Date.now();
+      const riskRepo = container.resolve<MemoryExecutiveRiskRepository>("IExecutiveRiskRepository");
+      for (let i = 0; i < 1000; i++) {
+        await riskRepo.findRiskById(tenantId, timelineRisk.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 risk lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Resource & Capacity Management Engine (Stage 3.4H): inventory management, capacity tracking, task allocation, conflict detection, capability matching, health auditing, quality evaluation, and isolation checks",
+    run: async () => {
+      await ensureBootstrapped();
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+      const resourceService = container.resolve<ExecutiveResourceService>("IExecutiveResourceService");
+
+      const tenantId = "tenant_resource_test";
+
+      // 1. Create a Plan base
+      const plan = await planningService.createPlan(tenantId, {
+        title: "Staffing Strategy Plan",
+        description: "Parent plan for resource capacity testing"
+      });
+
+      // 2. Resource Inventory & Capability Matching (Section 2)
+      const res1 = await resourceService.addResourceToInventory(tenantId, {
+        name: "Primary SRE",
+        type: "HUMAN",
+        capabilities: ["Kubernetes", "PostgreSQL"],
+        capacityHoursPerWeek: 40,
+        costPerHour: 80
+      });
+      assert.equal(res1.name, "Primary SRE");
+      assert.ok(res1.capabilities.includes("Kubernetes"));
+
+      // 3. Resource Allocation & Capacity Tracking (Section 3)
+      const alloc1 = await resourceService.allocateResourceToTask(tenantId, plan.id, {
+        resourceId: res1.id,
+        taskId: "t_setup",
+        allocatedHours: 25
+      });
+      assert.equal(alloc1.resourceId, res1.id);
+      assert.equal(alloc1.allocatedHours, 25);
+
+      const alloc2 = await resourceService.allocateResourceToTask(tenantId, plan.id, {
+        resourceId: res1.id,
+        taskId: "t_config",
+        allocatedHours: 20
+      });
+      assert.equal(alloc2.allocatedHours, 20);
+
+      // 4. Conflict Detection & Balancing (Section 5)
+      const conflicts = await resourceService.detectResourceConflicts(tenantId, plan.id);
+      assert.ok(conflicts.length >= 1);
+      assert.equal(conflicts[0].resourceId, res1.id);
+      assert.equal(conflicts[0].severity, "HIGH");
+
+      // 5. Resource Health Auditing (Section 10)
+      const health = await resourceService.evaluateResourceHealth(tenantId, plan.id);
+      assert.ok(health.overallUtilizationRate > 0.5);
+      assert.equal(health.conflictCount, 1);
+      assert.equal(health.status, "WARNING");
+
+      // 6. Resource Quality Evaluation (Section 11)
+      const quality = await resourceService.evaluateResourceQuality(tenantId, plan.id);
+      assert.ok(quality.overallQualityScore > 0.8);
+
+      // 7. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-res1" },
+            () => resourceService.evaluateResourceHealth(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-res2" },
+            () => resourceService.allocateResourceToTask(tenantId, plan.id, {})
+          );
+        },
+        /Security Violation/
+      );
+
+      // 8. Performance O(1) repository lookups
+      const start = Date.now();
+      const resRepo = container.resolve<MemoryExecutiveResourceRepository>("IExecutiveResourceRepository");
+      for (let i = 0; i < 1000; i++) {
+        await resRepo.findResourceById(tenantId, res1.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 resource lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Planning Governance & Compliance Engine (Stage 3.4I): governance checks, policy validation, compliance reporting, audit trailing, lineage auditing, explainability, health auditing, quality metrics, certification readiness, and isolation boundaries",
+    run: async () => {
+      await ensureBootstrapped();
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+      const govService = container.resolve<ExecutivePlanningGovernanceService>("IExecutivePlanningGovernanceService");
+
+      const tenantId = "tenant_gov_test";
+
+      // 1. Create a Plan base with loaded phase & task
+      const plan = await planningService.createPlan(tenantId, {
+        title: "Compliance Strategy Plan",
+        description: "Parent plan for governance testing"
+      });
+
+      await planningService.addPhase(tenantId, plan.id, {
+        id: "ph1",
+        title: "Validation Phase",
+        sequenceNumber: 1
+      });
+
+      await planningService.addTask(tenantId, plan.id, "ph1", {
+        id: "t_validate",
+        title: "Verify Certificates",
+        durationDays: 2
+      });
+
+      // 2. Policy Validation (Section 3)
+      const validation = await govService.validatePlanningPolicies(tenantId, plan.id);
+      assert.equal(validation.planId, plan.id);
+      assert.equal(validation.isValid, true);
+
+      // 3. Compliance Engine & Approval Readiness (Section 4 & 5)
+      const compliance = await govService.generateComplianceReport(tenantId, plan.id);
+      assert.equal(compliance.isCompliant, true);
+      assert.equal(compliance.complianceScore, 1.0);
+
+      // 4. Audit Engine & Lineage (Section 6 & 7)
+      const audit = await govService.generateAuditReport(tenantId, plan.id);
+      assert.ok(audit.auditTrail.length >= 1);
+      assert.ok(audit.auditTrail.some(a => a.action === "POLICY_VALIDATION"));
+
+      // 5. Certification Readiness (Section 11)
+      const certification = await govService.generateCertificationReport(tenantId, plan.id, "exec_chief_operations");
+      assert.equal(certification.isCertified, true);
+      assert.equal(certification.certifiedBy, "exec_chief_operations");
+
+      // 6. Governance Health Auditing (Section 9)
+      const health = await govService.evaluateGovernanceHealth(tenantId, plan.id);
+      assert.equal(health.healthIndex, 1.0);
+      assert.equal(health.status, "STABLE");
+
+      // 7. Governance Quality Evaluation (Section 10)
+      const quality = await govService.evaluateGovernanceQuality(tenantId, plan.id);
+      assert.ok(quality.qualityScore > 0.8);
+
+      // 8. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-gov1" },
+            () => govService.evaluateGovernanceHealth(tenantId, plan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-gov2" },
+            () => govService.generateCertificationReport(tenantId, plan.id, "unauthorized_actor")
+          );
+        },
+        /Security Violation/
+      );
+
+      // 9. Performance O(1) repository lookups
+      const start = Date.now();
+      const govRepo = container.resolve<MemoryExecutivePlanningGovernanceRepository>("IExecutivePlanningGovernanceRepository");
+      for (let i = 0; i < 1000; i++) {
+        await govRepo.findValidationByPlanId(tenantId, plan.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 governance lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Planning Hardening & Sandbox Security Engine (Stage 3.4J): audit tampering check, lineage tampering verification, privilege escalation rejection, contract validation, hardening reports, and isolation checks",
+    run: async () => {
+      await ensureBootstrapped();
+      const planningService = container.resolve<ExecutivePlanningService>("IExecutivePlanningService");
+      const hardService = container.resolve<ExecutivePlanningHardeningService>("IExecutivePlanningHardeningService");
+
+      const tenantId = "tenant_hard_test";
+
+      // 1. Create a Plan base
+      const plan = await planningService.createPlan(tenantId, {
+        title: "Hardened Plan",
+        description: "Parent plan for hardening checks"
+      });
+
+      // 2. Audit & Lineage Tampering checks
+      const hasTampering = await hardService.auditTamperingCheck(tenantId, plan.id);
+      assert.equal(hasTampering, false);
+
+      const lineageTampering = await hardService.lineageTamperingCheck(tenantId, plan.id);
+      assert.equal(lineageTampering, false);
+
+      // 3. Privilege Escalation rejection (fails safely)
+      await assert.rejects(
+        () => hardService.verifyPrivilegeEscalation(tenantId, "hacker_actor", "sys_admin"),
+        /Security Violation/
+      );
+
+      // 4. Contract Bypass detection (fails safely)
+      await assert.rejects(
+        () => hardService.verifyContractCompliance(tenantId, plan.id, null),
+        /Security Violation/
+      );
+
+      // 5. Generate Hardening Report on a clean plan with no violations
+      const cleanPlan = await planningService.createPlan(tenantId, {
+        title: "Clean Hardened Plan",
+        description: "Parent plan for clean hardening report"
+      });
+      const report = await hardService.generateHardeningReport(tenantId, cleanPlan.id);
+      assert.equal(report.isHardened, true);
+      assert.equal(report.hardeningScore, 1.0);
+
+      // 6. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-hard1" },
+            () => hardService.generateHardeningReport(tenantId, cleanPlan.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 7. Performance O(1) repository lookups
+      const start = Date.now();
+      const hardRepo = container.resolve<MemoryExecutivePlanningHardeningRepository>("IExecutivePlanningHardeningRepository");
+      for (let i = 0; i < 1000; i++) {
+        await hardRepo.getViolationsByPlanId(tenantId, plan.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 hardening lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Decision Intelligence Engine (Stage 3.5A+): decision creation, status updates, classification, ownership, assumptions validation, stability checks, readiness evaluations, context integrity, immutable snapshots, history versions, performance, and isolation boundaries",
+    run: async () => {
+      await ensureBootstrapped();
+      const decisionService = container.resolve<ExecutiveDecisionIntelligenceService>("IExecutiveDecisionIntelligenceService");
+
+      const tenantId = "tenant_decision_test";
+
+      // 1. Create decision with Ownership & Assumptions (Section 4 & 5)
+      const dec1 = await decisionService.createDecision(tenantId, {
+        title: "Hire Lead Developer",
+        description: "Hire a Lead Dev to resolve engineering delay bottlenecks",
+        status: "DRAFT",
+        type: "Hiring",
+        plans: ["plan_eng_1"],
+        goals: ["goal_speed_1"],
+        ownership: {
+          owner: "exec_chief_operations",
+          reviewer: "exec_cto",
+          approver: "exec_ceo",
+          stakeholders: ["exec_cfo"],
+          responsibleExecutive: "exec_cto",
+          delegatedExecutive: "exec_engineering_manager",
+          escalationOwner: "exec_ceo"
+        },
+        assumptions: [
+          {
+            text: "Candidate accepts initial offer range.",
+            confidence: 0.9,
+            evidence: "Market average survey",
+            owner: "exec_hr",
+            criticality: "HIGH",
+            validationStatus: "VALIDATED"
+          }
+        ],
+        metadata: { costImpact: 8500, timelineImpactDays: -15 }
+      });
+      assert.equal(dec1.ownership.reviewer, "exec_cto");
+      assert.equal(dec1.assumptions[0].validationStatus, "VALIDATED");
+
+      // 2. Lifecycle transitions, version tracking, and history version lookup
+      const updatedDec = await decisionService.updateDecision(tenantId, dec1.id, {
+        status: "APPROVED",
+        actorId: "exec_chief_operations",
+        assumptions: [
+          {
+            text: "Candidate accepts initial offer range.",
+            confidence: 0.9,
+            evidence: "Market average survey",
+            owner: "exec_hr",
+            criticality: "HIGH",
+            validationStatus: "BROKEN" // Invalidate assumption (Section 5)
+          }
+        ]
+      });
+      assert.equal(updatedDec.status, "APPROVED");
+      assert.equal(updatedDec.version, 2);
+
+      // Verify validationStatus change did NOT mutate core decision status, only stability
+      assert.equal(updatedDec.assumptions[0].validationStatus, "BROKEN");
+
+      const decRepo = container.resolve<MemoryExecutiveDecisionRepository>("IExecutiveDecisionRepository");
+      const decV1 = await decRepo.findDecisionVersion(tenantId, dec1.id, 1);
+      assert.ok(decV1);
+      assert.equal(decV1.status, "DRAFT");
+      assert.equal(decV1.assumptions[0].validationStatus, "VALIDATED");
+
+      // 3. Immutable Snapshot check (Section 13)
+      const snapshot = await decisionService.createDecisionSnapshot(tenantId, dec1.id);
+      assert.equal(snapshot.version, 2);
+
+      // Mutate original decision
+      await decisionService.updateDecision(tenantId, dec1.id, { title: "Title Mutated" });
+      const snapCheck = await decRepo.getSnapshot(tenantId, dec1.id);
+      assert.ok(snapCheck);
+      assert.equal(snapCheck.title, "Hire Lead Developer"); // Verify snapshot did not change (No shared references)
+
+      // 4. Decision Stability Engine (Section 6)
+      const stability = await decisionService.evaluateDecisionStability(tenantId, dec1.id);
+      assert.equal(stability, "WARNING"); // Broken assumption reduces stability
+
+      // 5. Decision Readiness Engine (Section 7)
+      const readiness = await decisionService.evaluateDecisionReadiness(tenantId, dec1.id);
+      assert.ok(readiness >= 0.8);
+
+      // 6. Decision Context Integrity Engine (Section 8)
+      const integrity = await decisionService.evaluateContextIntegrity(tenantId, dec1.id);
+      assert.equal(integrity, 1.0);
+
+      // 7. Decision Explainability Hardening (Section 9)
+      const explanation = await decisionService.explainDecision(tenantId, dec1.id);
+      assert.equal(explanation.decisionId, dec1.id);
+      assert.equal(explanation.whyNotAnother, "Alternative fallbacks did not satisfy budget constraints.");
+      assert.ok(explanation.whichAssumptions.includes("Candidate accepts initial offer range."));
+
+      // 7.5 Derived Decisions Graph Traversal & Cycle Detection (Phase 16)
+      const dec3 = await decisionService.createDecision(tenantId, {
+        title: "Provision Backup Instance",
+        description: "Standby database server context",
+        status: "DRAFT",
+        type: "Engineering"
+      });
+      await decisionService.linkDecisions(tenantId, dec1.id, dec3.id, "TRIGGERS");
+
+      // Transitive graph traversal
+      const traverseRes = await decisionService.traverseDecisionGraph(tenantId, dec1.id);
+      assert.equal(traverseRes.hasCycle, false);
+      assert.ok(traverseRes.nodes.some(n => n.decisionId === dec3.id));
+
+      // Link dec3 back to dec1 to form a circular relation graph
+      await decisionService.linkDecisions(tenantId, dec3.id, dec1.id, "DEPENDS_ON");
+      const traverseResCycle = await decisionService.traverseDecisionGraph(tenantId, dec1.id);
+      assert.equal(traverseResCycle.hasCycle, true);
+
+      // 8. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-dec1" },
+            () => decisionService.explainDecision(tenantId, dec1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-dec2" },
+            () => decisionService.updateDecision(tenantId, dec1.id, { status: "EXECUTED" })
+          );
+        },
+        /Security Violation/
+      );
+
+      // 9. Performance O(1) repository lookups
+      const start = Date.now();
+      for (let i = 0; i < 1000; i++) {
+        await decRepo.findDecisionById(tenantId, dec1.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup performance check: 1000 decision lookups took ${duration}ms, which should be well under 100ms.`);
+    }
+  },
+  {
+    name: "Executive Evidence Validation Engine (Stage 3.5B): evidence collection, verification lifecycle, credibility engine, completeness checks, contradiction graphs, correlation traversal, overall confidence, explainability, packaging, security boundaries, and performance",
+    run: async () => {
+      await ensureBootstrapped();
+      const evidenceService = container.resolve<ExecutiveEvidenceValidationService>("IExecutiveEvidenceValidationService");
+      const tenantId = "tenant_evidence_test";
+
+      // 1. Collect evidence with metrics & references
+      const ev1 = await evidenceService.collectEvidence(tenantId, {
+        title: "Database latency stats",
+        description: "Postgres write queue delay averages 450ms.",
+        status: "DRAFT",
+        classification: "Quantitative",
+        source: "Production APM",
+        sourceReliability: 0.95,
+        consistency: 0.9,
+        historicalAccuracy: 0.9,
+        evidenceQuality: 0.95,
+        goals: ["goal_latency_1"],
+        plans: ["plan_infra_1"]
+      });
+      assert.equal(ev1.title, "Database latency stats");
+      assert.equal(ev1.status, "DRAFT");
+      assert.equal(ev1.classification, "Quantitative");
+
+      const ev2 = await evidenceService.collectEvidence(tenantId, {
+        title: "Staging latency stats",
+        description: "Write queue delay averages 50ms.",
+        status: "PENDING_VERIFICATION",
+        classification: "Quantitative",
+        source: "Staging APM",
+        sourceReliability: 0.8,
+        consistency: 0.3, // Low consistency to trigger contradiction check
+        goals: ["goal_latency_1"],
+        plans: ["plan_infra_1"]
+      });
+      assert.equal(ev2.status, "PENDING_VERIFICATION");
+
+      // 2. Verify evidence lifecycle & version history
+      const verified = await evidenceService.verifyEvidence(tenantId, ev1.id, "VERIFIED", "exec_sre", "Verified via APM logs.");
+      assert.equal(verified.verificationStatus, "VERIFIED");
+      assert.equal(verified.status, "VERIFIED");
+      assert.equal(verified.version, 2);
+
+      const evRepo = container.resolve<MemoryExecutiveEvidenceRepository>("IExecutiveEvidenceRepository");
+      const evV1 = await evRepo.findEvidenceVersion(tenantId, ev1.id, 1);
+      assert.ok(evV1);
+      assert.equal(evV1.status, "DRAFT");
+
+      // 3. Credibility Engine (Deliverable 6)
+      const credibility = await evidenceService.calculateCredibility(tenantId, ev1.id);
+      assert.ok(credibility.credibilityScore >= 0.8);
+      assert.ok(credibility.explanation.includes("source reliability"));
+
+      // 4. Completeness Engine (Deliverable 7)
+      const completeness = await evidenceService.checkCompleteness(tenantId, ev1.id);
+      assert.equal(completeness.isCompletenessSufficient, true);
+      assert.equal(completeness.missingEvidenceList.length, 0);
+
+      // 5. Contradiction Engine (Deliverable 8)
+      const contradiction = await evidenceService.detectContradictions(tenantId, ev2.id);
+      assert.equal(contradiction.hasContradictions, true);
+      assert.equal(contradiction.severity, "HIGH");
+      assert.ok(contradiction.conflictGraph.length > 0);
+
+      // 6. Confidence Engine (Deliverable 10)
+      const confidence = await evidenceService.calculateConfidence(tenantId, ev1.id);
+      assert.ok(confidence.overallConfidence >= 0.8);
+
+      // 7. Explainability Engine (Deliverable 11)
+      const explanation = await evidenceService.explainEvidence(tenantId, ev1.id);
+      assert.equal(explanation.whyAccepted, "Sufficient independent sources provided.");
+
+      // 8. Packaging Engine (Deliverable 12)
+      const pkg = await evidenceService.packageEvidence(tenantId, ev1.id);
+      assert.ok(pkg.explanation.includes("packaged evidence"));
+      assert.ok(pkg.relatedGoals.includes("goal_latency_1"));
+
+      // 9. Graph Correlation & Traversal (Deliverable 9 & 16)
+      await evidenceService.linkEvidence(tenantId, ev1.id, ev2.id, "CORROBORATES");
+      const traversal = await evidenceService.traverseEvidenceGraph(tenantId, ev1.id);
+      assert.equal(traversal.hasCycle, false);
+      assert.ok(traversal.nodes.some(n => n.evidenceId === ev2.id));
+
+      // 10. Security Isolation (Deliverable 15)
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-ev1" },
+            () => evidenceService.calculateConfidence(tenantId, ev1.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 11. Performance O(1) repository lookups (Deliverable 16)
+      const start = Date.now();
+      for (let i = 0; i < 1000; i++) {
+        await evRepo.findEvidenceById(tenantId, ev1.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup check: 1000 evidence lookups took ${duration}ms.`);
+    }
+  },
+  {
+    name: "Executive Alternative Generation & Hypothesis Intelligence Engine (Stage 3.5C): lifecycle, diversity analysis, hypothesis and counter-hypothesis mapping, opportunity identification, constraints awareness, comparisons, packaging, security validation, and performance checks",
+    run: async () => {
+      await ensureBootstrapped();
+      const altService = container.resolve<ExecutiveAlternativeGenerationService>("IExecutiveAlternativeGenerationService");
+      const tenantId = "tenant_alternative_test";
+      const decisionId = "dec_pricing_1";
+
+      // 1. Generate multiple alternatives
+      const alts = await altService.generateAlternatives(tenantId, decisionId, "Should we increase pricing?");
+      assert.ok(alts.length >= 4);
+      assert.equal(alts[0].status, "GENERATED");
+      assert.ok(alts[0].title.includes("approach"));
+
+      // 2. Lifecycle transitions
+      const updatedAlt = await altService.updateAlternativeStatus(tenantId, alts[0].id, "VALIDATED", "exec_cfo");
+      assert.equal(updatedAlt.status, "VALIDATED");
+      assert.equal(updatedAlt.version, 2);
+
+      const altRepo = container.resolve<MemoryExecutiveAlternativeRepository>("IExecutiveAlternativeRepository");
+      const altV1 = await altRepo.findAlternativeVersion(tenantId, alts[0].id, 1);
+      assert.ok(altV1);
+      assert.equal(altV1.status, "GENERATED");
+
+      // 3. Hypothesis & Counter-Hypothesis Engine (including extra requirement)
+      const hypotheses = await altService.generateHypotheses(tenantId, decisionId, "Should we expand to UAE?");
+      assert.equal(hypotheses.length, 1);
+      const pair = hypotheses[0];
+      
+      // Verify Hypothesis opposite / counter logic
+      assert.ok(pair.hypothesis.text.includes("Expand to UAE"));
+      assert.ok(pair.counterHypothesis.text.includes("India market"));
+      
+      // Verify stored properties
+      assert.ok(pair.hypothesis.supportingEvidence.length > 0);
+      assert.ok(pair.hypothesis.unknownEvidence.length > 0);
+      assert.ok(pair.hypothesis.risks.length > 0);
+      assert.ok(pair.hypothesis.assumptions.length > 0);
+      assert.equal(pair.hypothesis.confidence, 0.8);
+
+      assert.ok(pair.counterHypothesis.supportingEvidence.length > 0);
+      assert.ok(pair.counterHypothesis.unknownEvidence.length > 0);
+      assert.ok(pair.counterHypothesis.risks.length > 0);
+      assert.ok(pair.counterHypothesis.assumptions.length > 0);
+      assert.equal(pair.counterHypothesis.confidence, 0.85);
+
+      // 4. Alternative Diversity Engine (Deliverable 5)
+      const diversity = await altService.evaluateDiversity(tenantId, alts);
+      assert.ok(diversity.diversityScore >= 0.75);
+      assert.ok(diversity.overlap <= 0.25);
+
+      // 5. Alternative Comparison Engine (Deliverable 9)
+      const matrix = await altService.compareAlternatives(tenantId, alts.map(a => a.id));
+      assert.equal(matrix.length, alts.length);
+      assert.equal(matrix[0].alternativeId, alts[0].id);
+
+      // 6. Alternative Explainability Engine (Deliverable 10)
+      const explanation = await altService.explainAlternative(tenantId, alts[0].id);
+      assert.ok(explanation.whyGenerated.includes("Low Cost"));
+
+      // 7. Alternative Packaging Engine (Deliverable 11)
+      const pkg = await altService.packageAlternatives(tenantId, decisionId);
+      assert.equal(pkg.decisionId, decisionId);
+      assert.ok(pkg.explanation.includes("compiled"));
+
+      // 8. Security Isolation (Deliverable 14)
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-alt1" },
+            () => altService.explainAlternative(tenantId, alts[0].id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 9. Performance O(1) repository lookups (Deliverable 15)
+      const start = Date.now();
+      for (let i = 0; i < 1000; i++) {
+        await altRepo.findAlternativeById(tenantId, alts[0].id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup check: 1000 alternative lookups took ${duration}ms.`);
+    }
+  },
+  {
+    name: "Executive Decision Evaluation Engine (Stage 3.5D): alternative evaluation, MCDA scoring matrix, ROI metrics, ranking execution, sensitivity analysis scenarios, history trailing, bias detection, devil's advocate reporting, security boundaries, and performance validation",
+    run: async () => {
+      await ensureBootstrapped();
+      const evalService = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+      const tenantId = "tenant_evaluation_test";
+      const decisionId = "dec_hiring_1";
+      const alternativeIds = ["alt_low_cost", "alt_high_growth"];
+
+      // 1. Evaluate alternatives (creates MCDA criteria scores & ROI metrics)
+      const pkg = await evalService.evaluateAlternatives(tenantId, decisionId, alternativeIds);
+      assert.equal(pkg.status, "GENERATED");
+      assert.equal(pkg.evaluations.length, 2);
+      assert.equal(pkg.evaluations[0].alternativeId, "alt_low_cost");
+      assert.equal(pkg.evaluations[0].mcdaScores[0].criterion, "Business Value");
+
+      // Verify Bias detection and Devil's advocate
+      assert.ok(pkg.evaluations[0].biasesDetected.length > 0);
+      assert.equal(pkg.evaluations[0].biasesDetected[0].biasType, "Optimism Bias");
+      assert.ok(pkg.devilsAdvocate["alt_low_cost"].strongestObjections.length > 0);
+
+      // 2. Rank alternatives (runs MCDA sorting & sensitivity analysis)
+      const rankedPkg = await evalService.rankAlternatives(tenantId, pkg.id);
+      assert.equal(rankedPkg.status, "SCORED");
+      assert.equal(rankedPkg.version, 2);
+      assert.equal(rankedPkg.rankings.length, 2);
+      assert.equal(rankedPkg.rankings[0].rank, 1);
+      assert.equal(rankedPkg.sensitivityAnalysis.length, 2);
+      assert.equal(rankedPkg.sensitivityAnalysis[0].scenarioName, "Cost weight increased +20%");
+
+      // 3. History snapshot checking
+      const evalRepo = container.resolve<MemoryExecutiveDecisionEvaluationRepository>("IExecutiveDecisionEvaluationRepository");
+      const history = await evalRepo.getHistoryByEvaluationId(tenantId, pkg.id); // fetches history for evaluation package
+      assert.ok(history.length >= 2);
+      assert.equal(history[0].previousStatus, "NONE");
+      assert.equal(history[0].newStatus, "GENERATED");
+      assert.equal(history[1].previousStatus, "GENERATED");
+      assert.equal(history[1].newStatus, "SCORED");
+
+      // 4. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-eval1" },
+            () => evalService.rankAlternatives(tenantId, pkg.id)
+          );
+        },
+        /Security Violation/
+      );
+
+      // 5. Performance O(1) repository lookups
+      const start = Date.now();
+      for (let i = 0; i < 1000; i++) {
+        await evalRepo.findEvaluationById(tenantId, pkg.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup check: 1000 evaluation lookups took ${duration}ms.`);
+    }
+  },
+  {
+    name: "Executive Simulation & Projection Engine (Stage 3.5E): simulation execution, optimistic/pessimistic scenario modeling, ARR/profit projections, outcome comparisons, explainability metadata, history tracking, security validation, and performance tests",
+    run: async () => {
+      await ensureBootstrapped();
+      const simService = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+      const tenantId = "tenant_simulation_test";
+      const decisionId = "dec_pricing_3";
+
+      // 1. Run simulation for a pricing decision case
+      const sim = await simService.runSimulation(tenantId, decisionId, "Should we increase pricing?");
+      assert.equal(sim.status, "GENERATED");
+      assert.equal(sim.outcomes.bestCase.scenarioName, "Optimistic");
+      assert.equal(sim.outcomes.bestCase.expectedARR, 1500000);
+      assert.equal(sim.outcomes.expectedCase.expectedARR, 1000000);
+      assert.equal(sim.outcomes.worstCase.expectedARR, 500000);
+
+      // Verify explainability
+      assert.ok(sim.explainability.whyProjected.includes("pricing elasticity"));
+      assert.ok(sim.explainability.whyDifferenceBetweenScenarios.length > 0);
+
+      // 2. Lifecycle transitions
+      const updatedSim = await simService.updateSimulationStatus(tenantId, sim.id, "COMPLETED", "exec_cfo");
+      assert.equal(updatedSim.status, "COMPLETED");
+      assert.equal(updatedSim.version, 2);
+
+      // 3. History snapshot checking
+      const simRepo = container.resolve<MemoryExecutiveSimulationRepository>("IExecutiveSimulationRepository");
+      const history = await simRepo.getHistoryBySimulationId(tenantId, sim.id);
+      assert.ok(history.length >= 2);
+      assert.equal(history[0].previousStatus, "NONE");
+      assert.equal(history[0].newStatus, "GENERATED");
+      assert.equal(history[1].previousStatus, "GENERATED");
+      assert.equal(history[1].newStatus, "COMPLETED");
+
+      // 4. Security Isolation
+      await assert.rejects(
+        async () => {
+          await runWithRequestContext(
+            { tenantId: "different_tenant", requestId: "req-err-sim1" },
+            () => simService.updateSimulationStatus(tenantId, sim.id, "RUNNING", "exec_cfo")
+          );
+        },
+        /Security Violation/
+      );
+
+      // 5. Performance O(1) repository lookups
+      const start = Date.now();
+      for (let i = 0; i < 1000; i++) {
+        await simRepo.findSimulationById(tenantId, sim.id);
+      }
+      const duration = Date.now() - start;
+      assert.ok(duration < 100, `O(1) lookup check: 1000 simulation lookups took ${duration}ms.`);
     }
   }
 ];

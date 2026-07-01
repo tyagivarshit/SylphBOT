@@ -14,7 +14,21 @@ import { MemoryExecutiveOrganizationalKnowledgeRepository, ExecutiveOrganization
 import { MemoryExecutiveMemoryOptimizationRepository, ExecutiveMemoryOptimizationService } from "./memoryOptimization.service";
 import { MemoryExecutiveMemoryGovernanceRepository, ExecutiveMemoryGovernanceService } from "./memoryGovernance.service";
 import { MemoryExecutiveMemoryCertificationRepository, ExecutiveMemoryCertificationService } from "./memoryCertification.service";
-import { MemoryExecutiveGoalRepository, ExecutiveGoalIntelligenceService } from "./goalIntelligence.service";
+import { MemoryExecutiveGoalRepository, ExecutiveGoalIntelligenceService, MemoryGoalAssumptionRepository } from "./goalIntelligence.service";
+import { MemoryExecutiveStrategyRepository, ExecutiveStrategyIntelligenceService } from "./strategyIntelligence.service";
+import { MemoryExecutivePlanningRepository, ExecutivePlanningService } from "./planning.service";
+import { MemoryExecutiveTimelineRepository, ExecutiveTimelineService } from "./timeline.service";
+import { MemoryExecutiveScenarioRepository, ExecutiveScenarioService } from "./scenario.service";
+import { MemoryExecutivePlanningOptimizationRepository, ExecutivePlanningOptimizationService } from "./planningOptimization.service";
+import { MemoryExecutiveRiskRepository, ExecutiveRiskService } from "./risk.service";
+import { MemoryExecutiveResourceRepository, ExecutiveResourceService } from "./resource.service";
+import { MemoryExecutivePlanningGovernanceRepository, ExecutivePlanningGovernanceService } from "./planningGovernance.service";
+import { MemoryExecutivePlanningHardeningRepository, ExecutivePlanningHardeningService } from "./planningHardening.service";
+import { MemoryExecutiveDecisionRepository, ExecutiveDecisionIntelligenceService } from "./decisionIntelligence.service";
+import { MemoryExecutiveEvidenceRepository, ExecutiveEvidenceValidationService } from "./evidenceValidation.service";
+import { MemoryExecutiveAlternativeRepository, ExecutiveAlternativeGenerationService, IExecutiveAlternativeRepository } from "./alternativeGeneration.service";
+import { MemoryExecutiveDecisionEvaluationRepository, ExecutiveDecisionEvaluationService, IExecutiveDecisionEvaluationRepository } from "./decisionEvaluation.service";
+import { MemoryExecutiveSimulationRepository, ExecutiveSimulationService, IExecutiveSimulationRepository } from "./simulationProjection.service";
 
 export class ExecutiveIdentityPlugin implements IDomainPlugin {
   public id = "plugin.executive.identity";
@@ -134,9 +148,125 @@ export class ExecutiveIdentityPlugin implements IDomainPlugin {
     container.registerInstance("IExecutiveGoalRepository", goalRepo);
     console.log("[Executive Goal Intelligence Plugin] Registered [IExecutiveGoalRepository] in DI Container.");
 
+    const goalAssumptionRepo = new MemoryGoalAssumptionRepository();
+    container.registerInstance("IGoalAssumptionRepository", goalAssumptionRepo);
+    console.log("[Executive Goal Intelligence Plugin] Registered [IGoalAssumptionRepository] in DI Container.");
+
     const goalService = new ExecutiveGoalIntelligenceService(container);
     container.registerInstance("IExecutiveGoalIntelligenceService", goalService);
     console.log("[Executive Goal Intelligence Plugin] Registered [IExecutiveGoalIntelligenceService] in DI Container.");
+
+    const strategyRepo = new MemoryExecutiveStrategyRepository();
+    container.registerInstance("IExecutiveStrategyRepository", strategyRepo);
+    console.log("[Executive Strategy Plugin] Registered [IExecutiveStrategyRepository] in DI Container.");
+
+    const strategyService = new ExecutiveStrategyIntelligenceService(container);
+    container.registerInstance("IExecutiveStrategyIntelligenceService", strategyService);
+    console.log("[Executive Strategy Plugin] Registered [IExecutiveStrategyIntelligenceService] in DI Container.");
+
+    const planningRepo = new MemoryExecutivePlanningRepository();
+    container.registerInstance("IExecutivePlanningRepository", planningRepo);
+    console.log("[Executive Planning Plugin] Registered [IExecutivePlanningRepository] in DI Container.");
+
+    const planningService = new ExecutivePlanningService(container);
+    container.registerInstance("IExecutivePlanningService", planningService);
+    console.log("[Executive Planning Plugin] Registered [IExecutivePlanningService] in DI Container.");
+
+    const timelineRepo = new MemoryExecutiveTimelineRepository();
+    container.registerInstance("IExecutiveTimelineRepository", timelineRepo);
+    console.log("[Executive Timeline Plugin] Registered [IExecutiveTimelineRepository] in DI Container.");
+
+    const timelineService = new ExecutiveTimelineService(container);
+    container.registerInstance("IExecutiveTimelineService", timelineService);
+    console.log("[Executive Timeline Plugin] Registered [IExecutiveTimelineService] in DI Container.");
+
+    const scenarioRepo = new MemoryExecutiveScenarioRepository();
+    container.registerInstance("IExecutiveScenarioRepository", scenarioRepo);
+    console.log("[Executive Scenario Plugin] Registered [IExecutiveScenarioRepository] in DI Container.");
+
+    const scenarioService = new ExecutiveScenarioService(container);
+    container.registerInstance("IExecutiveScenarioService", scenarioService);
+    console.log("[Executive Scenario Plugin] Registered [IExecutiveScenarioService] in DI Container.");
+
+    const planningOptRepo = new MemoryExecutivePlanningOptimizationRepository();
+    container.registerInstance("IExecutivePlanningOptimizationRepository", planningOptRepo);
+    console.log("[Executive Planning Optimization Plugin] Registered [IExecutivePlanningOptimizationRepository] in DI Container.");
+
+    const planningOptService = new ExecutivePlanningOptimizationService(container);
+    container.registerInstance("IExecutivePlanningOptimizationService", planningOptService);
+    console.log("[Executive Planning Optimization Plugin] Registered [IExecutivePlanningOptimizationService] in DI Container.");
+
+    const riskRepo = new MemoryExecutiveRiskRepository();
+    container.registerInstance("IExecutiveRiskRepository", riskRepo);
+    console.log("[Executive Risk Plugin] Registered [IExecutiveRiskRepository] in DI Container.");
+
+    const riskService = new ExecutiveRiskService(container);
+    container.registerInstance("IExecutiveRiskService", riskService);
+    console.log("[Executive Risk Plugin] Registered [IExecutiveRiskService] in DI Container.");
+
+    const resourceRepo = new MemoryExecutiveResourceRepository();
+    container.registerInstance("IExecutiveResourceRepository", resourceRepo);
+    console.log("[Executive Resource Plugin] Registered [IExecutiveResourceRepository] in DI Container.");
+
+    const resourceService = new ExecutiveResourceService(container);
+    container.registerInstance("IExecutiveResourceService", resourceService);
+    console.log("[Executive Resource Plugin] Registered [IExecutiveResourceService] in DI Container.");
+
+    const planningGovRepo = new MemoryExecutivePlanningGovernanceRepository();
+    container.registerInstance("IExecutivePlanningGovernanceRepository", planningGovRepo);
+    console.log("[Executive Planning Governance Plugin] Registered [IExecutivePlanningGovernanceRepository] in DI Container.");
+
+    const planningGovService = new ExecutivePlanningGovernanceService(container);
+    container.registerInstance("IExecutivePlanningGovernanceService", planningGovService);
+    console.log("[Executive Planning Governance Plugin] Registered [IExecutivePlanningGovernanceService] in DI Container.");
+
+    const planningHardRepo = new MemoryExecutivePlanningHardeningRepository();
+    container.registerInstance("IExecutivePlanningHardeningRepository", planningHardRepo);
+    console.log("[Executive Planning Hardening Plugin] Registered [IExecutivePlanningHardeningRepository] in DI Container.");
+
+    const planningHardService = new ExecutivePlanningHardeningService(container);
+    container.registerInstance("IExecutivePlanningHardeningService", planningHardService);
+    console.log("[Executive Planning Hardening Plugin] Registered [IExecutivePlanningHardeningService] in DI Container.");
+
+    const decisionRepo = new MemoryExecutiveDecisionRepository();
+    container.registerInstance("IExecutiveDecisionRepository", decisionRepo);
+    console.log("[Executive Decision Intelligence Plugin] Registered [IExecutiveDecisionRepository] in DI Container.");
+
+    const decisionService = new ExecutiveDecisionIntelligenceService(container);
+    container.registerInstance("IExecutiveDecisionIntelligenceService", decisionService);
+    console.log("[Executive Decision Intelligence Plugin] Registered [IExecutiveDecisionIntelligenceService] in DI Container.");
+
+    const evidenceRepo = new MemoryExecutiveEvidenceRepository();
+    container.registerInstance("IExecutiveEvidenceRepository", evidenceRepo);
+    console.log("[Executive Evidence Validation Plugin] Registered [IExecutiveEvidenceRepository] in DI Container.");
+
+    const evidenceService = new ExecutiveEvidenceValidationService(container);
+    container.registerInstance("IExecutiveEvidenceValidationService", evidenceService);
+    console.log("[Executive Evidence Validation Plugin] Registered [IExecutiveEvidenceValidationService] in DI Container.");
+
+    const alternativeRepo = new MemoryExecutiveAlternativeRepository();
+    container.registerInstance("IExecutiveAlternativeRepository", alternativeRepo);
+    console.log("[Executive Alternative Generation Plugin] Registered [IExecutiveAlternativeRepository] in DI Container.");
+
+    const alternativeService = new ExecutiveAlternativeGenerationService(container);
+    container.registerInstance("IExecutiveAlternativeGenerationService", alternativeService);
+    console.log("[Executive Alternative Generation Plugin] Registered [IExecutiveAlternativeGenerationService] in DI Container.");
+
+    const evaluationRepo = new MemoryExecutiveDecisionEvaluationRepository();
+    container.registerInstance("IExecutiveDecisionEvaluationRepository", evaluationRepo);
+    console.log("[Executive Decision Evaluation Plugin] Registered [IExecutiveDecisionEvaluationRepository] in DI Container.");
+
+    const evaluationService = new ExecutiveDecisionEvaluationService(container);
+    container.registerInstance("IExecutiveDecisionEvaluationService", evaluationService);
+    console.log("[Executive Decision Evaluation Plugin] Registered [IExecutiveDecisionEvaluationService] in DI Container.");
+
+    const simulationRepo = new MemoryExecutiveSimulationRepository();
+    container.registerInstance("IExecutiveSimulationRepository", simulationRepo);
+    console.log("[Executive Simulation Plugin] Registered [IExecutiveSimulationRepository] in DI Container.");
+
+    const simulationService = new ExecutiveSimulationService(container);
+    container.registerInstance("IExecutiveSimulationService", simulationService);
+    console.log("[Executive Simulation Plugin] Registered [IExecutiveSimulationService] in DI Container.");
 
     // 2. Register contracts with the Contract Registry
     if (container.has("IContractRegistry")) {
@@ -763,6 +893,693 @@ export class ExecutiveIdentityPlugin implements IDomainPlugin {
           progress: "number",
           completionPrediction: "string",
           timestamp: "string",
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.goal.tradeoff.created",
+        version: "1.0.0",
+        schema: {
+          goalId: "string",
+          tenantId: "string",
+          tradeoffId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.goal.success.updated",
+        version: "1.0.0",
+        schema: {
+          goalId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.goal.assumption.updated",
+        version: "1.0.0",
+        schema: {
+          goalId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.goal.outcome.projected",
+        version: "1.0.0",
+        schema: {
+          goalId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.plan.readiness.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.evidence.created",
+        version: "1.0.0",
+        schema: {
+          evidenceId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.evidence.verified",
+        version: "1.0.0",
+        schema: {
+          evidenceId: "string",
+          verificationStatus: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.evidence.conflict",
+        version: "1.0.0",
+        schema: {
+          evidenceId: "string",
+          severity: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.evidence.confidence.updated",
+        version: "1.0.0",
+        schema: {
+          evidenceId: "string",
+          overallConfidence: "number",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.evidence.stale",
+        version: "1.0.0",
+        schema: {
+          evidenceId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.evidence.archived",
+        version: "1.0.0",
+        schema: {
+          evidenceId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.created",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.status.updated",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          previousStatus: "string",
+          newStatus: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.updated",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          version: "number",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.archived",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.stability.updated",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          status: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.readiness.updated",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          readyScore: "number",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.snapshot.created",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.evidence.refreshed",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.lineage.audited",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.lineage.updated",
+        version: "1.0.0",
+        schema: {
+          decisionId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.strategy.generated",
+        version: "1.0.0",
+        schema: {
+          strategyId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.strategy.updated",
+        version: "1.0.0",
+        schema: {
+          strategyId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.strategy.archived",
+        version: "1.0.0",
+        schema: {
+          strategyId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.strategy.health.updated",
+        version: "1.0.0",
+        schema: {
+          strategyId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.strategy.evaluated",
+        version: "1.0.0",
+        schema: {
+          strategyId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.strategy.compared",
+        version: "1.0.0",
+        schema: {
+          strategyId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.plan.created",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.plan.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string",
+          version: "number"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.plan.completed",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.plan.archived",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.plan.quality.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.planning.policy.checked",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.planning.compliance.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.planning.certification.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.planning.governance.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.planning.audit.logged",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.security.violation.detected",
+        version: "1.0.0",
+        schema: {
+          violationId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.sandbox.hardened",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.plan.optimized",
+        version: "1.0.0",
+        schema: {
+          optimizationId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.resource.optimized",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.cost.optimized",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.resource.inventory.updated",
+        version: "1.0.0",
+        schema: {
+          resourceId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.resource.allocation.generated",
+        version: "1.0.0",
+        schema: {
+          allocationId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.resource.conflict.detected",
+        version: "1.0.0",
+        schema: {
+          resourceId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.resource.health.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.risk.created",
+        version: "1.0.0",
+        schema: {
+          riskId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.contingency.generated",
+        version: "1.0.0",
+        schema: {
+          contingencyId: "string",
+          riskId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.risk.propagated",
+        version: "1.0.0",
+        schema: {
+          sourceId: "string",
+          targetId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.risk.health.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.scenario.generated",
+        version: "1.0.0",
+        schema: {
+          scenarioId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.scenario.simulated",
+        version: "1.0.0",
+        schema: {
+          scenarioId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.warning.generated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.scenario.quality.updated",
+        version: "1.0.0",
+        schema: {
+          scenarioId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.timeline.rescheduled",
+        version: "1.0.0",
+        schema: {
+          timelineId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.timeline.updated",
+        version: "1.0.0",
+        schema: {
+          timelineId: "string",
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.timeline.health.updated",
+        version: "1.0.0",
+        schema: {
+          planId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.alternative.generated",
+        version: "1.0.0",
+        schema: {
+          alternativeId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.alternative.updated",
+        version: "1.0.0",
+        schema: {
+          alternativeId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.hypothesis.generated",
+        version: "1.0.0",
+        schema: {
+          pairId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.alternative.archived",
+        version: "1.0.0",
+        schema: {
+          alternativeId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.alternative.comparison.updated",
+        version: "1.0.0",
+        schema: {
+          alternativeIds: "array",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.evaluation.created",
+        version: "1.0.0",
+        schema: {
+          evaluationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.tradeoff.generated",
+        version: "1.0.0",
+        schema: {
+          evaluationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.ranked",
+        version: "1.0.0",
+        schema: {
+          evaluationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.business_impact.updated",
+        version: "1.0.0",
+        schema: {
+          evaluationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.roi.updated",
+        version: "1.0.0",
+        schema: {
+          evaluationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.decision.evaluation.archived",
+        version: "1.0.0",
+        schema: {
+          evaluationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.simulation.created",
+        version: "1.0.0",
+        schema: {
+          simulationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.simulation.completed",
+        version: "1.0.0",
+        schema: {
+          simulationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.simulation.failed",
+        version: "1.0.0",
+        schema: {
+          simulationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.simulation.forecast.updated",
+        version: "1.0.0",
+        schema: {
+          simulationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.simulation.recovery.generated",
+        version: "1.0.0",
+        schema: {
+          simulationId: "string",
+          tenantId: "string"
+        },
+      });
+
+      contractRegistry.registerContract({
+        name: "executive.simulation.archived",
+        version: "1.0.0",
+        schema: {
+          simulationId: "string",
+          tenantId: "string"
         },
       });
     }
@@ -1515,6 +2332,407 @@ export class ExecutiveIdentityPlugin implements IDomainPlugin {
           const srv = container.resolve<ExecutiveGoalIntelligenceService>("IExecutiveGoalIntelligenceService");
           return srv.generatePriorityReport(args.tenantId);
         },
+      });
+
+      // Stage 3.5C Tools
+      toolRegistry.registerTool({
+        name: "generate_alternatives",
+        description: "Generates multiple strategic alternatives for a decision topic.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            decisionId: { type: "string" },
+            topic: { type: "string" }
+          },
+          required: ["tenantId", "decisionId", "topic"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveAlternativeGenerationService>("IExecutiveAlternativeGenerationService");
+          return srv.generateAlternatives(args.tenantId, args.decisionId, args.topic);
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "generate_hypotheses",
+        description: "Generates hypothesis and counter-hypothesis pairs for validation.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            decisionId: { type: "string" },
+            topic: { type: "string" }
+          },
+          required: ["tenantId", "decisionId", "topic"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveAlternativeGenerationService>("IExecutiveAlternativeGenerationService");
+          return srv.generateHypotheses(args.tenantId, args.decisionId, args.topic);
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "alternative_comparison",
+        description: "Compares multiple generated alternatives on cost, risk, and impact.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            alternativeIds: { type: "array", items: { type: "string" } }
+          },
+          required: ["tenantId", "alternativeIds"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveAlternativeGenerationService>("IExecutiveAlternativeGenerationService");
+          return srv.compareAlternatives(args.tenantId, args.alternativeIds);
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "alternative_summary",
+        description: "Retrieves diversity index and explainability for an alternative.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveAlternativeGenerationService>("IExecutiveAlternativeGenerationService");
+          const explain = await srv.explainAlternative(args.tenantId, args.id);
+          const repo = container.resolve<IExecutiveAlternativeRepository>("IExecutiveAlternativeRepository");
+          const all = await repo.getAlternatives(args.tenantId);
+          const diversity = await srv.evaluateDiversity(args.tenantId, all.filter(a => a.decisionId === all.find(x => x.id === args.id)?.decisionId));
+          return { explain, diversity };
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "hypothesis_report",
+        description: "Retrieves generated hypothesis pairs linked to a decision.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            decisionId: { type: "string" }
+          },
+          required: ["tenantId", "decisionId"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveAlternativeGenerationService>("IExecutiveAlternativeGenerationService");
+          const repo = container.resolve<IExecutiveAlternativeRepository>("IExecutiveAlternativeRepository");
+          return repo.getHypothesisPairs(args.tenantId, args.decisionId);
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "opportunity_report",
+        description: "Lists opportunities and technology leverage discovered across alternatives.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            alternativeIds: { type: "array", items: { type: "string" } }
+          },
+          required: ["tenantId", "alternativeIds"]
+        },
+        execute: async (context: any, args: any) => {
+          const repo = container.resolve<IExecutiveAlternativeRepository>("IExecutiveAlternativeRepository");
+          const list = [];
+          for (const id of args.alternativeIds) {
+            const alt = await repo.findAlternativeById(args.tenantId, id);
+            if (alt) {
+              list.push({ alternativeId: id, opportunities: alt.opportunities });
+            }
+          }
+          return list;
+        }
+      });
+
+      // Stage 3.5D Tools
+      toolRegistry.registerTool({
+        name: "evaluate_alternatives",
+        description: "Creates a new MCDA evaluation package for decision alternatives.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            decisionId: { type: "string" },
+            alternativeIds: { type: "array", items: { type: "string" } }
+          },
+          required: ["tenantId", "decisionId", "alternativeIds"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+          return srv.evaluateAlternatives(args.tenantId, args.decisionId, args.alternativeIds);
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "decision_tradeoff_report",
+        description: "Retrieves trade-offs between core factors like growth/stability and revenue/profit.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+          const pkg = await srv.getEvaluation(args.tenantId, args.id);
+          return pkg ? pkg.tradeoffs : null;
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "decision_ranking",
+        description: "Retrieves alternatives sorted ranking and devil's advocate reports.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+          const pkg = await srv.getEvaluation(args.tenantId, args.id);
+          return pkg ? { rankings: pkg.rankings, devilsAdvocate: pkg.devilsAdvocate } : null;
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "business_impact_report",
+        description: "Lists business impact and strategic alignment scores across evaluated options.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+          const pkg = await srv.getEvaluation(args.tenantId, args.id);
+          if (!pkg) return [];
+          return pkg.evaluations.map(e => ({
+            alternativeId: e.alternativeId,
+            alignmentScore: e.alignmentScore,
+            alignmentExplanation: e.alignmentExplanation,
+            businessImpact: e.businessImpact
+          }));
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "mcda_matrix",
+        description: "Retrieves complete MCDA scoring criteria matrix for alternatives.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+          const pkg = await srv.getEvaluation(args.tenantId, args.id);
+          return pkg ? pkg.evaluations.map(e => ({ alternativeId: e.alternativeId, mcdaScores: e.mcdaScores, weightedScore: e.weightedScore })) : [];
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "roi_analysis",
+        description: "Lists estimated costs, ROI levels, and payback period parameters.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+          const pkg = await srv.getEvaluation(args.tenantId, args.id);
+          if (!pkg) return [];
+          return pkg.evaluations.map(e => ({
+            alternativeId: e.alternativeId,
+            costROI: e.costROI
+          }));
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "sensitivity_analysis",
+        description: "Exposes weight variation simulation scenarios and rankings.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveDecisionEvaluationService>("IExecutiveDecisionEvaluationService");
+          const pkg = await srv.getEvaluation(args.tenantId, args.id);
+          return pkg ? pkg.sensitivityAnalysis : [];
+        }
+      });
+
+      // Stage 3.5E Tools
+      toolRegistry.registerTool({
+        name: "simulate_decision",
+        description: "Runs Monte Carlo scenario simulations for decision alternatives.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            decisionId: { type: "string" },
+            topic: { type: "string" }
+          },
+          required: ["tenantId", "decisionId", "topic"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+          return srv.runSimulation(args.tenantId, args.decisionId, args.topic);
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "future_projection",
+        description: "Compares outcomes of Optimistic, Pessimistic, and Base Case scenarios.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+          const sim = await srv.getSimulation(args.tenantId, args.id);
+          return sim ? sim.outcomes : null;
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "business_forecast",
+        description: "Retrieves projected ARR and expected profit across scenarios.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+          const sim = await srv.getSimulation(args.tenantId, args.id);
+          if (!sim) return null;
+          return {
+            bestCase: { expectedARR: sim.outcomes.bestCase.expectedARR, expectedProfit: sim.outcomes.bestCase.expectedProfit },
+            expectedCase: { expectedARR: sim.outcomes.expectedCase.expectedARR, expectedProfit: sim.outcomes.expectedCase.expectedProfit },
+            worstCase: { expectedARR: sim.outcomes.worstCase.expectedARR, expectedProfit: sim.outcomes.worstCase.expectedProfit }
+          };
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "financial_forecast",
+        description: "Retrieves expected ROI and payback period across scenarios.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+          const sim = await srv.getSimulation(args.tenantId, args.id);
+          if (!sim) return null;
+          return {
+            expectedROI: sim.outcomes.expectedROI,
+            paybackPeriods: {
+              bestCase: sim.outcomes.bestCase.paybackPeriodMonths,
+              expectedCase: sim.outcomes.expectedCase.paybackPeriodMonths,
+              worstCase: sim.outcomes.worstCase.paybackPeriodMonths
+            }
+          };
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "failure_simulation",
+        description: "Exposes worst case scenarios and Failure Conditions.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+          const sim = await srv.getSimulation(args.tenantId, args.id);
+          if (!sim) return null;
+          return {
+            worstCaseObjections: sim.outcomes.worstCase.milestonesReached,
+            explainability: sim.explainability.whyFailure
+          };
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "recovery_simulation",
+        description: "Exposes risk recovery costs and business resilience metrics.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+          const sim = await srv.getSimulation(args.tenantId, args.id);
+          if (!sim) return null;
+          return {
+            recoveryCost: sim.outcomes.recoveryCost,
+            explainability: sim.explainability.whyRecovery
+          };
+        }
+      });
+
+      toolRegistry.registerTool({
+        name: "simulation_summary",
+        description: "Retrieves complete explainability and projections package for decision simulations.",
+        schema: {
+          type: "object",
+          properties: {
+            tenantId: { type: "string" },
+            id: { type: "string" }
+          },
+          required: ["tenantId", "id"]
+        },
+        execute: async (context: any, args: any) => {
+          const srv = container.resolve<ExecutiveSimulationService>("IExecutiveSimulationService");
+          return srv.getSimulation(args.tenantId, args.id);
+        }
       });
     }
   }

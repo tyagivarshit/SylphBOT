@@ -23,7 +23,6 @@ import {
 import { getVariantPerformance } from "./salesAgent/abTesting.service";
 import { runSalesOptimizer } from "./salesAgent/optimizer.service";
 import { getIsolatedProjectionSnapshot } from "../analytics/isolatedCache";
-import { logAnalyticsDashboardLifecycle } from "../utils/analyticsDashboardLifecycleTrace";
 
 type PlanKey = "FREE_LOCKED" | "BASIC" | "PRO" | "ELITE";
 type MetricFormat = "number" | "percent" | "minutes";
@@ -98,44 +97,9 @@ const STAGE_LABELS: Record<string, string> = {
 
 const ANALYTICS_DASHBOARD_CACHE_TTL_MS = 15_000;
 const ANALYTICS_DASHBOARD_STALE_TTL_MS = 60_000;
-const ANALYTICS_DASHBOARD_REFRESH_WAIT_MS = 100;
-const ANALYTICS_DASHBOARD_COMPUTE_BUDGET_MS = 500;
+const ANALYTICS_DASHBOARD_REFRESH_WAIT_MS = 180;
+const ANALYTICS_DASHBOARD_COMPUTE_BUDGET_MS = 7_000;
 const ANALYTICS_DASHBOARD_MIN_REFRESH_INTERVAL_MS = 1_500;
-
-const logAnalyticsDashboardTiming = (
-  event: string,
-  fields: Record<string, unknown>
-) => {
-  console.info("[ANALYTICS_DASHBOARD_TIMING]", {
-    event,
-    ...fields,
-  });
-};
-
-async function timeAnalyticsAwait<T>(
-  label: string,
-  fields: Record<string, unknown>,
-  work: () => Promise<T>
-): Promise<T> {
-  const startedAt = Date.now();
-  logAnalyticsDashboardTiming(`${label}:start`, fields);
-
-  try {
-    const result = await work();
-    logAnalyticsDashboardTiming(`${label}:end`, {
-      ...fields,
-      durationMs: Date.now() - startedAt,
-    });
-    return result;
-  } catch (error) {
-    logAnalyticsDashboardTiming(`${label}:error`, {
-      ...fields,
-      durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
-}
 
 const buildAnalyticsDashboardCacheKey = (
   businessId: string,
@@ -1229,18 +1193,7 @@ async function computeAnalyticsDashboardProjection(
   range: string,
   planKey: PlanKey
 ) {
-  const projectionStartedAt = Date.now();
   const window = getDateWindow(range);
-  const timingFields = {
-    businessId,
-    range,
-    planKey,
-    currentStart: window.current.start.toISOString(),
-    currentEnd: window.current.end.toISOString(),
-    previousStart: window.previous.start.toISOString(),
-    previousEnd: window.previous.end.toISOString(),
-  };
-  logAnalyticsDashboardTiming("computeAnalyticsDashboardProjection:start", timingFields);
 
   const [
     business,
@@ -1251,62 +1204,20 @@ async function computeAnalyticsDashboardProjection(
     currentRevenueBrainEvents,
     currentTrackedMessages,
     variantPerformance,
-  ] = await timeAnalyticsAwait("computeAnalyticsDashboardProjection:initialPromiseAll", timingFields, () =>
-    Promise.all([
-      timeAnalyticsAwait("getBusinessProfile", timingFields, () =>
-        getBusinessProfile(businessId)
-      ),
-      timeAnalyticsAwait("getAllLeads", timingFields, () => getAllLeads(businessId)),
-      timeAnalyticsAwait("getAllAppointments", timingFields, () =>
-        getAllAppointments(businessId)
-      ),
-      timeAnalyticsAwait("getMessagesInRange", timingFields, () =>
-        getMessagesInRange(businessId, window.previous.start, window.current.end)
-      ),
-      timeAnalyticsAwait("getConversionEventsInRange", timingFields, () =>
-        getConversionEventsInRange(
-          businessId,
-          window.current.start,
-          window.current.end
-        )
-      ),
-      timeAnalyticsAwait("getRevenueBrainAnalyticsInRange", timingFields, () =>
-        getRevenueBrainAnalyticsInRange(
-          businessId,
-          window.current.start,
-          window.current.end
-        )
-      ),
-      timeAnalyticsAwait("getTrackedMessagesInRange", timingFields, () =>
-        getTrackedMessagesInRange(
-          businessId,
-          window.current.start,
-          window.current.end
-        )
-      ),
-      timeAnalyticsAwait("getVariantPerformance", timingFields, () =>
-        getVariantPerformance({ businessId })
-      ),
-    ])
-  );
-  logAnalyticsDashboardTiming("computeAnalyticsDashboardProjection:initialPromiseAll:rows", {
-    ...timingFields,
-    allLeads: allLeads.length,
-    allAppointments: allAppointments.length,
-    rangeMessages: rangeMessages.length,
-    currentConversionEvents: currentConversionEvents.length,
-    currentRevenueBrainEvents: currentRevenueBrainEvents.length,
-    currentTrackedMessages: currentTrackedMessages.length,
-  });
-
-  if (currentTrackedMessages.length >= 10) {
-    logAnalyticsDashboardTiming("runSalesOptimizer:background_start", timingFields);
-    void timeAnalyticsAwait("runSalesOptimizer:background", timingFields, () =>
-      runSalesOptimizer({ businessId })
-    ).catch(() => {});
-  }
-
-  logAnalyticsDashboardTiming("computeAnalyticsDashboardProjection:sync_build_start", timingFields);
+  ] = await Promise.all([
+    getBusinessProfile(businessId),
+    getAllLeads(businessId),
+    getAllAppointments(businessId),
+    getMessagesInRange(businessId, window.previous.start, window.current.end),
+    getConversionEventsInRange(businessId, window.current.start, window.current.end),
+    getRevenueBrainAnalyticsInRange(
+      businessId,
+      window.current.start,
+      window.current.end
+    ),
+    getTrackedMessagesInRange(businessId, window.current.start, window.current.end),
+    getVariantPerformance({ businessId }),
+  ]);
 
   // Split messages
   const currentMessages = rangeMessages.filter(
@@ -1372,6 +1283,10 @@ async function computeAnalyticsDashboardProjection(
     currentTrackedMessages,
     currentConversionEvents
   );
+
+  if (currentTrackedMessages.length >= 10) {
+    void runSalesOptimizer({ businessId }).catch(() => {});
+  }
 
   const currentResponse = getResponseMetrics(currentMessages);
   const previousResponse = getResponseMetrics(previousMessages);
@@ -1532,7 +1447,7 @@ async function computeAnalyticsDashboardProjection(
         }
       : null;
 
-  const payload = {
+  return {
     meta: {
       range: window.range,
       label: window.label,
@@ -1625,12 +1540,6 @@ async function computeAnalyticsDashboardProjection(
     sourcePerformance,
     deepDive,
   };
-  logAnalyticsDashboardTiming("computeAnalyticsDashboardProjection:end", {
-    ...timingFields,
-    durationMs: Date.now() - projectionStartedAt,
-  });
-
-  return payload;
 }
 
 export async function getAnalyticsDashboard(
@@ -1642,14 +1551,6 @@ export async function getAnalyticsDashboard(
   }
 ) {
   const cacheKey = buildAnalyticsDashboardCacheKey(businessId, range, planKey);
-  const dashboardTimingFields = {
-    businessId,
-    range,
-    planKey,
-    cacheKey,
-  };
-  logAnalyticsDashboardLifecycle("getAnalyticsDashboard service called", dashboardTimingFields);
-  logAnalyticsDashboardTiming("getAnalyticsDashboard:start", dashboardTimingFields);
 
   if (planKey !== "ELITE") {
     console.info("[ANALYTICS_DASHBOARD_CACHE]", {
@@ -1658,38 +1559,23 @@ export async function getAnalyticsDashboard(
       range,
       planKey,
     });
-    logAnalyticsDashboardTiming("getAnalyticsDashboard:non_elite_fallback", dashboardTimingFields);
-    logAnalyticsDashboardLifecycle("getAnalyticsDashboard service returned", {
-      ...dashboardTimingFields,
-      source: "non_elite_fallback",
-    });
     return buildAnalyticsDashboardFallback(range, planKey);
   }
 
   const fallback = buildAnalyticsDashboardFallback(range, planKey);
-  const snapshot = await timeAnalyticsAwait(
-    "getAnalyticsDashboard:getIsolatedProjectionSnapshot",
-    dashboardTimingFields,
-    () =>
-      getIsolatedProjectionSnapshot({
-        cacheKey,
-        label: "analytics_dashboard",
-        businessId,
-        cacheTtlMs: ANALYTICS_DASHBOARD_CACHE_TTL_MS,
-        staleTtlMs: ANALYTICS_DASHBOARD_STALE_TTL_MS,
-        computeBudgetMs: ANALYTICS_DASHBOARD_COMPUTE_BUDGET_MS,
-        initialWaitMs: ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
-        minRefreshIntervalMs: ANALYTICS_DASHBOARD_MIN_REFRESH_INTERVAL_MS,
-        requestSignal: options?.requestSignal || null,
-        fallback,
-        compute: () =>
-          timeAnalyticsAwait(
-            "getAnalyticsDashboard:computeAnalyticsDashboardProjection",
-            dashboardTimingFields,
-            () => computeAnalyticsDashboardProjection(businessId, range, planKey)
-          ),
-      })
-  );
+  const snapshot = await getIsolatedProjectionSnapshot({
+    cacheKey,
+    label: "analytics_dashboard",
+    businessId,
+    cacheTtlMs: ANALYTICS_DASHBOARD_CACHE_TTL_MS,
+    staleTtlMs: ANALYTICS_DASHBOARD_STALE_TTL_MS,
+    computeBudgetMs: ANALYTICS_DASHBOARD_COMPUTE_BUDGET_MS,
+    initialWaitMs: ANALYTICS_DASHBOARD_REFRESH_WAIT_MS,
+    minRefreshIntervalMs: ANALYTICS_DASHBOARD_MIN_REFRESH_INTERVAL_MS,
+    requestSignal: options?.requestSignal || null,
+    fallback,
+    compute: () => computeAnalyticsDashboardProjection(businessId, range, planKey),
+  });
 
   console.info("[ANALYTICS_DASHBOARD_CACHE]", {
     mode: snapshot.meta.source,
@@ -1701,18 +1587,6 @@ export async function getAnalyticsDashboard(
     waitMs: snapshot.meta.waitMs,
     budgetExceeded: snapshot.meta.budgetExceeded,
     cancelled: snapshot.meta.cancelled,
-  });
-  logAnalyticsDashboardTiming("getAnalyticsDashboard:end", {
-    ...dashboardTimingFields,
-    source: snapshot.meta.source,
-    waitMs: snapshot.meta.waitMs,
-    budgetExceeded: snapshot.meta.budgetExceeded,
-  });
-  logAnalyticsDashboardLifecycle("getAnalyticsDashboard service returned", {
-    ...dashboardTimingFields,
-    source: snapshot.meta.source,
-    waitMs: snapshot.meta.waitMs,
-    budgetExceeded: snapshot.meta.budgetExceeded,
   });
   return snapshot.value;
 }

@@ -23,6 +23,8 @@ import { getSystemHealth } from "../services/systemHealth.service";
 import { getEmbeddingRuntimeState } from "../services/embedding.service";
 import { getStartupIsolationSnapshot } from "../runtime/startupIsolation.service";
 import { asyncHandler } from "../utils/asyncHandler";
+import { container } from "../runtime/kernel/diContainer";
+import { executiveStartupMetrics } from "../services/executive/plugin";
 
 const router = Router();
 
@@ -104,6 +106,221 @@ router.get(
           windowEnd: snapshot.windowEnd,
         })) || [],
     });
+  })
+);
+
+router.get(
+  "/executive",
+  asyncHandler(async (req, res) => {
+    const report: any = {
+      success: true,
+      requestId: req.requestId,
+      pluginLoaded: false,
+      diHealthy: false,
+      repositoriesHealthy: false,
+      servicesHealthy: false,
+      capabilitiesHealthy: false,
+      contractsHealthy: false,
+      startupTimeMs: executiveStartupMetrics.startupTime,
+      initializationTimeMs: executiveStartupMetrics.initializationTime,
+      memoryOverheadBytes: executiveStartupMetrics.memoryOverheadBytes,
+      details: {}
+    };
+
+    try {
+      if (!container.has("IPluginRegistry")) {
+        return res.status(500).json({
+          success: false,
+          message: "Core PluginRegistry not initialized"
+        });
+      }
+
+      const pluginRegistry = container.resolve<any>("IPluginRegistry");
+      const plugin = pluginRegistry.getPlugin("plugin.executive.identity");
+      report.pluginLoaded = !!plugin;
+      report.details.pluginId = plugin ? plugin.id : null;
+      report.details.pluginName = plugin ? plugin.name : null;
+
+      // 1. Check Repositories
+      const keyRepos = [
+        "IExecutiveRepository",
+        "IExecutiveMemoryRepository",
+        "IExecutiveMemoryArchitectureRepository",
+        "IExecutiveMemoryConsolidationRepository",
+        "IExecutiveMemoryRetrievalRepository",
+        "IExecutiveMemoryAssociationRepository",
+        "IExecutiveSemanticMemoryRepository",
+        "IExecutiveOrganizationalKnowledgeRepository",
+        "IExecutiveMemoryOptimizationRepository",
+        "IExecutiveMemoryGovernanceRepository",
+        "IExecutiveMemoryCertificationRepository",
+        "IExecutiveGoalRepository",
+        "IGoalAssumptionRepository",
+        "IExecutiveStrategyRepository",
+        "IExecutivePlanningRepository",
+        "IExecutiveTimelineRepository",
+        "IExecutiveScenarioRepository",
+        "IExecutivePlanningOptimizationRepository",
+        "IExecutiveRiskRepository",
+        "IExecutiveResourceRepository",
+        "IExecutivePlanningGovernanceRepository",
+        "IExecutivePlanningHardeningRepository",
+        "IExecutiveDecisionRepository",
+        "IExecutiveEvidenceRepository",
+        "IExecutiveAlternativeRepository",
+        "IExecutiveDecisionEvaluationRepository",
+        "IExecutiveSimulationRepository",
+        "IExecutiveDecisionSelectionRepository",
+        "IExecutiveDecisionAuthorizationRepository",
+        "IExecutiveDecisionDispatchRepository",
+        "IExecutiveDecisionMonitoringRepository",
+        "IExecutiveDecisionHardeningRepository",
+        "IExecutiveExecutionRepository",
+        "IExecutiveExecutionHardeningRepository",
+        "IExecutiveExecutionGraphRepository",
+        "IExecutiveExecutionAdapterRepository",
+        "IExecutiveExecutionDriverRepository",
+        "IExecutiveWorkflowRepository",
+        "IExecutiveAdaptiveExecutionRepository",
+        "IExecutiveSupervisorRepository",
+        "IExecutiveOperationsSupervisorRepository",
+        "IExecutiveSchedulerRepository",
+        "IExecutiveExecutionLearningRepository",
+        "IExecutiveExecutionCertificationRepository"
+      ];
+      
+      const missingRepos = [];
+      for (const repo of keyRepos) {
+        if (!container.has(repo)) {
+          missingRepos.push(repo);
+        } else {
+          try {
+            container.resolve(repo);
+          } catch (e: any) {
+            missingRepos.push(`${repo} (resolve failed: ${e.message})`);
+          }
+        }
+      }
+      report.repositoriesHealthy = missingRepos.length === 0;
+      report.details.missingRepositories = missingRepos;
+
+      // 2. Check Services
+      const keyServices = [
+        "IExecutiveIdentityService",
+        "IExecutivePerceptionService",
+        "IExecutiveCognitionService",
+        "IExecutiveMemoryService",
+        "IExecutiveMemoryArchitectureService",
+        "IExecutiveMemoryConsolidationService",
+        "IExecutiveMemoryRetrievalService",
+        "IExecutiveMemoryAssociationService",
+        "IExecutiveSemanticMemoryService",
+        "IExecutiveOrganizationalKnowledgeService",
+        "IExecutiveMemoryOptimizationService",
+        "IExecutiveMemoryGovernanceService",
+        "IExecutiveMemoryCertificationService",
+        "IExecutiveGoalIntelligenceService",
+        "IExecutiveStrategyIntelligenceService",
+        "IExecutivePlanningService",
+        "IExecutiveTimelineService",
+        "IExecutiveScenarioService",
+        "IExecutivePlanningOptimizationService",
+        "IExecutiveRiskService",
+        "IExecutiveResourceService",
+        "IExecutivePlanningGovernanceService",
+        "IExecutivePlanningHardeningService",
+        "IExecutiveDecisionIntelligenceService",
+        "IExecutiveEvidenceValidationService",
+        "IExecutiveAlternativeGenerationService",
+        "IExecutiveDecisionEvaluationService",
+        "IExecutiveSimulationService",
+        "IExecutiveDecisionSelectionService",
+        "IExecutiveDecisionAuthorizationService",
+        "IExecutiveDecisionDispatchService",
+        "IExecutiveDecisionMonitoringService",
+        "IExecutiveDecisionHardeningService",
+        "IExecutiveExecutionService",
+        "IExecutiveExecutionHardeningService",
+        "IExecutiveExecutionGraphService",
+        "IExecutiveExecutionAdapterService",
+        "IExecutiveExecutionDriverService",
+        "IExecutiveWorkflowOrchestratorService",
+        "IExecutiveAdaptiveExecutionService",
+        "IExecutiveSupervisorService",
+        "IExecutiveOperationsSupervisorService",
+        "IExecutiveSchedulerService",
+        "IExecutiveExecutionLearningService",
+        "IExecutiveExecutionCertificationService"
+      ];
+
+      const missingServices = [];
+      for (const service of keyServices) {
+        if (!container.has(service)) {
+          missingServices.push(service);
+        } else {
+          try {
+            container.resolve(service);
+          } catch (e: any) {
+            missingServices.push(`${service} (resolve failed: ${e.message})`);
+          }
+        }
+      }
+      report.servicesHealthy = missingServices.length === 0;
+      report.details.missingServices = missingServices;
+
+      // 3. DI Container Overall Health
+      report.diHealthy = report.repositoriesHealthy && report.servicesHealthy;
+
+      // 4. Check Capabilities
+      if (container.has("ICapabilityRegistry")) {
+        const capabilityRegistry = container.resolve<any>("ICapabilityRegistry");
+        const sampleCapabilities = [
+          "create_executive_identity",
+          "validate_executive_authority",
+          "check_executive_boundary",
+          "select_best_decision",
+          "adaptive_execution",
+          "executive_supervisor"
+        ];
+        const missingCapabilities = sampleCapabilities.filter(c => !capabilityRegistry.has(c));
+        report.capabilitiesHealthy = missingCapabilities.length === 0;
+        report.details.missingCapabilities = missingCapabilities;
+      } else {
+        report.details.missingCapabilities = ["ICapabilityRegistry missing from DI"];
+      }
+
+      // 5. Check Contracts
+      if (container.has("IContractRegistry")) {
+        const contractRegistry = container.resolve<any>("IContractRegistry");
+        const sampleContracts = [
+          "executive.created",
+          "executive.status.updated",
+          "executive.boundary.breached",
+          "executive.escalated",
+          "executive.lifecycle.transitioned",
+          "executive.health.updated"
+        ];
+        const missingContracts = sampleContracts.filter(c => !contractRegistry.has(c));
+        report.contractsHealthy = missingContracts.length === 0;
+        report.details.missingContracts = missingContracts;
+      } else {
+        report.details.missingContracts = ["IContractRegistry missing from DI"];
+      }
+
+      const overallHealthy =
+        report.pluginLoaded &&
+        report.diHealthy &&
+        report.capabilitiesHealthy &&
+        report.contractsHealthy;
+
+      return res.status(overallHealthy ? 200 : 500).json(report);
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to run health check",
+        error: error.message || String(error)
+      });
+    }
   })
 );
 

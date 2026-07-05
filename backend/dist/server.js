@@ -55,6 +55,9 @@ const prisma_1 = __importDefault(require("./config/prisma"));
 const redis_1 = require("./config/redis");
 const startupIsolation_service_1 = require("./runtime/startupIsolation.service");
 const prewarm_service_1 = require("./services/prewarm.service");
+const bootstrap_1 = require("./runtime/kernel/bootstrap");
+const diContainer_1 = require("./runtime/kernel/diContainer");
+const plugin_1 = require("./services/executive/plugin");
 let isShuttingDown = false;
 const parsePositiveInt = (raw, fallbackValue) => {
     const parsed = Number(raw);
@@ -433,9 +436,41 @@ const startServer = async () => {
             }, "Runtime infrastructure exceeded startup critical budget; continuing with deferred initialization");
             (0, startupIsolation_service_1.markRedisReady)(false);
         }
-        else {
-            (0, startupIsolation_service_1.markRedisReady)(true);
+    }
+    // Bootstrap Universal Core Runtime and mount Executive Platform plugin
+    try {
+        plugin_1.executiveStartupMetrics.bootstrapStartTime = Date.now();
+        logger_1.default.info({ event: "Runtime Kernel Bootstrapping" }, "Bootstrapping Universal Core Runtime...");
+        if (!diContainer_1.container.has("IMemoryEngine")) {
+            await bootstrap_1.bootstrapper.bootstrap();
         }
+        plugin_1.executiveStartupMetrics.bootstrapEndTime = Date.now();
+        plugin_1.executiveStartupMetrics.pluginRegisterStartTime = Date.now();
+        const memStart = process.memoryUsage().heapUsed;
+        logger_1.default.info({ event: "Executive Plugin Registration" }, "Mounting Executive Plugin...");
+        const pluginRegistry = diContainer_1.container.resolve("IPluginRegistry");
+        if (!pluginRegistry.getPlugin("plugin.executive.identity")) {
+            await pluginRegistry.registerPlugin(new plugin_1.ExecutiveIdentityPlugin());
+        }
+        const memEnd = process.memoryUsage().heapUsed;
+        plugin_1.executiveStartupMetrics.pluginRegisterEndTime = Date.now();
+        plugin_1.executiveStartupMetrics.startupTime = plugin_1.executiveStartupMetrics.bootstrapEndTime - plugin_1.executiveStartupMetrics.bootstrapStartTime;
+        plugin_1.executiveStartupMetrics.initializationTime = plugin_1.executiveStartupMetrics.pluginRegisterEndTime - plugin_1.executiveStartupMetrics.pluginRegisterStartTime;
+        plugin_1.executiveStartupMetrics.memoryOverheadBytes = Math.max(0, memEnd - memStart);
+        plugin_1.executiveStartupMetrics.isHealthy = true;
+        logger_1.default.info({
+            event: "Executive Platform Wire Complete",
+            startupTimeMs: plugin_1.executiveStartupMetrics.startupTime,
+            initializationTimeMs: plugin_1.executiveStartupMetrics.initializationTime,
+            memoryOverheadBytes: plugin_1.executiveStartupMetrics.memoryOverheadBytes
+        }, "Universal Core Runtime bootstrapped and Executive Plugin registered successfully.");
+    }
+    catch (err) {
+        plugin_1.executiveStartupMetrics.isHealthy = false;
+        plugin_1.executiveStartupMetrics.error = err.message || String(err);
+        logger_1.default.error({ err, event: "Executive Platform Wire Failed" }, "Failed to bootstrap Universal Core Runtime or mount Executive Plugin");
+        // In production, we fail fast if our core platform fails to start
+        process.exit(1);
     }
     const { default: app } = await Promise.resolve().then(() => __importStar(require("./app")));
     const server = http_1.default.createServer(app);

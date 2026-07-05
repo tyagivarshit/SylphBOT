@@ -1217,7 +1217,7 @@ const enforceSessionAnomalyGuard = async (req: Request, input: {
       deviceId: String(req.headers["x-device-id"] || "").trim() || null,
       signal: null,
       suppressTouchWrite: isSessionLedgerQuietRoute(req),
-    }).catch((err) => {
+    } as any).catch((err) => {
       req.logger?.warn(
         { error: err?.message || String(err), sessionKey },
         "Background session anomaly tracking failed"

@@ -5,21 +5,15 @@ import {
   type PermissionAction,
 } from "../services/rbac.service";
 import {
+
   assertAuthorizedAccess,
   evaluateReadOnlyAccessFastPath,
 } from "../services/security/securityGovernanceOS.service";
 import { getRequestBusinessId } from "../services/tenant.service";
 import { runDetachedBackgroundTask } from "../utils/backgroundTask";
-import {
-  getAnalyticsDashboardCorrelationId,
-  getAnalyticsDashboardLifecycleElapsedMs,
-  isAnalyticsDashboardRequest,
-  logAnalyticsDashboardLifecycle,
-} from "../utils/analyticsDashboardLifecycleTrace";
 
 const getHeaderValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
-
 const isReadOnlyBillingFastPath = (req: Request, action: PermissionAction) => {
   if (process.env.RBAC_READ_FAST_PATH_ENABLED === "false") {
     return false;
@@ -40,38 +34,6 @@ const isReadOnlyBillingFastPath = (req: Request, action: PermissionAction) => {
 
 export const requirePermission = (action: PermissionAction) =>
   async (req: Request, _res: Response, next: NextFunction) => {
-    const isAnalyticsDashboardFeatureGate =
-      action === "analytics:view" && isAnalyticsDashboardRequest(req);
-    let featureGateEndLogged = false;
-    const logFeatureGateEnd = () => {
-      if (!isAnalyticsDashboardFeatureGate || featureGateEndLogged) {
-        return;
-      }
-      featureGateEndLogged = true;
-      logAnalyticsDashboardLifecycle("FEATURE_GATE_END", {
-        correlationId: getAnalyticsDashboardCorrelationId({ req, res: _res }),
-        requestId: req.requestId || null,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res: _res }),
-        route: req.originalUrl,
-        method: req.method,
-        action,
-      });
-    };
-    const originalNext = next;
-    next = ((...args: Parameters<NextFunction>) => {
-      logFeatureGateEnd();
-      return originalNext(...args);
-    }) as NextFunction;
-    if (isAnalyticsDashboardFeatureGate) {
-      logAnalyticsDashboardLifecycle("FEATURE_GATE_START", {
-        correlationId: getAnalyticsDashboardCorrelationId({ req, res: _res }),
-        requestId: req.requestId || null,
-        elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res: _res }),
-        route: req.originalUrl,
-        method: req.method,
-        action,
-      });
-    }
     try {
       const principal = req.apiKey
         ? {
@@ -84,12 +46,10 @@ export const requirePermission = (action: PermissionAction) =>
           : null;
 
       if (!principal) {
-        logFeatureGateEnd();
         return next(unauthorized("Unauthorized"));
       }
 
       if (!hasPermission(principal, action)) {
-        logFeatureGateEnd();
         return next(forbidden("Insufficient permissions"));
       }
 
@@ -136,7 +96,6 @@ export const requirePermission = (action: PermissionAction) =>
       if (isReadOnlyBillingFastPath(req, action)) {
         const fastPathVerdict = evaluateReadOnlyAccessFastPath(accessRequest);
         if (!fastPathVerdict.allowed) {
-          logFeatureGateEnd();
           return next(forbidden(`Access denied (${fastPathVerdict.reason})`));
         }
 
@@ -155,10 +114,8 @@ export const requirePermission = (action: PermissionAction) =>
 
       await assertAuthorizedAccess(accessRequest);
 
-      logFeatureGateEnd();
       next();
     } catch (error) {
-      logFeatureGateEnd();
       next(error);
     }
   };

@@ -95,6 +95,7 @@ import { universalCoreTests } from "./universalCore.test";
 import { workflowRuntimeTests } from "./workflowRuntime.test";
 import { oigTests } from "./oig.test";
 import { executiveIdentityTests } from "./executiveIdentity.test";
+import { executiveExecutionTests } from "./executiveExecution.test";
 
 
 
@@ -939,6 +940,7 @@ const tests: TestCase[] = [
   ...workflowRuntimeTests,
   ...oigTests,
   ...executiveIdentityTests,
+  ...executiveExecutionTests,
 ];
 
 let failures = 0;

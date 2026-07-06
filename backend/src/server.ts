@@ -35,6 +35,13 @@ import { PrewarmService } from "./services/prewarm.service";
 import { bootstrapper } from "./runtime/kernel/bootstrap";
 import { container } from "./runtime/kernel/diContainer";
 import { ExecutiveIdentityPlugin, executiveStartupMetrics } from "./services/executive/plugin";
+import {
+  getDeploymentMetadata,
+  getGitCommit,
+  getInternalApiKeyMetadata,
+  getServiceName,
+  startupTimestamp,
+} from "./utils/internalHealthDiagnostics";
 
 
 let isShuttingDown = false;
@@ -643,6 +650,24 @@ export const startServer = async () => {
   return await new Promise<http.Server>((resolve) => {
     server.listen(env.PORT, () => {
       logger.info({ port: env.PORT }, "Server listening");
+      logger.info(
+        {
+          event: "internal_health_startup_diagnostics",
+          ...getInternalApiKeyMetadata(),
+          nodeEnv: process.env.NODE_ENV,
+          serviceName: getServiceName(),
+          gitCommit: getGitCommit(),
+          startupTimestamp,
+        },
+        "Internal health startup diagnostics"
+      );
+      logger.info(
+        {
+          event: "deployment_metadata",
+          ...getDeploymentMetadata(),
+        },
+        "Deployment metadata"
+      );
       
       const libName = getBcryptLibraryName();
       console.log(`AUTH_BCRYPT_RUNTIME {\n  library: ${libName}\n}`);

@@ -58,6 +58,7 @@ const prewarm_service_1 = require("./services/prewarm.service");
 const bootstrap_1 = require("./runtime/kernel/bootstrap");
 const diContainer_1 = require("./runtime/kernel/diContainer");
 const plugin_1 = require("./services/executive/plugin");
+const internalHealthDiagnostics_1 = require("./utils/internalHealthDiagnostics");
 let isShuttingDown = false;
 const parsePositiveInt = (raw, fallbackValue) => {
     const parsed = Number(raw);
@@ -536,6 +537,18 @@ const startServer = async () => {
     return await new Promise((resolve) => {
         server.listen(env_1.env.PORT, () => {
             logger_1.default.info({ port: env_1.env.PORT }, "Server listening");
+            logger_1.default.info({
+                event: "internal_health_startup_diagnostics",
+                ...(0, internalHealthDiagnostics_1.getInternalApiKeyMetadata)(),
+                nodeEnv: process.env.NODE_ENV,
+                serviceName: (0, internalHealthDiagnostics_1.getServiceName)(),
+                gitCommit: (0, internalHealthDiagnostics_1.getGitCommit)(),
+                startupTimestamp: internalHealthDiagnostics_1.startupTimestamp,
+            }, "Internal health startup diagnostics");
+            logger_1.default.info({
+                event: "deployment_metadata",
+                ...(0, internalHealthDiagnostics_1.getDeploymentMetadata)(),
+            }, "Deployment metadata");
             const libName = (0, bcryptWorker_1.getBcryptLibraryName)();
             console.log(`AUTH_BCRYPT_RUNTIME {\n  library: ${libName}\n}`);
             // Projection recovery initialization before runtime ready

@@ -17,6 +17,8 @@ const startupIsolation_service_1 = require("../runtime/startupIsolation.service"
 const asyncHandler_1 = require("../utils/asyncHandler");
 const diContainer_1 = require("../runtime/kernel/diContainer");
 const plugin_1 = require("../services/executive/plugin");
+const logger_1 = __importDefault(require("../utils/logger"));
+const internalHealthDiagnostics_1 = require("../utils/internalHealthDiagnostics");
 const router = (0, express_1.Router)();
 const isValidInternalKey = (providedKey, expectedKey) => {
     if (!providedKey || !expectedKey) {
@@ -33,7 +35,43 @@ const requireInternalHealthKey = (req, res, next) => {
     }
     const internalKey = req.get("x-internal-key")?.trim();
     const expectedKey = process.env.INTERNAL_API_KEY?.trim();
-    if (!isValidInternalKey(internalKey, expectedKey)) {
+    const headerPresent = Boolean(internalKey);
+    const envPresent = Boolean(expectedKey);
+    const headerLength = internalKey?.length || 0;
+    const envLength = expectedKey?.length || 0;
+    const comparisonPossible = headerPresent && envPresent && headerLength === envLength;
+    logger_1.default.info({
+        event: "internal_health_key_validation_input",
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+        remoteIP: req.ip || req.socket.remoteAddress || null,
+        headerPresent,
+        headerLength,
+        envPresent,
+        envLength,
+        comparisonPossible,
+    }, "Internal health key validation input");
+    const validationPassed = isValidInternalKey(internalKey, expectedKey);
+    const failureReason = validationPassed
+        ? null
+        : !headerPresent
+            ? "HEADER_MISSING"
+            : !envPresent
+                ? "ENV_MISSING"
+                : headerLength !== envLength
+                    ? "LENGTH_MISMATCH"
+                    : comparisonPossible
+                        ? "TIMING_SAFE_EQUAL_FAILED"
+                        : "UNKNOWN";
+    logger_1.default.info({
+        event: "internal_health_key_validation_result",
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+        validationPassed,
+        validationFailed: !validationPassed,
+        failureReason,
+    }, "Internal health key validation result");
+    if (!validationPassed) {
         return res.status(403).json({
             success: false,
             requestId: req.requestId,
@@ -84,6 +122,10 @@ router.get("/executive", (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         servicesHealthy: false,
         capabilitiesHealthy: false,
         contractsHealthy: false,
+        ...(0, internalHealthDiagnostics_1.getInternalApiKeyMetadata)(),
+        startupTimestamp: internalHealthDiagnostics_1.startupTimestamp,
+        gitCommit: (0, internalHealthDiagnostics_1.getGitCommit)(),
+        buildTimestamp: (0, internalHealthDiagnostics_1.getBuildTimestamp)(),
         startupTimeMs: plugin_1.executiveStartupMetrics.startupTime,
         initializationTimeMs: plugin_1.executiveStartupMetrics.initializationTime,
         memoryOverheadBytes: plugin_1.executiveStartupMetrics.memoryOverheadBytes,

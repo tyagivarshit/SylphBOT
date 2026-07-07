@@ -1,0 +1,2 @@
+Google OAuth disabled: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET missing
+[Contract Registry] Idempotent registration: Contract [booking.created] v[1.0.0] already registered with identical schema. Reusing existing.

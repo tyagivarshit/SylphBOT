@@ -162,11 +162,6 @@ const verifyResolvableTokens = (tokens: string[]) => {
   const missing: string[] = [];
 
   for (const token of tokens) {
-    if (!container.has(token)) {
-      missing.push(token);
-      continue;
-    }
-
     try {
       container.resolve(token);
       resolved.push(token);
@@ -176,6 +171,20 @@ const verifyResolvableTokens = (tokens: string[]) => {
   }
 
   return { resolved, missing };
+};
+
+const resolveRuntimeToken = <T = any>(token: string) => {
+  try {
+    return {
+      instance: container.resolve<T>(token),
+      error: null as string | null,
+    };
+  } catch (e: any) {
+    return {
+      instance: null as T | null,
+      error: `${token} (resolve failed: ${e.message || String(e)})`,
+    };
+  }
 };
 
 const isValidInternalKey = (
@@ -327,18 +336,25 @@ router.get(
       startupTimeMs: executiveStartupMetrics.startupTime,
       initializationTimeMs: executiveStartupMetrics.initializationTime,
       memoryOverheadBytes: executiveStartupMetrics.memoryOverheadBytes,
+      missingRepositories: [],
+      missingServices: [],
+      missingCapabilities: [],
+      missingContracts: [],
       details: {}
     };
 
     try {
-      if (!container.has("IPluginRegistry")) {
-        return res.status(500).json({
-          success: false,
-          message: "Core PluginRegistry not initialized"
-        });
-      }
-
-        const pluginRegistry = container.resolve<any>("IPluginRegistry");
+        const pluginRegistryResolution = resolveRuntimeToken<any>("IPluginRegistry");
+        const pluginRegistry = pluginRegistryResolution.instance;
+        if (!pluginRegistry) {
+          report.details.missingRuntimeContracts = [pluginRegistryResolution.error];
+          report.details.registryResolutionErrors = [pluginRegistryResolution.error];
+          return res.status(500).json({
+            ...report,
+            success: false,
+            message: "Core PluginRegistry not initialized"
+          });
+        }
         const plugin = pluginRegistry.getPlugin(EXECUTIVE_PLUGIN_ID);
         report.pluginLoaded = !!plugin;
         report.pluginRegistered = !!plugin;
@@ -350,11 +366,13 @@ router.get(
 
         const repoStatus = verifyResolvableTokens(EXECUTIVE_REPOSITORY_TOKENS);
         report.repositoriesHealthy = repoStatus.missing.length === 0;
+        report.missingRepositories = repoStatus.missing;
         report.details.registeredRepositories = repoStatus.resolved;
         report.details.missingRepositories = repoStatus.missing;
 
         const serviceStatus = verifyResolvableTokens(EXECUTIVE_SERVICE_TOKENS);
         report.servicesHealthy = serviceStatus.missing.length === 0;
+        report.missingServices = serviceStatus.missing;
         report.details.resolvedServices = serviceStatus.resolved;
         report.details.missingServices = serviceStatus.missing;
         report.details.duplicateRegistrations = [];
@@ -367,8 +385,9 @@ router.get(
 
         const registeredTools: string[] = [];
         const missingTools: string[] = [];
-        if (container.has("IToolRegistry")) {
-          const toolRegistry = container.resolve<any>("IToolRegistry");
+        const toolRegistryResolution = resolveRuntimeToken<any>("IToolRegistry");
+        const toolRegistry = toolRegistryResolution.instance;
+        if (toolRegistry) {
           for (const toolName of EXECUTIVE_TOOL_NAMES) {
             if (toolRegistry.getTool(toolName)) {
               registeredTools.push(toolName);
@@ -377,7 +396,7 @@ router.get(
             }
           }
         } else {
-          missingTools.push("IToolRegistry missing from DI");
+          missingTools.push(toolRegistryResolution.error || "IToolRegistry missing from DI");
         }
         report.toolsHealthy = missingTools.length === 0;
         report.details.registeredTools = registeredTools;
@@ -385,27 +404,29 @@ router.get(
 
         const registeredCapabilities: string[] = [];
         const missingCapabilities: string[] = [];
-        const capabilitySource: Record<string, string> = {};
-        if (container.has("IToolRegistry")) {
-          const toolRegistry = container.resolve<any>("IToolRegistry");
-          for (const capability of EXECUTIVE_TOOL_NAMES) {
+        const capabilitySource: Record<string, string[]> = {};
+        const capabilityRegistryResolution = resolveRuntimeToken<any>("ICapabilityRegistry");
+        const capabilityRegistry = capabilityRegistryResolution.instance;
+        const pluginCapabilities = Array.isArray(plugin?.capabilities)
+          ? plugin.capabilities
+          : [];
+        for (const capability of EXECUTIVE_TOOL_NAMES) {
+          const sources: string[] = [];
+          if (pluginCapabilities.includes(capability)) {
+            sources.push("PluginRegistry");
+          }
+          if (toolRegistry) {
             const tools = typeof toolRegistry.findToolsForCapability === "function"
               ? toolRegistry.findToolsForCapability(capability)
               : [];
-            const tool = toolRegistry.getTool(capability);
+            const tool = typeof toolRegistry.getTool === "function"
+              ? toolRegistry.getTool(capability)
+              : null;
             if (tools.length > 0 || tool) {
-              registeredCapabilities.push(capability);
-              capabilitySource[capability] = "ToolRegistry";
-            } else {
-              missingCapabilities.push(capability);
+              sources.push("ToolRegistry");
             }
           }
-        } else {
-          missingCapabilities.push("IToolRegistry missing from DI");
-        }
-        if (container.has("ICapabilityRegistry")) {
-          const capabilityRegistry = container.resolve<any>("ICapabilityRegistry");
-          for (const capability of EXECUTIVE_TOOL_NAMES) {
+          if (capabilityRegistry) {
             const cap = typeof capabilityRegistry.lookup === "function"
               ? capabilityRegistry.lookup(capability)
               : null;
@@ -413,19 +434,27 @@ router.get(
               ? capabilityRegistry.discover({ name: capability })
               : [];
             if (cap || discovered.length > 0) {
-              capabilitySource[capability] = "CapabilityRegistry";
+              sources.push("CapabilityRegistry");
             }
+          }
+          if (sources.length > 0) {
+            registeredCapabilities.push(capability);
+            capabilitySource[capability] = sources;
+          } else {
+            missingCapabilities.push(capability);
           }
         }
         report.capabilitiesHealthy = missingCapabilities.length === 0;
+        report.missingCapabilities = missingCapabilities;
         report.details.registeredCapabilities = registeredCapabilities;
         report.details.missingCapabilities = missingCapabilities;
         report.details.capabilitySource = capabilitySource;
 
         const missingContracts: string[] = [];
         const registeredContracts: string[] = [];
-        if (container.has("IContractRegistry")) {
-          const contractRegistry = container.resolve<any>("IContractRegistry");
+        const contractRegistryResolution = resolveRuntimeToken<any>("IContractRegistry");
+        const contractRegistry = contractRegistryResolution.instance;
+        if (contractRegistry) {
           for (const contractName of EXECUTIVE_EVENT_CONTRACTS) {
             if (contractRegistry.getContract(contractName, "1.0.0")) {
               registeredContracts.push(contractName);
@@ -434,38 +463,30 @@ router.get(
             }
           }
         } else {
-          missingContracts.push("IContractRegistry missing from DI");
+          missingContracts.push(contractRegistryResolution.error || "IContractRegistry missing from DI");
         }
         const missingRuntimeContracts = runtimeContractStatus.missing;
-        report.contractsHealthy =
-          missingContracts.length === 0 &&
-          missingRuntimeContracts.length === 0 &&
-          report.servicesHealthy &&
-          report.repositoriesHealthy;
+        report.contractsHealthy = missingContracts.length === 0;
+        report.missingContracts = missingContracts;
         report.details.registeredContracts = registeredContracts;
-        report.details.missingContracts = [
-          ...missingContracts,
-          ...missingRuntimeContracts,
-          ...repoStatus.missing.map(token => `DI repository contract missing: ${token}`),
-          ...serviceStatus.missing.map(token => `DI service contract missing: ${token}`),
-        ];
+        report.details.missingContracts = missingContracts;
+        report.details.missingRuntimeContracts = missingRuntimeContracts;
+        report.details.registryResolutionErrors = [
+          toolRegistryResolution.error,
+          capabilityRegistryResolution.error,
+          contractRegistryResolution.error,
+        ].filter(Boolean);
 
         report.startupHealthy =
           executiveStartupMetrics.isHealthy &&
           report.pluginLoaded &&
-          container.has("IPluginRegistry") &&
-          container.has("IToolRegistry") &&
-          container.has("IContractRegistry");
+          runtimeContractStatus.missing.length === 0;
         report.details.startupHealthy = report.startupHealthy;
         report.details.startupTime = executiveStartupMetrics.startupTime;
         report.details.pluginRegistrationTime =
           executiveStartupMetrics.pluginRegisterEndTime -
           executiveStartupMetrics.pluginRegisterStartTime;
-        report.details.runtimeInitialized =
-          container.has("IPluginRegistry") &&
-          container.has("IToolRegistry") &&
-          container.has("IContractRegistry") &&
-          container.has("ICapabilityRegistry");
+        report.details.runtimeInitialized = runtimeContractStatus.missing.length === 0;
 
       const overallHealthy =
         report.pluginLoaded &&
@@ -474,7 +495,10 @@ router.get(
         report.capabilitiesHealthy &&
         report.toolsHealthy &&
         report.contractsHealthy &&
+        report.diHealthy &&
         report.startupHealthy;
+
+      report.success = overallHealthy;
 
       return res.status(overallHealthy ? 200 : 500).json(report);
     } catch (error: any) {

@@ -132,13 +132,22 @@ const EXECUTIVE_SERVICE_TOKENS = [
   "IExecutiveExecutionCertificationService",
 ];
 
-const EXECUTIVE_TOOL_NAMES = [
+const EXECUTIVE_EXECUTABLE_TOOL_NAMES = [
   "create_executive_identity",
   "validate_executive_authority",
   "check_executive_boundary",
   "select_best_decision",
   "adaptive_execution",
+];
+
+const EXECUTIVE_CAPABILITY_NAMES = [
+  ...EXECUTIVE_EXECUTABLE_TOOL_NAMES,
   "executive_supervisor",
+];
+
+const EXECUTIVE_SUPERVISOR_RUNTIME_TOKENS = [
+  "IExecutiveSupervisorRepository",
+  "IExecutiveSupervisorService",
 ];
 
 const EXECUTIVE_EVENT_CONTRACTS = [
@@ -339,6 +348,7 @@ router.get(
       missingRepositories: [],
       missingServices: [],
       missingCapabilities: [],
+      missingTools: [],
       missingContracts: [],
       details: {}
     };
@@ -388,7 +398,7 @@ router.get(
         const toolRegistryResolution = resolveRuntimeToken<any>("IToolRegistry");
         const toolRegistry = toolRegistryResolution.instance;
         if (toolRegistry) {
-          for (const toolName of EXECUTIVE_TOOL_NAMES) {
+          for (const toolName of EXECUTIVE_EXECUTABLE_TOOL_NAMES) {
             if (toolRegistry.getTool(toolName)) {
               registeredTools.push(toolName);
             } else {
@@ -399,6 +409,7 @@ router.get(
           missingTools.push(toolRegistryResolution.error || "IToolRegistry missing from DI");
         }
         report.toolsHealthy = missingTools.length === 0;
+        report.missingTools = missingTools;
         report.details.registeredTools = registeredTools;
         report.details.missingTools = missingTools;
 
@@ -410,7 +421,7 @@ router.get(
         const pluginCapabilities = Array.isArray(plugin?.capabilities)
           ? plugin.capabilities
           : [];
-        for (const capability of EXECUTIVE_TOOL_NAMES) {
+        for (const capability of EXECUTIVE_CAPABILITY_NAMES) {
           const sources: string[] = [];
           if (pluginCapabilities.includes(capability)) {
             sources.push("PluginRegistry");
@@ -449,6 +460,13 @@ router.get(
         report.details.registeredCapabilities = registeredCapabilities;
         report.details.missingCapabilities = missingCapabilities;
         report.details.capabilitySource = capabilitySource;
+
+        const supervisorRuntimeStatus = verifyResolvableTokens(EXECUTIVE_SUPERVISOR_RUNTIME_TOKENS);
+        report.details.supervisorRuntime = {
+          pluginCapabilityRegistered: pluginCapabilities.includes("executive_supervisor"),
+          resolvedRuntimeOwners: supervisorRuntimeStatus.resolved,
+          missingRuntimeOwners: supervisorRuntimeStatus.missing,
+        };
 
         const missingContracts: string[] = [];
         const registeredContracts: string[] = [];

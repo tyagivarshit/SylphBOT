@@ -42,6 +42,7 @@ import healthRoutes from "./routes/health.routes";
 import receptionIntakeRoutes from "./routes/receptionIntake.routes";
 import usageRoutes from "./routes/usage.routes";
 import commerceRoutes from "./routes/commerce.routes";
+import executiveRoutes from "./routes/executive.routes";
 import { getClientStatus } from "./controllers/client.controller";
 import helpAiRoutes from "./routes/helpAi.routes";
 import {
@@ -939,6 +940,7 @@ app.use("/api/training", protect, trainingRoutes);
 app.use("/api/leads", protect, leadRoutes);
 app.use("/api/analytics", protect, analyticsRoutes);
 app.use("/api/autonomous", protect, autonomousRoutes);
+app.use("/api/executive", protect, executiveRoutes);
 app.use("/api/audit", protect, auditRoutes);
 app.use("/api/search", protect, searchRoutes);
 app.use("/api/security", protect, securityRoutes);

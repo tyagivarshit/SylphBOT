@@ -1,0 +1,3840 @@
+[dotenv@17.3.1] injecting env (0) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+[15:18:59] [32mINFO[39m: [36mInitializing database connection pool...[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 3,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:00.989Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 2,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertTenantIsolation:tenantIsolationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'tenantIsolationLedger.upsert(tenant_isolation:3361079b658d750b8147835f)'
+  ],
+  isolationKey: 'tenant_isolation:3361079b658d750b8147835f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertTenantIsolation:tenantIsolationLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [
+    'tenantIsolationLedger.upsert(tenant_isolation:3361079b658d750b8147835f)'
+  ],
+  isolationKey: 'tenant_isolation:3361079b658d750b8147835f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:69f2fb5872b9553fa64c4550)'
+  ],
+  attestationKey: 'isolation_attest:69f2fb5872b9553fa64c4550'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:69f2fb5872b9553fa64c4550)'
+  ],
+  attestationKey: 'isolation_attest:69f2fb5872b9553fa64c4550'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:c138f95c0c40c356b5b5330958)' ],
+  eventKey: 'auth_evt:c138f95c0c40c356b5b5330958',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:c138f95c0c40c356b5b5330958)' ],
+  eventKey: 'auth_evt:c138f95c0c40c356b5b5330958',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 13,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:02.087Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:52f645489f5b6023e0570ae8)'
+  ],
+  attestationKey: 'isolation_attest:52f645489f5b6023e0570ae8'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:52f645489f5b6023e0570ae8)'
+  ],
+  attestationKey: 'isolation_attest:52f645489f5b6023e0570ae8'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:8331f974dc83822c26c6abf8be)' ],
+  eventKey: 'auth_evt:8331f974dc83822c26c6abf8be',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:8331f974dc83822c26c6abf8be)' ],
+  eventKey: 'auth_evt:8331f974dc83822c26c6abf8be',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 14,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:03.157Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 2,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:db8998133d994d518e16938f)'
+  ],
+  attestationKey: 'isolation_attest:db8998133d994d518e16938f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:db8998133d994d518e16938f)'
+  ],
+  attestationKey: 'isolation_attest:db8998133d994d518e16938f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f9c1202c7646576a90d8bb7604)' ],
+  eventKey: 'auth_evt:f9c1202c7646576a90d8bb7604',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f9c1202c7646576a90d8bb7604)' ],
+  eventKey: 'auth_evt:f9c1202c7646576a90d8bb7604',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 3,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:04.241Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 2,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:1bbb9db7381ddf4af46425c1)'
+  ],
+  attestationKey: 'isolation_attest:1bbb9db7381ddf4af46425c1'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:1bbb9db7381ddf4af46425c1)'
+  ],
+  attestationKey: 'isolation_attest:1bbb9db7381ddf4af46425c1'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:57410c6cb16351b55d8b5cb69d)' ],
+  eventKey: 'auth_evt:57410c6cb16351b55d8b5cb69d',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:57410c6cb16351b55d8b5cb69d)' ],
+  eventKey: 'auth_evt:57410c6cb16351b55d8b5cb69d',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 9,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:05.343Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:cde5dd99e01325999aca0405)'
+  ],
+  attestationKey: 'isolation_attest:cde5dd99e01325999aca0405'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:cde5dd99e01325999aca0405)'
+  ],
+  attestationKey: 'isolation_attest:cde5dd99e01325999aca0405'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:0786a59d349d389d2b13b7b62d)' ],
+  eventKey: 'auth_evt:0786a59d349d389d2b13b7b62d',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:0786a59d349d389d2b13b7b62d)' ],
+  eventKey: 'auth_evt:0786a59d349d389d2b13b7b62d',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 10,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:06.456Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:d80203c33c304825dbd89149)'
+  ],
+  attestationKey: 'isolation_attest:d80203c33c304825dbd89149'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:d80203c33c304825dbd89149)'
+  ],
+  attestationKey: 'isolation_attest:d80203c33c304825dbd89149'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:57922f400860e461cf36c58302)' ],
+  eventKey: 'auth_evt:57922f400860e461cf36c58302',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:57922f400860e461cf36c58302)' ],
+  eventKey: 'auth_evt:57922f400860e461cf36c58302',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 12,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:07.537Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:0ea1d0dfaa7d95187ed3bbf0)'
+  ],
+  attestationKey: 'isolation_attest:0ea1d0dfaa7d95187ed3bbf0'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:0ea1d0dfaa7d95187ed3bbf0)'
+  ],
+  attestationKey: 'isolation_attest:0ea1d0dfaa7d95187ed3bbf0'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:0b208763a2733f63524475e08e)' ],
+  eventKey: 'auth_evt:0b208763a2733f63524475e08e',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:0b208763a2733f63524475e08e)' ],
+  eventKey: 'auth_evt:0b208763a2733f63524475e08e',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 11,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:08.640Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:de2608dd4156cb8adcb7954d)'
+  ],
+  attestationKey: 'isolation_attest:de2608dd4156cb8adcb7954d'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:de2608dd4156cb8adcb7954d)'
+  ],
+  attestationKey: 'isolation_attest:de2608dd4156cb8adcb7954d'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:eb729b7873ea449f1b89de388d)' ],
+  eventKey: 'auth_evt:eb729b7873ea449f1b89de388d',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:eb729b7873ea449f1b89de388d)' ],
+  eventKey: 'auth_evt:eb729b7873ea449f1b89de388d',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 11,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:09.741Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:2495f04bf827bd710c781305)'
+  ],
+  attestationKey: 'isolation_attest:2495f04bf827bd710c781305'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:2495f04bf827bd710c781305)'
+  ],
+  attestationKey: 'isolation_attest:2495f04bf827bd710c781305'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:19b9e10114b0f5fbb40e0db5a6)' ],
+  eventKey: 'auth_evt:19b9e10114b0f5fbb40e0db5a6',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:19b9e10114b0f5fbb40e0db5a6)' ],
+  eventKey: 'auth_evt:19b9e10114b0f5fbb40e0db5a6',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 3,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:10.816Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:c6b271988d494fd45a2a042f)'
+  ],
+  attestationKey: 'isolation_attest:c6b271988d494fd45a2a042f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:c6b271988d494fd45a2a042f)'
+  ],
+  attestationKey: 'isolation_attest:c6b271988d494fd45a2a042f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:c0d81cec5529b786a88d51ed22)' ],
+  eventKey: 'auth_evt:c0d81cec5529b786a88d51ed22',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:c0d81cec5529b786a88d51ed22)' ],
+  eventKey: 'auth_evt:c0d81cec5529b786a88d51ed22',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 3,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:11.884Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:b39aaf0c535e5cd3e5712b9f)'
+  ],
+  attestationKey: 'isolation_attest:b39aaf0c535e5cd3e5712b9f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:b39aaf0c535e5cd3e5712b9f)'
+  ],
+  attestationKey: 'isolation_attest:b39aaf0c535e5cd3e5712b9f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f03b38b2ebc874be25e26b2d94)' ],
+  eventKey: 'auth_evt:f03b38b2ebc874be25e26b2d94',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f03b38b2ebc874be25e26b2d94)' ],
+  eventKey: 'auth_evt:f03b38b2ebc874be25e26b2d94',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 11,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:12.945Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:ff93ae1d92b9836487113d3f)'
+  ],
+  attestationKey: 'isolation_attest:ff93ae1d92b9836487113d3f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:ff93ae1d92b9836487113d3f)'
+  ],
+  attestationKey: 'isolation_attest:ff93ae1d92b9836487113d3f'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:3d2cb1d50af03e112dd9e71a7f)' ],
+  eventKey: 'auth_evt:3d2cb1d50af03e112dd9e71a7f',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:3d2cb1d50af03e112dd9e71a7f)' ],
+  eventKey: 'auth_evt:3d2cb1d50af03e112dd9e71a7f',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 14,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:14.036Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:ad198e25a2398f3cc27fcecb)'
+  ],
+  attestationKey: 'isolation_attest:ad198e25a2398f3cc27fcecb'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:ad198e25a2398f3cc27fcecb)'
+  ],
+  attestationKey: 'isolation_attest:ad198e25a2398f3cc27fcecb'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:00233b009f8b028571b55ec6b0)' ],
+  eventKey: 'auth_evt:00233b009f8b028571b55ec6b0',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:00233b009f8b028571b55ec6b0)' ],
+  eventKey: 'auth_evt:00233b009f8b028571b55ec6b0',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 14,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:15.137Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 2,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:e2a1b2f213b78638efd26f09)'
+  ],
+  attestationKey: 'isolation_attest:e2a1b2f213b78638efd26f09'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:e2a1b2f213b78638efd26f09)'
+  ],
+  attestationKey: 'isolation_attest:e2a1b2f213b78638efd26f09'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:acd7b48100b87f40945a1c9415)' ],
+  eventKey: 'auth_evt:acd7b48100b87f40945a1c9415',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:acd7b48100b87f40945a1c9415)' ],
+  eventKey: 'auth_evt:acd7b48100b87f40945a1c9415',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 2,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:16.219Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:137ea6111a5ed30a08dae69d)'
+  ],
+  attestationKey: 'isolation_attest:137ea6111a5ed30a08dae69d'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:137ea6111a5ed30a08dae69d)'
+  ],
+  attestationKey: 'isolation_attest:137ea6111a5ed30a08dae69d'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:35a15d8860ad74afa68db1f13f)' ],
+  eventKey: 'auth_evt:35a15d8860ad74afa68db1f13f',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:35a15d8860ad74afa68db1f13f)' ],
+  eventKey: 'auth_evt:35a15d8860ad74afa68db1f13f',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 2,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 1,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:17.304Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:4dbe9f07099807bc5e69eb43)'
+  ],
+  attestationKey: 'isolation_attest:4dbe9f07099807bc5e69eb43'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:4dbe9f07099807bc5e69eb43)'
+  ],
+  attestationKey: 'isolation_attest:4dbe9f07099807bc5e69eb43'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 2,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f78d09c6ad9d9641f1e1e74221)' ],
+  eventKey: 'auth_evt:f78d09c6ad9d9641f1e1e74221',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f78d09c6ad9d9641f1e1e74221)' ],
+  eventKey: 'auth_evt:f78d09c6ad9d9641f1e1e74221',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 15,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:18.407Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:cbd21e6098c1a33174736c8d)'
+  ],
+  attestationKey: 'isolation_attest:cbd21e6098c1a33174736c8d'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:cbd21e6098c1a33174736c8d)'
+  ],
+  attestationKey: 'isolation_attest:cbd21e6098c1a33174736c8d'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:d1cee564bc93b96bce98078ecd)' ],
+  eventKey: 'auth_evt:d1cee564bc93b96bce98078ecd',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:d1cee564bc93b96bce98078ecd)' ],
+  eventKey: 'auth_evt:d1cee564bc93b96bce98078ecd',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 11,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:19.487Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:6fd8b41e42f7db4a22695f26)'
+  ],
+  attestationKey: 'isolation_attest:6fd8b41e42f7db4a22695f26'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:6fd8b41e42f7db4a22695f26)'
+  ],
+  attestationKey: 'isolation_attest:6fd8b41e42f7db4a22695f26'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:3408affab1265a1d983f2bd554)' ],
+  eventKey: 'auth_evt:3408affab1265a1d983f2bd554',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:3408affab1265a1d983f2bd554)' ],
+  eventKey: 'auth_evt:3408affab1265a1d983f2bd554',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 11,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:20.569Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:3219770c4c27d94ea1abdc62)'
+  ],
+  attestationKey: 'isolation_attest:3219770c4c27d94ea1abdc62'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:3219770c4c27d94ea1abdc62)'
+  ],
+  attestationKey: 'isolation_attest:3219770c4c27d94ea1abdc62'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:3bf97b52d47431e9d5941fb91a)' ],
+  eventKey: 'auth_evt:3bf97b52d47431e9d5941fb91a',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:3bf97b52d47431e9d5941fb91a)' ],
+  eventKey: 'auth_evt:3bf97b52d47431e9d5941fb91a',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 11,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:21.655Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:d1dd2e9d7e368e8f0541076e)'
+  ],
+  attestationKey: 'isolation_attest:d1dd2e9d7e368e8f0541076e'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:d1dd2e9d7e368e8f0541076e)'
+  ],
+  attestationKey: 'isolation_attest:d1dd2e9d7e368e8f0541076e'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:0df5f37473eda061f730945bd1)' ],
+  eventKey: 'auth_evt:0df5f37473eda061f730945bd1',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:0df5f37473eda061f730945bd1)' ],
+  eventKey: 'auth_evt:0df5f37473eda061f730945bd1',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 2,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:22.743Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:64a281aa0f06b92b3b07ae70)'
+  ],
+  attestationKey: 'isolation_attest:64a281aa0f06b92b3b07ae70'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:64a281aa0f06b92b3b07ae70)'
+  ],
+  attestationKey: 'isolation_attest:64a281aa0f06b92b3b07ae70'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:497921062b154e113628a4a771)' ],
+  eventKey: 'auth_evt:497921062b154e113628a4a771',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:497921062b154e113628a4a771)' ],
+  eventKey: 'auth_evt:497921062b154e113628a4a771',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 3,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:23.831Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:621e9400be5c8983a9dc8d37)'
+  ],
+  attestationKey: 'isolation_attest:621e9400be5c8983a9dc8d37'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:621e9400be5c8983a9dc8d37)'
+  ],
+  attestationKey: 'isolation_attest:621e9400be5c8983a9dc8d37'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:4516761653c81056a8ae0295e7)' ],
+  eventKey: 'auth_evt:4516761653c81056a8ae0295e7',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:4516761653c81056a8ae0295e7)' ],
+  eventKey: 'auth_evt:4516761653c81056a8ae0295e7',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 12,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:24.903Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:60a8dbe26b102083ec4d1089)'
+  ],
+  attestationKey: 'isolation_attest:60a8dbe26b102083ec4d1089'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:60a8dbe26b102083ec4d1089)'
+  ],
+  attestationKey: 'isolation_attest:60a8dbe26b102083ec4d1089'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:b62df5dc9eed40e2832543a453)' ],
+  eventKey: 'auth_evt:b62df5dc9eed40e2832543a453',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:b62df5dc9eed40e2832543a453)' ],
+  eventKey: 'auth_evt:b62df5dc9eed40e2832543a453',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 7,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:25.983Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:23f5d423e35a9193cc00723b)'
+  ],
+  attestationKey: 'isolation_attest:23f5d423e35a9193cc00723b'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:23f5d423e35a9193cc00723b)'
+  ],
+  attestationKey: 'isolation_attest:23f5d423e35a9193cc00723b'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:352a16827fd5a491a7534b9f91)' ],
+  eventKey: 'auth_evt:352a16827fd5a491a7534b9f91',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:352a16827fd5a491a7534b9f91)' ],
+  eventKey: 'auth_evt:352a16827fd5a491a7534b9f91',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 14,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:27.099Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 2,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:b8c0476053084a6100754444)'
+  ],
+  attestationKey: 'isolation_attest:b8c0476053084a6100754444'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:b8c0476053084a6100754444)'
+  ],
+  attestationKey: 'isolation_attest:b8c0476053084a6100754444'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f2edfa0fbca4bbc1fcb60063c1)' ],
+  eventKey: 'auth_evt:f2edfa0fbca4bbc1fcb60063c1',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:f2edfa0fbca4bbc1fcb60063c1)' ],
+  eventKey: 'auth_evt:f2edfa0fbca4bbc1fcb60063c1',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 10,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:28.195Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:e8c40ade4b674d4f40a5193c)'
+  ],
+  attestationKey: 'isolation_attest:e8c40ade4b674d4f40a5193c'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:e8c40ade4b674d4f40a5193c)'
+  ],
+  attestationKey: 'isolation_attest:e8c40ade4b674d4f40a5193c'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:e82c4b912beb53b869a212d264)' ],
+  eventKey: 'auth_evt:e82c4b912beb53b869a212d264',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 0,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:e82c4b912beb53b869a212d264)' ],
+  eventKey: 'auth_evt:e82c4b912beb53b869a212d264',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+startup_event_loop_lag {
+  metric: 'startup_event_loop_lag',
+  value: 11,
+  businessId: null,
+  route: 'startup_isolation',
+  metadata: null,
+  recordedAt: '2026-07-08T15:19:29.291Z'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:assertTenantIsolation',
+  durationMs: 0,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'tenantIsolationLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'assertAuthorizedAccess:authorizeAccess',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'delegated',
+  dbQueries: [ 'see nested FEATURE_GATE_AWAIT_TRACE events' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:97d85e8117b6af9998f5d6c3)'
+  ],
+  attestationKey: 'isolation_attest:97d85e8117b6af9998f5d6c3'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'attestInfraIsolation:isolationAttestationLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [
+    'isolationAttestationLedger.upsert(isolation_attest:97d85e8117b6af9998f5d6c3)'
+  ],
+  attestationKey: 'isolation_attest:97d85e8117b6af9998f5d6c3'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:attestInfraIsolation',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'isolationAttestationLedger.create' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'start',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:7f248f7d5d4d9916a47e2dcdf6)' ],
+  eventKey: 'auth_evt:7f248f7d5d4d9916a47e2dcdf6',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'appendAuthEvent:authEventLedger.upsert',
+  durationMs: 1,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert(auth_evt:7f248f7d5d4d9916a47e2dcdf6)' ],
+  eventKey: 'auth_evt:7f248f7d5d4d9916a47e2dcdf6',
+  action: 'analytics:view',
+  outcome: 'ALLOWED'
+}
+FEATURE_GATE_AWAIT_TRACE {
+  event: 'end',
+  fileName: 'backend/src/services/security/securityGovernanceOS.service.ts',
+  redisOps: 'none',
+  functionName: 'authorizeAccess:appendAuthEvent:authorized',
+  durationMs: 1,
+  action: 'analytics:view',
+  route: null,
+  cacheStatus: 'none',
+  dbQueries: [ 'authEventLedger.upsert' ]
+}
+prisma:error 
+Invalid `prisma_1.default.user.findFirst()` invocation in
+D:\sylph-ai\backend\dist\server.js:394:37
+
+  391 try {
+  392     await prisma_1.default.$connect();
+  393     // Warm up the pool and run a lightweight validation query
+→ 394     await prisma_1.default.user.findFirst(
+Raw query failed. Code: `unknown`. Message: `Kind: Server selection timeout: No available servers. Topology: { Type: Unknown, Servers: [ { Address: localhost:27017, Type: Unknown, Error: Kind: I/O error: No connection could be made because the target machine actively refused it. (os error 10061), labels: {}, source: None } ] }, labels: {}, source: None`
+[15:19:30] [31mERROR[39m: [36mDatabase connection failed or deferred during startup[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"
+    err: {
+      "type": "PrismaClientKnownRequestError",
+      "message": "\nInvalid `prisma_1.default.user.findFirst()` invocation in\nD:\\sylph-ai\\backend\\dist\\server.js:394:37\n\n  391 try {\n  392     await prisma_1.default.$connect();\n  393     // Warm up the pool and run a lightweight validation query\n→ 394     await prisma_1.default.user.findFirst(\nRaw query failed. Code: `unknown`. Message: `Kind: Server selection timeout: No available servers. Topology: { Type: Unknown, Servers: [ { Address: localhost:27017, Type: Unknown, Error: Kind: I/O error: No connection could be made because the target machine actively refused it. (os error 10061), labels: {}, source: None } ] }, labels: {}, source: None`",
+      "stack":
+          PrismaClientKnownRequestError: 
+          Invalid `prisma_1.default.user.findFirst()` invocation in
+          D:\sylph-ai\backend\dist\server.js:394:37
+          
+            391 try {
+            392     await prisma_1.default.$connect();
+            393     // Warm up the pool and run a lightweight validation query
+          → 394     await prisma_1.default.user.findFirst(
+          Raw query failed. Code: `unknown`. Message: `Kind: Server selection timeout: No available servers. Topology: { Type: Unknown, Servers: [ { Address: localhost:27017, Type: Unknown, Error: Kind: I/O error: No connection could be made because the target machine actively refused it. (os error 10061), labels: {}, source: None } ] }, labels: {}, source: None`
+              at ei.handleRequestError (D:\sylph-ai\backend\node_modules\@prisma\client\runtime\library.js:121:7268)
+              at ei.handleAndLogRequestError (D:\sylph-ai\backend\node_modules\@prisma\client\runtime\library.js:121:6593)
+              at ei.request (D:\sylph-ai\backend\node_modules\@prisma\client\runtime\library.js:121:6300)
+              at async a (D:\sylph-ai\backend\node_modules\@prisma\client\runtime\library.js:130:9551)
+              at async startServer (D:\sylph-ai\backend\dist\server.js:394:9)
+      "code": "P2010",
+      "meta": {
+        "type": "Object",
+        "message": "Kind: Server selection timeout: No available servers. Topology: { Type: Unknown, Servers: [ { Address: localhost:27017, Type: Unknown, Error: Kind: I/O error: No connection could be made because the target machine actively refused it. (os error 10061), labels: {}, source: None } ] }, labels: {}, source: None",
+        "stack":
+            
+        "modelName": "User",
+        "code": "unknown"
+      },
+      "clientVersion": "6.19.2",
+      "name": "PrismaClientKnownRequestError"
+    }
+[15:19:30] [31mERROR[39m: [36mCritical: Database pool warmup failed and startup isolation is enabled. Exiting.[39m
+    [35mtraceId[39m: null
+    [35mcorrelationId[39m: null
+    [35mtenantId[39m: null
+    [35mleadId[39m: null
+    [35minteractionId[39m: null
+    [35mappointmentId[39m: null
+    [35mproposalId[39m: null
+    [35mcontractId[39m: null
+    [35mpaymentId[39m: null
+    [35mqueueJobId[39m: null
+    [35mworkerId[39m: null
+    [35mprovider[39m: null
+    [35mseverity[39m: "info"
+    [35mcomponent[39m: "runtime"
+    [35mphase[39m: "operations"
+    [35mversion[39m: "phase6a.v1"

@@ -429,7 +429,28 @@ const login = async (req, res, next) => {
             email: user.email,
             name: user.name,
         };
-        const businessId = user.businessId || null;
+        let loginBootstrapBusinessId = null;
+        try {
+            const bootstrap = await withFastTimeout((0, authBootstrap_service_1.ensureAuthBootstrapContext)({
+                userId: resolvedUser.id,
+                preferredBusinessId: user.businessId || null,
+                profileSeed: {
+                    email: resolvedUser.email,
+                    name: resolvedUser.name,
+                    avatar: user.avatar || null,
+                },
+            }), LOGIN_DB_PERSISTENCE_BASE_BUDGET_MS);
+            loginBootstrapBusinessId =
+                String(bootstrap.user.businessId || bootstrap.identity.businessId || "").trim() ||
+                    null;
+        }
+        catch (error) {
+            console.warn("AUTH_LOGIN_BOOTSTRAP_PRE_TOKEN_FAILED", {
+                userId: resolvedUser.id,
+                reason: String(error?.message || error || "auth_bootstrap_failed"),
+            });
+        }
+        const businessId = loginBootstrapBusinessId || user.businessId || null;
         const tAccessToken = Date.now();
         const accessToken = (0, generateToken_1.generateAccessToken)(resolvedUser.id, resolvedUser.role, businessId, resolvedUser.tokenVersion);
         console.log("[LOGIN_TRACE] access_token_ms=", Date.now() - tAccessToken);

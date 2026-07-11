@@ -111,8 +111,21 @@ export const requirePermission = (action: PermissionAction) =>
 
         return next();
       }
-
+      console.info("RBAC_BEFORE_ASSERT", {
+  action: accessRequest.action,
+  tenantId: accessRequest.tenantId,
+  businessId: accessRequest.businessId,
+  actorId: accessRequest.actorId,
+  requestId: req.requestId,
+});
       await assertAuthorizedAccess(accessRequest);
+      console.info("RBAC_AFTER_ASSERT", {
+  action: accessRequest.action,
+  tenantId: accessRequest.tenantId,
+  businessId: accessRequest.businessId,
+  actorId: accessRequest.actorId,
+  requestId: req.requestId,
+});
 
       next();
     } catch (error) {

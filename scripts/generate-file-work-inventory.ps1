@@ -253,6 +253,7 @@ foreach ($family in $families) {
     $names = if ($r.Components) { $r.Components } elseif ($r.Exports) { $r.Exports } else { [IO.Path]::GetFileNameWithoutExtension($r.Path) }
     $componentLines += "- `$($r.Path)`: $(Escape-Cell $r.Work) Names: $(Escape-Cell $names). Signals: $(Escape-Cell $r.Signals)."
   }
+
   $componentLines += ""
 }
 Set-Content -LiteralPath $frontendPath -Value ($componentLines -join "`r`n") -Encoding UTF8

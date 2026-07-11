@@ -6,6 +6,7 @@ import { runDetachedBackgroundTask } from "../../utils/backgroundTask";
 import { decrypt, encrypt } from "../../utils/encrypt";
 import { logAnalyticsDashboardLifecycle } from "../../utils/analyticsDashboardLifecycleTrace";
 import { registerKmsAuditSink, kmsProviderRouterService } from "./kmsProviderRouter.service";
+import { getRequestContext } from "../../observability/requestContext";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -573,6 +574,100 @@ type SecurityStore = {
   sessionLedgerInflightWrites: Map<string, { expiresAt: number; promise: Promise<unknown> }>;
 };
 
+const maskTenantId = (id?: string | null): string => {
+  if (!id) return "";
+  const str = String(id).trim();
+  if (str.length <= 6) return str;
+  return "*".repeat(str.length - 6) + str.slice(-6);
+};
+
+const getCallerInfo = (lines: string[]) => {
+  const callerFrame = lines[3] || "";
+  const match = callerFrame.match(/at\s+([^(]+)\s+\((.+):(\d+):(\d+)\)/) || callerFrame.match(/at\s+(.+):(\d+):(\d+)/);
+  if (match) {
+    if (match.length === 5) {
+      const func = match[1].trim();
+      const path = match[2];
+      const filename = path.split(/[/\\]/).pop() || path;
+      return { functionName: func, fileName: filename };
+    } else {
+      const path = match[1];
+      const filename = path.split(/[/\\]/).pop() || path;
+      return { functionName: "anonymous", fileName: filename };
+    }
+  }
+  return { functionName: "unknown", fileName: "unknown" };
+};
+
+class InstrumentedSet extends Set<string> {
+  add(value: string, metadata?: { reason?: string; trigger?: string }): this {
+    super.add(value);
+
+    const err = new Error();
+    const stackLines = (err.stack || "").split("\n").map(l => l.trim());
+    const caller = getCallerInfo(stackLines);
+    const ctx = getRequestContext();
+    const stackFrames = stackLines.slice(3, 7).join(" | ");
+
+    console.info("tenant_frozen_added", {
+      requestId: ctx?.requestId || "N/A",
+      traceId: ctx?.traceId || ctx?.requestId || "N/A",
+      tenantId: maskTenantId(value),
+      actorUserId: ctx?.userId || "N/A",
+      actorRole: (ctx as any)?.role || "N/A",
+      sourceFunction: caller.functionName,
+      sourceFile: caller.fileName,
+      reason: metadata?.reason || "System isolation enforcement",
+      trigger: metadata?.trigger || "direct_write",
+      stack: stackFrames,
+      timestamp: new Date().toISOString(),
+    });
+
+    return this;
+  }
+
+  delete(value: string, metadata?: { reason?: string }): boolean {
+    const result = super.delete(value);
+
+    const err = new Error();
+    const stackLines = (err.stack || "").split("\n").map(l => l.trim());
+    const caller = getCallerInfo(stackLines);
+    const ctx = getRequestContext();
+
+    console.info("tenant_frozen_removed", {
+      requestId: ctx?.requestId || "N/A",
+      traceId: ctx?.traceId || ctx?.requestId || "N/A",
+      tenantId: maskTenantId(value),
+      sourceFunction: caller.functionName,
+      reason: metadata?.reason || "Administrative manual unfreeze",
+      timestamp: new Date().toISOString(),
+    });
+
+    return result;
+  }
+
+  has(value: string): boolean {
+    const exists = super.has(value);
+
+    const err = new Error();
+    const stackLines = (err.stack || "").split("\n").map(l => l.trim());
+    const caller = getCallerInfo(stackLines);
+    const ctx = getRequestContext();
+
+    console.info("tenant_frozen_check", {
+      requestId: ctx?.requestId || "N/A",
+      traceId: ctx?.traceId || ctx?.requestId || "N/A",
+      tenantId: maskTenantId(value),
+      exists,
+      sourceFunction: caller.functionName,
+      sourceFile: caller.fileName,
+      timestamp: new Date().toISOString(),
+    });
+
+    return exists;
+  }
+}
+
 const globalForSecurity = globalThis as typeof globalThis & {
   __sylphSecurityStore?: SecurityStore;
 };
@@ -621,7 +716,7 @@ const createStore = (): SecurityStore => ({
   riskCounter: new Map(),
   revokedSessionKeys: new Set(),
   consumedMfaChallenges: new Set(),
-  frozenTenants: new Set(),
+  frozenTenants: new InstrumentedSet(),
   failpoints: new Set(),
   sessionLedgerInflightWrites: new Map(),
 });
@@ -850,7 +945,16 @@ const isTenantFrozen = (tenantId?: string | null) => {
     return false;
   }
 
-  return getStore().frozenTenants.has(normalized);
+  const exists = getStore().frozenTenants.has(normalized);
+
+  console.info("is_tenant_frozen_result", {
+    tenantId: maskTenantId(normalized),
+    exists,
+    setSize: getStore().frozenTenants.size,
+    timestamp: new Date().toISOString(),
+  });
+
+  return exists;
 };
 
 const writePolicyLedger = async (input: {
@@ -940,6 +1044,17 @@ const writePolicyLedger = async (input: {
   return row;
 };
 
+let hasLoggedStartupSnapshot = false;
+const emitStartupSnapshotOnce = (store: SecurityStore) => {
+  if (hasLoggedStartupSnapshot) return;
+  hasLoggedStartupSnapshot = true;
+  console.info("frozen_tenants_startup_snapshot", {
+    setSize: store.frozenTenants.size,
+    tenantIds: Array.from(store.frozenTenants).map(maskTenantId),
+    startupTimestamp: new Date().toISOString(),
+  });
+};
+
 export const bootstrapSecurityGovernanceOS = async () => {
   const store = getStore();
   if (governanceInitialized || governanceAlreadyInitialized || store.bootstrappedAt) {
@@ -948,6 +1063,7 @@ export const bootstrapSecurityGovernanceOS = async () => {
     if (!store.bootstrappedAt) {
       store.bootstrappedAt = new Date();
     }
+    emitStartupSnapshotOnce(store);
     return {
       bootstrappedAt: store.bootstrappedAt,
       phaseVersion: SECURITY_PHASE_VERSION,
@@ -1229,6 +1345,7 @@ export const bootstrapSecurityGovernanceOS = async () => {
     store.bootstrappedAt = timestamp;
     governanceInitialized = true;
     governanceAlreadyInitialized = true;
+    emitStartupSnapshotOnce(store);
     try {
       await redis.set(redisKey, String(timestamp.getTime()));
     } catch (err) {
@@ -1389,7 +1506,10 @@ export const assertTenantIsolation = async (input: {
     await persistTenantIsolationLedger();
     if (isCritical) {
       if (actorTenantId) {
-        getStore().frozenTenants.add(actorTenantId);
+        (getStore().frozenTenants as InstrumentedSet).add(actorTenantId, {
+          reason: input.reason || "Cross-tenant bleed blocked",
+          trigger: `subsystem: ${subsystem}`,
+        });
       }
       await attestInfraIsolation({
         businessId: row.businessId,
@@ -2728,6 +2848,19 @@ export const authorizeAccess = async (request: AccessRequest) => {
   }
 
   if (tenantId && isTenantFrozen(tenantId) && actorType !== "SYSTEM") {
+    const ctx = getRequestContext();
+    console.info("authorization_denied_tenant_frozen", {
+      tenantId: maskTenantId(tenantId),
+      requestId: ctx?.requestId || "N/A",
+      traceId: ctx?.traceId || ctx?.requestId || "N/A",
+      actorUserId: actorId || "N/A",
+      actorRole: role || "N/A",
+      action,
+      resource: request.resourceTenantId || (request.metadata?.resource as string) || "N/A",
+      reason: "tenant_frozen",
+      timestamp: new Date().toISOString(),
+    });
+
     await traceFeatureGateAwait(
       "authorizeAccess:appendAuthEvent:tenant_frozen",
       {
@@ -3706,7 +3839,10 @@ export const attestInfraIsolation = async (input: {
 
   if (breachedDomains.length) {
     if (tenantId) {
-      getStore().frozenTenants.add(tenantId);
+      (getStore().frozenTenants as InstrumentedSet).add(tenantId, {
+        reason: `Isolation breach detected across: ${breachedDomains.join(", ")}`,
+        trigger: `source: ${input.source}`,
+      });
       row.containedAt = now();
       row.updatedAt = row.containedAt;
     }
@@ -3760,11 +3896,17 @@ const applyContainment = async (input: {
       reason: "fraud_containment_revoke",
     });
     if (tenantId) {
-      store.frozenTenants.add(tenantId);
+      (store.frozenTenants as InstrumentedSet).add(tenantId, {
+        reason: `Containment action: ${action}`,
+        trigger: `containment_action_${action}`,
+      });
     }
   } else if (action === "TENANT_FREEZE") {
     if (tenantId) {
-      store.frozenTenants.add(tenantId);
+      (store.frozenTenants as InstrumentedSet).add(tenantId, {
+        reason: `Containment action: ${action}`,
+        trigger: `containment_action_${action}`,
+      });
     }
   } else if (action === "BLOCK_WEBHOOK") {
     const overrideKey = `override:webhook:${stableHash([

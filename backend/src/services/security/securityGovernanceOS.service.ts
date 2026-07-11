@@ -3234,6 +3234,38 @@ export const assertAuthorizedAccess = async (request: AccessRequest) => {
     () => authorizeAccess(request)
   );
   if (!result.allowed) {
+    const runtimeReason = result.reason || "denied";
+    let branchName = "DENIED";
+    if (runtimeReason === "tenant_frozen") branchName = "TENANT_FROZEN";
+    else if (runtimeReason === "tenant_isolation") branchName = "TENANT_ISOLATION";
+    else if (runtimeReason === "security_override") branchName = "SECURITY_OVERRIDE";
+    else if (runtimeReason === "permission_denied") branchName = "PERMISSION_DENIED";
+    else if (runtimeReason === "scope_denied") branchName = "SCOPE_DENIED";
+    else if (runtimeReason === "outside_allowed_hours") branchName = "OUTSIDE_ALLOWED_HOURS";
+    else if (runtimeReason === "mfa_required") branchName = "MFA_REQUIRED";
+    else if (runtimeReason === "escalation_denied") branchName = "ESCALATION_DENIED";
+    else {
+      branchName = String(runtimeReason).toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+    }
+
+    const ctx = getRequestContext();
+    const requestId = ctx?.requestId || "N/A";
+
+    console.info("AUTH_BRANCH_HIT", {
+      branch: branchName,
+      reason: runtimeReason,
+      file: __filename,
+      line: 3237,
+      requestId,
+      tenantId: request.tenantId ?? null,
+      businessId: request.businessId ?? null,
+      actorId: request.actorId ?? null,
+      actorType: request.actorType ?? null,
+      role: request.role ?? null,
+      action: request.action ?? null,
+      timestamp: new Date().toISOString()
+    });
+
     throw forbidden(`Access denied (${result.reason})`);
   }
   return result;

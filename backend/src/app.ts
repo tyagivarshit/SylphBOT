@@ -950,6 +950,15 @@ app.use("/api/leads", protect, leadRoutes);
 app.use("/api/analytics", protect, analyticsRoutes);
 app.use("/api/autonomous", protect, autonomousRoutes);
 console.info("EXEC_ROUTER_MOUNTED");
+app.use("/api/executive", (req, res, next) => {
+    console.info("EXEC_MOUNT_HIT", {
+        url: req.originalUrl,
+        method: req.method,
+        requestId: req.requestId,
+    });
+
+    next();
+});
 app.use("/api/executive", protect, executiveRoutes);
 app.use("/api/audit", protect, auditRoutes);
 app.use("/api/search", protect, searchRoutes);

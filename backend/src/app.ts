@@ -378,6 +378,15 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(globalLimiter);
 app.use(cookieParser());
+app.use((req, res, next) => {
+  console.info("GLOBAL_MIDDLEWARE", {
+    method: req.method,
+    url: req.originalUrl,
+    requestId: req.requestId,
+  });
+
+  next();
+});
 app.use(passport.initialize());
 app.use((req, res, next) => {
   const originalSetHeader = res.setHeader.bind(res);

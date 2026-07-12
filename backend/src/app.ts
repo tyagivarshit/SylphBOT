@@ -348,6 +348,15 @@ app.use((req, res, next) => {
 });
 
 app.use(requestContextMiddleware);
+app.use((req, _res, next) => {
+  console.error("REQUEST_ENTERED_PROCESS", {
+    method: req.method,
+    url: req.originalUrl,
+    requestId: req.requestId,
+  });
+
+  next();
+});
 app.use(
   compression({
     filter: (req, res) => {

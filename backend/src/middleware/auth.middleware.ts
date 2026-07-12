@@ -1552,6 +1552,11 @@ export const protect = async (
   res: Response,
   next: NextFunction
 ) => {
+  console.info("PROTECT_ENTER",{
+        route:req.originalUrl,
+        method:req.method,
+        requestId:req.requestId
+    });
   const startedAt = Date.now();
   const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
   let authEndLogged = false;
@@ -1741,6 +1746,7 @@ export const protect = async (
       if (isRequestClosed(req, res)) {
         return;
       }
+      console.info("PROTECT_SUCCESS");
       return next();
     }
 
@@ -1785,20 +1791,30 @@ export const protect = async (
         if (isRequestClosed(req, res)) {
           return;
         }
+        console.info("PROTECT_SUCCESS");
         return next();
       }
     }
 
     const accessToken = req.cookies?.accessToken;
     const refreshToken = req.cookies?.refreshToken;
+    console.info("PROTECT_TOKENS",{
+    access:!!accessToken,
+    refresh:!!refreshToken,
+    requestId:req.requestId
+});
 
     if (!accessToken && !refreshToken) {
+      console.info("PROTECT_NO_TOKENS");
       throw unauthorized("Missing session");
     }
 
     if (isInstantCheckoutRoute(req) && accessToken) {
       const fastPathStartedAt = Date.now();
       const decoded = verifyAccessToken(accessToken);
+      console.info("ACCESS_TOKEN_DECODED",{
+    decoded:!!decoded
+});
       decodedAccessToken = decoded;
       const accessTokenKey = hashToken(accessToken);
       const maybeContext =
@@ -1867,6 +1883,7 @@ export const protect = async (
         if (isRequestClosed(req, res)) {
           return;
         }
+        console.info("PROTECT_SUCCESS");
         return next();
       }
 
@@ -2069,6 +2086,7 @@ export const protect = async (
         if (isRequestClosed(req, res)) {
           return;
         }
+        console.info("PROTECT_SUCCESS");
         return next();
       } catch (error) {
         const lookupDurationMs = Date.now() - lookupStartedAt;
@@ -2165,6 +2183,7 @@ export const protect = async (
           if (isRequestClosed(req, res)) {
             return;
           }
+          console.info("PROTECT_SUCCESS");
           return next();
         }
 
@@ -2185,6 +2204,7 @@ export const protect = async (
           if (isRequestClosed(req, res)) {
             return;
           }
+          console.info("PROTECT_SUCCESS");
           return next();
         }
 
@@ -2255,6 +2275,7 @@ export const protect = async (
             if (isRequestClosed(req, res)) {
               return;
             }
+            console.info("PROTECT_SUCCESS");
             return next();
           }
         }
@@ -2312,6 +2333,7 @@ export const protect = async (
           if (isRequestClosed(req, res)) {
             return;
           }
+          console.info("PROTECT_SUCCESS");
           return next();
         }
 
@@ -2398,6 +2420,7 @@ export const protect = async (
           if (isRequestClosed(req, res)) {
             return;
           }
+          console.info("PROTECT_SUCCESS");
           return next();
         }
 
@@ -2587,6 +2610,7 @@ export const protect = async (
             if (isRequestClosed(req, res)) {
               return;
             }
+            console.info("PROTECT_SUCCESS");
             return next();
           }
         }
@@ -2609,6 +2633,7 @@ export const protect = async (
             if (isRequestClosed(req, res)) {
               return;
             }
+            console.info("PROTECT_SUCCESS");
             return next();
           }
 
@@ -2628,6 +2653,7 @@ export const protect = async (
             if (isRequestClosed(req, res)) {
               return;
             }
+            console.info("PROTECT_SUCCESS");
             return next();
           }
         }
@@ -2669,7 +2695,7 @@ export const protect = async (
       if (isRequestClosed(req, res)) {
         return;
       }
-
+      console.info("PROTECT_SUCCESS");
       return next();
     }
 
@@ -2731,7 +2757,7 @@ export const protect = async (
           if (isRequestClosed(req, res)) {
             return;
           }
-
+          console.info("PROTECT_SUCCESS");
           return next();
         }
       }
@@ -2871,7 +2897,7 @@ export const protect = async (
             if (isRequestClosed(req, res)) {
               return;
             }
-
+            console.info("PROTECT_SUCCESS");
             return next();
           }
         }
@@ -2964,12 +2990,18 @@ export const protect = async (
         source: "refresh_token",
       },
     });
-
+    console.info("PROTECT_SUCCESS");
     return next();
-  } catch (err) {
+  } 
+    catch (err) {
+    console.error("PROTECT_EXCEPTION", {
+        error: err instanceof Error ? err.message : err,
+    });
+
     if (isRequestClosed(req, res) || isRequestAbortedError(err)) {
-      return;
+        return;
     }
+
     return next(err);
-  }
-};
+}
+}

@@ -224,6 +224,10 @@ export const getExecutiveRuntimeExecutionAudit = () => {
 };
 
 export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInput) => {
+   console.info("EXEC_SERVICE_ENTER", {
+        requestId: input.requestId,
+        tenantId: input.tenantId,
+    });
   const requestScope = container.createScope();
   const trace: ExecutionTraceEntry[] = [];
   const duplicateCounts: Record<string, number> = {};

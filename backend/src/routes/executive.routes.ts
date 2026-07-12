@@ -16,7 +16,19 @@ router.use(attachBillingContext);
 
 router.post(
   "/runtime/execute",
+
+  (req, res, next) => {
+    console.info("EXEC_ROUTE_ENTER", {
+      requestId: req.requestId,
+      route: req.originalUrl,
+      method: req.method,
+    });
+
+    next();
+  },
+
   auditRequest("executive.runtime_execute"),
+
   executeExecutiveRuntimeController
 );
 

@@ -21,6 +21,10 @@ export const executeExecutiveRuntimeController = async (
   req: ExecutiveRequest,
   res: Response
 ) => {
+  console.info("EXEC_CONTROLLER_ENTER", {
+        requestId: req.requestId,
+        tenantId: getTenantId(req),
+    });
   const tenantId = getTenantId(req);
 
   if (!tenantId) {

@@ -1557,8 +1557,12 @@ export const protect = async (
         method:req.method,
         requestId:req.requestId
     });
+    console.info("P0_AFTER_ENTER");
   const startedAt = Date.now();
   const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
+  console.info("P1_AFTER_ANALYTICS_CHECK", {
+  isAnalyticsDashboard,
+});
   let authEndLogged = false;
   const logAuthEnd = () => {
     if (!isAnalyticsDashboard || authEndLogged) {
@@ -1578,6 +1582,7 @@ export const protect = async (
     logAuthEnd();
     return originalNext(...args);
   }) as NextFunction;
+  console.info("P2_AFTER_NEXT_WRAP");
   if (isAnalyticsDashboard) {
     logAnalyticsDashboardLifecycle("AUTH_START", {
       correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
@@ -1586,14 +1591,18 @@ export const protect = async (
       route: req.originalUrl,
       method: req.method,
     });
+    console.info("P3_AFTER_ANALYTICS_LOG");
   }
   const isCheckout =
     String(req.originalUrl || "").includes("/checkout") ||
     String(req.originalUrl || "").includes("surface=checkout") ||
     String(req.query?.surface || "").trim().toLowerCase() === "checkout";
   const directLookupRoute = shouldUseDirectAuthLookup(req);
+  console.info("P4_AFTER_DIRECT_LOOKUP");
   const degradedAuthAllowed = !directLookupRoute && shouldServeDegradedAuth(req);
+  console.info("P5_AFTER_DEGRADED");
   const routeCritical = !directLookupRoute && isAuthStabilizationCriticalRoute(req);
+  console.info("P6_AFTER_ROUTE_CRITICAL");
   let decodedAccessToken: ReturnType<typeof verifyAccessToken> = null;
   let accessLookupTransientReason: string | null = null;
   let accessLookupTransientStage: string | null = null;

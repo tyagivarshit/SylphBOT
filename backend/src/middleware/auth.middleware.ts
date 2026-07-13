@@ -1803,15 +1803,22 @@ export const protect = async (
     refresh:!!refreshToken,
     requestId:req.requestId
 });
+console.info("P6_TOKENS_READ",{
+    access:!!accessToken,
+    refresh:!!refreshToken
+});
 
     if (!accessToken && !refreshToken) {
       console.info("PROTECT_NO_TOKENS");
       throw unauthorized("Missing session");
     }
-
+    console.info("P7_AFTER_TOKEN_CHECK");
     if (isInstantCheckoutRoute(req) && accessToken) {
       const fastPathStartedAt = Date.now();
       const decoded = verifyAccessToken(accessToken);
+      console.info("P8_ACCESS_TOKEN_VERIFIED",{
+    valid:!!decoded
+});
       console.info("ACCESS_TOKEN_DECODED",{
     decoded:!!decoded
 });
@@ -1895,7 +1902,9 @@ export const protect = async (
         elapsedMs: Date.now() - fastPathStartedAt,
       });
     }
-
+    console.info("P9_DIRECT_LOOKUP",{
+    directLookupRoute
+});
     if (directLookupRoute) {
       const lookupStartedAt = Date.now();
       req.logger?.info(
@@ -1912,7 +1921,11 @@ export const protect = async (
         let resolvedSource: "access_token" | "refresh_token" = "access_token";
 
         if (accessToken) {
+          console.info("P10_ACCESS_BRANCH");
           const decoded = verifyAccessToken(accessToken);
+          console.info("P11_ACCESS_DECODE",{
+    valid:!!decoded
+});
           decodedAccessToken = decoded;
 
           if (decoded?.id && typeof decoded.tokenVersion === "number") {
@@ -2118,7 +2131,11 @@ export const protect = async (
     }
 
     if (accessToken) {
+      console.info("P10B_ACCESS_FLOW");
       const decoded = verifyAccessToken(accessToken);
+      console.info("P11B_ACCESS_DECODE",{
+    valid:!!decoded
+});
       decodedAccessToken = decoded;
       const accessTokenKey = hashToken(accessToken);
 
@@ -2184,6 +2201,11 @@ export const protect = async (
             return;
           }
           console.info("PROTECT_SUCCESS");
+          console.info("PROTECT_SUCCESS_PREBOUND");
+          console.info("PROTECT_SUCCESS_MEMORY");
+          console.info("PROTECT_SUCCESS_REDIS");
+          console.info("PROTECT_SUCCESS_DB");
+          console.info("PROTECT_SUCCESS_REFRESH");
           return next();
         }
 
@@ -2279,7 +2301,7 @@ export const protect = async (
             return next();
           }
         }
-
+        console.info("P12_MEMORY_LOOKUP");
         const cachedContext = readMemoryAuthContext(
           accessTokenKey,
           decoded.tokenVersion
@@ -2344,6 +2366,7 @@ export const protect = async (
             cache: "auth_context",
           },
         });
+        console.info("P13_REDIS_LOOKUP");
         let redisContext: CachedAuthContext | null = null;
         try {
           redisContext = await runAuthStage({
@@ -2459,6 +2482,7 @@ export const protect = async (
             "Skipping auth DB fallback due to low request budget"
           );
         } else {
+          console.info("P14_DB_LOOKUP");
           const lookupPromise =
             existingLookup ||
             (async () => {
@@ -2702,7 +2726,7 @@ export const protect = async (
     if (isRequestClosed(req, res)) {
       return;
     }
-
+    console.info("P15_REFRESH_FLOW");
     if (!refreshToken) {
       throw unauthorized("Session expired");
     }
@@ -2994,9 +3018,12 @@ export const protect = async (
     return next();
   } 
     catch (err) {
-    console.error("PROTECT_EXCEPTION", {
-        error: err instanceof Error ? err.message : err,
-    });
+    console.error("PROTECT_EXCEPTION",{
+    error:err instanceof Error ? err.message : err,
+    stack:err instanceof Error ? err.stack : undefined,
+    route:req.originalUrl,
+    requestId:req.requestId
+});
 
     if (isRequestClosed(req, res) || isRequestAbortedError(err)) {
         return;

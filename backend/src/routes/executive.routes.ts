@@ -7,53 +7,67 @@ import { auditRequest } from "../middleware/audit.middleware";
 import { requirePermission } from "../middleware/rbac.middleware";
 import { attachBillingContext } from "../middleware/subscription.middleware";
 import { requireBusinessContext } from "../middleware/tenant.middleware";
+import { subscriptionGuard } from "../middleware/subscriptionGuard.middleware";
+import { executiveLimiter } from "../middleware/rateLimit.middleware";
+import { badRequest } from "../utils/AppError";
 
 const router = Router();
-router.use((req,res,next)=>{
-    console.info("EXEC_ROUTER_USE",{
-        url:req.originalUrl,
-        path:req.path,
-        method:req.method
-    });
-    next();
-});
-router.use((req,res,next)=>{
-    console.info("AFTER_ROUTER");
-    next();
-});
+
+const validateExecutivePayload = (req: any, res: any, next: any) => {
+  const body = req.body;
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return next(badRequest("Invalid request body"));
+  }
+
+  const allowedKeys = new Set(["objective", "context"]);
+  const bodyKeys = Object.keys(body);
+
+  for (const key of bodyKeys) {
+    if (!allowedKeys.has(key)) {
+      return next(badRequest(`Unknown payload property: ${key}`, { unknownField: key }));
+    }
+  }
+
+  if (!("objective" in body)) {
+    return next(badRequest("objective is required", { missingField: "objective" }));
+  }
+
+  const objective = body.objective;
+
+  if (typeof objective !== "string") {
+    return next(badRequest("objective must be a string", { invalidType: "objective" }));
+  }
+
+  if (objective.trim() === "") {
+    return next(badRequest("objective must not be an empty string", { invalidValue: "objective" }));
+  }
+
+  if ("context" in body) {
+    const context = body.context;
+    if (context !== undefined && context !== null) {
+      if (typeof context !== "object" || Array.isArray(context)) {
+        return next(badRequest("context must be a plain object", { invalidType: "context" }));
+      }
+    }
+  }
+
+  next();
+};
+
 router.use(requireBusinessContext);
-router.use((req,res,next)=>{
-    console.info("AFTER_BUSINESS");
-    next();
-});
-router.use(requirePermission("analytics:view"));
-router.use((req,res,next)=>{
-    console.info("AFTER_PERMISSION");
-    next();
-});
+router.use(requirePermission("executive:execute"));
+router.use(subscriptionGuard);
 router.use(attachBillingContext);
-router.use((req,res,next)=>{
-    console.info("AFTER_BILLING");
-    next();
-});
+
 router.post(
   "/runtime/execute",
-
-  (req, res, next) => {
-    console.info("EXEC_ROUTE_ENTER", {
-      requestId: req.requestId,
-      route: req.originalUrl,
-      method: req.method,
-    });
-
-    next();
-  },
-
+  executiveLimiter,
+  validateExecutivePayload,
   auditRequest("executive.runtime_execute"),
-
   executeExecutiveRuntimeController
 );
 
-router.get("/runtime/audit", getExecutiveRuntimeAuditController);
+router.get("/runtime/audit", executiveLimiter, getExecutiveRuntimeAuditController);
 
 export default router;

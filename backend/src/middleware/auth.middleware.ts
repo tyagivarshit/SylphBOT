@@ -1552,17 +1552,11 @@ export const protect = async (
   res: Response,
   next: NextFunction
 ) => {
-  console.info("PROTECT_ENTER",{
-        route:req.originalUrl,
-        method:req.method,
-        requestId:req.requestId
-    });
-    console.info("P0_AFTER_ENTER");
+  
+    
   const startedAt = Date.now();
   const isAnalyticsDashboard = isAnalyticsDashboardRequest(req);
-  console.info("P1_AFTER_ANALYTICS_CHECK", {
-  isAnalyticsDashboard,
-});
+  
   let authEndLogged = false;
   const logAuthEnd = () => {
     if (!isAnalyticsDashboard || authEndLogged) {
@@ -1582,7 +1576,7 @@ export const protect = async (
     logAuthEnd();
     return originalNext(...args);
   }) as NextFunction;
-  console.info("P2_AFTER_NEXT_WRAP");
+  
   if (isAnalyticsDashboard) {
     logAnalyticsDashboardLifecycle("AUTH_START", {
       correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
@@ -1591,18 +1585,18 @@ export const protect = async (
       route: req.originalUrl,
       method: req.method,
     });
-    console.info("P3_AFTER_ANALYTICS_LOG");
+    
   }
   const isCheckout =
     String(req.originalUrl || "").includes("/checkout") ||
     String(req.originalUrl || "").includes("surface=checkout") ||
     String(req.query?.surface || "").trim().toLowerCase() === "checkout";
   const directLookupRoute = shouldUseDirectAuthLookup(req);
-  console.info("P4_AFTER_DIRECT_LOOKUP");
+  
   const degradedAuthAllowed = !directLookupRoute && shouldServeDegradedAuth(req);
-  console.info("P5_AFTER_DEGRADED");
+  
   const routeCritical = !directLookupRoute && isAuthStabilizationCriticalRoute(req);
-  console.info("P6_AFTER_ROUTE_CRITICAL");
+  
   let decodedAccessToken: ReturnType<typeof verifyAccessToken> = null;
   let accessLookupTransientReason: string | null = null;
   let accessLookupTransientStage: string | null = null;
@@ -1755,7 +1749,7 @@ export const protect = async (
       if (isRequestClosed(req, res)) {
         return;
       }
-      console.info("PROTECT_SUCCESS");
+      
       return next();
     }
 
@@ -1800,34 +1794,25 @@ export const protect = async (
         if (isRequestClosed(req, res)) {
           return;
         }
-        console.info("PROTECT_SUCCESS");
+        
         return next();
       }
     }
 
     const accessToken = req.cookies?.accessToken;
     const refreshToken = req.cookies?.refreshToken;
-    console.info("PROTECT_TOKENS",{
-    access:!!accessToken,
-    refresh:!!refreshToken,
-    requestId:req.requestId
-});
-console.info("P6_TOKENS_READ",{
-    access:!!accessToken,
-    refresh:!!refreshToken
-});
+    
+
 
     if (!accessToken && !refreshToken) {
-      console.info("PROTECT_NO_TOKENS");
+      
       throw unauthorized("Missing session");
     }
-    console.info("P7_AFTER_TOKEN_CHECK");
+    
     if (isInstantCheckoutRoute(req) && accessToken) {
       const fastPathStartedAt = Date.now();
       const decoded = verifyAccessToken(accessToken);
-      console.info("P8_ACCESS_TOKEN_VERIFIED",{
-    valid:!!decoded
-});
+      
       console.info("ACCESS_TOKEN_DECODED",{
     decoded:!!decoded
 });
@@ -1899,7 +1884,7 @@ console.info("P6_TOKENS_READ",{
         if (isRequestClosed(req, res)) {
           return;
         }
-        console.info("PROTECT_SUCCESS");
+        
         return next();
       }
 
@@ -1911,9 +1896,7 @@ console.info("P6_TOKENS_READ",{
         elapsedMs: Date.now() - fastPathStartedAt,
       });
     }
-    console.info("P9_DIRECT_LOOKUP",{
-    directLookupRoute
-});
+    
     if (directLookupRoute) {
       const lookupStartedAt = Date.now();
       req.logger?.info(
@@ -1930,11 +1913,9 @@ console.info("P6_TOKENS_READ",{
         let resolvedSource: "access_token" | "refresh_token" = "access_token";
 
         if (accessToken) {
-          console.info("P10_ACCESS_BRANCH");
+          
           const decoded = verifyAccessToken(accessToken);
-          console.info("P11_ACCESS_DECODE",{
-    valid:!!decoded
-});
+          
           decodedAccessToken = decoded;
 
           if (decoded?.id && typeof decoded.tokenVersion === "number") {
@@ -2108,7 +2089,7 @@ console.info("P6_TOKENS_READ",{
         if (isRequestClosed(req, res)) {
           return;
         }
-        console.info("PROTECT_SUCCESS");
+        
         return next();
       } catch (error) {
         const lookupDurationMs = Date.now() - lookupStartedAt;
@@ -2140,11 +2121,9 @@ console.info("P6_TOKENS_READ",{
     }
 
     if (accessToken) {
-      console.info("P10B_ACCESS_FLOW");
+      
       const decoded = verifyAccessToken(accessToken);
-      console.info("P11B_ACCESS_DECODE",{
-    valid:!!decoded
-});
+      
       decodedAccessToken = decoded;
       const accessTokenKey = hashToken(accessToken);
 
@@ -2209,12 +2188,12 @@ console.info("P6_TOKENS_READ",{
           if (isRequestClosed(req, res)) {
             return;
           }
-          console.info("PROTECT_SUCCESS");
-          console.info("PROTECT_SUCCESS_PREBOUND");
-          console.info("PROTECT_SUCCESS_MEMORY");
-          console.info("PROTECT_SUCCESS_REDIS");
-          console.info("PROTECT_SUCCESS_DB");
-          console.info("PROTECT_SUCCESS_REFRESH");
+          
+          
+          
+          
+          
+          
           return next();
         }
 
@@ -2235,7 +2214,7 @@ console.info("P6_TOKENS_READ",{
           if (isRequestClosed(req, res)) {
             return;
           }
-          console.info("PROTECT_SUCCESS");
+          
           return next();
         }
 
@@ -2306,11 +2285,11 @@ console.info("P6_TOKENS_READ",{
             if (isRequestClosed(req, res)) {
               return;
             }
-            console.info("PROTECT_SUCCESS");
+            
             return next();
           }
         }
-        console.info("P12_MEMORY_LOOKUP");
+        
         const cachedContext = readMemoryAuthContext(
           accessTokenKey,
           decoded.tokenVersion
@@ -2364,7 +2343,7 @@ console.info("P6_TOKENS_READ",{
           if (isRequestClosed(req, res)) {
             return;
           }
-          console.info("PROTECT_SUCCESS");
+          
           return next();
         }
 
@@ -2375,7 +2354,7 @@ console.info("P6_TOKENS_READ",{
             cache: "auth_context",
           },
         });
-        console.info("P13_REDIS_LOOKUP");
+        
         let redisContext: CachedAuthContext | null = null;
         try {
           redisContext = await runAuthStage({
@@ -2452,7 +2431,7 @@ console.info("P6_TOKENS_READ",{
           if (isRequestClosed(req, res)) {
             return;
           }
-          console.info("PROTECT_SUCCESS");
+          
           return next();
         }
 
@@ -2491,7 +2470,7 @@ console.info("P6_TOKENS_READ",{
             "Skipping auth DB fallback due to low request budget"
           );
         } else {
-          console.info("P14_DB_LOOKUP");
+          
           const lookupPromise =
             existingLookup ||
             (async () => {
@@ -2643,7 +2622,7 @@ console.info("P6_TOKENS_READ",{
             if (isRequestClosed(req, res)) {
               return;
             }
-            console.info("PROTECT_SUCCESS");
+            
             return next();
           }
         }
@@ -2666,7 +2645,7 @@ console.info("P6_TOKENS_READ",{
             if (isRequestClosed(req, res)) {
               return;
             }
-            console.info("PROTECT_SUCCESS");
+            
             return next();
           }
 
@@ -2686,7 +2665,7 @@ console.info("P6_TOKENS_READ",{
             if (isRequestClosed(req, res)) {
               return;
             }
-            console.info("PROTECT_SUCCESS");
+            
             return next();
           }
         }
@@ -2728,14 +2707,14 @@ console.info("P6_TOKENS_READ",{
       if (isRequestClosed(req, res)) {
         return;
       }
-      console.info("PROTECT_SUCCESS");
+      
       return next();
     }
 
     if (isRequestClosed(req, res)) {
       return;
     }
-    console.info("P15_REFRESH_FLOW");
+    
     if (!refreshToken) {
       throw unauthorized("Session expired");
     }
@@ -2790,7 +2769,7 @@ console.info("P6_TOKENS_READ",{
           if (isRequestClosed(req, res)) {
             return;
           }
-          console.info("PROTECT_SUCCESS");
+          
           return next();
         }
       }
@@ -2930,7 +2909,7 @@ console.info("P6_TOKENS_READ",{
             if (isRequestClosed(req, res)) {
               return;
             }
-            console.info("PROTECT_SUCCESS");
+            
             return next();
           }
         }
@@ -3023,7 +3002,7 @@ console.info("P6_TOKENS_READ",{
         source: "refresh_token",
       },
     });
-    console.info("PROTECT_SUCCESS");
+    
     return next();
   } 
     catch (err) {

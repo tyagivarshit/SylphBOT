@@ -445,6 +445,16 @@ const startServer = async () => {
         if (!diContainer_1.container.has("IMemoryEngine")) {
             await bootstrap_1.bootstrapper.bootstrap();
         }
+        if (!diContainer_1.container.has("IEmbeddingEngine")) {
+            const { EmbeddingEngine } = await Promise.resolve().then(() => __importStar(require("./services/embedding.service")));
+            diContainer_1.container.registerInstance("IEmbeddingEngine", new EmbeddingEngine());
+            logger_1.default.info({ event: "Embedding Engine Registered" }, "Embedding Engine registered in DI Container.");
+        }
+        if (!diContainer_1.container.has("IKnowledgeStore")) {
+            const { KnowledgeStore } = await Promise.resolve().then(() => __importStar(require("./services/knowledgeSearch.service")));
+            diContainer_1.container.registerInstance("IKnowledgeStore", new KnowledgeStore());
+            logger_1.default.info({ event: "Knowledge Store Registered" }, "Knowledge Store registered in DI Container.");
+        }
         plugin_1.executiveStartupMetrics.bootstrapEndTime = Date.now();
         plugin_1.executiveStartupMetrics.pluginRegisterStartTime = Date.now();
         const memStart = process.memoryUsage().heapUsed;

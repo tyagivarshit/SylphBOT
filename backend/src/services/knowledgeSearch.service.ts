@@ -1131,3 +1131,24 @@ export const searchKnowledge = async (
   retrievalInflight.set(cacheKey, run);
   return run.then((rows) => cloneResults(rows));
 };
+
+export class KnowledgeStore {
+  public async getKnowledgeItems(tenantId: string): Promise<any[]> {
+    const rows = await prisma.knowledgeBase.findMany({
+      where: {
+        businessId: tenantId,
+        isActive: true,
+      },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.businessId,
+      category: row.sourceType || "generic",
+      tags: row.clientId ? [row.clientId] : [],
+      content: `${row.title}\n${row.content}`,
+      confidence: 1.0,
+    }));
+  }
+}
+

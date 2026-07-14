@@ -264,6 +264,14 @@ app.use((req, res, next) => {
     next();
 });
 app.use(requestContext_middleware_1.requestContextMiddleware);
+app.use((req, _res, next) => {
+    console.error("REQUEST_ENTERED_PROCESS", {
+        method: req.method,
+        url: req.originalUrl,
+        requestId: req.requestId,
+    });
+    next();
+});
 app.use((0, compression_1.default)({
     filter: (req, res) => {
         if (isStripeCheckoutRedirectRoute(req)) {
@@ -281,6 +289,14 @@ app.use((0, cors_1.default)(corsOptions));
 app.options(/.*/, (0, cors_1.default)(corsOptions));
 app.use(rateLimit_middleware_1.globalLimiter);
 app.use((0, cookie_parser_1.default)());
+app.use((req, res, next) => {
+    console.info("GLOBAL_MIDDLEWARE", {
+        method: req.method,
+        url: req.originalUrl,
+        requestId: req.requestId,
+    });
+    next();
+});
 app.use(passport_1.default.initialize());
 app.use((req, res, next) => {
     const originalSetHeader = res.setHeader.bind(res);
@@ -729,11 +745,12 @@ app.use("/api/ai", auth_middleware_1.protect, subscription_middleware_1.attachBi
 app.use("/api/automation", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, automation_routes_1.default);
 app.use("/api/messages", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, message_routes_1.default);
 app.use("/api/conversations", auth_middleware_1.protect, conversation_routes_1.default);
-app.use("/api/comment-triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
-app.use("/api/comment-automation/triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
-app.use("/api/triggers", auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
-app.get("/api/client/status", auth_middleware_1.protect, client_controller_1.getClientStatus);
-app.get("/api/clients/status", auth_middleware_1.protect, client_controller_1.getClientStatus);
+app.use([
+    "/api/comment-triggers",
+    "/api/comment-automation/triggers",
+    "/api/triggers"
+], auth_middleware_1.protect, subscription_middleware_1.attachBillingContext, commentTrigger_routes_1.default);
+app.get(["/api/client/status", "/api/clients/status"], auth_middleware_1.protect, client_controller_1.getClientStatus);
 app.use("/api/clients", auth_middleware_1.protect, client_routes_1.default);
 app.use("/api/instagram", auth_middleware_1.protect, instagram_routes_1.default);
 app.use("/api/knowledge", auth_middleware_1.protect, knowledge_routes_1.default);

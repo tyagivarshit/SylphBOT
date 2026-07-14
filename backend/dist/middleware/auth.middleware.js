@@ -1303,6 +1303,9 @@ const protect = async (req, res, next) => {
         if (isInstantCheckoutRoute(req) && accessToken) {
             const fastPathStartedAt = Date.now();
             const decoded = (0, generateToken_1.verifyAccessToken)(accessToken);
+            console.info("ACCESS_TOKEN_DECODED", {
+                decoded: !!decoded
+            });
             decodedAccessToken = decoded;
             const accessTokenKey = hashToken(accessToken);
             const maybeContext = decoded?.id && typeof decoded.tokenVersion === "number"
@@ -2243,6 +2246,12 @@ const protect = async (req, res, next) => {
         return next();
     }
     catch (err) {
+        console.error("PROTECT_EXCEPTION", {
+            error: err instanceof Error ? err.message : err,
+            stack: err instanceof Error ? err.stack : undefined,
+            route: req.originalUrl,
+            requestId: req.requestId
+        });
         if (isRequestClosed(req, res) || isRequestAbortedError(err)) {
             return;
         }

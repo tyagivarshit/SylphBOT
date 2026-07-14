@@ -204,22 +204,33 @@ const buildRuntimeDNA = (objective: string) => ({
   },
 });
 
-const recordLedger = (service: string, requestId: string) => {
-  const existing = invocationLedger.get(service);
-  invocationLedger.set(service, {
+const recordLedger = (tenantId: string, service: string, requestId: string) => {
+  const key = `${tenantId}:${service}`;
+  const existing = invocationLedger.get(key);
+  invocationLedger.set(key, {
     count: (existing?.count || 0) + 1,
     lastRequestId: requestId,
     lastExecutedAt: nowIso(),
   });
 };
 
-export const getExecutiveRuntimeExecutionAudit = () => {
-  const invoked = Array.from(invocationLedger.keys());
+export const getExecutiveRuntimeExecutionAudit = (tenantId: string) => {
+  const prefix = `${tenantId}:`;
+  const tenantEntries = Array.from(invocationLedger.entries()).filter(([key]) => key.startsWith(prefix));
+  const invokedServices: string[] = [];
+  const invocationCounts: Record<string, any> = {};
+
+  for (const [key, val] of tenantEntries) {
+    const service = key.substring(prefix.length);
+    invokedServices.push(service);
+    invocationCounts[service] = val;
+  }
+
   return {
     mountedServices: REQUIRED_EXECUTIVE_SERVICE_TOKENS,
-    invokedServices: invoked,
-    neverInvokedServices: REQUIRED_EXECUTIVE_SERVICE_TOKENS.filter((token) => !invocationLedger.has(token)),
-    invocationCounts: Object.fromEntries(invocationLedger.entries()),
+    invokedServices,
+    neverInvokedServices: REQUIRED_EXECUTIVE_SERVICE_TOKENS.filter((token) => !invokedServices.includes(token)),
+    invocationCounts,
   };
 };
 
@@ -256,7 +267,7 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       entry.finishedAt = nowIso();
       entry.durationMs = Date.now() - stepStartedAt;
       entry.result = summarize(result);
-      recordLedger(service, input.requestId);
+      recordLedger(input.tenantId, service, input.requestId);
       return result;
     } catch (error: any) {
       entry.status = "FAILED";

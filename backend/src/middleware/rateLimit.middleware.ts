@@ -152,3 +152,15 @@ export const userActionLimiter = rateLimit({
   passOnStoreError: true,
   handler,
 });
+
+export const executiveLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? 15 : 60,
+  keyGenerator,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: createStore("executive"),
+  skip: shouldSkipRedisRateLimit,
+  passOnStoreError: true,
+  handler,
+});

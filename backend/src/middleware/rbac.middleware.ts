@@ -54,9 +54,15 @@ export const requirePermission = (action: PermissionAction) =>
       }
 
       const businessId = getRequestBusinessId(req);
-      const mfaHeader = getHeaderValue(req.headers["x-mfa-verified"]);
-      const mfaChallengeHeader = getHeaderValue(req.headers["x-mfa-challenge"]);
-      const elevationHeader = getHeaderValue(req.headers["x-elevation-token"]);
+      const gatewaySecret = process.env.GATEWAY_SIGNATURE_KEY;
+      const gatewaySignature = req.headers["x-gateway-signature"];
+      const isGatewayTrusted = gatewaySecret && gatewaySignature === gatewaySecret;
+      const trustHeaders = process.env.NODE_ENV !== "production" || isGatewayTrusted;
+
+      const mfaHeader = trustHeaders ? getHeaderValue(req.headers["x-mfa-verified"]) : undefined;
+      const mfaChallengeHeader = trustHeaders ? getHeaderValue(req.headers["x-mfa-challenge"]) : undefined;
+      const elevationHeader = trustHeaders ? getHeaderValue(req.headers["x-elevation-token"]) : undefined;
+
       const mfaVerified =
         typeof mfaHeader === "string"
           ? ["true", "1", "yes", "on"].includes(mfaHeader.trim().toLowerCase())

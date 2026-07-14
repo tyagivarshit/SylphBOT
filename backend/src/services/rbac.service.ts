@@ -10,7 +10,8 @@ export type PermissionAction =
   | "api_keys:manage"
   | "compliance:export"
   | "compliance:delete"
-  | "messages:enqueue";
+  | "messages:enqueue"
+  | "executive:execute";
 
 type Principal = {
   role?: string | null;
@@ -29,6 +30,7 @@ const ROLE_PERMISSIONS: Record<AppRole, PermissionAction[]> = {
     "compliance:export",
     "compliance:delete",
     "messages:enqueue",
+    "executive:execute",
   ],
   ADMIN: [
     "billing:view",
@@ -40,6 +42,7 @@ const ROLE_PERMISSIONS: Record<AppRole, PermissionAction[]> = {
     "api_keys:manage",
     "compliance:export",
     "messages:enqueue",
+    "executive:execute",
   ],
   AGENT: [
     "analytics:view",

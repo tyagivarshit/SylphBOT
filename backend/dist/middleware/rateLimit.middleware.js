@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.userActionLimiter = exports.securityLimiter = exports.globalLimiter = exports.aiLimiter = exports.authLimiter = exports.__rateLimitTestInternals = void 0;
+exports.executiveLimiter = exports.userActionLimiter = exports.securityLimiter = exports.globalLimiter = exports.aiLimiter = exports.authLimiter = exports.__rateLimitTestInternals = void 0;
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const rate_limit_redis_1 = __importDefault(require("rate-limit-redis"));
 const redis_1 = require("../config/redis");
@@ -129,6 +129,17 @@ exports.userActionLimiter = (0, express_rate_limit_1.default)({
     standardHeaders: true,
     legacyHeaders: false,
     store: createStore("user-actions"),
+    skip: shouldSkipRedisRateLimit,
+    passOnStoreError: true,
+    handler,
+});
+exports.executiveLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000,
+    max: isProd ? 15 : 60,
+    keyGenerator,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: createStore("executive"),
     skip: shouldSkipRedisRateLimit,
     passOnStoreError: true,
     handler,

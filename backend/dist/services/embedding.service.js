@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isEmbeddingRuntimeReady = exports.getEmbeddingRuntimeState = exports.warmupEmbeddingRuntime = exports.createEmbeddingsBatch = exports.createEmbedding = void 0;
+exports.EmbeddingEngine = exports.isEmbeddingRuntimeReady = exports.getEmbeddingRuntimeState = exports.warmupEmbeddingRuntime = exports.createEmbeddingsBatch = exports.createEmbedding = void 0;
 const core_1 = require("../runtime/core");
 const transformers_1 = require("@xenova/transformers");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
@@ -690,3 +690,30 @@ const getEmbeddingRuntimeState = () => ({
 exports.getEmbeddingRuntimeState = getEmbeddingRuntimeState;
 const isEmbeddingRuntimeReady = () => modelReady;
 exports.isEmbeddingRuntimeReady = isEmbeddingRuntimeReady;
+class EmbeddingEngine {
+    async getEmbedding(text) {
+        const started = Date.now();
+        const vec = await (0, exports.createEmbedding)(text);
+        return {
+            vector: vec,
+            dimensions: vec.length,
+            durationMs: Date.now() - started,
+            source: "local"
+        };
+    }
+    async getEmbeddingBatch(texts) {
+        const started = Date.now();
+        const vectors = await (0, exports.createEmbeddingsBatch)(texts);
+        const duration = Date.now() - started;
+        return vectors.map(vec => ({
+            vector: vec,
+            dimensions: vec.length,
+            durationMs: duration / texts.length,
+            source: "local"
+        }));
+    }
+    async warmup() {
+        await (0, exports.warmupEmbeddingRuntime)("manual");
+    }
+}
+exports.EmbeddingEngine = EmbeddingEngine;

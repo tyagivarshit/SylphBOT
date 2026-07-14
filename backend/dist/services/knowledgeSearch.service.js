@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.searchKnowledge = void 0;
+exports.KnowledgeStore = exports.searchKnowledge = void 0;
 const crypto_1 = require("crypto");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const performanceMetrics_1 = require("../observability/performanceMetrics");
@@ -785,3 +785,22 @@ const searchKnowledge = async (businessId, message, options) => {
     return run.then((rows) => cloneResults(rows));
 };
 exports.searchKnowledge = searchKnowledge;
+class KnowledgeStore {
+    async getKnowledgeItems(tenantId) {
+        const rows = await prisma_1.default.knowledgeBase.findMany({
+            where: {
+                businessId: tenantId,
+                isActive: true,
+            },
+        });
+        return rows.map((row) => ({
+            id: row.id,
+            tenantId: row.businessId,
+            category: row.sourceType || "generic",
+            tags: row.clientId ? [row.clientId] : [],
+            content: `${row.title}\n${row.content}`,
+            confidence: 1.0,
+        }));
+    }
+}
+exports.KnowledgeStore = KnowledgeStore;

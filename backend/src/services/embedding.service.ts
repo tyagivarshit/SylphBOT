@@ -1,5 +1,5 @@
 import { container } from "../runtime/core";
-import { IModelManager } from "../runtime/interfaces/core";
+import { IModelManager, IEmbeddingEngine, EmbeddingResult } from "../runtime/interfaces/core";
 import { pipeline } from "@xenova/transformers";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
 import { markAiRuntimeReady } from "../runtime/startupIsolation.service";
@@ -924,3 +924,33 @@ export const getEmbeddingRuntimeState = () => ({
 });
 
 export const isEmbeddingRuntimeReady = () => modelReady;
+
+export class EmbeddingEngine implements IEmbeddingEngine {
+  public async getEmbedding(text: string): Promise<EmbeddingResult> {
+    const started = Date.now();
+    const vec = await createEmbedding(text);
+    return {
+      vector: vec,
+      dimensions: vec.length,
+      durationMs: Date.now() - started,
+      source: "local"
+    };
+  }
+
+  public async getEmbeddingBatch(texts: string[]): Promise<EmbeddingResult[]> {
+    const started = Date.now();
+    const vectors = await createEmbeddingsBatch(texts);
+    const duration = Date.now() - started;
+    return vectors.map(vec => ({
+      vector: vec,
+      dimensions: vec.length,
+      durationMs: duration / texts.length,
+      source: "local"
+    }));
+  }
+
+  public async warmup(): Promise<void> {
+    await warmupEmbeddingRuntime("manual");
+  }
+}
+

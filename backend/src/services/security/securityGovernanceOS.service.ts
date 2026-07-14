@@ -603,11 +603,17 @@ class InstrumentedSet extends Set<string> {
   add(value: string, metadata?: { reason?: string; trigger?: string }): this {
     super.add(value);
 
-    const err = new Error();
-    const stackLines = (err.stack || "").split("\n").map(l => l.trim());
-    const caller = getCallerInfo(stackLines);
     const ctx = getRequestContext();
-    const stackFrames = stackLines.slice(3, 7).join(" | ");
+    const stackTraceEnabled = process.env.SECURITY_STACK_TRACE_ENABLED === "true";
+    let caller = { functionName: "N/A", fileName: "N/A" };
+    let stackFrames = "N/A";
+
+    if (stackTraceEnabled) {
+      const err = new Error();
+      const stackLines = (err.stack || "").split("\n").map(l => l.trim());
+      caller = getCallerInfo(stackLines);
+      stackFrames = stackLines.slice(3, 7).join(" | ");
+    }
 
     console.info("tenant_frozen_added", {
       requestId: ctx?.requestId || "N/A",
@@ -629,10 +635,15 @@ class InstrumentedSet extends Set<string> {
   delete(value: string, metadata?: { reason?: string }): boolean {
     const result = super.delete(value);
 
-    const err = new Error();
-    const stackLines = (err.stack || "").split("\n").map(l => l.trim());
-    const caller = getCallerInfo(stackLines);
     const ctx = getRequestContext();
+    const stackTraceEnabled = process.env.SECURITY_STACK_TRACE_ENABLED === "true";
+    let caller = { functionName: "N/A", fileName: "N/A" };
+
+    if (stackTraceEnabled) {
+      const err = new Error();
+      const stackLines = (err.stack || "").split("\n").map(l => l.trim());
+      caller = getCallerInfo(stackLines);
+    }
 
     console.info("tenant_frozen_removed", {
       requestId: ctx?.requestId || "N/A",
@@ -649,10 +660,20 @@ class InstrumentedSet extends Set<string> {
   has(value: string): boolean {
     const exists = super.has(value);
 
-    const err = new Error();
-    const stackLines = (err.stack || "").split("\n").map(l => l.trim());
-    const caller = getCallerInfo(stackLines);
+    const checkLoggingEnabled = process.env.SECURITY_FREEZE_CHECK_LOGGING_ENABLED === "true";
+    if (!checkLoggingEnabled) {
+      return exists;
+    }
+
     const ctx = getRequestContext();
+    const stackTraceEnabled = process.env.SECURITY_STACK_TRACE_ENABLED === "true";
+    let caller = { functionName: "N/A", fileName: "N/A" };
+
+    if (stackTraceEnabled) {
+      const err = new Error();
+      const stackLines = (err.stack || "").split("\n").map(l => l.trim());
+      caller = getCallerInfo(stackLines);
+    }
 
     console.info("tenant_frozen_check", {
       requestId: ctx?.requestId || "N/A",

@@ -540,6 +540,16 @@ export const startServer = async () => {
     if (!container.has("IMemoryEngine")) {
       await bootstrapper.bootstrap();
     }
+    if (!container.has("IEmbeddingEngine")) {
+      const { EmbeddingEngine } = await import("./services/embedding.service");
+      container.registerInstance("IEmbeddingEngine", new EmbeddingEngine());
+      logger.info({ event: "Embedding Engine Registered" }, "Embedding Engine registered in DI Container.");
+    }
+    if (!container.has("IKnowledgeStore")) {
+      const { KnowledgeStore } = await import("./services/knowledgeSearch.service");
+      container.registerInstance("IKnowledgeStore", new KnowledgeStore());
+      logger.info({ event: "Knowledge Store Registered" }, "Knowledge Store registered in DI Container.");
+    }
     executiveStartupMetrics.bootstrapEndTime = Date.now();
 
     executiveStartupMetrics.pluginRegisterStartTime = Date.now();

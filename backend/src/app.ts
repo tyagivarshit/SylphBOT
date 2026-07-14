@@ -931,26 +931,17 @@ app.use("/api/automation", protect, attachBillingContext, automationRoutes);
 app.use("/api/messages", protect, attachBillingContext, messageRoutes);
 app.use("/api/conversations", protect, conversationRoutes);
 app.use(
-  "/api/comment-triggers",
-  protect,
-  attachBillingContext,
-  commentTriggerRoutes
-);
-app.use(
-  "/api/comment-automation/triggers",
-  protect,
-  attachBillingContext,
-  commentTriggerRoutes
-);
-app.use(
-  "/api/triggers",
+  [
+    "/api/comment-triggers",
+    "/api/comment-automation/triggers",
+    "/api/triggers"
+  ],
   protect,
   attachBillingContext,
   commentTriggerRoutes
 );
 
-app.get("/api/client/status", protect, getClientStatus);
-app.get("/api/clients/status", protect, getClientStatus);
+app.get(["/api/client/status", "/api/clients/status"], protect, getClientStatus);
 app.use("/api/clients", protect, clientRoutes);
 app.use("/api/instagram", protect, instagramRoutes);
 app.use("/api/knowledge", protect, knowledgeRoutes);
@@ -958,16 +949,6 @@ app.use("/api/training", protect, trainingRoutes);
 app.use("/api/leads", protect, leadRoutes);
 app.use("/api/analytics", protect, analyticsRoutes);
 app.use("/api/autonomous", protect, autonomousRoutes);
-console.info("EXEC_ROUTER_MOUNTED");
-app.use("/api/executive", (req, res, next) => {
-    console.info("EXEC_MOUNT_HIT", {
-        url: req.originalUrl,
-        method: req.method,
-        requestId: req.requestId,
-    });
-
-    next();
-});
 app.use("/api/executive", protect, executiveRoutes);
 app.use("/api/audit", protect, auditRoutes);
 app.use("/api/search", protect, searchRoutes);

@@ -48,6 +48,7 @@ import { TimeoutExceededError, withTimeout } from "../utils/boundedTimeout";
 import logger from "../utils/logger";
 import { getRequestContext } from "../observability/requestContext";
 import { axiosWithMetaRetry } from "../utils/metaRetry";
+import { runDetachedBackgroundTask } from "../utils/backgroundTask";
 
 const META_OAUTH_CONNECT_TIMEOUT_MS = 45_000;
 const META_GRAPH_TIMEOUT_MS = 12_000;
@@ -5861,32 +5862,49 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
             nonce: parsedState.nonce,
           })
         : null;
-      if (lifecycleContext) {
-        await markMetaOAuthLifecycleStage({
-          context: lifecycleContext,
-          stage: "INITIATED",
-          detail: "Instagram connection initiated",
-        });
-        await markMetaOAuthLifecycleStage({
-          context: lifecycleContext,
-          stage: "OAUTH_STARTED",
-          detail: "Instagram OAuth redirect generated",
-        });
-      }
-      await recordInstagramConnectStage({
-        traceId,
-        businessId,
-        stage: "IG_OAUTH_STARTED",
-        status: "COMPLETED",
-        metadata: {
-          mode,
-          platform,
-          workspaceId: businessId,
-          preferredFacebookPageId,
-          preferredInstagramProfessionalAccountId,
-          preferredPhoneNumberId,
+
+      runDetachedBackgroundTask(
+        "instagram_oauth_init_telemetry",
+        async () => {
+          if (lifecycleContext) {
+            await markMetaOAuthLifecycleStage({
+              context: lifecycleContext,
+              stage: "INITIATED",
+              detail: "Instagram connection initiated",
+            });
+            await markMetaOAuthLifecycleStage({
+              context: lifecycleContext,
+              stage: "OAUTH_STARTED",
+              detail: "Instagram OAuth redirect generated",
+            });
+          }
+          await recordInstagramConnectStage({
+            traceId,
+            businessId,
+            stage: "IG_OAUTH_STARTED",
+            status: "COMPLETED",
+            metadata: {
+              mode,
+              platform,
+              workspaceId: businessId,
+              preferredFacebookPageId,
+              preferredInstagramProfessionalAccountId,
+              preferredPhoneNumberId,
+            },
+          });
         },
-      });
+        (error) => {
+          logger.error(
+            {
+              err: error,
+              traceId,
+              businessId,
+              component: "instagram-oauth-init-telemetry",
+            },
+            "Instagram OAuth start telemetry failed"
+          );
+        }
+      );
     }
 
     if (platform === "WHATSAPP") {

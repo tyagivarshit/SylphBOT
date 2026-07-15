@@ -20,6 +20,9 @@ const stripe_price_map_1 = require("../config/stripe.price.map");
 const usage_service_1 = require("../services/usage.service");
 const tenant_service_1 = require("../services/tenant.service");
 const tax_service_1 = require("../services/tax.service");
+const lock_service_1 = require("../services/commerce/lock.service");
+const seat_service_1 = require("../services/commerce/seat.service");
+const credit_service_1 = require("../services/commerce/credit.service");
 const stripe_service_1 = require("../services/stripe.service");
 const stripeConfig_service_1 = require("../services/commerce/providers/stripeConfig.service");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
@@ -106,9 +109,6 @@ const BILLING_CHECKOUT_WARMUP_JOIN_BUDGET_MS = 350;
 const BILLING_CHECKOUT_SESSION_MIN_REMAINING_MS = 5 * 60 * 1000;
 const BILLING_CHECKOUT_SESSION_JOIN_BUDGET_MS = 1500;
 const billingProjectionCache = new Map();
-const checkoutInFlight = new Map();
-const checkoutConfirmInFlight = new Map();
-const instantCheckoutInFlight = new Map();
 const instantCheckoutEntitlementCache = new Map();
 const billingCheckoutWarmupCache = new Map();
 const billingCheckoutWarmupInFlight = new Map();
@@ -1349,7 +1349,12 @@ class BillingController {
         return {
             success: true,
             subscription: billingContext.subscription,
-            billing: billingContext.context,
+            billing: {
+                ...billingContext.context,
+                seatCount: await seat_service_1.SeatBillingService.getSeatCount(businessId).catch(() => 0),
+                seatLimit: await seat_service_1.SeatBillingService.getSeatLimit(businessId).catch(() => 1),
+                creditBalance: await credit_service_1.CreditEngine.getCreditBalance(businessId).catch(() => 0),
+            },
             usage: usage
                 ? {
                     aiCallsUsed: usage.usage.ai.monthlyUsed,
@@ -1602,6 +1607,7 @@ class BillingController {
         };
     }
     static async instantCheckout(req, res) {
+        let activeLock = null;
         const startedAt = Date.now();
         const requestId = String(req.requestId || "").trim() || null;
         const stageTimings = [];
@@ -1953,15 +1959,11 @@ class BillingController {
                 .replace(/[^a-zA-Z0-9._-]/g, "")
                 .slice(0, 80) || buildCheckoutAttemptToken();
             inFlightKey = `${businessId}:${normalizedPlan}:${normalizedBilling}:instant`;
-            const currentInFlight = instantCheckoutInFlight.get(inFlightKey);
-            if (currentInFlight &&
-                Date.now() - currentInFlight.startedAt <= INSTANT_CHECKOUT_IN_FLIGHT_WINDOW_MS) {
+            activeLock = new lock_service_1.RedisLock(inFlightKey, { ttlMs: 25000, maxRetries: 1 });
+            const acquired = await activeLock.acquire();
+            if (!acquired) {
                 return fail(409, "checkout_in_progress", "Another checkout is already in progress");
             }
-            instantCheckoutInFlight.set(inFlightKey, {
-                startedAt: Date.now(),
-                requestId,
-            });
             const successUrl = `${env_1.env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}` +
                 `&plan=${encodeURIComponent(normalizedPlan)}` +
                 `&billing=${encodeURIComponent(normalizedBilling)}` +
@@ -2064,13 +2066,14 @@ class BillingController {
                 : "Instant checkout failed");
         }
         finally {
-            if (inFlightKey) {
-                instantCheckoutInFlight.delete(inFlightKey);
+            if (activeLock) {
+                await activeLock.release().catch(() => undefined);
             }
         }
     }
     static async handleCheckout(req, res, options) {
         const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
+        let activeLock = null;
         const checkoutStartedAt = Date.now();
         let checkoutLastStageAt = checkoutStartedAt;
         const checkoutStageTimings = [];
@@ -2547,9 +2550,9 @@ class BillingController {
                 .digest("hex")
                 .slice(0, 24);
             const inFlightKey = `${businessId}:${normalizedPlan}:${normalizedBilling}:${checkoutType}`;
-            const currentInFlight = checkoutInFlight.get(inFlightKey);
-            if (currentInFlight &&
-                Date.now() - currentInFlight.startedAt <= CHECKOUT_IN_FLIGHT_WINDOW_MS) {
+            activeLock = new lock_service_1.RedisLock(inFlightKey, { ttlMs: 30000, maxRetries: 1 });
+            const acquired = await activeLock.acquire();
+            if (!acquired) {
                 return sendCheckoutError({
                     status: 409,
                     message: "Another checkout is already in progress. Please wait a moment and retry.",
@@ -2557,10 +2560,6 @@ class BillingController {
                     code: "CHECKOUT_IN_PROGRESS",
                 });
             }
-            checkoutInFlight.set(inFlightKey, {
-                startedAt: Date.now(),
-                requestId: checkoutRequestId,
-            });
             try {
                 (0, requestLifecycle_1.throwIfRequestLifecycleAborted)({
                     req,
@@ -2773,7 +2772,9 @@ class BillingController {
                 });
             }
             finally {
-                checkoutInFlight.delete(inFlightKey);
+                if (activeLock) {
+                    await activeLock.release().catch(() => undefined);
+                }
             }
         }
         catch (error) {
@@ -3808,10 +3809,9 @@ class BillingController {
                 }));
             }
             const confirmInFlightKey = `${businessId}:${sessionId}`;
-            const activeConfirmInFlight = checkoutConfirmInFlight.get(confirmInFlightKey);
-            if (activeConfirmInFlight &&
-                Date.now() - activeConfirmInFlight.startedAt <=
-                    CHECKOUT_CONFIRM_IN_FLIGHT_WINDOW_MS) {
+            const confirmLock = new lock_service_1.RedisLock(confirmInFlightKey, { ttlMs: 30000, maxRetries: 1 });
+            const acquired = await confirmLock.acquire();
+            if (!acquired) {
                 console.info("BILLING_STAGE_OK", {
                     stage: "checkout_confirm.pending",
                     businessId,
@@ -3881,15 +3881,8 @@ class BillingController {
                     reason: String(error?.message || "confirm_async_failed"),
                 });
             })
-                .finally(() => {
-                const active = checkoutConfirmInFlight.get(confirmInFlightKey);
-                if (active?.promise === inFlightPromise) {
-                    checkoutConfirmInFlight.delete(confirmInFlightKey);
-                }
-            });
-            checkoutConfirmInFlight.set(confirmInFlightKey, {
-                startedAt: Date.now(),
-                promise: inFlightPromise,
+                .finally(async () => {
+                await confirmLock.release().catch(() => undefined);
             });
             void inFlightPromise;
             console.info("BILLING_STAGE_OK", {

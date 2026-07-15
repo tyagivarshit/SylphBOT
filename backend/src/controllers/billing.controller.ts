@@ -29,6 +29,9 @@ import {
 import { getUsageOverview } from "../services/usage.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
 import { getTaxConfig } from "../services/tax.service";
+import { RedisLock } from "../services/commerce/lock.service";
+import { SeatBillingService } from "../services/commerce/seat.service";
+import { CreditEngine } from "../services/commerce/credit.service";
 import { stripe } from "../services/stripe.service";
 import { assertStripeConfigReady } from "../services/commerce/providers/stripeConfig.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
@@ -137,27 +140,6 @@ const billingProjectionCache = new Map<
     expiresAt: number;
     updatedAt?: number;
     promise?: Promise<Record<string, unknown>>;
-  }
->();
-const checkoutInFlight = new Map<
-  string,
-  {
-    startedAt: number;
-    requestId: string | null;
-  }
->();
-const checkoutConfirmInFlight = new Map<
-  string,
-  {
-    startedAt: number;
-    promise: Promise<void>;
-  }
->();
-const instantCheckoutInFlight = new Map<
-  string,
-  {
-    startedAt: number;
-    requestId: string | null;
   }
 >();
 const instantCheckoutEntitlementCache = new Map<
@@ -1859,7 +1841,12 @@ export class BillingController {
     return {
       success: true,
       subscription: billingContext.subscription,
-      billing: billingContext.context,
+      billing: {
+        ...billingContext.context,
+        seatCount: await SeatBillingService.getSeatCount(businessId).catch(() => 0),
+        seatLimit: await SeatBillingService.getSeatLimit(businessId).catch(() => 1),
+        creditBalance: await CreditEngine.getCreditBalance(businessId).catch(() => 0),
+      },
       usage: usage
         ? {
             aiCallsUsed: usage.usage.ai.monthlyUsed,
@@ -2159,6 +2146,7 @@ export class BillingController {
   }
 
   static async instantCheckout(req: Request, res: Response) {
+    let activeLock: RedisLock | null = null;
     const startedAt = Date.now();
     const requestId = String(req.requestId || "").trim() || null;
     const stageTimings: Array<{ stage: string; stageMs: number; elapsedMs: number }> = [];
@@ -2598,17 +2586,11 @@ export class BillingController {
           .replace(/[^a-zA-Z0-9._-]/g, "")
           .slice(0, 80) || buildCheckoutAttemptToken();
       inFlightKey = `${businessId}:${normalizedPlan}:${normalizedBilling}:instant`;
-      const currentInFlight = instantCheckoutInFlight.get(inFlightKey);
-      if (
-        currentInFlight &&
-        Date.now() - currentInFlight.startedAt <= INSTANT_CHECKOUT_IN_FLIGHT_WINDOW_MS
-      ) {
+      activeLock = new RedisLock(inFlightKey, { ttlMs: 25000, maxRetries: 1 });
+      const acquired = await activeLock.acquire();
+      if (!acquired) {
         return fail(409, "checkout_in_progress", "Another checkout is already in progress");
       }
-      instantCheckoutInFlight.set(inFlightKey, {
-        startedAt: Date.now(),
-        requestId,
-      });
 
       const successUrl =
         `${env.FRONTEND_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}` +
@@ -2727,8 +2709,8 @@ export class BillingController {
           : "Instant checkout failed"
       );
     } finally {
-      if (inFlightKey) {
-        instantCheckoutInFlight.delete(inFlightKey);
+      if (activeLock) {
+        await activeLock.release().catch(() => undefined);
       }
     }
   }
@@ -2741,6 +2723,7 @@ export class BillingController {
     }
   ) {
     const redirectOnSuccess = Boolean(options?.redirectOnSuccess);
+    let activeLock: RedisLock | null = null;
     const checkoutStartedAt = Date.now();
     let checkoutLastStageAt = checkoutStartedAt;
     const checkoutStageTimings: Array<{
@@ -3310,11 +3293,9 @@ const emitCheckoutMetric = (
         .slice(0, 24);
 
       const inFlightKey = `${businessId}:${normalizedPlan}:${normalizedBilling}:${checkoutType}`;
-      const currentInFlight = checkoutInFlight.get(inFlightKey);
-      if (
-        currentInFlight &&
-        Date.now() - currentInFlight.startedAt <= CHECKOUT_IN_FLIGHT_WINDOW_MS
-      ) {
+      activeLock = new RedisLock(inFlightKey, { ttlMs: 30000, maxRetries: 1 });
+      const acquired = await activeLock.acquire();
+      if (!acquired) {
         return sendCheckoutError({
           status: 409,
           message: "Another checkout is already in progress. Please wait a moment and retry.",
@@ -3322,10 +3303,6 @@ const emitCheckoutMetric = (
           code: "CHECKOUT_IN_PROGRESS",
         });
       }
-      checkoutInFlight.set(inFlightKey, {
-        startedAt: Date.now(),
-        requestId: checkoutRequestId,
-      });
 
       try {
         throwIfRequestLifecycleAborted({
@@ -3551,7 +3528,9 @@ const emitCheckoutMetric = (
           paymentIntentKey: paymentIntent.paymentIntentKey,
         });
       } finally {
-        checkoutInFlight.delete(inFlightKey);
+        if (activeLock) {
+          await activeLock.release().catch(() => undefined);
+        }
       }
     } catch (error: any) {
       if (isRequestLifecycleAborted({ req, res }) || isResponseCommitted()) {
@@ -4764,12 +4743,9 @@ const emitCheckoutMetric = (
       }
 
       const confirmInFlightKey = `${businessId}:${sessionId}`;
-      const activeConfirmInFlight = checkoutConfirmInFlight.get(confirmInFlightKey);
-      if (
-        activeConfirmInFlight &&
-        Date.now() - activeConfirmInFlight.startedAt <=
-          CHECKOUT_CONFIRM_IN_FLIGHT_WINDOW_MS
-      ) {
+      const confirmLock = new RedisLock(confirmInFlightKey, { ttlMs: 30000, maxRetries: 1 });
+      const acquired = await confirmLock.acquire();
+      if (!acquired) {
         console.info("BILLING_STAGE_OK", {
           stage: "checkout_confirm.pending",
           businessId,
@@ -4849,16 +4825,9 @@ const emitCheckoutMetric = (
             reason: String((error as Error)?.message || "confirm_async_failed"),
           });
         })
-        .finally(() => {
-          const active = checkoutConfirmInFlight.get(confirmInFlightKey);
-          if (active?.promise === inFlightPromise) {
-            checkoutConfirmInFlight.delete(confirmInFlightKey);
-          }
+        .finally(async () => {
+          await confirmLock.release().catch(() => undefined);
         });
-      checkoutConfirmInFlight.set(confirmInFlightKey, {
-        startedAt: Date.now(),
-        promise: inFlightPromise,
-      });
       void inFlightPromise;
 
       console.info("BILLING_STAGE_OK", {

@@ -1136,6 +1136,36 @@ function BillingPageContent() {
             </div>
           </div>
 
+          {isEntitlementKnown && billingContext && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 mb-6">
+              <div className="bg-white/80 border border-slate-100 rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Team Seats</p>
+                <p className="text-2xl font-bold text-slate-900 mt-1">
+                  {(billingContext as any).seatCount ?? 0} / {(billingContext as any).seatLimit ?? 1}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Active workspace members</p>
+              </div>
+              <div className="bg-white/80 border border-slate-100 rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">AI Credits Balance</p>
+                <p className="text-2xl font-bold text-slate-900 mt-1">
+                  {((billingContext as any).creditBalance ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Available for replies and decisions</p>
+              </div>
+              <div className="bg-white/80 border border-slate-100 rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Monetization Plan</p>
+                <p className="text-2xl font-bold text-slate-900 mt-1">
+                  {subscription?.plan?.name || "None"}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {subscription?.plan?.name?.toUpperCase().startsWith("ENTERPRISE") 
+                    ? "Custom Enterprise Contract" 
+                    : "Standard Self-Serve Plan"}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div id="plans" className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
             {plans.map((plan) => {
               const displayPrice =

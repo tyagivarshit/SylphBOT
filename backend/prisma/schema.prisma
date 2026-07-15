@@ -205,6 +205,10 @@ enum SubscriptionLedgerStatus {
   PAUSED
   CANCELLED
   EXPIRED
+  GRACE
+  SUSPENDED
+  REACTIVATING
+  PAYMENT_PENDING
 }
 
 enum RefundStatus {
@@ -1620,6 +1624,18 @@ model AddonBalance {
   updatedAt  DateTime @updatedAt
 
   @@unique([businessId, type])
+  @@index([businessId])
+}
+
+model CreditLedger {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  businessId String   @db.ObjectId
+  type       String   // MONTHLY, BONUS, PURCHASED
+  amount     Int
+  reason     String
+  expiresAt  DateTime?
+  createdAt  DateTime @default(now())
+
   @@index([businessId])
 }
 

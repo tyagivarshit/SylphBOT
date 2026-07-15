@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runDeveloperPlatformExtensibilitySelfAudit = exports.revokeDeveloperPlatformApiKey = exports.createDeveloperPlatformApiKey = exports.applyDeveloperPlatformOverride = exports.applyDeveloperPlatformPolicy = exports.invokeDeveloperPlatformPackageAction = exports.subscribeDeveloperPlatformEvent = exports.bindDeveloperPlatformSecret = exports.installDeveloperPlatformPackage = exports.publishDeveloperPlatformRelease = exports.publishDeveloperPlatformPackage = exports.registerDeveloperPlatformNamespace = exports.getDeveloperPlatformDashboard = exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.generateMetaReviewPack = exports.seedMetaReviewerDemo = exports.runMetaColdBootReconcile = exports.runMetaTokenLifecycle = exports.runMetaDoctor = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
+exports.getInstagramConnectionTrace = exports.runDeveloperPlatformExtensibilitySelfAudit = exports.revokeDeveloperPlatformApiKey = exports.createDeveloperPlatformApiKey = exports.applyDeveloperPlatformOverride = exports.applyDeveloperPlatformPolicy = exports.invokeDeveloperPlatformPackageAction = exports.subscribeDeveloperPlatformEvent = exports.bindDeveloperPlatformSecret = exports.installDeveloperPlatformPackage = exports.publishDeveloperPlatformRelease = exports.publishDeveloperPlatformPackage = exports.registerDeveloperPlatformNamespace = exports.getDeveloperPlatformDashboard = exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.generateMetaReviewPack = exports.seedMetaReviewerDemo = exports.runMetaColdBootReconcile = exports.runMetaTokenLifecycle = exports.runMetaDoctor = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
@@ -1782,3 +1782,57 @@ const runDeveloperPlatformExtensibilitySelfAudit = async (req, res) => {
     }
 };
 exports.runDeveloperPlatformExtensibilitySelfAudit = runDeveloperPlatformExtensibilitySelfAudit;
+const getInstagramConnectionTrace = async (req, res) => {
+    try {
+        const { connectionId } = req.params;
+        if (!connectionId) {
+            return res.status(400).json({
+                success: false,
+                message: "connectionId param is required",
+            });
+        }
+        const trace = await prisma_1.default.traceLedger.findFirst({
+            where: {
+                OR: [
+                    { traceId: connectionId },
+                    { traceId: `ig_connect_${connectionId}` },
+                    { correlationId: connectionId }
+                ]
+            }
+        });
+        if (!trace) {
+            return res.status(404).json({
+                success: false,
+                message: "Trace not found",
+            });
+        }
+        const lifecycle = Array.isArray(trace.lifecycle) ? trace.lifecycle : [];
+        const currentStage = lifecycle.length > 0 ? lifecycle[lifecycle.length - 1].stage : null;
+        const completedStages = lifecycle
+            .filter((s) => s.status === "COMPLETED")
+            .map((s) => s.stage);
+        const failedStage = trace.status === "FAILED" ? currentStage : null;
+        const duration = trace.endedAt
+            ? new Date(trace.endedAt).getTime() - new Date(trace.startedAt).getTime()
+            : Date.now() - new Date(trace.startedAt).getTime();
+        const errors = lifecycle
+            .filter((s) => s.status === "FAILED")
+            .map((s) => s.metadata?.reason || s.metadata?.message || "Unknown error");
+        return res.json({
+            connectionId,
+            currentStage,
+            completedStages,
+            failedStage,
+            duration,
+            errors
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to retrieve connection trace",
+            error: String(error?.message || "trace_retrieve_failed"),
+        });
+    }
+};
+exports.getInstagramConnectionTrace = getInstagramConnectionTrace;

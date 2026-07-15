@@ -1893,3 +1893,61 @@ export const runDeveloperPlatformExtensibilitySelfAudit = async (req: any, res: 
     });
   }
 };
+
+export const getInstagramConnectionTrace = async (req: any, res: any) => {
+  try {
+    const { connectionId } = req.params;
+
+    if (!connectionId) {
+      return res.status(400).json({
+        success: false,
+        message: "connectionId param is required",
+      });
+    }
+
+    const trace = await prisma.traceLedger.findFirst({
+      where: {
+        OR: [
+          { traceId: connectionId },
+          { traceId: `ig_connect_${connectionId}` },
+          { correlationId: connectionId }
+        ]
+      }
+    });
+
+    if (!trace) {
+      return res.status(404).json({
+        success: false,
+        message: "Trace not found",
+      });
+    }
+
+    const lifecycle = Array.isArray(trace.lifecycle) ? (trace.lifecycle as any[]) : [];
+    const currentStage = lifecycle.length > 0 ? lifecycle[lifecycle.length - 1].stage : null;
+    const completedStages = lifecycle
+      .filter((s: any) => s.status === "COMPLETED")
+      .map((s: any) => s.stage);
+    const failedStage = trace.status === "FAILED" ? currentStage : null;
+    const duration = trace.endedAt 
+      ? new Date(trace.endedAt).getTime() - new Date(trace.startedAt).getTime() 
+      : Date.now() - new Date(trace.startedAt).getTime();
+    const errors = lifecycle
+      .filter((s: any) => s.status === "FAILED")
+      .map((s: any) => s.metadata?.reason || s.metadata?.message || "Unknown error");
+
+    return res.json({
+      connectionId,
+      currentStage,
+      completedStages,
+      failedStage,
+      duration,
+      errors
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve connection trace",
+      error: String((error as Error)?.message || "trace_retrieve_failed"),
+    });
+  }
+};

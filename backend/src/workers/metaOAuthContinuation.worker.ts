@@ -9,6 +9,7 @@ import {
 } from "../queues/metaOAuthContinuation.queue";
 import { runMetaOAuthContinuationFromQueueJob } from "../controllers/client.controller";
 import { getMetaOAuthLifecycleSnapshot } from "../services/metaOAuthLifecycle.service";
+import logger from "../utils/logger";
 
 const shouldRunWorker =
   process.env.RUN_WORKER === "true" ||
@@ -35,6 +36,13 @@ const processMetaOAuthContinuationJob = async (
 
   const startedAtMs = Date.now();
   const resumeCount = Number(job.attemptsMade || 0);
+
+  logger.info({
+    jobId: job.id || "",
+    businessId: job.data.businessId,
+    stage: "META_OAUTH_JOB_STARTED",
+    durationMs: 0,
+  });
 
   emitPerformanceMetric({
     name: "onboarding_resume_count",
@@ -77,10 +85,30 @@ const processMetaOAuthContinuationJob = async (
     },
   }).catch(() => undefined);
 
-  await runMetaOAuthContinuationFromQueueJob({
-    ...job.data,
-    source: "queue_worker",
-  });
+  try {
+    await runMetaOAuthContinuationFromQueueJob({
+      ...job.data,
+      source: "queue_worker",
+    });
+
+    const durationMs = Date.now() - startedAtMs;
+    logger.info({
+      jobId: job.id || "",
+      businessId: job.data.businessId,
+      stage: "META_OAUTH_JOB_COMPLETED",
+      durationMs,
+    });
+  } catch (error: any) {
+    const durationMs = Date.now() - startedAtMs;
+    logger.error({
+      jobId: job.id || "",
+      businessId: job.data.businessId,
+      stage: "META_OAUTH_JOB_FAILED",
+      durationMs,
+      message: error.message,
+    });
+    throw error;
+  }
 
   const durationMs = Date.now() - startedAtMs;
   const deferredSinceMs = job.data.queuedAtIso

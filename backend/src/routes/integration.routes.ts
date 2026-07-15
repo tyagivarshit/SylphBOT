@@ -43,6 +43,7 @@ import {
   subscribeDeveloperPlatformEvent,
   upsertConnectHubBranding,
   upgradeConnectHubPlan,
+  getInstagramConnectionTrace,
 } from "../controllers/integration.controller";
 
 const router = express.Router();
@@ -277,6 +278,13 @@ router.get(
   requirePermission("settings:view"),
   runDeveloperPlatformExtensibilitySelfAudit
 );
+router.get(
+  "/meta/instagram/:connectionId/trace",
+  protect,
+  requirePermission("settings:view"),
+  getInstagramConnectionTrace
+);
+
 router.get("/", protect, requirePermission("settings:view"), getIntegrations);
 
 export default router;

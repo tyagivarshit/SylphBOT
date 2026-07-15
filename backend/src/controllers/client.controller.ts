@@ -45,6 +45,9 @@ import {
 import { scheduleDeferredIntegrationProjectionReconcile } from "../services/integrationProjectionRecovery.service";
 import { isRedisCircuitOpen } from "../redis/redisSafety";
 import { TimeoutExceededError, withTimeout } from "../utils/boundedTimeout";
+import logger from "../utils/logger";
+import { getRequestContext } from "../observability/requestContext";
+import { axiosWithMetaRetry } from "../utils/metaRetry";
 
 const META_OAUTH_CONNECT_TIMEOUT_MS = 45_000;
 const META_GRAPH_TIMEOUT_MS = 12_000;
@@ -311,6 +314,36 @@ class MetaOAuthFlowError extends Error {
     this.metadata = options.metadata || null;
   }
 }
+
+export const logInstagramOAuthStage = (options: {
+  stage: string;
+  status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
+  userId?: string | null;
+  businessId?: string | null;
+  platform?: string;
+  durationMs?: number;
+  metadata?: Record<string, any>;
+}) => {
+  const context = getRequestContext();
+  const requestId = context?.requestId || `req_${Date.now()}`;
+  const correlationId = context?.correlationId || context?.traceId || `corr_${Date.now()}`;
+  const userId = options.userId || context?.userId || null;
+  const businessId = options.businessId || context?.businessId || context?.tenantId || null;
+  const platform = options.platform || "INSTAGRAM";
+
+  logger.info({
+    requestId,
+    correlationId,
+    businessId,
+    userId,
+    platform,
+    stage: options.stage,
+    timestamp: new Date().toISOString(),
+    durationMs: options.durationMs || 0,
+    status: options.status,
+    ...options.metadata,
+  });
+};
 
 const buildInstagramTraceId = (nonce?: string | null) => {
   const normalizedNonce = String(nonce || "").trim();
@@ -1112,18 +1145,36 @@ const fetchWhatsAppPhoneCandidates = async (accessToken: string) => {
 };
 
 const fetchMetaBusinesses = async (accessToken: string) => {
-  const response = await axios.get("https://graph.facebook.com/v19.0/me/businesses", {
-    params: {
-      fields: "id,name",
-      access_token: accessToken,
-    },
-    timeout: META_GRAPH_TIMEOUT_MS,
+  logInstagramOAuthStage({
+    stage: "INSTAGRAM_ACCOUNT_DISCOVERY_STARTED",
+    status: "IN_PROGRESS",
   });
+  try {
+    const response = await axiosWithMetaRetry({
+      method: "GET",
+      url: "https://graph.facebook.com/v19.0/me/businesses",
+      params: {
+        fields: "id,name",
+        access_token: accessToken,
+      },
+      timeout: META_GRAPH_TIMEOUT_MS,
+    }, "INSTAGRAM_ACCOUNT_DISCOVERY");
 
-  return getMetaDataArray(response.data).map((business) => ({
-    id: normalizeOptionalString(business?.id),
-    name: normalizeOptionalString(business?.name),
-  }));
+    const list = getMetaDataArray(response.data).map((business) => ({
+      id: normalizeOptionalString(business?.id),
+      name: normalizeOptionalString(business?.name),
+    }));
+
+    return list;
+  } catch (error: any) {
+    logger.error({
+      stage: "INSTAGRAM_ACCOUNT_DISCOVERY",
+      provider: "META_GRAPH_API",
+      status: error.response?.status,
+      message: error.message,
+    });
+    throw error;
+  }
 };
 
 const isProfessionalInstagramAccount = (accountType?: string | null) => {
@@ -1132,14 +1183,31 @@ const isProfessionalInstagramAccount = (accountType?: string | null) => {
 };
 
 const fetchInstagramConnection = async (accessToken: string) => {
-  const pagesRes = await axios.get("https://graph.facebook.com/v19.0/me/accounts", {
-    params: {
-      fields:
-        "id,name,access_token,instagram_business_account{id,username},connected_instagram_account{id,username}",
-      access_token: accessToken,
-    },
-    timeout: META_GRAPH_TIMEOUT_MS,
+  logInstagramOAuthStage({
+    stage: "INSTAGRAM_PAGE_DISCOVERY_STARTED",
+    status: "IN_PROGRESS",
   });
+  let pagesRes;
+  try {
+    pagesRes = await axiosWithMetaRetry({
+      method: "GET",
+      url: "https://graph.facebook.com/v19.0/me/accounts",
+      params: {
+        fields:
+          "id,name,access_token,instagram_business_account{id,username},connected_instagram_account{id,username}",
+        access_token: accessToken,
+      },
+      timeout: META_GRAPH_TIMEOUT_MS,
+    }, "INSTAGRAM_PAGE_DISCOVERY");
+  } catch (error: any) {
+    logger.error({
+      stage: "INSTAGRAM_PAGE_DISCOVERY",
+      provider: "META_GRAPH_API",
+      status: error.response?.status,
+      message: error.message,
+    });
+    throw error;
+  }
 
   const pages = getMetaDataArray(pagesRes.data);
   const allPairs: InstagramPagePair[] = [];
@@ -1149,6 +1217,19 @@ const fetchInstagramConnection = async (accessToken: string) => {
     facebookPageName: string | null;
   }> = [];
   const pageAccessTokenByFacebookPageId: Record<string, string> = {};
+
+  if (pages.length === 0) {
+    logInstagramOAuthStage({
+      stage: "INSTAGRAM_PAGE_DISCOVERY_EMPTY",
+      status: "COMPLETED",
+    });
+  } else {
+    logInstagramOAuthStage({
+      stage: "INSTAGRAM_PAGE_DISCOVERY_SUCCESS",
+      status: "COMPLETED",
+      metadata: { pagesFound: pages.length },
+    });
+  }
 
   for (const page of pages) {
     const facebookPageId = normalizeOptionalString(page?.id);
@@ -1175,17 +1256,25 @@ const fetchInstagramConnection = async (accessToken: string) => {
     let instagramAccountType: string | null = null;
 
     if (instagramProfessionalAccountId && pageAccessToken) {
+      logInstagramOAuthStage({
+        stage: "INSTAGRAM_ACCOUNT_FOUND",
+        status: "COMPLETED",
+        metadata: {
+          facebookPageId,
+          instagramProfessionalAccountId,
+          instagramUsername,
+        },
+      });
       try {
-        const igProfileRes = await axios.get(
-          `https://graph.facebook.com/v19.0/${instagramProfessionalAccountId}`,
-          {
-            params: {
-              fields: "id,username,name,account_type",
-              access_token: pageAccessToken,
-            },
-            timeout: META_GRAPH_TIMEOUT_MS,
-          }
-        );
+        const igProfileRes = await axiosWithMetaRetry({
+          method: "GET",
+          url: `https://graph.facebook.com/v19.0/${instagramProfessionalAccountId}`,
+          params: {
+            fields: "id,username,name,account_type",
+            access_token: pageAccessToken,
+          },
+          timeout: META_GRAPH_TIMEOUT_MS,
+        }, "INSTAGRAM_ACCOUNT_DISCOVERY");
 
         instagramUsername =
           normalizeOptionalString(igProfileRes.data?.username) || instagramUsername;
@@ -1193,9 +1282,23 @@ const fetchInstagramConnection = async (accessToken: string) => {
         instagramAccountType = normalizeOptionalString(
           igProfileRes.data?.account_type
         );
-      } catch {
-        // Keep base pair metadata if profile enrichment fails.
+      } catch (error: any) {
+        logger.error({
+          stage: "INSTAGRAM_ACCOUNT_DISCOVERY",
+          provider: "META_GRAPH_API",
+          status: error.response?.status,
+          message: error.message,
+        });
       }
+    } else {
+      logInstagramOAuthStage({
+        stage: "INSTAGRAM_ACCOUNT_NOT_FOUND",
+        status: "COMPLETED",
+        metadata: {
+          facebookPageId,
+          facebookPageName,
+        },
+      });
     }
 
     if (!instagramProfessionalAccountId) {
@@ -1232,18 +1335,39 @@ const fetchInstagramConnection = async (accessToken: string) => {
 };
 
 const fetchMetaGrantedPermissions = async (accessToken: string) => {
+  logInstagramOAuthStage({
+    stage: "INSTAGRAM_PERMISSION_CHECK_STARTED",
+    status: "IN_PROGRESS",
+  });
   try {
-    const response = await axios.get("https://graph.facebook.com/v19.0/me/permissions", {
+    const response = await axiosWithMetaRetry({
+      method: "GET",
+      url: "https://graph.facebook.com/v19.0/me/permissions",
       params: {
         access_token: accessToken,
       },
       timeout: META_GRAPH_TIMEOUT_MS,
-    });
-    return getMetaDataArray(response.data)
+    }, "INSTAGRAM_PERMISSION_CHECK");
+
+    const permissions = getMetaDataArray(response.data)
       .filter((row) => String(row?.status || "").toLowerCase() === "granted")
       .map((row) => normalizeOptionalString(row?.permission))
       .filter((permission): permission is string => Boolean(permission));
-  } catch {
+
+    logInstagramOAuthStage({
+      stage: "INSTAGRAM_PERMISSION_CHECK_SUCCESS",
+      status: "COMPLETED",
+      metadata: { grantedPermissions: permissions },
+    });
+
+    return permissions;
+  } catch (error: any) {
+    logger.error({
+      stage: "INSTAGRAM_PERMISSION_CHECK",
+      provider: "META_GRAPH_API",
+      status: error.response?.status,
+      message: error.message,
+    });
     return [];
   }
 };
@@ -1255,20 +1379,37 @@ const subscribeInstagramPageWebhook = async (
   if (!facebookPageId || !pageAccessToken) {
     return false;
   }
+  logInstagramOAuthStage({
+    stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_STARTED",
+    status: "IN_PROGRESS",
+    metadata: { facebookPageId },
+  });
   try {
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${facebookPageId}/subscribed_apps`,
-      null,
-      {
-        params: {
-          subscribed_fields: "messages,messaging_postbacks,comments",
-          access_token: pageAccessToken,
-        },
-        timeout: META_GRAPH_TIMEOUT_MS,
-      }
-    );
+    await axiosWithMetaRetry({
+      method: "POST",
+      url: `https://graph.facebook.com/v19.0/${facebookPageId}/subscribed_apps`,
+      data: null,
+      params: {
+        subscribed_fields: "messages,messaging_postbacks,comments",
+        access_token: pageAccessToken,
+      },
+      timeout: META_GRAPH_TIMEOUT_MS,
+    }, "INSTAGRAM_WEBHOOK_SUBSCRIBE");
+
+    logInstagramOAuthStage({
+      stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_SUCCESS",
+      status: "COMPLETED",
+      metadata: { facebookPageId },
+    });
+
     return true;
-  } catch {
+  } catch (error: any) {
+    logger.error({
+      stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_FAILED",
+      provider: "META_GRAPH_API",
+      status: error.response?.status,
+      message: error.message,
+    });
     return false;
   }
 };
@@ -1281,15 +1422,23 @@ const fetchInstagramProfileSnapshot = async (
     return null;
   }
   try {
-    const response = await axios.get(`https://graph.facebook.com/v19.0/${pageId}`, {
+    const response = await axiosWithMetaRetry({
+      method: "GET",
+      url: `https://graph.facebook.com/v19.0/${pageId}`,
       params: {
         fields: "id,username,name,profile_picture_url",
         access_token: pageAccessToken,
       },
       timeout: META_GRAPH_TIMEOUT_MS,
-    });
+    }, "INSTAGRAM_PROFILE_FETCH");
     return response.data || null;
-  } catch {
+  } catch (error: any) {
+    logger.error({
+      stage: "INSTAGRAM_PROFILE_FETCH",
+      provider: "META_GRAPH_API",
+      status: error.response?.status,
+      message: error.message,
+    });
     return null;
   }
 };
@@ -2291,6 +2440,12 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           timeoutMs: META_OAUTH_CALLBACK_ENQUEUE_BUDGET_MS,
           task: enqueueMetaOAuthContinuation(enqueuePayload),
         });
+        logger.info({
+          jobId: enqueueResult.jobId,
+          businessId,
+          stage: "META_OAUTH_JOB_CREATED",
+          durationMs: Date.now() - callbackStartedAtMs,
+        });
         emitOnboardingTraceEvent({
           businessId,
           eventType: "callback_handoff_success",
@@ -2559,22 +2714,29 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     shortToken = providedShortToken;
 
     if (!shortToken) {
+      logInstagramOAuthStage({
+        stage: "INSTAGRAM_CODE_EXCHANGE_STARTED",
+        status: "IN_PROGRESS",
+      });
       let shortTokenRes: any;
       try {
-        shortTokenRes = await axios.get(
-          "https://graph.facebook.com/v19.0/oauth/access_token",
-          {
-            params: {
-              client_id: metaRuntime.appId,
-              client_secret: metaRuntime.appSecret,
-              redirect_uri: redirectUri,
-              code,
-            },
-            timeout: internalContinuation
-              ? META_GRAPH_TIMEOUT_MS
-              : META_GRAPH_FAST_LANE_TIMEOUT_MS,
-          }
-        );
+        shortTokenRes = await axiosWithMetaRetry({
+          method: "GET",
+          url: "https://graph.facebook.com/v19.0/oauth/access_token",
+          params: {
+            client_id: metaRuntime.appId,
+            client_secret: metaRuntime.appSecret,
+            redirect_uri: redirectUri,
+            code,
+          },
+          timeout: internalContinuation
+            ? META_GRAPH_TIMEOUT_MS
+            : META_GRAPH_FAST_LANE_TIMEOUT_MS,
+        }, "INSTAGRAM_CODE_EXCHANGE");
+        logInstagramOAuthStage({
+          stage: "INSTAGRAM_CODE_EXCHANGE_SUCCESS",
+          status: "COMPLETED",
+        });
       } catch (error: any) {
         if (
           !internalContinuation &&
@@ -2588,8 +2750,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         if (targetPlatform === "INSTAGRAM") {
           failInstagramConnect({
             stage: "IG_CODE_EXCHANGED",
-            reason: getAxiosErrorMessage(error),
-            code: "IG_CODE_EXCHANGE_FAILED",
+            reason: "Meta authorization failed.",
+            code: "INSTAGRAM_TOKEN_EXCHANGE_FAILED",
             statusCode: Number(error?.response?.status || 400),
             metadata: {
               providerError: error?.response?.data || null,
@@ -2971,21 +3133,28 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     longToken = providedLongToken;
 
     if (!longToken) {
+      logInstagramOAuthStage({
+        stage: "INSTAGRAM_LONG_TOKEN_STARTED",
+        status: "IN_PROGRESS",
+      });
       let longTokenRes: any;
 
       try {
-        longTokenRes = await axios.get(
-          "https://graph.facebook.com/v19.0/oauth/access_token",
-          {
-            params: {
-              grant_type: "fb_exchange_token",
-              client_id: metaRuntime.appId,
-              client_secret: metaRuntime.appSecret,
-              fb_exchange_token: shortToken,
-            },
-            timeout: META_GRAPH_TIMEOUT_MS,
-          }
-        );
+        longTokenRes = await axiosWithMetaRetry({
+          method: "GET",
+          url: "https://graph.facebook.com/v19.0/oauth/access_token",
+          params: {
+            grant_type: "fb_exchange_token",
+            client_id: metaRuntime.appId,
+            client_secret: metaRuntime.appSecret,
+            fb_exchange_token: shortToken,
+          },
+          timeout: META_GRAPH_TIMEOUT_MS,
+        }, "INSTAGRAM_LONG_TOKEN");
+        logInstagramOAuthStage({
+          stage: "INSTAGRAM_LONG_TOKEN_SUCCESS",
+          status: "COMPLETED",
+        });
       } catch (error: any) {
         if (
           !internalContinuation &&
@@ -2997,8 +3166,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         if (targetPlatform === "INSTAGRAM") {
           failInstagramConnect({
             stage: "IG_LONG_TOKEN_EXCHANGED",
-            reason: getAxiosErrorMessage(error),
-            code: "IG_LONG_TOKEN_EXCHANGE_FAILED",
+            reason: "Meta authorization failed.",
+            code: "INSTAGRAM_TOKEN_EXCHANGE_FAILED",
             statusCode: Number(error?.response?.status || 400),
             metadata: {
               providerError: error?.response?.data || null,

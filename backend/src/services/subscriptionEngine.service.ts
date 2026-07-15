@@ -1,5 +1,6 @@
 import { Prisma, SubscriptionLedgerStatus } from "@prisma/client";
 import prisma from "../config/prisma";
+import { invalidateBillingContextCache } from "../middleware/subscription.middleware";
 import { commerceAuthorityService } from "./commerceAuthority.service";
 import { publishCommerceEvent } from "./commerceEvent.service";
 import { invoiceEngineService } from "./invoiceEngine.service";
@@ -284,6 +285,8 @@ export const createSubscriptionEngineService = () => {
       },
     });
 
+    await invalidateBillingContextCache(businessId).catch(() => undefined);
+
     return updated;
   };
 
@@ -401,7 +404,7 @@ export const createSubscriptionEngineService = () => {
           ? null
           : toMinor(Number(metadata.prorationMinor));
 
-      return prisma.subscriptionLedger.update({
+      const updatedSub = await prisma.subscriptionLedger.update({
         where: {
           id: subscription.id,
         },
@@ -420,6 +423,9 @@ export const createSubscriptionEngineService = () => {
           },
         },
       });
+
+      await invalidateBillingContextCache(businessId).catch(() => undefined);
+      return updatedSub;
     }
 
     // renew
@@ -476,6 +482,8 @@ export const createSubscriptionEngineService = () => {
         renewal: true,
       },
     });
+
+    await invalidateBillingContextCache(businessId).catch(() => undefined);
 
     return renewed;
   };

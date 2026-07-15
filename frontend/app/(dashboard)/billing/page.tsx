@@ -26,6 +26,7 @@ type Subscription = {
     name?: string | null;
     type?: string | null;
   } | null;
+  status?: string | null;
 };
 
 type Invoice = {
@@ -539,6 +540,27 @@ function BillingPageContent() {
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [plansRequestFailed, setPlansRequestFailed] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  const handleManageBilling = useCallback(async () => {
+    setPortalLoading(true);
+    try {
+      const response = await apiFetch<{ url?: string }>("/api/billing/portal", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!response.success || !response.data?.url) {
+        throw new Error(response.message || "Billing portal is temporarily unavailable");
+      }
+
+      window.location.assign(response.data.url);
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : "Failed to open billing portal");
+    } finally {
+      setPortalLoading(false);
+    }
+  }, []);
   const hasLoadedBillingRef = useRef(false);
   const hasLoadedPlansRef = useRef(false);
   const checkoutLockRef = useRef(false);
@@ -1096,6 +1118,16 @@ function BillingPageContent() {
                     Syncing...
                   </span>
                 )}
+                {subscription?.stripeSubscriptionId && (
+                  <LoadingButton
+                    onClick={handleManageBilling}
+                    loading={portalLoading}
+                    loadingLabel="Opening..."
+                    className="rounded-xl border border-blue-100 bg-blue-50/80 px-3.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                  >
+                    Manage Billing
+                  </LoadingButton>
+                )}
                 <span className="brand-chip brand-chip-success">
                   <ShieldCheck size={13} />
                   Secure billing
@@ -1180,12 +1212,12 @@ function BillingPageContent() {
                   </div>
 
                    <LoadingButton
-                    onClick={() => handleCheckout(plan.type)}
-                    loading={loading === plan.type}
-                    loadingLabel="Redirecting to secure checkout..."
-                    disabled={Boolean(loading) || (isEntitlementKnown && current)}
+                    onClick={current && (subscription?.status === "PAUSED" || subscription?.status === "PAST_DUE") ? handleManageBilling : () => handleCheckout(plan.type)}
+                    loading={current && (subscription?.status === "PAUSED" || subscription?.status === "PAST_DUE") ? portalLoading : loading === plan.type}
+                    loadingLabel={current && (subscription?.status === "PAUSED" || subscription?.status === "PAST_DUE") ? "Opening..." : "Redirecting to secure checkout..."}
+                    disabled={Boolean(loading) || portalLoading || (isEntitlementKnown && current && subscription?.status !== "PAUSED" && subscription?.status !== "PAST_DUE")}
                     className={`mt-6 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                      isEntitlementKnown && current
+                      isEntitlementKnown && current && subscription?.status !== "PAUSED" && subscription?.status !== "PAST_DUE"
                         ? "bg-gray-200 text-gray-600"
                         : "bg-[linear-gradient(135deg,#081223_0%,#0b2a5b_55%,#1e5eff_100%)] text-white hover:shadow-lg"
                     }`}
@@ -1193,12 +1225,21 @@ function BillingPageContent() {
                     {!isEntitlementKnown
                       ? `Choose ${plan.name}`
                       : current
-                      ? "Current Plan"
+                      ? subscription?.status === "PAUSED"
+                        ? "Resume"
+                        : subscription?.status === "PAST_DUE"
+                        ? "Renew"
+                        : "Current Plan"
                       : planKey === "FREE_LOCKED" || planKey === "LOCKED"
                         ? hasUsedTrial
                           ? "Buy Now"
                           : "Start Free Trial"
-                        : "Upgrade Now"}
+                        : (() => {
+                            const rank: Record<string, number> = { BASIC: 1, PRO: 2, ELITE: 3 };
+                            const currentRank = rank[planKey] || 0;
+                            const targetRank = rank[plan.type] || 0;
+                            return targetRank < currentRank ? "Downgrade" : "Upgrade Now";
+                          })()}
                   </LoadingButton>
 
                   <p className="mt-3 text-xs text-gray-500">

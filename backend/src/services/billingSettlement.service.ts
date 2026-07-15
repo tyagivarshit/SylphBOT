@@ -225,7 +225,30 @@ export const settleSuccessfulCheckout = async (input: {
   const amountMinor = Math.max(0, Number(proposal.totalMinor || unitPriceMinor * quantity));
   const subscriptionIdempotencyKey = `checkout:settlement:subscription:${paymentIntent.id}`;
   const invoiceIdempotencyKey = `checkout:settlement:invoice:${paymentIntent.id}`;
-  const periodEnd = resolvePeriodEnd(now, billingCycle);
+  const toRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+
+  const isTrialCheckout =
+    String(toRecord(paymentIntent.metadata).checkoutType || "").toLowerCase() === "trial" ||
+    String(toRecord(proposal.metadata).checkoutType || "").toLowerCase() === "trial" ||
+    Number(toRecord(paymentIntent.metadata).trialDays || 0) > 0 ||
+    Number(toRecord(proposal.metadata).trialDays || 0) > 0;
+
+  const trialDays = Math.max(
+    0,
+    Number(
+      toRecord(paymentIntent.metadata).trialDays ||
+        toRecord(proposal.metadata).trialDays ||
+        0
+    )
+  );
+
+  const targetStatus = isTrialCheckout ? "TRIALING" : "ACTIVE";
+  const trialEndsAt = isTrialCheckout ? new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000) : null;
+  const periodEnd = isTrialCheckout ? (trialEndsAt as Date) : resolvePeriodEnd(now, billingCycle);
+
   const invoiceNumber = buildInvoiceNumber({
     paymentIntentKey: paymentIntent.paymentIntentKey,
     now,
@@ -258,7 +281,7 @@ export const settleSuccessfulCheckout = async (input: {
             id: bootstrapSubscription.id,
           },
           data: {
-            status: "ACTIVE",
+            status: targetStatus,
             provider: "STRIPE",
             providerSubscriptionId: input.providerSubscriptionId || bootstrapSubscription.providerSubscriptionId,
             planCode,
@@ -270,6 +293,7 @@ export const settleSuccessfulCheckout = async (input: {
             currentPeriodStart: now,
             currentPeriodEnd: periodEnd,
             renewAt: periodEnd,
+            trialEndsAt,
             pausedAt: null,
             cancelledAt: null,
             metadata: mergeMetadata(bootstrapSubscription.metadata, {
@@ -288,7 +312,7 @@ export const settleSuccessfulCheckout = async (input: {
             businessId: paymentIntent.businessId,
             proposalId: proposal.id,
             subscriptionKey: buildLedgerKey("subscription"),
-            status: "ACTIVE",
+            status: targetStatus,
             provider: "STRIPE",
             providerSubscriptionId: input.providerSubscriptionId || null,
             planCode,
@@ -300,6 +324,7 @@ export const settleSuccessfulCheckout = async (input: {
             currentPeriodStart: now,
             currentPeriodEnd: periodEnd,
             renewAt: periodEnd,
+            trialEndsAt,
             metadata: {
               source: "checkout_settlement",
               paymentIntentId: paymentIntent.id,
@@ -310,17 +335,18 @@ export const settleSuccessfulCheckout = async (input: {
       }
 
       shouldQueueBillingEmail = true;
-    } else if (subscription.status !== "ACTIVE") {
+    } else if (subscription.status !== "ACTIVE" && subscription.status !== "TRIALING") {
       subscription = await tx.subscriptionLedger.update({
         where: {
           id: subscription.id,
         },
         data: {
-          status: "ACTIVE",
+          status: targetStatus,
           providerSubscriptionId: input.providerSubscriptionId || subscription.providerSubscriptionId,
           currentPeriodStart: subscription.currentPeriodStart || now,
           currentPeriodEnd: subscription.currentPeriodEnd || periodEnd,
           renewAt: subscription.renewAt || periodEnd,
+          trialEndsAt: subscription.trialEndsAt || trialEndsAt,
           metadata: mergeMetadata(subscription.metadata, {
             settlementSource: input.source || "billing_settlement",
             paymentIntentId: paymentIntent.id,
@@ -348,10 +374,10 @@ export const settleSuccessfulCheckout = async (input: {
           invoiceKey: buildLedgerKey("invoice"),
           status: "PAID",
           currency: currency as Currency,
-          subtotalMinor: Math.max(0, Number(proposal.subtotalMinor || amountMinor)),
-          taxMinor: Math.max(0, Number(proposal.taxMinor || 0)),
-          totalMinor: amountMinor,
-          paidMinor: amountMinor,
+          subtotalMinor: isTrialCheckout ? 0 : Math.max(0, Number(proposal.subtotalMinor || amountMinor)),
+          taxMinor: isTrialCheckout ? 0 : Math.max(0, Number(proposal.taxMinor || 0)),
+          totalMinor: isTrialCheckout ? 0 : amountMinor,
+          paidMinor: isTrialCheckout ? 0 : amountMinor,
           dueAt: now,
           issuedAt: now,
           paidAt: now,
@@ -373,7 +399,7 @@ export const settleSuccessfulCheckout = async (input: {
         },
         data: {
           status: "PAID",
-          paidMinor: Math.max(invoice.paidMinor, amountMinor),
+          paidMinor: isTrialCheckout ? 0 : Math.max(invoice.paidMinor, amountMinor),
           paidAt: invoice.paidAt || now,
           metadata: mergeMetadata(invoice.metadata, {
             settlementSource: input.source || "billing_settlement",

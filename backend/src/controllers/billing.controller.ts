@@ -28,6 +28,7 @@ import {
 } from "../config/stripe.price.map";
 import { getUsageOverview } from "../services/usage.service";
 import { resolveUserWorkspaceIdentity } from "../services/tenant.service";
+import { getTaxConfig } from "../services/tax.service";
 import { stripe } from "../services/stripe.service";
 import { assertStripeConfigReady } from "../services/commerce/providers/stripeConfig.service";
 import { emitPerformanceMetric } from "../observability/performanceMetrics";
@@ -358,6 +359,11 @@ const createInstantCheckoutStripeSession = async (input: {
     currency: input.currency,
   };
 
+  const { taxRegion, taxType, ...checkoutTaxConfig } = getTaxConfig({
+    currency: input.currency,
+    withCustomerUpdate: Boolean(input.stripeCustomerId),
+  });
+
   return stripe.checkout.sessions.create(
     {
       mode: "subscription",
@@ -376,6 +382,7 @@ const createInstantCheckoutStripeSession = async (input: {
           quantity: input.quantity,
         },
       ],
+      ...checkoutTaxConfig,
       success_url: successUrl,
       cancel_url: cancelUrl,
       after_expiration: {
@@ -5075,6 +5082,13 @@ const emitCheckoutMetric = (
           updatedAt: "desc",
         },
       });
+
+      if (subscription && (subscription.status === "CANCELLED" || subscription.status === "EXPIRED")) {
+        return res.status(400).json({
+          success: false,
+          message: "Subscription is already cancelled or expired",
+        });
+      }
 
       if (!subscription) {
         return res.status(400).json({

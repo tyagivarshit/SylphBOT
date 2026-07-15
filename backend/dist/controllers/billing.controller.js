@@ -19,6 +19,7 @@ const pricing_config_1 = require("../config/pricing.config");
 const stripe_price_map_1 = require("../config/stripe.price.map");
 const usage_service_1 = require("../services/usage.service");
 const tenant_service_1 = require("../services/tenant.service");
+const tax_service_1 = require("../services/tax.service");
 const stripe_service_1 = require("../services/stripe.service");
 const stripeConfig_service_1 = require("../services/commerce/providers/stripeConfig.service");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
@@ -202,6 +203,10 @@ const createInstantCheckoutStripeSession = async (input) => {
         quantity: String(input.quantity),
         currency: input.currency,
     };
+    const { taxRegion, taxType, ...checkoutTaxConfig } = (0, tax_service_1.getTaxConfig)({
+        currency: input.currency,
+        withCustomerUpdate: Boolean(input.stripeCustomerId),
+    });
     return stripe_service_1.stripe.checkout.sessions.create({
         mode: "subscription",
         client_reference_id: input.checkoutAttempt,
@@ -219,6 +224,7 @@ const createInstantCheckoutStripeSession = async (input) => {
                 quantity: input.quantity,
             },
         ],
+        ...checkoutTaxConfig,
         success_url: successUrl,
         cancel_url: cancelUrl,
         after_expiration: {
@@ -4072,6 +4078,12 @@ class BillingController {
                     updatedAt: "desc",
                 },
             });
+            if (subscription && (subscription.status === "CANCELLED" || subscription.status === "EXPIRED")) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Subscription is already cancelled or expired",
+                });
+            }
             if (!subscription) {
                 return res.status(400).json({
                     success: false,

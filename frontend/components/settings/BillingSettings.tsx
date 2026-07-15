@@ -73,7 +73,7 @@ export default function BillingSettings() {
 
   const subscription = data?.subscription;
   const billing = data?.billing;
-  const isPaidSubscription = Boolean(subscription?.stripeSubscriptionId);
+  const isPaidSubscription = Boolean(subscription?.stripeSubscriptionId) && subscription?.status !== "CANCELLED" && subscription?.status !== "EXPIRED";
   const billingDegraded = Boolean(data?.meta?.degraded);
 
   const portalMutation = useMutation({

@@ -926,8 +926,7 @@ export const createCommerceProjectionService = () => {
 
         if (
           providerStatus &&
-          providerStatus !== subscription.status &&
-          providerStatus !== "TRIALING"
+          providerStatus !== subscription.status
         ) {
           await subscriptionEngineService
             .transitionSubscriptionStatus({

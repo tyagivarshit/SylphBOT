@@ -40,6 +40,7 @@ exports.recordConversionOutcome = exports.getRevenueAnalytics = exports.getDeepA
 const service = __importStar(require("../services/analytics.service"));
 const analyticsDashboard_service_1 = require("../services/analyticsDashboard.service");
 const prisma_1 = __importDefault(require("../config/prisma"));
+const analytics_service_1 = require("../services/commerce/analytics.service");
 const conversionTracker_service_1 = require("../services/salesAgent/conversionTracker.service");
 const followup_queue_1 = require("../queues/followup.queue");
 const tenant_service_1 = require("../services/tenant.service");
@@ -307,31 +308,16 @@ exports.getDeepAnalyticsDashboard = getDeepAnalyticsDashboard;
 const getRevenueAnalytics = async (req, res) => {
     try {
         const businessId = req.user?.businessId;
-        const range = req.query.range || "30d";
-        const planKey = req.billing?.planKey || "FREE_LOCKED";
         if (!businessId) {
             return res.status(403).json({
                 success: false,
                 message: "Business not found",
             });
         }
-        const projection = await withLifecycleBudget({
-            req,
-            res,
-            label: "analytics_revenue",
-            fallback: (0, analyticsDashboard_service_1.buildAnalyticsDashboardFallback)(range, planKey),
-            task: () => (0, analyticsDashboard_service_1.getAnalyticsDashboard)(businessId, range, planKey, {
-                requestSignal: (0, requestLifecycle_1.getRequestAbortSignal)({ req, res }),
-            }),
-        });
-        if (isResponseCommitted(res) || (0, requestLifecycle_1.isRequestLifecycleAborted)({ req, res })) {
-            return;
-        }
-        const dashboard = projection.value;
+        const summary = await analytics_service_1.RevenueAnalyticsService.getSummaryMetrics();
         res.json({
             success: true,
-            data: dashboard.revenueEngine,
-            meta: dashboard.meta,
+            data: summary,
         });
     }
     catch (error) {

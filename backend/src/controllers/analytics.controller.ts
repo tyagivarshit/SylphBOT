@@ -5,6 +5,7 @@ import {
   getAnalyticsDashboard,
 } from "../services/analyticsDashboard.service";
 import prisma from "../config/prisma";
+import { RevenueAnalyticsService } from "../services/commerce/analytics.service";
 import { recordConversionEvent } from "../services/salesAgent/conversionTracker.service";
 import { scheduleFollowups } from "../queues/followup.queue";
 import { getRequestBusinessId } from "../services/tenant.service";
@@ -329,15 +330,6 @@ export const getDeepAnalyticsDashboard = async (
 export const getRevenueAnalytics = async (req: Request, res: Response) => {
   try {
     const businessId = (req as any).user?.businessId as string | null;
-    const range = (req.query.range as string) || "30d";
-    const planKey =
-      ((req as any).billing?.planKey as
-        | "FREE_LOCKED"
-        | "BASIC"
-        | "PRO"
-        | "ELITE"
-        | undefined) || "FREE_LOCKED";
-
     if (!businessId) {
       return res.status(403).json({
         success: false,
@@ -345,25 +337,10 @@ export const getRevenueAnalytics = async (req: Request, res: Response) => {
       });
     }
 
-    const projection = await withLifecycleBudget({
-      req,
-      res,
-      label: "analytics_revenue",
-      fallback: buildAnalyticsDashboardFallback(range, planKey),
-      task: () =>
-        getAnalyticsDashboard(businessId, range, planKey, {
-          requestSignal: getRequestAbortSignal({ req, res }),
-        }),
-    });
-    if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {
-      return;
-    }
-    const dashboard = projection.value;
-
+    const summary = await RevenueAnalyticsService.getSummaryMetrics();
     res.json({
       success: true,
-      data: dashboard.revenueEngine,
-      meta: dashboard.meta,
+      data: summary,
     });
   } catch (error) {
     if (isResponseCommitted(res) || isRequestLifecycleAborted({ req, res })) {

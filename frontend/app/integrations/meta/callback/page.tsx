@@ -163,6 +163,42 @@ const lifecycleStageLabel = (stage?: string | null) => {
   if (!normalized) {
     return "Preparing onboarding lifecycle";
   }
+  if (normalized === "INITIATED") {
+    return "Connection initiated";
+  }
+  if (normalized === "OAUTH_STARTED") {
+    return "OAuth redirect generated";
+  }
+  if (normalized === "AUTHORIZING") {
+    return "Authorizing with Meta services";
+  }
+  if (normalized === "CODE_RECEIVED") {
+    return "Authorization code received";
+  }
+  if (normalized === "TOKEN_EXCHANGING") {
+    return "Exchanging access token";
+  }
+  if (normalized === "TOKEN_VALIDATED") {
+    return "Token validated successfully";
+  }
+  if (normalized === "ACCOUNT_DISCOVERY") {
+    return "Discovering linked Instagram accounts";
+  }
+  if (normalized === "PAGE_VALIDATION") {
+    return "Validating Page linkages";
+  }
+  if (normalized === "PERMISSION_CHECK") {
+    return "Verifying requested permissions";
+  }
+  if (normalized === "WEBHOOK_SETUP") {
+    return "Subscribing to real-time events";
+  }
+  if (normalized === "FINAL_VERIFICATION") {
+    return "Running final verification checks";
+  }
+  if (normalized === "CONNECTED") {
+    return "Instagram connected successfully";
+  }
   if (normalized === "OAUTH_AUTHENTICATED") {
     return "OAuth authenticated";
   }
@@ -219,7 +255,7 @@ const resolveOnboardingPhase = (lifecycle?: LifecyclePayload | null) => {
   const connectionState = readString(lifecycle?.connectionState).toUpperCase();
   const stage = readString(lifecycle?.stage).toUpperCase();
 
-  if (status === "COMPLETED" || connectionState === "READY_MINIMAL") {
+  if (status === "COMPLETED" || connectionState === "READY_MINIMAL" || stage === "CONNECTED") {
     return "ACTIVE";
   }
 
@@ -243,19 +279,40 @@ const resolveOnboardingPhase = (lifecycle?: LifecyclePayload | null) => {
     return "ACTION_REQUIRED";
   }
 
-  if (stage === "OAUTH_AUTHENTICATED") {
+  if (
+    stage === "INITIATED" ||
+    stage === "OAUTH_STARTED" ||
+    stage === "AUTHORIZING" ||
+    stage === "OAUTH_AUTHENTICATED"
+  ) {
     return "CONNECTING";
   }
 
-  if (stage === "CALLBACK_ACCEPTED" || connectionState === "CONTINUATION_SCHEDULED") {
+  if (
+    stage === "CODE_RECEIVED" ||
+    stage === "TOKEN_EXCHANGING" ||
+    stage === "CALLBACK_ACCEPTED" ||
+    connectionState === "CONTINUATION_SCHEDULED"
+  ) {
     return "PROCESSING";
   }
 
-  if (stage === "META_ACCOUNT_CONNECTED" || connectionState === "CONNECTED_PENDING") {
+  if (
+    stage === "TOKEN_VALIDATED" ||
+    stage === "ACCOUNT_DISCOVERY" ||
+    stage === "PAGE_VALIDATION" ||
+    stage === "FINAL_VERIFICATION" ||
+    stage === "META_ACCOUNT_CONNECTED" ||
+    connectionState === "CONNECTED_PENDING"
+  ) {
     return "VERIFYING";
   }
 
-  if (stage === "WEBHOOK_ACTIVATION") {
+  if (
+    stage === "PERMISSION_CHECK" ||
+    stage === "WEBHOOK_SETUP" ||
+    stage === "WEBHOOK_ACTIVATION"
+  ) {
     return "ACTIVATING";
   }
 
@@ -1075,32 +1132,177 @@ function MetaCallbackContent() {
     }
   };
 
-  if (loading) {
-    const lifecycleStatus = normalizeLifecycleStatus(lifecycle?.status);
-    const phase = resolveOnboardingPhase(lifecycle);
-    const stageLabel = lifecycleStageLabel(lifecycle?.stage);
-    const statusDetail = readString(lifecycle?.statusDetail);
-    return (
-      <div className="flex h-screen items-center justify-center bg-slate-50 px-6 text-sm text-slate-700">
-        <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-          <p className="font-medium text-slate-900">Finalizing Meta connection...</p>
-          <p className="mt-1 text-xs text-slate-600">
-            Phase: {phase} | Stage: {stageLabel} ({lifecycleStatus})
-          </p>
-          {statusDetail ? (
-            <p className="mt-1 text-xs text-slate-500">{statusDetail}</p>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
+  if (loading || !failure) {
+    const stage = lifecycle?.stage;
+    const normStage = String(stage || "").toUpperCase();
+    const isWhatsApp = searchParams.get("platform")?.toLowerCase() === "whatsapp" || lifecycle?.platform?.toLowerCase() === "whatsapp";
 
-  if (!failure) {
-    const phase = resolveOnboardingPhase(lifecycle);
-    const stageLabel = lifecycleStageLabel(lifecycle?.stage);
+    if (isWhatsApp) {
+      const lifecycleStatus = normalizeLifecycleStatus(lifecycle?.status);
+      const phase = resolveOnboardingPhase(lifecycle);
+      const stageLabel = lifecycleStageLabel(stage);
+      const statusDetail = readString(lifecycle?.statusDetail);
+      return (
+        <div className="flex h-screen items-center justify-center bg-slate-50 px-6 text-sm text-slate-700">
+          <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+            <p className="font-medium text-slate-900">Finalizing Meta WhatsApp connection...</p>
+            <p className="mt-1 text-xs text-slate-600">
+              Phase: {phase} | Stage: {stageLabel} ({lifecycleStatus})
+            </p>
+            {statusDetail ? (
+              <p className="mt-1 text-xs text-slate-500">{statusDetail}</p>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    const getProgressData = (st?: string | null) => {
+      const norm = String(st || "").toUpperCase();
+      switch (norm) {
+        case "INITIATED":
+          return { step: 0, percent: 10, time: "35s" };
+        case "OAUTH_STARTED":
+          return { step: 0, percent: 20, time: "30s" };
+        case "AUTHORIZING":
+          return { step: 0, percent: 30, time: "25s" };
+        case "CODE_RECEIVED":
+          return { step: 0, percent: 40, time: "22s" };
+        case "TOKEN_EXCHANGING":
+          return { step: 1, percent: 50, time: "18s" };
+        case "TOKEN_VALIDATED":
+          return { step: 1, percent: 60, time: "15s" };
+        case "ACCOUNT_DISCOVERY":
+          return { step: 2, percent: 70, time: "12s" };
+        case "PAGE_VALIDATION":
+          return { step: 2, percent: 75, time: "10s" };
+        case "PERMISSION_CHECK":
+          return { step: 2, percent: 80, time: "8s" };
+        case "WEBHOOK_SETUP":
+          return { step: 3, percent: 90, time: "5s" };
+        case "FINAL_VERIFICATION":
+          return { step: 3, percent: 95, time: "2s" };
+        case "CONNECTED":
+        case "COMPLETED":
+          return { step: 3, percent: 100, time: "0s" };
+        default:
+          if (norm.includes("CALLBACK") || norm.includes("ACCEPTED")) return { step: 0, percent: 30, time: "25s" };
+          if (norm.includes("TOKEN") || norm.includes("PERSISTENCE")) return { step: 1, percent: 60, time: "15s" };
+          if (norm.includes("ACCOUNT") || norm.includes("PAIR")) return { step: 2, percent: 75, time: "10s" };
+          if (norm.includes("WEBHOOK")) return { step: 3, percent: 90, time: "5s" };
+          return { step: 0, percent: 15, time: "30s" };
+      }
+    };
+
+    const { step, percent, time } = getProgressData(stage);
+    const stageLabel = lifecycleStageLabel(stage);
+    const statusDetail = readString(lifecycle?.statusDetail);
+
+    const steps = [
+      { id: 0, title: "OAuth Exchange", desc: "Verifying credentials with Meta" },
+      { id: 1, title: "Token Validation", desc: "Exchanging and verifying access tokens" },
+      { id: 2, title: "Account Discovery", desc: "Discovering linked pages and profiles" },
+      { id: 3, title: "Webhook Setup", desc: "Subscribing to comments and messages" },
+    ];
+
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-700">
-        {phase}... {stageLabel}
+      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-900 px-4 py-12 text-slate-100 font-sans selection:bg-indigo-500/30">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-900/40 via-slate-950 to-slate-950 -z-10" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#0f172a_1px,transparent_1px),linear-gradient(to_bottom,#0f172a_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] -z-10 opacity-70" />
+
+        <div className="w-full max-w-xl rounded-2xl border border-slate-800 bg-slate-950/70 p-8 shadow-2xl backdrop-blur-xl transition-all duration-300">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+              </span>
+              <span className="text-xs font-semibold tracking-wider text-indigo-400 uppercase">Onboarding Engine</span>
+            </div>
+            <div className="text-xs font-medium text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-full">
+              Estimated: {time} remaining
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <h1 className="text-2xl font-bold tracking-tight text-white">Connecting Instagram</h1>
+            <p className="mt-2 text-sm text-slate-400">
+              We are configuring a highly secure, real-time messaging link with Meta Graph API.
+            </p>
+          </div>
+
+          <div className="mt-8">
+            <div className="flex justify-between text-xs font-semibold text-slate-400 mb-2">
+              <span>Overall Progress</span>
+              <span className="text-indigo-400">{percent}%</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+              <div 
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-400 transition-all duration-700 ease-out"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-8 space-y-5">
+            {steps.map((s) => {
+              const isCompleted = step > s.id;
+              const isActive = step === s.id;
+
+              return (
+                <div 
+                  key={s.id}
+                  className={`flex items-start gap-4 p-3.5 rounded-xl border transition-all duration-300 ${
+                    isActive 
+                      ? "border-slate-700 bg-slate-900/50" 
+                      : isCompleted
+                      ? "border-slate-800/40 bg-slate-950/20 opacity-80"
+                      : "border-transparent bg-transparent opacity-40"
+                  }`}
+                >
+                  <div className="mt-0.5">
+                    {isCompleted ? (
+                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    ) : isActive ? (
+                      <div className="flex h-5 w-5 items-center justify-center rounded-full border border-indigo-400/50 bg-indigo-950 text-indigo-400">
+                        <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                      </div>
+                    ) : (
+                      <div className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-800 bg-slate-950 text-slate-600 text-[10px] font-bold">
+                        {s.id + 1}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-semibold transition-colors duration-300 ${isActive ? 'text-white' : 'text-slate-350'}`}>
+                      {s.title}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-400 truncate">
+                      {isActive && statusDetail ? statusDetail : s.desc}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-slate-900 flex justify-between items-center text-xs text-slate-500">
+            <span>Stage: {stageLabel}</span>
+            <button 
+              onClick={() => router.replace(buildSettingsRedirect({}) as Route)}
+              className="text-slate-400 hover:text-white transition-colors duration-200"
+            >
+              Cancel Setup
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

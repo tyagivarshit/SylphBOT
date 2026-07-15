@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getInstagramConnectionTrace = exports.runDeveloperPlatformExtensibilitySelfAudit = exports.revokeDeveloperPlatformApiKey = exports.createDeveloperPlatformApiKey = exports.applyDeveloperPlatformOverride = exports.applyDeveloperPlatformPolicy = exports.invokeDeveloperPlatformPackageAction = exports.subscribeDeveloperPlatformEvent = exports.bindDeveloperPlatformSecret = exports.installDeveloperPlatformPackage = exports.publishDeveloperPlatformRelease = exports.publishDeveloperPlatformPackage = exports.registerDeveloperPlatformNamespace = exports.getDeveloperPlatformDashboard = exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.generateMetaReviewPack = exports.seedMetaReviewerDemo = exports.runMetaColdBootReconcile = exports.runMetaTokenLifecycle = exports.runMetaDoctor = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
+exports.reconnectInstagram = exports.getInstagramHistory = exports.getInstagramHealth = exports.getInstagramStatus = exports.getInstagramConnectionTrace = exports.runDeveloperPlatformExtensibilitySelfAudit = exports.revokeDeveloperPlatformApiKey = exports.createDeveloperPlatformApiKey = exports.applyDeveloperPlatformOverride = exports.applyDeveloperPlatformPolicy = exports.invokeDeveloperPlatformPackageAction = exports.subscribeDeveloperPlatformEvent = exports.bindDeveloperPlatformSecret = exports.installDeveloperPlatformPackage = exports.publishDeveloperPlatformRelease = exports.publishDeveloperPlatformPackage = exports.registerDeveloperPlatformNamespace = exports.getDeveloperPlatformDashboard = exports.applyConnectHubOverride = exports.assignConnectHubSeat = exports.rollbackConnectHubMarketplaceArtifact = exports.installConnectHubMarketplaceArtifact = exports.upsertConnectHubBranding = exports.promoteSandboxConnectHubIntegration = exports.recoverConnectHubWebhook = exports.expireConnectHubToken = exports.refreshConnectHubToken = exports.generateMetaReviewPack = exports.seedMetaReviewerDemo = exports.runMetaColdBootReconcile = exports.runMetaTokenLifecycle = exports.runMetaDoctor = exports.runWhatsAppDoctor = exports.runConnectHubSelfAudit = exports.meterConnectHubFeatureGate = exports.upgradeConnectHubPlan = exports.saveConnectHubWizardProgress = exports.getIntegrationDiagnostics = exports.retryConnectDiagnostic = exports.connectWhatsAppHub = exports.connectInstagramHub = exports.provisionConnectHubTenant = exports.getConnectHubDashboard = exports.getInstagramAccounts = exports.getOnboarding = exports.getIntegrations = void 0;
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 const encrypt_1 = require("../utils/encrypt");
@@ -11,6 +11,7 @@ const instagramProfile_service_1 = require("../services/instagramProfile.service
 const boundedTimeout_1 = require("../utils/boundedTimeout");
 const performanceMetrics_1 = require("../observability/performanceMetrics");
 const saasPackagingConnectHubOS_service_1 = require("../services/saasPackagingConnectHubOS.service");
+const connectionHealth_service_1 = require("../services/connectionHealth.service");
 const developerPlatformExtensibilityOS_service_1 = require("../services/developerPlatformExtensibilityOS.service");
 const integrationOnboardingProjection_service_1 = require("../services/integrationOnboardingProjection.service");
 const integrationOnboardingProjection_queue_1 = require("../queues/integrationOnboardingProjection.queue");
@@ -1836,3 +1837,216 @@ const getInstagramConnectionTrace = async (req, res) => {
     }
 };
 exports.getInstagramConnectionTrace = getInstagramConnectionTrace;
+const getInstagramStatus = async (req, res) => {
+    try {
+        const businessId = await getBusinessIdForRequest(req);
+        if (!businessId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+        const client = await prisma_1.default.client.findFirst({
+            where: {
+                businessId,
+                platform: "INSTAGRAM",
+                deletedAt: null,
+            },
+            select: {
+                id: true,
+                isActive: true,
+                connectionStatus: true,
+                healthScore: true,
+                lastHealthCheck: true,
+                lastSuccessfulSync: true,
+                lastFailureReason: true,
+            },
+        });
+        if (!client) {
+            return res.status(200).json({
+                success: true,
+                connected: false,
+                connectionStatus: "INITIATED",
+                healthScore: 0,
+                lastSuccessfulSync: null,
+                lastHealthCheck: null,
+                lastFailureReason: null,
+            });
+        }
+        return res.json({
+            success: true,
+            connected: client.isActive,
+            connectionStatus: client.connectionStatus || "INITIATED",
+            healthScore: client.healthScore ?? 100,
+            lastSuccessfulSync: client.lastSuccessfulSync,
+            lastHealthCheck: client.lastHealthCheck,
+            lastFailureReason: client.lastFailureReason,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch Instagram status",
+            error: error.message,
+        });
+    }
+};
+exports.getInstagramStatus = getInstagramStatus;
+const getInstagramHealth = async (req, res) => {
+    try {
+        const businessId = await getBusinessIdForRequest(req);
+        if (!businessId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+        const client = await prisma_1.default.client.findFirst({
+            where: {
+                businessId,
+                platform: "INSTAGRAM",
+                deletedAt: null,
+            },
+        });
+        if (!client) {
+            return res.status(404).json({
+                success: false,
+                message: "Instagram connection not found",
+            });
+        }
+        const force = req.query.force === "true";
+        let healthResult;
+        if (force || !client.lastHealthCheck || Date.now() - new Date(client.lastHealthCheck).getTime() > 10 * 60 * 1000) {
+            if (force) {
+                healthResult = await connectionHealth_service_1.InstagramConnectionHealthService.evaluateHealth(client.id);
+            }
+            else {
+                connectionHealth_service_1.InstagramConnectionHealthService.evaluateHealth(client.id).catch(() => undefined);
+                healthResult = {
+                    clientId: client.id,
+                    businessId: client.businessId,
+                    platform: "INSTAGRAM",
+                    isActive: client.isActive,
+                    healthScore: client.healthScore ?? 100,
+                    status: client.connectionStatus || "Healthy",
+                    lastChecked: client.lastHealthCheck ? client.lastHealthCheck.toISOString() : new Date().toISOString(),
+                    metrics: {
+                        tokenHealth: client.connectionStatus === "Invalid" || client.connectionStatus === "Expired" ? 0 : 100,
+                        webhookHealth: client.lastFailureReason?.includes("webhook") ? 0 : 100,
+                        permissionHealth: client.lastFailureReason?.includes("permission") ? 50 : 100,
+                        apiAvailability: 100,
+                        messageDeliveryHealth: 100,
+                        workerHealth: 100,
+                    },
+                    issues: client.lastFailureReason ? client.lastFailureReason.split("; ") : [],
+                    recommendedActions: client.lastFailureReason ? ["Reconnect Instagram to restore access"] : [],
+                };
+            }
+        }
+        else {
+            healthResult = {
+                clientId: client.id,
+                businessId: client.businessId,
+                platform: "INSTAGRAM",
+                isActive: client.isActive,
+                healthScore: client.healthScore ?? 100,
+                status: client.connectionStatus || "Healthy",
+                lastChecked: client.lastHealthCheck.toISOString(),
+                metrics: {
+                    tokenHealth: client.connectionStatus === "Invalid" || client.connectionStatus === "Expired" ? 0 : 100,
+                    webhookHealth: client.lastFailureReason?.includes("webhook") ? 0 : 100,
+                    permissionHealth: client.lastFailureReason?.includes("permission") ? 50 : 100,
+                    apiAvailability: 100,
+                    messageDeliveryHealth: 100,
+                    workerHealth: 100,
+                },
+                issues: client.lastFailureReason ? client.lastFailureReason.split("; ") : [],
+                recommendedActions: client.lastFailureReason ? ["Reconnect Instagram to resolve issues"] : [],
+            };
+        }
+        return res.json({
+            success: true,
+            data: healthResult,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch Instagram health score",
+            error: error.message,
+        });
+    }
+};
+exports.getInstagramHealth = getInstagramHealth;
+const getInstagramHistory = async (req, res) => {
+    try {
+        const businessId = await getBusinessIdForRequest(req);
+        if (!businessId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+        const history = await prisma_1.default.connectionAttemptLedger.findMany({
+            where: {
+                tenantKey: businessId,
+                provider: "INSTAGRAM",
+            },
+            orderBy: {
+                createdAt: "desc",
+            },
+            take: 20,
+        });
+        return res.json({
+            success: true,
+            history: history.map((h) => {
+                const meta = h.metadata && typeof h.metadata === "object" ? h.metadata : {};
+                return {
+                    attemptKey: h.attemptKey,
+                    stage: h.step,
+                    status: h.status,
+                    detail: h.statusDetail,
+                    errorCode: h.errorCode,
+                    errorMessage: h.errorMessage,
+                    resolutionHint: h.resolutionHint,
+                    createdAt: h.createdAt,
+                    timeline: meta.history || [],
+                };
+            }),
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch Instagram connection history",
+            error: error.message,
+        });
+    }
+};
+exports.getInstagramHistory = getInstagramHistory;
+const reconnectInstagram = async (req, res) => {
+    try {
+        const businessId = await getBusinessIdForRequest(req);
+        if (!businessId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+        const client = await prisma_1.default.client.findFirst({
+            where: {
+                businessId,
+                platform: "INSTAGRAM",
+                deletedAt: null,
+            },
+        });
+        if (!client) {
+            return res.status(404).json({
+                success: false,
+                message: "Instagram connection not found to reconnect",
+            });
+        }
+        const lastIssue = client.lastFailureReason || "webhook";
+        const recovery = await connectionHealth_service_1.InstagramConnectionHealthService.attemptSelfRecovery(client.id, lastIssue);
+        return res.json({
+            success: recovery.success,
+            message: recovery.message,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Failed to reconnect / self-recover Instagram",
+            error: error.message,
+        });
+    }
+};
+exports.reconnectInstagram = reconnectInstagram;

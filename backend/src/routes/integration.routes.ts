@@ -44,6 +44,10 @@ import {
   upsertConnectHubBranding,
   upgradeConnectHubPlan,
   getInstagramConnectionTrace,
+  getInstagramStatus,
+  getInstagramHealth,
+  getInstagramHistory,
+  reconnectInstagram,
 } from "../controllers/integration.controller";
 
 const router = express.Router();
@@ -283,6 +287,31 @@ router.get(
   protect,
   requirePermission("settings:view"),
   getInstagramConnectionTrace
+);
+
+router.get(
+  "/instagram/status",
+  protect,
+  requirePermission("settings:view"),
+  getInstagramStatus
+);
+router.get(
+  "/instagram/health",
+  protect,
+  requirePermission("settings:view"),
+  getInstagramHealth
+);
+router.get(
+  "/instagram/history",
+  protect,
+  requirePermission("settings:view"),
+  getInstagramHistory
+);
+router.post(
+  "/instagram/reconnect",
+  protect,
+  requirePermission("settings:manage"),
+  reconnectInstagram
 );
 
 router.get("/", protect, requirePermission("settings:view"), getIntegrations);

@@ -2601,6 +2601,18 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     }
 
     if (targetPlatform === "INSTAGRAM") {
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "AUTHORIZING",
+          detail: "Authorizing with Meta services",
+        });
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "CODE_RECEIVED",
+          detail: "Authorization code received from Meta",
+        });
+      }
       const recordCallbackReceived = recordInstagramConnectStage({
         traceId: instagramTraceId,
         businessId,
@@ -2714,6 +2726,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     shortToken = providedShortToken;
 
     if (!shortToken) {
+      if (lifecycleContext && targetPlatform === "INSTAGRAM") {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "TOKEN_EXCHANGING",
+          detail: "Exchanging authorization code for access token",
+        });
+      }
       logInstagramOAuthStage({
         stage: "INSTAGRAM_CODE_EXCHANGE_STARTED",
         status: "IN_PROGRESS",
@@ -2762,6 +2781,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       }
 
       shortToken = normalizeOptionalString(shortTokenRes.data?.access_token);
+      if (lifecycleContext && targetPlatform === "INSTAGRAM") {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "TOKEN_VALIDATED",
+          detail: "Access token validated and resolved",
+        });
+      }
     }
 
     if (!shortToken) {
@@ -3330,6 +3356,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       lifecycleContext?.replayToken || `meta_oauth_${oauthState.nonce}`;
 
     if (targetPlatform === "INSTAGRAM") {
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "ACCOUNT_DISCOVERY",
+          detail: "Discovering linked Instagram Professional accounts",
+        });
+      }
       let businesses: Array<{ id: string | null; name: string | null }> = [];
 
       try {
@@ -3406,6 +3439,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             .toUpperCase() === "PERSONAL"
       );
 
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "PAGE_VALIDATION",
+          detail: "Validating Facebook Page and Instagram Professional Account link",
+        });
+      }
       await recordInstagramConnectStage({
         traceId: instagramTraceId,
         businessId,
@@ -3559,6 +3599,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         });
       }
 
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "PERMISSION_CHECK",
+          detail: "Verifying required Meta permissions",
+        });
+      }
       await recordInstagramConnectStage({
         traceId: instagramTraceId,
         businessId,
@@ -3590,6 +3637,13 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         });
       }
 
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "WEBHOOK_SETUP",
+          detail: "Subscribing app to page webhook updates",
+        });
+      }
       await recordInstagramConnectStage({
         traceId: instagramTraceId,
         businessId,
@@ -3718,6 +3772,17 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         });
       }
 
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "FINAL_VERIFICATION",
+          detail: "Configuring automation parameters and final verification",
+          metadata: {
+            integrationKey: connectResult.integration?.integrationKey || null,
+            attemptKey: connectResult.attempt?.attemptKey || null,
+          },
+        });
+      }
       await recordInstagramConnectStage({
         traceId: instagramTraceId,
         businessId,
@@ -3754,6 +3819,21 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
 
       connectedClients.push(instagramClient);
+
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "CONNECTED",
+          detail: "Instagram connection established successfully",
+          metadata: {
+            clientId: instagramClient.id,
+            pageId: instagramClient.pageId,
+          },
+        });
+        await markMetaOAuthLifecycleCompleted({
+          context: lifecycleContext,
+        });
+      }
 
       await recordInstagramConnectStage({
         traceId: instagramTraceId,
@@ -5773,6 +5853,26 @@ export const startMetaOAuth = async (req: Request, res: Response) => {
     );
 
     if (platform === "INSTAGRAM") {
+      const lifecycleContext = parsedState
+        ? createMetaOAuthLifecycleContext({
+            businessId,
+            platform,
+            mode,
+            nonce: parsedState.nonce,
+          })
+        : null;
+      if (lifecycleContext) {
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "INITIATED",
+          detail: "Instagram connection initiated",
+        });
+        await markMetaOAuthLifecycleStage({
+          context: lifecycleContext,
+          stage: "OAUTH_STARTED",
+          detail: "Instagram OAuth redirect generated",
+        });
+      }
       await recordInstagramConnectStage({
         traceId,
         businessId,

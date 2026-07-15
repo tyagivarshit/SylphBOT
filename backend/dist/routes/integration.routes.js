@@ -49,5 +49,9 @@ router.post("/connect-hub/developer-platform/api-keys/create", auth_middleware_1
 router.post("/connect-hub/developer-platform/api-keys/revoke", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.revokeDeveloperPlatformApiKey);
 router.get("/connect-hub/developer-platform/self-audit", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.runDeveloperPlatformExtensibilitySelfAudit);
 router.get("/meta/instagram/:connectionId/trace", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getInstagramConnectionTrace);
+router.get("/instagram/status", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getInstagramStatus);
+router.get("/instagram/health", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getInstagramHealth);
+router.get("/instagram/history", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getInstagramHistory);
+router.post("/instagram/reconnect", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:manage"), integration_controller_1.reconnectInstagram);
 router.get("/", auth_middleware_1.protect, (0, rbac_middleware_1.requirePermission)("settings:view"), integration_controller_1.getIntegrations);
 exports.default = router;

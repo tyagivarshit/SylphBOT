@@ -22,7 +22,20 @@ export type MetaOAuthLifecycleStage =
   | "CONNECTION_VERIFICATION"
   | "FINAL_ONBOARDING"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  // Upgraded stages for Instagram Hardening Phase 2
+  | "INITIATED"
+  | "OAUTH_STARTED"
+  | "AUTHORIZING"
+  | "CODE_RECEIVED"
+  | "TOKEN_EXCHANGING"
+  | "TOKEN_VALIDATED"
+  | "ACCOUNT_DISCOVERY"
+  | "PAGE_VALIDATION"
+  | "PERMISSION_CHECK"
+  | "WEBHOOK_SETUP"
+  | "FINAL_VERIFICATION"
+  | "CONNECTED";
 
 export type MetaOAuthLifecycleStatus =
   | "PROCESSING"
@@ -74,6 +87,19 @@ const LIFECYCLE_STAGE_RANK: Record<MetaOAuthLifecycleStage, number> = {
   FINAL_ONBOARDING: 90,
   COMPLETED: 100,
   FAILED: 100,
+  // Ranks for the upgraded Instagram connection stages
+  INITIATED: 5,
+  OAUTH_STARTED: 15,
+  AUTHORIZING: 25,
+  CODE_RECEIVED: 35,
+  TOKEN_EXCHANGING: 45,
+  TOKEN_VALIDATED: 55,
+  ACCOUNT_DISCOVERY: 65,
+  PAGE_VALIDATION: 75,
+  PERMISSION_CHECK: 85,
+  WEBHOOK_SETUP: 95,
+  FINAL_VERIFICATION: 98,
+  CONNECTED: 100,
 };
 
 const globalForMetaOAuthLifecycle = globalThis as typeof globalThis & {

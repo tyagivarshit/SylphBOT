@@ -548,6 +548,13 @@ model Client {
   isActive      Boolean  @default(true)
   deletedAt     DateTime?
 
+  connectionStatus  String?
+  healthScore        Int?
+  lastHealthCheck    DateTime?
+  lastSuccessfulSync DateTime?
+  lastFailureReason  String?
+  recoveryAttempts   Int?
+
   createdAt     DateTime @default(now())
 
   @@unique([businessId, platform])

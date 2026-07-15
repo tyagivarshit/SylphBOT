@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import prisma from "../config/prisma";
-import { checkConnectionHealth } from "../services/connectionHealth.service";
+import { checkConnectionHealth, InstagramConnectionHealthService } from "../services/connectionHealth.service";
 
 const log = (...args: any[]) => {
   console.log("[CONNECTION HEALTH CRON]", ...args);
@@ -34,7 +34,17 @@ export const startConnectionHealthCron = () => {
       let inactiveCount = 0;
 
       for (const client of clients) {
-        const healthy = await checkConnectionHealth(client);
+        let healthy = false;
+        if (client.platform === "INSTAGRAM") {
+          try {
+            const healthReport = await InstagramConnectionHealthService.evaluateHealth(client.id);
+            healthy = healthReport.healthScore >= 60;
+          } catch (err) {
+            healthy = false;
+          }
+        } else {
+          healthy = await checkConnectionHealth(client);
+        }
 
         if (!healthy) {
           inactiveCount += 1;

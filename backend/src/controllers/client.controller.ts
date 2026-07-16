@@ -1412,27 +1412,26 @@ console.error("PROFILE_GRAPH_ERROR", {
     }
 
     let accepted = false;
-    let evaluationReason = "UNKNOWN";
+let evaluationReason = "UNKNOWN";
 
-    if (!instagramProfessionalAccountId) {
-      accepted = false;
-      evaluationReason = "NO_INSTAGRAM_ACCOUNT";
-    } else if (!instagramAccountType) {
-      accepted = false;
-      evaluationReason = "GRAPH_LOOKUP_FAILED";
-      console.error("PROFILE_REJECTED", {
-    instagramProfessionalAccountId,
-    graphResponse: rawProfileResponse,
-    accountType: instagramAccountType,
-    reason: evaluationReason,
-});
-    } else if (String(instagramAccountType).trim().toUpperCase() === "PERSONAL") {
-      accepted = false;
-      evaluationReason = "PERSONAL_ACCOUNT";
-    } else if (isProfessionalInstagramAccount(instagramAccountType)) {
-      accepted = true;
-      evaluationReason = "ACCEPTED";
-    }
+if (!instagramProfessionalAccountId) {
+  accepted = false;
+  evaluationReason = "NO_INSTAGRAM_ACCOUNT";
+}
+else if (
+  instagramAccountType &&
+  String(instagramAccountType).trim().toUpperCase() === "PERSONAL"
+) {
+  accepted = false;
+  evaluationReason = "PERSONAL_ACCOUNT";
+}
+else {
+  accepted = true;
+  evaluationReason =
+    instagramAccountType
+      ? "ACCOUNT_TYPE_VERIFIED"
+      : "ACCOUNT_TYPE_UNAVAILABLE_ASSUMED_PROFESSIONAL";
+}
 
     console.info("PAIR_FILTER", {
       pageId: facebookPageId,
@@ -1461,9 +1460,9 @@ console.error("PROFILE_GRAPH_ERROR", {
 
     allPairs.push(pair);
 
-    if (isProfessionalInstagramAccount(instagramAccountType)) {
-      validPairs.push(pair);
-    }
+    if (accepted) {
+    validPairs.push(pair);
+}
   }
 
   const validPairsCount = validPairs.length;

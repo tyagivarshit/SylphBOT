@@ -276,7 +276,12 @@ type MetaActionCode =
   | "ACCOUNT_RESTRICTED"
   | "QUOTA_EXCEEDED"
   | "PAIR_SELECTION_REQUIRED"
-  | "UNKNOWN";
+  | "UNKNOWN"
+  | "GRAPH_LOOKUP_FAILED"
+  | "GRAPH_PERMISSION_ERROR"
+  | "PAGE_NOT_LINKED"
+  | "NO_INSTAGRAM_ACCOUNT"
+  | "TOKEN_INVALID";
 
 type ActionableFailurePayload = {
   reasonCode: MetaActionCode;
@@ -411,6 +416,9 @@ type InstagramPagePair = {
   instagramUsername: string | null;
   instagramName: string | null;
   instagramAccountType: string | null;
+  lookupSuccess?: boolean;
+  lookupErrorCode?: string | null;
+  lookupErrorMessage?: string | null;
 };
 
 type WhatsAppPhoneCandidate = {
@@ -557,6 +565,16 @@ const META_HELP_LINKS: Record<MetaActionCode, string> = {
     "https://www.facebook.com/business/help/898752960195806",
   UNKNOWN:
     "https://www.facebook.com/business/help",
+  GRAPH_LOOKUP_FAILED:
+    "https://developers.facebook.com/docs/graph-api/using-graph-api/error-handling",
+  GRAPH_PERMISSION_ERROR:
+    "https://developers.facebook.com/docs/permissions/reference",
+  PAGE_NOT_LINKED:
+    "https://www.facebook.com/business/help/898752960195806",
+  NO_INSTAGRAM_ACCOUNT:
+    "https://www.facebook.com/business/help/898752960195806",
+  TOKEN_INVALID:
+    "https://developers.facebook.com/docs/facebook-login/guides/access-tokens",
 };
 
 const resolveMetaActionCode = ({
@@ -675,6 +693,22 @@ const resolveMetaActionCode = ({
     return "PAIR_SELECTION_REQUIRED";
   }
 
+  if (normalizedCode === "GRAPH_LOOKUP_FAILED" || normalizedCode.includes("LOOKUP_FAILED")) {
+    return "GRAPH_LOOKUP_FAILED";
+  }
+  if (normalizedCode === "GRAPH_PERMISSION_ERROR" || normalizedCode.includes("GRAPH_PERMISSION")) {
+    return "GRAPH_PERMISSION_ERROR";
+  }
+  if (normalizedCode === "PAGE_NOT_LINKED" || normalizedCode.includes("PAGE_NOT_LINKED")) {
+    return "PAGE_NOT_LINKED";
+  }
+  if (normalizedCode === "NO_INSTAGRAM_ACCOUNT" || normalizedCode.includes("NO_INSTAGRAM_ACCOUNT")) {
+    return "NO_INSTAGRAM_ACCOUNT";
+  }
+  if (normalizedCode === "TOKEN_INVALID" || normalizedCode.includes("TOKEN_INVALID")) {
+    return "TOKEN_INVALID";
+  }
+
   return "UNKNOWN";
 };
 
@@ -693,6 +727,71 @@ const buildActionableFailurePayload = (input: {
     reasonCode,
     helpLink: META_HELP_LINKS[reasonCode],
   };
+
+  if (reasonCode === "GRAPH_LOOKUP_FAILED") {
+    return {
+      ...shared,
+      problem: "Instagram account lookup failed.",
+      cause: "Meta Graph API query failed during profile validation.",
+      fix: "Verify your Meta account status and retry.",
+      cta: {
+        label: "Retry",
+        action: "RETRY",
+      },
+    };
+  }
+
+  if (reasonCode === "GRAPH_PERMISSION_ERROR") {
+    return {
+      ...shared,
+      problem: "Missing required Meta permissions.",
+      cause: "The access token lacks permissions to view the Instagram profile.",
+      fix: "Grant all requested permissions in the Meta login dialog and reconnect.",
+      cta: {
+        label: "Reconnect with Permissions",
+        action: "RECONNECT",
+      },
+    };
+  }
+
+  if (reasonCode === "PAGE_NOT_LINKED") {
+    return {
+      ...shared,
+      problem: "Facebook Page is not linked.",
+      cause: "The chosen Page is not associated with this workspace or was not authorized.",
+      fix: "Choose a linked Page or reconnect to authorize your Page.",
+      cta: {
+        label: "Reconnect",
+        action: "RECONNECT",
+      },
+    };
+  }
+
+  if (reasonCode === "NO_INSTAGRAM_ACCOUNT") {
+    return {
+      ...shared,
+      problem: "No linked Instagram account found.",
+      cause: "Your Facebook Page is not linked to any Instagram Professional Account.",
+      fix: "Link an Instagram Professional (Business or Creator) Account to your Facebook Page, then reconnect.",
+      cta: {
+        label: "Open Linking Guide",
+        action: "OPEN_GUIDE",
+      },
+    };
+  }
+
+  if (reasonCode === "TOKEN_INVALID") {
+    return {
+      ...shared,
+      problem: "Meta credentials are invalid.",
+      cause: "The provided Meta access token is expired, revoked, or invalid.",
+      fix: "Log in again to re-authorize connection.",
+      cta: {
+        label: "Reconnect",
+        action: "RECONNECT",
+      },
+    };
+  }
 
   if (reasonCode === "ACCOUNT_PERSONAL") {
     return {
@@ -1179,8 +1278,45 @@ const fetchMetaBusinesses = async (accessToken: string) => {
   }
 };
 
+const categorizeMetaError = (error: any): { code: MetaActionCode; reason: string } => {
+  const status = Number(error?.response?.status || 0);
+  const data = error?.response?.data?.error || {};
+  const message = String(data?.message || error?.message || "");
+  const code = Number(data?.code || 0);
+
+  // Token invalid/expired
+  if (
+    status === 401 ||
+    code === 190 ||
+    message.toLowerCase().includes("token") ||
+    message.toLowerCase().includes("session") ||
+    message.toLowerCase().includes("auth")
+  ) {
+    return { code: "TOKEN_INVALID", reason: message || "Invalid or expired Meta access token." };
+  }
+
+  // Permission error
+  if (
+    status === 403 ||
+    code === 10 ||
+    (code >= 200 && code <= 299) ||
+    message.toLowerCase().includes("permission") ||
+    message.toLowerCase().includes("scope") ||
+    message.toLowerCase().includes("manage_pages") ||
+    message.toLowerCase().includes("instagram_basic")
+  ) {
+    return { code: "GRAPH_PERMISSION_ERROR", reason: message || "Missing required Meta permissions." };
+  }
+
+  // Fallback lookup failure
+  return { code: "GRAPH_LOOKUP_FAILED", reason: message || "Meta Graph API lookup failed." };
+};
+
 const isProfessionalInstagramAccount = (accountType?: string | null) => {
-  const normalized = String(accountType || "").trim().toUpperCase();
+  if (!accountType) {
+    return false; // Unknown or missing is not implicitly professional in this helper
+  }
+  const normalized = String(accountType).trim().toUpperCase();
   return normalized === "BUSINESS" || normalized === "CREATOR";
 };
 const fetchInstagramConnection = async (
@@ -1307,6 +1443,8 @@ accessToken: string, connectionSteps?: string[], connectionPerformance?: any) =>
     let profileSuccess = false;
     let profileError: string | null = null;
     let rawProfileResponse: any = null;
+    let lookupErrorCode: string | null = null;
+    let lookupErrorMessage: string | null = null;
 
     if (instagramProfessionalAccountId && pageAccessToken) {
       logInstagramOAuthStage({
@@ -1324,40 +1462,30 @@ accessToken: string, connectionSteps?: string[], connectionPerformance?: any) =>
           method: "GET",
           url: `https://graph.facebook.com/v19.0/${instagramProfessionalAccountId}`,
           params: {
-            fields: "id,username,name,account_type",
+            fields: "id,username,name",
             access_token: pageAccessToken,
           },
           timeout: META_GRAPH_TIMEOUT_MS,
         }, "INSTAGRAM_ACCOUNT_DISCOVERY");
         console.info("RAW_IG_PROFILE_GRAPH_RESPONSE", {
-  requestFields: "id,username,name,account_type",
-  response: igProfileRes.data,
-});
-console.info("PROFILE_RESPONSE", {
-    response: igProfileRes.data,
-    keys: Object.keys(igProfileRes.data || {}),
-});
+          requestFields: "id,username,name",
+          response: igProfileRes.data,
+        });
+        console.info("PROFILE_RESPONSE", {
+          response: igProfileRes.data,
+          keys: Object.keys(igProfileRes.data || {}),
+        });
 
         instagramUsername =
           normalizeOptionalString(igProfileRes.data?.username) || instagramUsername;
         instagramName = normalizeOptionalString(igProfileRes.data?.name);
-        console.info("ACCOUNT_TYPE_DEBUG", {
-  account_type: igProfileRes.data?.account_type,
-  keys: Object.keys(igProfileRes.data || {}),
-});
-        instagramAccountType = normalizeOptionalString(
-          igProfileRes.data?.account_type
-        );
-        console.info("ACCOUNT_TYPE_VALUE", {
-    account_type: igProfileRes.data?.account_type,
-    normalized: instagramAccountType,
-});
+        instagramAccountType = null;
         rawProfileResponse = igProfileRes.data || null;
         profileSuccess = true;
         console.info("RAW_PROFILE_RESPONSE", {
-  instagramProfessionalAccountId,
-  raw: igProfileRes.data,
-});
+          instagramProfessionalAccountId,
+          raw: igProfileRes.data,
+        });
 
         if (connectionPerformance) {
           connectionPerformance.profileLookup = (connectionPerformance.profileLookup || 0) + (Date.now() - lookupStart);
@@ -1365,16 +1493,20 @@ console.info("PROFILE_RESPONSE", {
       } catch (error: any) {
         profileError = error.message;
         rawProfileResponse = error.response?.data || { message: error.message };
+        const cat = categorizeMetaError(error);
+        lookupErrorCode = cat.code;
+        lookupErrorMessage = cat.reason;
+
         console.error("RAW_PROFILE_ERROR", {
-  instagramProfessionalAccountId,
-  status: error.response?.status,
-  data: error.response?.data,
-});
-console.error("PROFILE_GRAPH_ERROR", {
-    status: error.response?.status,
-    data: error.response?.data,
-    headers: error.response?.headers,
-});
+          instagramProfessionalAccountId,
+          status: error.response?.status,
+          data: error.response?.data,
+        });
+        console.error("PROFILE_GRAPH_ERROR", {
+          status: error.response?.status,
+          data: error.response?.data,
+          headers: error.response?.headers,
+        });
         logger.error({
           stage: "INSTAGRAM_ACCOUNT_DISCOVERY",
           provider: "META_GRAPH_API",
@@ -1411,27 +1543,32 @@ console.error("PROFILE_GRAPH_ERROR", {
       });
     }
 
-    let accepted = false;
-let evaluationReason = "UNKNOWN";
+    const professionalLinked = Boolean(instagramProfessionalAccountId);
+    const metadataVerified = instagramAccountType
+      ? isProfessionalInstagramAccount(instagramAccountType)
+      : null;
 
-if (!instagramProfessionalAccountId) {
-  accepted = false;
-  evaluationReason = "NO_INSTAGRAM_ACCOUNT";
-}
-else if (
-  instagramAccountType &&
-  String(instagramAccountType).trim().toUpperCase() === "PERSONAL"
-) {
-  accepted = false;
-  evaluationReason = "PERSONAL_ACCOUNT";
-}
-else {
-  accepted = true;
-  evaluationReason =
-    instagramAccountType
-      ? "ACCOUNT_TYPE_VERIFIED"
-      : "ACCOUNT_TYPE_UNAVAILABLE_ASSUMED_PROFESSIONAL";
-}
+    let accepted = false;
+    let evaluationReason = "UNKNOWN";
+
+    if (!professionalLinked) {
+      accepted = false;
+      evaluationReason = "NO_INSTAGRAM_ACCOUNT";
+    }
+    else if (!profileSuccess) {
+      accepted = false;
+      evaluationReason = "PROFILE_LOOKUP_FAILED";
+    }
+    else if (metadataVerified === false) {
+      accepted = false;
+      evaluationReason = "PERSONAL_ACCOUNT";
+    }
+    else {
+      accepted = true;
+      evaluationReason = instagramAccountType
+        ? "ACCOUNT_TYPE_VERIFIED"
+        : "ACCOUNT_TYPE_UNAVAILABLE_ASSUMED_PROFESSIONAL";
+    }
 
     console.info("PAIR_FILTER", {
       pageId: facebookPageId,
@@ -1456,13 +1593,16 @@ else {
       instagramUsername,
       instagramName,
       instagramAccountType,
+      lookupSuccess: profileSuccess,
+      lookupErrorCode,
+      lookupErrorMessage,
     };
 
     allPairs.push(pair);
 
     if (accepted) {
-    validPairs.push(pair);
-}
+      validPairs.push(pair);
+    }
   }
 
   const validPairsCount = validPairs.length;
@@ -1482,7 +1622,9 @@ else {
         rejectedReason = "NO_LINKED_ACCOUNT";
       } else if (personalPairs.length > 0) {
         rejectedReason = "ACCOUNT_PERSONAL";
-      } else if (allPairs.length > 0 && allPairs.every(p => p.instagramAccountType === null)) {
+      } else if (allPairs.length > 0 && allPairs.every((p) => p.lookupSuccess === false)) {
+        rejectedReason = allPairs[0].lookupErrorCode || "GRAPH_LOOKUP_FAILED";
+      } else if (allPairs.length > 0 && allPairs.every((p) => p.instagramAccountType === null)) {
         rejectedReason = "PROFILE_LOOKUP_FAILED";
       }
       connectionSteps.push(`Professional Accounts = 0\n↓\nRejected Because:\n${rejectedReason}`);
@@ -3266,10 +3408,11 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       try {
         instagramDiscovery = await fetchInstagramConnection(shortToken, (req as any).__instagramConnectionSteps);
       } catch (error: any) {
+        const cat = categorizeMetaError(error);
         failInstagramConnect({
           stage: "IG_PAGES_FETCHED",
-          reason: getAxiosErrorMessage(error),
-          code: "IG_PAGES_FETCH_FAILED",
+          reason: cat.reason,
+          code: cat.code,
           statusCode: Number(error?.response?.status || 400),
           metadata: {
             providerError: error?.response?.data || null,
@@ -3300,6 +3443,16 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       );
 
       if (!validPairs.length) {
+        const lookupFailedPair = allPairs.find((p) => p.lookupSuccess === false);
+        if (lookupFailedPair) {
+          failInstagramConnect({
+            stage: "IG_PAIR_VALIDATED",
+            reason: lookupFailedPair.lookupErrorMessage || "Instagram account lookup failed.",
+            code: lookupFailedPair.lookupErrorCode || "GRAPH_LOOKUP_FAILED",
+            statusCode: 400,
+          });
+        }
+
         if (personalPairs.length) {
           failInstagramConnect({
             stage: "IG_PAIR_VALIDATED",
@@ -3315,7 +3468,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             stage: "IG_PAIR_VALIDATED",
             reason:
               "No Instagram Professional account is linked to your Facebook Page.",
-            code: "NO_LINKED_IG_ACCOUNT",
+            code: "NO_INSTAGRAM_ACCOUNT",
             statusCode: 400,
           });
         }
@@ -3326,7 +3479,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             "No eligible Facebook Page and Instagram Professional account pair was found.",
           code:
             instagramDiscovery.pagesFound > 0
-              ? "NO_LINKED_PAGE"
+              ? "PAGE_NOT_LINKED"
               : "PAGE_ROLE_REMOVED",
           statusCode: 400,
         });
@@ -3620,10 +3773,11 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       try {
         instagramConnection = await fetchInstagramConnection(longToken, (req as any).__instagramConnectionSteps);
       } catch (error: any) {
+        const cat = categorizeMetaError(error);
         failInstagramConnect({
           stage: "IG_PAGES_FETCHED",
-          reason: getAxiosErrorMessage(error),
-          code: "IG_PAGES_FETCH_FAILED",
+          reason: cat.reason,
+          code: cat.code,
           statusCode: Number(error?.response?.status || 400),
           metadata: {
             providerError: error?.response?.data || null,
@@ -3684,11 +3838,21 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
 
       if (!validPairs.length) {
-        let finalFailureCode = "NO_LINKED_PAGE";
+        let finalFailureCode = "PAGE_NOT_LINKED";
+        const lookupFailedPair = allPairs.find((p) => p.lookupSuccess === false);
+        if (lookupFailedPair) {
+          failInstagramConnect({
+            stage: "IG_PAIR_VALIDATED",
+            reason: lookupFailedPair.lookupErrorMessage || "Instagram account lookup failed.",
+            code: lookupFailedPair.lookupErrorCode || "GRAPH_LOOKUP_FAILED",
+            statusCode: 400,
+          });
+        }
+
         if (personalPairs.length) {
           finalFailureCode = "ACCOUNT_PERSONAL";
         } else if (instagramConnection.pagesWithoutInstagram.length > 0) {
-          finalFailureCode = "NO_LINKED_IG_ACCOUNT";
+          finalFailureCode = "NO_INSTAGRAM_ACCOUNT";
         }
 
         console.info("FINAL_PAIR_SUMMARY", {
@@ -3715,7 +3879,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             stage: "IG_PAIR_VALIDATED",
             reason:
               "No Instagram Professional account is linked to your Facebook Page.",
-            code: "NO_LINKED_IG_ACCOUNT",
+            code: "NO_INSTAGRAM_ACCOUNT",
             statusCode: 400,
           });
         }
@@ -3726,7 +3890,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             "No eligible Facebook Page and Instagram Professional account pair was found.",
           code:
             instagramConnection.pagesFound > 0
-              ? "NO_LINKED_PAGE"
+              ? "PAGE_NOT_LINKED"
               : "PAGE_ROLE_REMOVED",
           statusCode: 400,
         });
@@ -3802,7 +3966,16 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         },
       });
 
-      if (!isProfessionalInstagramAccount(selectedPair.instagramAccountType)) {
+      if (!selectedPair.lookupSuccess) {
+        failInstagramConnect({
+          stage: "IG_PAIR_VALIDATED",
+          reason: selectedPair.lookupErrorMessage || "Instagram account lookup failed.",
+          code: selectedPair.lookupErrorCode || "GRAPH_LOOKUP_FAILED",
+          statusCode: 400,
+        });
+      }
+
+      if (selectedPair.instagramAccountType && !isProfessionalInstagramAccount(selectedPair.instagramAccountType)) {
         failInstagramConnect({
           stage: "IG_PAIR_VALIDATED",
           reason:
@@ -4783,12 +4956,18 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         if (!lastStep.includes("Rejected Because:")) {
           let rejectedReason = "UNKNOWN";
           const errorCode = error.code || "";
-          if (errorCode === "IG_PERMISSION_MISSING") {
-            rejectedReason = "MISSING_SCOPE";
+          if (errorCode === "IG_PERMISSION_MISSING" || errorCode === "GRAPH_PERMISSION_ERROR") {
+            rejectedReason = "GRAPH_PERMISSION_ERROR";
           } else if (errorCode === "ACCOUNT_PERSONAL") {
             rejectedReason = "ACCOUNT_PERSONAL";
-          } else if (errorCode === "NO_LINKED_IG_ACCOUNT" || errorCode === "NO_LINKED_PAGE") {
-            rejectedReason = "NO_LINKED_ACCOUNT";
+          } else if (errorCode === "NO_LINKED_IG_ACCOUNT" || errorCode === "NO_INSTAGRAM_ACCOUNT") {
+            rejectedReason = "NO_INSTAGRAM_ACCOUNT";
+          } else if (errorCode === "NO_LINKED_PAGE" || errorCode === "PAGE_NOT_LINKED") {
+            rejectedReason = "PAGE_NOT_LINKED";
+          } else if (errorCode === "TOKEN_INVALID" || errorCode === "TOKEN_EXPIRED" || errorCode === "TOKEN_REVOKED") {
+            rejectedReason = "TOKEN_INVALID";
+          } else if (errorCode === "GRAPH_LOOKUP_FAILED") {
+            rejectedReason = "GRAPH_LOOKUP_FAILED";
           } else if (errorCode === "INSTAGRAM_TOKEN_EXCHANGE_FAILED") {
             rejectedReason = "UNKNOWN";
           }

@@ -419,7 +419,7 @@ const readFailurePayload = (input: unknown): FailurePayload => {
     platform
   );
 
-  return {
+  const payload = {
     platform,
     stage: readString(data.stage || "IG_CONNECT_FAILED"),
     reason: readString(data.reason || root.message || "Meta connect failed"),
@@ -439,6 +439,23 @@ const readFailurePayload = (input: unknown): FailurePayload => {
     businessManagerUrl: readString(data.businessManagerUrl) || null,
     requiresReconnect: Boolean(data.requiresReconnect),
   };
+
+  if (payload.code !== "ACCOUNT_PERSONAL") {
+    const isProfessionalError = 
+      payload.reason.includes("must be Professional") || 
+      payload.actionable?.problem?.includes("must be Professional") ||
+      payload.actionable?.cause?.includes("must be Professional");
+    
+    if (isProfessionalError) {
+      if (payload.actionable) {
+        payload.actionable.problem = "Meta connection failed.";
+        payload.actionable.cause = payload.reason;
+        payload.actionable.fix = "Review backend diagnostics and try again.";
+      }
+    }
+  }
+
+  return payload;
 };
 
 const failureFromLifecycle = (
@@ -482,7 +499,7 @@ const failureFromLifecycle = (
       ? (metadata.availablePhoneNumbers as WhatsAppPhoneOption[])
       : [];
 
-  return {
+  const payload = {
     operationId: readString(lifecycle.operationId) || null,
     replayToken: readString(lifecycle.replayToken) || null,
     platform,
@@ -508,6 +525,23 @@ const failureFromLifecycle = (
     businessManagerUrl: readString(metadata.businessManagerUrl) || null,
     requiresReconnect: Boolean(metadata.requiresReconnect),
   };
+
+  if (payload.code !== "ACCOUNT_PERSONAL") {
+    const isProfessionalError = 
+      payload.reason.includes("must be Professional") || 
+      payload.actionable?.problem?.includes("must be Professional") ||
+      payload.actionable?.cause?.includes("must be Professional");
+    
+    if (isProfessionalError) {
+      if (payload.actionable) {
+        payload.actionable.problem = "Meta connection failed.";
+        payload.actionable.cause = payload.reason;
+        payload.actionable.fix = "Review backend diagnostics and try again.";
+      }
+    }
+  }
+
+  return payload;
 };
 
 function MetaCallbackContent() {

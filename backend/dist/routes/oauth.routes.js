@@ -100,6 +100,16 @@ router.get("/meta/callback", async (req, res) => {
         }
         const traceId = buildMetaTraceId(oauthState.nonce);
         const provider = oauthState.platform === "WHATSAPP" ? "WHATSAPP" : "INSTAGRAM";
+        if (provider === "INSTAGRAM") {
+            console.info("INSTAGRAM_CALLBACK_RECEIVED", {
+                traceId,
+                businessId: oauthState.businessId || null,
+                userId: oauthState.userId || null,
+                callbackTime: new Date().toISOString(),
+                codePresent: Boolean(code),
+                statePresent: Boolean(rawState),
+            });
+        }
         const callbackReceivedStage = getProviderStage(provider, "CALLBACK_RECEIVED");
         const stateVerifiedStage = getProviderStage(provider, "STATE_VERIFIED");
         const connectFailedStage = getProviderStage(provider, "CONNECT_FAILED");

@@ -71,6 +71,7 @@ const META_OAUTH_CALLBACK_RESPONSE_BUDGET_MS = Math.max(
   Number(process.env.META_OAUTH_CALLBACK_RESPONSE_BUDGET_MS || 500)
 );
 
+
 const emitCallbackMetric = (input: {
   name:
     | "oauth_callback_accept_ms"
@@ -1183,11 +1184,12 @@ const isProfessionalInstagramAccount = (accountType?: string | null) => {
   return normalized === "BUSINESS" || normalized === "CREATOR";
 };
 
-const fetchInstagramConnection = async (accessToken: string) => {
+const fetchInstagramConnection = async (accessToken: string, connectionSteps?: string[], connectionPerformance?: any) => {
   logInstagramOAuthStage({
     stage: "INSTAGRAM_PAGE_DISCOVERY_STARTED",
     status: "IN_PROGRESS",
   });
+  const discoveryStartMs = Date.now();
   let pagesRes;
   try {
     pagesRes = await axiosWithMetaRetry({
@@ -1200,6 +1202,9 @@ const fetchInstagramConnection = async (accessToken: string) => {
       },
       timeout: META_GRAPH_TIMEOUT_MS,
     }, "INSTAGRAM_PAGE_DISCOVERY");
+    if (connectionPerformance) {
+      connectionPerformance.pageDiscovery = Date.now() - discoveryStartMs;
+    }
   } catch (error: any) {
     logger.error({
       stage: "INSTAGRAM_PAGE_DISCOVERY",
@@ -1211,6 +1216,34 @@ const fetchInstagramConnection = async (accessToken: string) => {
   }
 
   const pages = getMetaDataArray(pagesRes.data);
+  const sanitizeAccountsResponse = (data: any) => {
+    if (!data || typeof data !== "object") return data;
+    const clone = JSON.parse(JSON.stringify(data));
+    if (Array.isArray(clone.data)) {
+      for (const page of clone.data) {
+        if (page.access_token) page.access_token = "[MASKED]";
+      }
+    }
+    return clone;
+  };
+
+  console.info("META_ME_ACCOUNTS_RESPONSE", {
+    pagesFound: pages.length,
+    pages: pages.map((page: any) => ({
+      pageId: normalizeOptionalString(page?.id),
+      pageName: normalizeOptionalString(page?.name),
+      hasAccessToken: Boolean(normalizeOptionalString(page?.access_token)),
+      hasInstagramBusinessAccount: Boolean(page?.instagram_business_account?.id),
+      instagramBusinessAccountId: normalizeOptionalString(page?.instagram_business_account?.id),
+      connectedInstagramAccountId: normalizeOptionalString(page?.connected_instagram_account?.id),
+    })),
+    rawSanitizedGraphResponse: sanitizeAccountsResponse(pagesRes.data),
+  });
+
+  if (connectionSteps) {
+    connectionSteps.push(`Pages Found = ${pages.length}`);
+  }
+
   const allPairs: InstagramPagePair[] = [];
   const validPairs: InstagramPagePair[] = [];
   const pagesWithoutInstagram: Array<{
@@ -1256,6 +1289,25 @@ const fetchInstagramConnection = async (accessToken: string) => {
     let instagramName: string | null = null;
     let instagramAccountType: string | null = null;
 
+    let whyChosen = "none";
+    if (page?.instagram_business_account?.id) {
+      whyChosen = "instagram_business_account";
+    } else if (page?.connected_instagram_account?.id) {
+      whyChosen = "connected_instagram_account";
+    }
+    console.info("INSTAGRAM_PAGE_ANALYSIS", {
+      pageId: facebookPageId,
+      pageName: facebookPageName,
+      instagramBusinessAccountId: normalizeOptionalString(page?.instagram_business_account?.id),
+      connectedInstagramAccountId: normalizeOptionalString(page?.connected_instagram_account?.id),
+      chosenInstagramId: instagramProfessionalAccountId,
+      whyChosen,
+    });
+
+    let profileSuccess = false;
+    let profileError: string | null = null;
+    let rawProfileResponse: any = null;
+
     if (instagramProfessionalAccountId && pageAccessToken) {
       logInstagramOAuthStage({
         stage: "INSTAGRAM_ACCOUNT_FOUND",
@@ -1266,6 +1318,7 @@ const fetchInstagramConnection = async (accessToken: string) => {
           instagramUsername,
         },
       });
+      const lookupStart = Date.now();
       try {
         const igProfileRes = await axiosWithMetaRetry({
           method: "GET",
@@ -1283,7 +1336,15 @@ const fetchInstagramConnection = async (accessToken: string) => {
         instagramAccountType = normalizeOptionalString(
           igProfileRes.data?.account_type
         );
+        rawProfileResponse = igProfileRes.data || null;
+        profileSuccess = true;
+
+        if (connectionPerformance) {
+          connectionPerformance.profileLookup = (connectionPerformance.profileLookup || 0) + (Date.now() - lookupStart);
+        }
       } catch (error: any) {
+        profileError = error.message;
+        rawProfileResponse = error.response?.data || { message: error.message };
         logger.error({
           stage: "INSTAGRAM_ACCOUNT_DISCOVERY",
           provider: "META_GRAPH_API",
@@ -1291,6 +1352,24 @@ const fetchInstagramConnection = async (accessToken: string) => {
           message: error.message,
         });
       }
+
+      console.info("INSTAGRAM_PROFILE_LOOKUP", {
+        instagramId: instagramProfessionalAccountId,
+        graphResponse: rawProfileResponse,
+        username: instagramUsername,
+        account_type: instagramAccountType || null,
+        name: instagramName || null,
+      });
+
+      console.info("INSTAGRAM_PROFILE_LOOKUP_RESULT", {
+        instagramProfessionalAccountId,
+        instagramUsername,
+        instagramName,
+        instagramAccountType,
+        success: profileSuccess,
+        error: profileError,
+        durationMs: Date.now() - lookupStart,
+      });
     } else {
       logInstagramOAuthStage({
         stage: "INSTAGRAM_ACCOUNT_NOT_FOUND",
@@ -1301,6 +1380,31 @@ const fetchInstagramConnection = async (accessToken: string) => {
         },
       });
     }
+
+    let accepted = false;
+    let evaluationReason = "UNKNOWN";
+
+    if (!instagramProfessionalAccountId) {
+      accepted = false;
+      evaluationReason = "NO_INSTAGRAM_ACCOUNT";
+    } else if (!instagramAccountType) {
+      accepted = false;
+      evaluationReason = "GRAPH_LOOKUP_FAILED";
+    } else if (String(instagramAccountType).trim().toUpperCase() === "PERSONAL") {
+      accepted = false;
+      evaluationReason = "PERSONAL_ACCOUNT";
+    } else if (isProfessionalInstagramAccount(instagramAccountType)) {
+      accepted = true;
+      evaluationReason = "ACCEPTED";
+    }
+
+    console.info("PAIR_FILTER", {
+      pageId: facebookPageId,
+      instagramId: instagramProfessionalAccountId || null,
+      accountType: instagramAccountType || null,
+      Decision: accepted ? "ACCEPTED" : "REJECTED",
+      exactReason: evaluationReason,
+    });
 
     if (!instagramProfessionalAccountId) {
       pagesWithoutInstagram.push({
@@ -1323,6 +1427,30 @@ const fetchInstagramConnection = async (accessToken: string) => {
 
     if (isProfessionalInstagramAccount(instagramAccountType)) {
       validPairs.push(pair);
+    }
+  }
+
+  const validPairsCount = validPairs.length;
+  if (connectionSteps) {
+    connectionSteps.push(`Instagram Accounts = ${validPairsCount}`);
+    if (validPairsCount === 0) {
+      let rejectedReason = "UNKNOWN";
+      const personalPairs = allPairs.filter(
+        (pair) =>
+          String(pair.instagramAccountType || "")
+            .trim()
+            .toUpperCase() === "PERSONAL"
+      );
+      if (pages.length === 0) {
+        rejectedReason = "NO_PAGE";
+      } else if (pagesWithoutInstagram.length > 0 && allPairs.length === 0) {
+        rejectedReason = "NO_LINKED_ACCOUNT";
+      } else if (personalPairs.length > 0) {
+        rejectedReason = "ACCOUNT_PERSONAL";
+      } else if (allPairs.length > 0 && allPairs.every(p => p.instagramAccountType === null)) {
+        rejectedReason = "PROFILE_LOOKUP_FAILED";
+      }
+      connectionSteps.push(`Professional Accounts = 0\n↓\nRejected Because:\n${rejectedReason}`);
     }
   }
 
@@ -2191,6 +2319,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
   const internalContinuation = (req as any).__metaContinuationInternal === true;
   let instagramTraceId = buildInstagramTraceId(null);
   let instagramBusinessId: string | null = getRequestBusinessId(req);
+  let targetPlatform: any = null;
   let lifecycleContext: ReturnType<typeof createMetaOAuthLifecycleContext> | null = null;
   let lifecycleRequestTimedOut = false;
   let lifecycleRequestAborted = false;
@@ -2289,6 +2418,20 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     instagramTraceId = buildInstagramTraceId(oauthState?.nonce || null);
     instagramBusinessId = oauthState?.businessId || requestBusinessId || null;
 
+    if (oauthState?.platform === "INSTAGRAM") {
+      console.info("INSTAGRAM_CONNECT_START", {
+        traceId: instagramTraceId,
+        businessId: instagramBusinessId,
+        userId: userId || null,
+        platform: oauthState.platform,
+        requestId: (req as any).requestId || null,
+        timestamp: new Date().toISOString(),
+      });
+      if (!(req as any).__instagramConnectionSteps) {
+        (req as any).__instagramConnectionSteps = ["Request Started"];
+      }
+    }
+
     if (oauthState?.businessId && oauthState?.nonce && oauthState?.platform) {
       lifecycleContext = createMetaOAuthLifecycleContext({
         businessId: oauthState.businessId,
@@ -2361,8 +2504,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
     }
 
     const businessId = oauthState.businessId;
-    const targetPlatform = oauthState.platform;
+    targetPlatform = oauthState.platform;
     instagramBusinessId = businessId;
+
+    if (targetPlatform === "INSTAGRAM") {
+      if ((req as any).__instagramConnectionSteps) {
+        (req as any).__instagramConnectionSteps.push("OAuth Success");
+      }
+    }
+
     lifecycleContext = createMetaOAuthLifecycleContext({
       businessId,
       platform: targetPlatform,
@@ -2739,6 +2889,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         status: "IN_PROGRESS",
       });
       let shortTokenRes: any;
+      if (targetPlatform === "INSTAGRAM") {
+        console.info("INSTAGRAM_TOKEN_EXCHANGE_STARTED", {
+          traceId: instagramTraceId,
+          businessId,
+          userId,
+          appId: metaRuntime.appId,
+        });
+      }
+      const tokenStartMs = Date.now();
       try {
         shortTokenRes = await axiosWithMetaRetry({
           method: "GET",
@@ -2753,6 +2912,17 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             ? META_GRAPH_TIMEOUT_MS
             : META_GRAPH_FAST_LANE_TIMEOUT_MS,
         }, "INSTAGRAM_CODE_EXCHANGE");
+
+        if (targetPlatform === "INSTAGRAM") {
+          console.info("INSTAGRAM_TOKEN_EXCHANGE_SUCCESS", {
+            responseTime: Date.now() - tokenStartMs,
+            expires_in: shortTokenRes.data?.expires_in || null,
+            token_type: shortTokenRes.data?.token_type || null,
+            userId,
+            appId: metaRuntime.appId,
+          });
+        }
+
         logInstagramOAuthStage({
           stage: "INSTAGRAM_CODE_EXCHANGE_SUCCESS",
           status: "COMPLETED",
@@ -2789,6 +2959,10 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           detail: "Access token validated and resolved",
         });
       }
+    }
+
+    if (targetPlatform === "INSTAGRAM" && (req as any).__instagramConnectionSteps && !(req as any).__instagramConnectionSteps.includes("Token Success")) {
+      (req as any).__instagramConnectionSteps.push("Token Success");
     }
 
     if (!shortToken) {
@@ -3055,7 +3229,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         null;
 
       try {
-        instagramDiscovery = await fetchInstagramConnection(shortToken);
+        instagramDiscovery = await fetchInstagramConnection(shortToken, (req as any).__instagramConnectionSteps);
       } catch (error: any) {
         failInstagramConnect({
           stage: "IG_PAGES_FETCHED",
@@ -3178,11 +3352,25 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           },
           timeout: META_GRAPH_TIMEOUT_MS,
         }, "INSTAGRAM_LONG_TOKEN");
+        if (targetPlatform === "INSTAGRAM") {
+          console.info("META_LONG_TOKEN_EXCHANGED", {
+            success: true,
+            expiresIn: longTokenRes.data?.expires_in || null,
+            tokenLength: longTokenRes.data?.access_token ? String(longTokenRes.data.access_token).length : 0,
+          });
+        }
         logInstagramOAuthStage({
           stage: "INSTAGRAM_LONG_TOKEN_SUCCESS",
           status: "COMPLETED",
         });
       } catch (error: any) {
+        if (targetPlatform === "INSTAGRAM") {
+          console.info("META_LONG_TOKEN_EXCHANGED", {
+            success: false,
+            expiresIn: null,
+            tokenLength: 0,
+          });
+        }
         if (
           !internalContinuation &&
           lifecycleContext &&
@@ -3395,7 +3583,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       > | null = null;
 
       try {
-        instagramConnection = await fetchInstagramConnection(longToken);
+        instagramConnection = await fetchInstagramConnection(longToken, (req as any).__instagramConnectionSteps);
       } catch (error: any) {
         failInstagramConnect({
           stage: "IG_PAGES_FETCHED",
@@ -3461,6 +3649,22 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       });
 
       if (!validPairs.length) {
+        let finalFailureCode = "NO_LINKED_PAGE";
+        if (personalPairs.length) {
+          finalFailureCode = "ACCOUNT_PERSONAL";
+        } else if (instagramConnection.pagesWithoutInstagram.length > 0) {
+          finalFailureCode = "NO_LINKED_IG_ACCOUNT";
+        }
+
+        console.info("FINAL_PAIR_SUMMARY", {
+          pagesFound: instagramConnection.pagesFound,
+          pagesWithoutInstagram: instagramConnection.pagesWithoutInstagram,
+          personalAccounts: personalPairs.length,
+          validPairs,
+          selectedPair: null,
+          finalFailureCode,
+        });
+
         if (personalPairs.length) {
           failInstagramConnect({
             stage: "IG_PAIR_VALIDATED",
@@ -3534,6 +3738,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       }
 
       if (!selectedPair) {
+        console.info("FINAL_PAIR_SUMMARY", {
+          pagesFound: instagramConnection.pagesFound,
+          pagesWithoutInstagram: instagramConnection.pagesWithoutInstagram,
+          personalAccounts: personalPairs.length,
+          validPairs,
+          selectedPair: null,
+          finalFailureCode: "NO_LINKED_IG_ACCOUNT",
+        });
+
         failInstagramConnect({
           stage: "IG_PAIR_SELECTED",
           reason: "Unable to resolve a valid Instagram asset pair.",
@@ -3586,6 +3799,12 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       const missingPermissions = requiredInstagramPermissions.filter(
         (scope) => !grantedPermissions.includes(scope)
       );
+
+      console.info("META_PERMISSIONS", {
+        "Granted Permissions": grantedPermissions,
+        "Missing Permissions": missingPermissions,
+        "Expected Permissions": requiredInstagramPermissions,
+      });
 
       if (missingPermissions.length) {
         failInstagramConnect({
@@ -4340,6 +4559,10 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
     lifecycleRequestAborted = isRequestDetached();
 
+    if (targetPlatform === "INSTAGRAM" && (req as any).__instagramConnectionSteps) {
+      console.info("INSTAGRAM_CONNECTION_SUMMARY\n" + (req as any).__instagramConnectionSteps.join("\n↓\n"));
+    }
+
     if (lifecycleContext) {
       await finalizeMetaOnboardingLifecycle(
         {
@@ -4519,6 +4742,26 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         metadata: error.metadata,
       });
 
+      if ((req as any).__instagramConnectionSteps) {
+        const steps = (req as any).__instagramConnectionSteps;
+        const lastStep = steps[steps.length - 1];
+        if (!lastStep.includes("Rejected Because:")) {
+          let rejectedReason = "UNKNOWN";
+          const errorCode = error.code || "";
+          if (errorCode === "IG_PERMISSION_MISSING") {
+            rejectedReason = "MISSING_SCOPE";
+          } else if (errorCode === "ACCOUNT_PERSONAL") {
+            rejectedReason = "ACCOUNT_PERSONAL";
+          } else if (errorCode === "NO_LINKED_IG_ACCOUNT" || errorCode === "NO_LINKED_PAGE") {
+            rejectedReason = "NO_LINKED_ACCOUNT";
+          } else if (errorCode === "INSTAGRAM_TOKEN_EXCHANGE_FAILED") {
+            rejectedReason = "UNKNOWN";
+          }
+          steps.push(`Professional Accounts = 0\n↓\nRejected Because:\n${rejectedReason}`);
+        }
+        console.info("INSTAGRAM_CONNECTION_SUMMARY\n" + steps.join("\n↓\n"));
+      }
+
       if (lifecycleRequestAborted) {
         return;
       }
@@ -4585,6 +4828,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         data: null,
         message: "This connected account already exists for your business",
       });
+    }
+
+    if (targetPlatform === "INSTAGRAM" && (req as any).__instagramConnectionSteps) {
+      const steps = (req as any).__instagramConnectionSteps;
+      const lastStep = steps[steps.length - 1];
+      if (!lastStep.includes("Rejected Because:")) {
+        steps.push(`Professional Accounts = 0\n↓\nRejected Because:\nUNKNOWN`);
+      }
+      console.info("INSTAGRAM_CONNECTION_SUMMARY\n" + steps.join("\n↓\n"));
     }
 
     console.error("Meta OAuth error:", error);

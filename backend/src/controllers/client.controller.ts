@@ -1169,7 +1169,7 @@ const fetchMetaBusinesses = async (accessToken: string) => {
 
     return list;
   } catch (error: any) {
-    logger.error({
+  logger.error({
       stage: "INSTAGRAM_ACCOUNT_DISCOVERY",
       provider: "META_GRAPH_API",
       status: error.response?.status,
@@ -1324,7 +1324,7 @@ const fetchInstagramConnection = async (accessToken: string, connectionSteps?: s
           method: "GET",
           url: `https://graph.facebook.com/v19.0/${instagramProfessionalAccountId}`,
           params: {
-            fields: "id,username,name,account_type",
+            fields: "id,username,name",
             access_token: pageAccessToken,
           },
           timeout: META_GRAPH_TIMEOUT_MS,
@@ -1338,6 +1338,10 @@ const fetchInstagramConnection = async (accessToken: string, connectionSteps?: s
         );
         rawProfileResponse = igProfileRes.data || null;
         profileSuccess = true;
+        console.info("RAW_PROFILE_RESPONSE", {
+  instagramProfessionalAccountId,
+  raw: igProfileRes.data,
+});
 
         if (connectionPerformance) {
           connectionPerformance.profileLookup = (connectionPerformance.profileLookup || 0) + (Date.now() - lookupStart);
@@ -1345,6 +1349,11 @@ const fetchInstagramConnection = async (accessToken: string, connectionSteps?: s
       } catch (error: any) {
         profileError = error.message;
         rawProfileResponse = error.response?.data || { message: error.message };
+        console.error("RAW_PROFILE_ERROR", {
+  instagramProfessionalAccountId,
+  status: error.response?.status,
+  data: error.response?.data,
+});
         logger.error({
           stage: "INSTAGRAM_ACCOUNT_DISCOVERY",
           provider: "META_GRAPH_API",

@@ -1333,6 +1333,10 @@ accessToken: string, connectionSteps?: string[], connectionPerformance?: any) =>
   requestFields: "id,username,name,account_type",
   response: igProfileRes.data,
 });
+console.info("PROFILE_RESPONSE", {
+    response: igProfileRes.data,
+    keys: Object.keys(igProfileRes.data || {}),
+});
 
         instagramUsername =
           normalizeOptionalString(igProfileRes.data?.username) || instagramUsername;
@@ -1344,6 +1348,10 @@ accessToken: string, connectionSteps?: string[], connectionPerformance?: any) =>
         instagramAccountType = normalizeOptionalString(
           igProfileRes.data?.account_type
         );
+        console.info("ACCOUNT_TYPE_VALUE", {
+    account_type: igProfileRes.data?.account_type,
+    normalized: instagramAccountType,
+});
         rawProfileResponse = igProfileRes.data || null;
         profileSuccess = true;
         console.info("RAW_PROFILE_RESPONSE", {
@@ -1361,6 +1369,11 @@ accessToken: string, connectionSteps?: string[], connectionPerformance?: any) =>
   instagramProfessionalAccountId,
   status: error.response?.status,
   data: error.response?.data,
+});
+console.error("PROFILE_GRAPH_ERROR", {
+    status: error.response?.status,
+    data: error.response?.data,
+    headers: error.response?.headers,
 });
         logger.error({
           stage: "INSTAGRAM_ACCOUNT_DISCOVERY",
@@ -1407,6 +1420,12 @@ accessToken: string, connectionSteps?: string[], connectionPerformance?: any) =>
     } else if (!instagramAccountType) {
       accepted = false;
       evaluationReason = "GRAPH_LOOKUP_FAILED";
+      console.error("PROFILE_REJECTED", {
+    instagramProfessionalAccountId,
+    graphResponse: rawProfileResponse,
+    accountType: instagramAccountType,
+    reason: evaluationReason,
+});
     } else if (String(instagramAccountType).trim().toUpperCase() === "PERSONAL") {
       accepted = false;
       evaluationReason = "PERSONAL_ACCOUNT";

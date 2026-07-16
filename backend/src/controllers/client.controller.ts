@@ -1690,8 +1690,13 @@ const subscribeInstagramPageWebhook = async (
     status: "IN_PROGRESS",
     metadata: { facebookPageId },
   });
+  logger.info({
+  stage: "META_SUBSCRIBE_REQUEST",
+  facebookPageId,
+  hasPageAccessToken: Boolean(pageAccessToken),
+}, "Calling Instagram subscribed_apps");
   try {
-    await axiosWithMetaRetry({
+    const response = await axiosWithMetaRetry({
       method: "POST",
       url: `https://graph.facebook.com/v19.0/${facebookPageId}/subscribed_apps`,
       data: null,
@@ -1702,6 +1707,12 @@ const subscribeInstagramPageWebhook = async (
       timeout: META_GRAPH_TIMEOUT_MS,
     }, "INSTAGRAM_WEBHOOK_SUBSCRIBE");
 
+logger.info({
+  stage: "META_SUBSCRIBE_SUCCESS",
+  facebookPageId,
+  status: response.status,
+  data: response.data,
+}, "Instagram subscribed_apps success");
     logInstagramOAuthStage({
       stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_SUCCESS",
       status: "COMPLETED",
@@ -1711,6 +1722,13 @@ const subscribeInstagramPageWebhook = async (
     return true;
   } catch (error: any) {
     logger.error({
+  stage: "META_SUBSCRIBE_FAILED",
+  facebookPageId,
+  status: error.response?.status,
+  data: error.response?.data,
+  message: error.message,
+}, "Instagram subscribed_apps failed");
+    logger.error({
       stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_FAILED",
       provider: "META_GRAPH_API",
       status: error.response?.status,
@@ -1719,6 +1737,7 @@ const subscribeInstagramPageWebhook = async (
     return false;
   }
 };
+
 
 const fetchInstagramProfileSnapshot = async (
   pageId: string | null,
@@ -4116,7 +4135,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           },
         });
       }
-
+      logger.info({
+  stage: "WEBHOOK_CONNECT_ENTER",
+  businessId,
+  platform: "INSTAGRAM",
+  selectedPageId: selectedPair.facebookPageId,
+  instagramProfessionalAccountId:
+    selectedPair.instagramProfessionalAccountId,
+  grantedPermissions,
+}, "Entering connectInstagramOneClick");
       const connectResult = await connectInstagramOneClick({
         businessId,
         tenantId: businessId,

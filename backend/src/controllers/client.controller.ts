@@ -1183,8 +1183,8 @@ const isProfessionalInstagramAccount = (accountType?: string | null) => {
   const normalized = String(accountType || "").trim().toUpperCase();
   return normalized === "BUSINESS" || normalized === "CREATOR";
 };
-
-const fetchInstagramConnection = async (accessToken: string, connectionSteps?: string[], connectionPerformance?: any) => {
+const fetchInstagramConnection = async (
+accessToken: string, connectionSteps?: string[], connectionPerformance?: any) => {
   logInstagramOAuthStage({
     stage: "INSTAGRAM_PAGE_DISCOVERY_STARTED",
     status: "IN_PROGRESS",
@@ -1324,15 +1324,23 @@ const fetchInstagramConnection = async (accessToken: string, connectionSteps?: s
           method: "GET",
           url: `https://graph.facebook.com/v19.0/${instagramProfessionalAccountId}`,
           params: {
-            fields: "id,username,name",
+            fields: "id,username,name,account_type",
             access_token: pageAccessToken,
           },
           timeout: META_GRAPH_TIMEOUT_MS,
         }, "INSTAGRAM_ACCOUNT_DISCOVERY");
+        console.info("RAW_IG_PROFILE_GRAPH_RESPONSE", {
+  requestFields: "id,username,name,account_type",
+  response: igProfileRes.data,
+});
 
         instagramUsername =
           normalizeOptionalString(igProfileRes.data?.username) || instagramUsername;
         instagramName = normalizeOptionalString(igProfileRes.data?.name);
+        console.info("ACCOUNT_TYPE_DEBUG", {
+  account_type: igProfileRes.data?.account_type,
+  keys: Object.keys(igProfileRes.data || {}),
+});
         instagramAccountType = normalizeOptionalString(
           igProfileRes.data?.account_type
         );

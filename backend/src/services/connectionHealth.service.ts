@@ -244,7 +244,7 @@ export const subscribeInstagramPageWebhook = async (
       url: `https://graph.facebook.com/v19.0/${facebookPageId}/subscribed_apps`,
       data: null,
       params: {
-        subscribed_fields: "messages,messaging_postbacks,comments",
+        subscribed_fields: "messages,messaging_postbacks",
         access_token: pageAccessToken,
       },
       timeout: 12000,

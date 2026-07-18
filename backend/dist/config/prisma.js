@@ -8,8 +8,94 @@ const client_1 = require("@prisma/client");
 const env_1 = require("./env");
 const businessIdResolver_1 = require("../utils/businessIdResolver");
 const requestLifecycle_1 = require("../utils/requestLifecycle");
+const requestContext_1 = require("../observability/requestContext");
 const mongodb_1 = require("mongodb");
 const os_1 = __importDefault(require("os"));
+const getActiveTraceId = () => {
+    try {
+        const context = (0, requestContext_1.getRequestContext)();
+        if (context) {
+            const tid = context.traceId || context.requestId || context.correlationId;
+            if (tid && typeof tid === "string" && tid.trim() !== "") {
+                return tid.trim();
+            }
+        }
+    }
+    catch { }
+    try {
+        const reqStore = requestLifecycle_1.requestStorage.getStore();
+        if (reqStore?.req) {
+            const req = reqStore.req;
+            const tid = req.requestId || req.traceId || req.correlationId;
+            if (tid && typeof tid === "string" && tid.trim() !== "") {
+                return tid.trim();
+            }
+        }
+    }
+    catch { }
+    return null;
+};
+const isForensicTrace = () => {
+    let context = null;
+    let req = null;
+    try {
+        context = (0, requestContext_1.getRequestContext)();
+    }
+    catch { }
+    try {
+        const reqStore = requestLifecycle_1.requestStorage.getStore();
+        req = reqStore?.req;
+    }
+    catch { }
+    if (!context && !req) {
+        return false;
+    }
+    const tid = context?.traceId || context?.requestId || context?.correlationId || req?.requestId || req?.traceId || req?.correlationId;
+    if (tid && typeof tid === "string") {
+        const lower = tid.toLowerCase();
+        if (lower.includes("ig_") ||
+            lower.includes("meta_") ||
+            lower.includes("webhook_") ||
+            lower.includes("whatsapp") ||
+            lower.includes("waba")) {
+            return true;
+        }
+    }
+    const route = context?.route || req?.originalUrl || req?.url;
+    if (route && typeof route === "string") {
+        const lower = route.toLowerCase();
+        if (lower.includes("webhook") || lower.includes("oauth/meta") || lower.includes("instagram")) {
+            return true;
+        }
+    }
+    if (context?.provider === "INSTAGRAM" || context?.provider === "WHATSAPP") {
+        return true;
+    }
+    return false;
+};
+const getKeys = (obj) => {
+    if (obj && typeof obj === "object") {
+        return Object.keys(obj);
+    }
+    return [];
+};
+const getOrderByKeys = (orderBy) => {
+    if (!orderBy)
+        return [];
+    if (Array.isArray(orderBy)) {
+        const keys = [];
+        for (const item of orderBy) {
+            if (item && typeof item === "object") {
+                keys.push(...Object.keys(item));
+            }
+        }
+        return Array.from(new Set(keys));
+    }
+    if (typeof orderBy === "object") {
+        return Object.keys(orderBy);
+    }
+    return [];
+};
 let nativeMongoClient = null;
 const resolveDatabasePoolSize = () => {
     const cpuCores = Math.max(1, os_1.default.cpus()?.length || 1);
@@ -193,6 +279,50 @@ const invalidateAuthUserFindUniqueL1Cache = (userId) => {
 };
 const prisma = basePrisma.$extends({
     query: {
+        $allModels: {
+            async $allOperations({ model, operation, args, query }) {
+                const forensicMode = process.env.FORENSIC_MODE === "true";
+                if (forensicMode && isForensicTrace()) {
+                    const startTime = Date.now();
+                    const traceId = getActiveTraceId() || "FIELD_NOT_PRESENT";
+                    const summary = {
+                        model,
+                        operation,
+                        whereKeys: getKeys(args?.where),
+                        selectKeys: getKeys(args?.select),
+                        includeKeys: getKeys(args?.include),
+                        orderByKeys: getOrderByKeys(args?.orderBy),
+                        hasData: args?.data !== undefined,
+                        hasWhere: args?.where !== undefined,
+                        hasSelect: args?.select !== undefined,
+                        hasInclude: args?.include !== undefined,
+                    };
+                    try {
+                        const result = await query(args);
+                        const durationMs = Date.now() - startTime;
+                        console.info("FORENSIC_PRISMA_QUERY", {
+                            ...summary,
+                            durationMs,
+                            traceId,
+                            success: true,
+                        });
+                        return result;
+                    }
+                    catch (error) {
+                        const durationMs = Date.now() - startTime;
+                        console.info("FORENSIC_PRISMA_QUERY", {
+                            ...summary,
+                            durationMs,
+                            traceId,
+                            success: false,
+                            error: error?.message || String(error),
+                        });
+                        throw error;
+                    }
+                }
+                return query(args);
+            }
+        },
         memory: {
             async $allOperations({ model, operation, args, query }) {
                 const { RuntimeGuard } = require("../runtime/kernel/runtimeGuard");

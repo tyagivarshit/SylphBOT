@@ -33,7 +33,7 @@ import {
   saveSetupWizardProgress,
   upsertTenantBranding,
 } from "../services/saasPackagingConnectHubOS.service";
-import { InstagramConnectionHealthService } from "../services/connectionHealth.service";
+import { InstagramConnectionHealthService, subscribeInstagramPageWebhook } from "../services/connectionHealth.service";
 import {
   applyExtensionOverride,
   applyExtensionPolicy,
@@ -708,6 +708,23 @@ export const connectInstagramHub = async (req: any, res: any) => {
       metaProof: req.body?.metaProof || undefined,
       simulate: req.body?.simulate || undefined,
     });
+
+    if (result && result.integration && result.integration.status === "CONNECTED") {
+      const facebookPageId = result.integration.metadata?.pageId;
+      const credentialRef = result.integration.credentialRef;
+      if (facebookPageId && credentialRef) {
+        const decryptedToken = credentialRef.startsWith("enc::")
+          ? decrypt(credentialRef.replace(/^enc::/, ""))
+          : credentialRef;
+        if (decryptedToken && !decryptedToken.startsWith("ig_token_")) {
+          try {
+            await subscribeInstagramPageWebhook(facebookPageId, decryptedToken);
+          } catch (err: any) {
+            console.error("Failed to subscribe Instagram page webhook in connectInstagramHub:", err.message);
+          }
+        }
+      }
+    }
 
     return res.json({
       success: true,

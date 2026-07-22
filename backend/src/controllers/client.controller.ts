@@ -40,6 +40,7 @@ import {
 import { enqueueIntegrationOnboardingProjectionReconcile } from "../queues/integrationOnboardingProjection.queue";
 import {
   enqueueMetaOAuthContinuation,
+  META_OAUTH_CONTINUATION_QUEUE_NAME,
   type MetaOAuthContinuationJobPayload,
 } from "../queues/metaOAuthContinuation.queue";
 import { scheduleDeferredIntegrationProjectionReconcile } from "../services/integrationProjectionRecovery.service";
@@ -1691,10 +1692,10 @@ const subscribeInstagramPageWebhook = async (
     metadata: { facebookPageId },
   });
   logger.info({
-    stage: "META_SUBSCRIBE_REQUEST",
-    facebookPageId,
-    hasPageAccessToken: Boolean(pageAccessToken),
-  }, "Calling Instagram subscribed_apps");
+  stage: "META_SUBSCRIBE_REQUEST",
+  facebookPageId,
+  hasPageAccessToken: Boolean(pageAccessToken),
+}, "Calling Instagram subscribed_apps");
   try {
     const response = await axiosWithMetaRetry({
       method: "POST",
@@ -1707,33 +1708,12 @@ const subscribeInstagramPageWebhook = async (
       timeout: META_GRAPH_TIMEOUT_MS,
     }, "INSTAGRAM_WEBHOOK_SUBSCRIBE");
 
-    logger.info({
-      stage: "META_SUBSCRIBE_RESPONSE",
-      facebookPageId,
-      status: response.status,
-      headers: response.headers,
-      data: response.data,
-      timestamp: new Date().toISOString(),
-    }, "Instagram subscribed_apps response received");
-
-    logger.info({
-      stage: "META_SUBSCRIBE_SUCCESS",
-      facebookPageId,
-      status: response.status,
-      data: response.data,
-    }, "Instagram subscribed_apps success");
-
-    const isActive = response.status === 200 && response.data?.success === true;
-    if (!isActive) {
-      logger.error({
-        stage: "META_SUBSCRIBE_FAILED_VALIDATION",
-        facebookPageId,
-        status: response.status,
-        data: response.data,
-      }, "Instagram subscribed_apps response failed validation");
-      return false;
-    }
-
+logger.info({
+  stage: "META_SUBSCRIBE_SUCCESS",
+  facebookPageId,
+  status: response.status,
+  data: response.data,
+}, "Instagram subscribed_apps success");
     logInstagramOAuthStage({
       stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_SUCCESS",
       status: "COMPLETED",
@@ -1742,24 +1722,23 @@ const subscribeInstagramPageWebhook = async (
 
     return true;
   } catch (error: any) {
-    const errorData = error.response?.data;
     logger.error({
-      stage: "META_SUBSCRIBE_FAILED",
-      facebookPageId,
-      status: error.response?.status,
-      data: errorData,
-      message: error.message,
-    }, "Instagram subscribed_apps failed");
+  stage: "META_SUBSCRIBE_FAILED",
+  facebookPageId,
+  status: error.response?.status,
+  data: error.response?.data,
+  message: error.message,
+}, "Instagram subscribed_apps failed");
     logger.error({
       stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_FAILED",
       provider: "META_GRAPH_API",
       status: error.response?.status,
-      data: errorData,
       message: error.message,
     });
     return false;
   }
 };
+
 
 const fetchInstagramProfileSnapshot = async (
   pageId: string | null,
@@ -2855,11 +2834,12 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
             enqueueTimedOut,
           },
         });
-        setImmediate(() => {
-          const { type: _type, ...queueInput } = enqueuePayload;
-          runMetaOAuthContinuationFromQueueJob(queueInput).catch((err) => {
-            console.error("Local async fallback failed:", err);
-          });
+        const { type: _type, ...queueInput } = enqueuePayload;
+        await runMetaOAuthContinuationFromQueueJob({
+          ...queueInput,
+          jobId: enqueuePayload.operationId || `fallback-${Date.now()}`,
+          attemptsMade: 0,
+          source: "queue_worker",
         });
       }
 
@@ -4602,7 +4582,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           wabaId: selectedPhone.wabaId || null,
         },
       });
-      logWaCheckpoint("[WA STEP 8] phone selected / selection required", {
+      logWaCheckpoint("[WA STEP 8] phone selected /ag selection required", {
         selectionRequired: false,
         selectedPhoneNumberId: resolvedPhoneNumberId,
       });
@@ -5156,8 +5136,63 @@ const createMetaOAuthContinuationMockResponse = () => {
 };
 
 export const runMetaOAuthContinuationFromQueueJob = async (
-  input: MetaOAuthContinuationQueueInput
+  input: MetaOAuthContinuationQueueInput & {
+    jobId?: string;
+    attemptsMade?: number;
+  }
 ) => {
+  const startedAtMs = Date.now();
+  const resumeCount = Number(input.attemptsMade || 0);
+  const jobId = input.jobId || "";
+
+  logger.info({
+    jobId,
+    businessId: input.businessId,
+    stage: "META_OAUTH_JOB_STARTED",
+    durationMs: 0,
+  });
+
+  emitPerformanceMetric({
+    name: "onboarding_resume_count",
+    value: resumeCount,
+    businessId: input.businessId,
+    route: "meta_oauth_continuation_worker",
+    metadata: {
+      operationId: input.operationId,
+      replayToken: input.replayToken,
+      resumeCount,
+    },
+  });
+  emitPerformanceMetric({
+    name: "continuation_async_only",
+    value: 1,
+    businessId: input.businessId,
+    route: "meta_oauth_continuation_worker",
+    metadata: {
+      operationId: input.operationId,
+      replayToken: input.replayToken,
+      source: input.source || "queue_worker",
+    },
+  });
+  void recordObservabilityEvent({
+    businessId: input.businessId,
+    tenantId: input.businessId,
+    eventType: "worker_consumption_detected",
+    message: "worker_consumption_detected:meta_oauth_continuation",
+    severity: "info",
+    context: {
+      component: "meta_oauth_continuation_worker",
+      phase: "consume",
+    },
+    metadata: {
+      operationId: input.operationId,
+      replayToken: input.replayToken,
+      queueName: META_OAUTH_CONTINUATION_QUEUE_NAME,
+      attemptsMade: resumeCount,
+      source: input.source || "queue_worker",
+    },
+  }).catch(() => undefined);
+
   const lease = await acquireMetaOAuthReconciliationLease({
     operationId: input.operationId,
     replayToken: input.replayToken,
@@ -5242,8 +5277,91 @@ export const runMetaOAuthContinuationFromQueueJob = async (
 
   try {
     await metaOAuthConnect(req, res);
+
+    if (res.statusCode >= 400) {
+      const errorDetail = (res as any).body?.message || (res as any).body?.reason || `Continuation failed with status code ${res.statusCode}`;
+      throw new Error(`meta_oauth_continuation_failed:${errorDetail}`);
+    }
+
+    const durationMs = Date.now() - startedAtMs;
+    logger.info({
+      jobId,
+      businessId: input.businessId,
+      stage: "META_OAUTH_JOB_COMPLETED",
+      durationMs,
+    });
+  } catch (error: any) {
+    const durationMs = Date.now() - startedAtMs;
+    logger.error({
+      jobId,
+      businessId: input.businessId,
+      stage: "META_OAUTH_JOB_FAILED",
+      durationMs,
+      message: error.message,
+    });
+    throw error;
   } finally {
     lease.release();
+  }
+
+  const durationMs = Date.now() - startedAtMs;
+  const deferredSinceMs = input.queuedAtIso
+    ? Math.max(0, Date.now() - new Date(input.queuedAtIso).getTime())
+    : null;
+
+  emitPerformanceMetric({
+    name: "onboarding_async_completion_ms",
+    value: durationMs,
+    businessId: input.businessId,
+    route: "meta_oauth_continuation_worker",
+    metadata: {
+      operationId: input.operationId,
+      replayToken: input.replayToken,
+      platform: input.platform,
+      mode: input.mode,
+      deferredSinceMs,
+    },
+  });
+
+  if (deferredSinceMs !== null) {
+    emitPerformanceMetric({
+      name: "callback_deferred_work_ms",
+      value: deferredSinceMs,
+      businessId: input.businessId,
+      route: "meta_oauth_continuation_worker",
+      metadata: {
+        operationId: input.operationId,
+        replayToken: input.replayToken,
+      },
+    });
+  }
+
+  const lifecycle = await getMetaOAuthLifecycleSnapshot({
+    attemptKey: input.operationId,
+    replayToken: input.replayToken,
+    platform: input.platform,
+  }).catch(() => null);
+
+  const metadata =
+    lifecycle?.metadata && typeof lifecycle.metadata === "object"
+      ? (lifecycle.metadata as Record<string, unknown>)
+      : {};
+  const stageDurations =
+    metadata.stageDurationsMs && typeof metadata.stageDurationsMs === "object"
+      ? (metadata.stageDurationsMs as Record<string, unknown>)
+      : {};
+  const webhookActivationAsyncMs = Number(stageDurations.WEBHOOK_ACTIVATION || 0);
+  if (Number.isFinite(webhookActivationAsyncMs) && webhookActivationAsyncMs > 0) {
+    emitPerformanceMetric({
+      name: "webhook_activation_async_ms",
+      value: webhookActivationAsyncMs,
+      businessId: input.businessId,
+      route: "meta_oauth_continuation_worker",
+      metadata: {
+        operationId: input.operationId,
+        replayToken: input.replayToken,
+      },
+    });
   }
 
   return {

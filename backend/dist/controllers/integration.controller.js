@@ -589,6 +589,23 @@ const connectInstagramHub = async (req, res) => {
             metaProof: req.body?.metaProof || undefined,
             simulate: req.body?.simulate || undefined,
         });
+        if (result && result.integration && result.integration.status === "CONNECTED") {
+            const facebookPageId = result.integration.metadata?.pageId;
+            const credentialRef = result.integration.credentialRef;
+            if (facebookPageId && credentialRef) {
+                const decryptedToken = credentialRef.startsWith("enc::")
+                    ? (0, encrypt_1.decrypt)(credentialRef.replace(/^enc::/, ""))
+                    : credentialRef;
+                if (decryptedToken && !decryptedToken.startsWith("ig_token_")) {
+                    try {
+                        await (0, connectionHealth_service_1.subscribeInstagramPageWebhook)(facebookPageId, decryptedToken);
+                    }
+                    catch (err) {
+                        console.error("Failed to subscribe Instagram page webhook in connectInstagramHub:", err.message);
+                    }
+                }
+            }
+        }
         return res.json({
             success: true,
             data: result,

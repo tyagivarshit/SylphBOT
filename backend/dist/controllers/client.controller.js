@@ -4176,6 +4176,8 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
     const startedAtMs = Date.now();
     const resumeCount = Number(input.attemptsMade || 0);
     const jobId = input.jobId || "";
+    const operationId = input.operationId;
+    const traceId = input.traceId || null;
     logger_1.default.info({
         jobId,
         businessId: input.businessId,
@@ -4222,13 +4224,52 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
             source: input.source || "queue_worker",
         },
     }).catch(() => undefined);
-    const lease = await (0, metaOAuthLifecycle_service_1.acquireMetaOAuthReconciliationLease)({
+    // Helper helper to wrap promises with timeout logging
+    const awaitWithTimeoutLogging = async (promise, functionName) => {
+        const startTime = Date.now();
+        let completed = false;
+        const timer = setTimeout(() => {
+            if (!completed) {
+                const elapsed = (Date.now() - startTime) / 1000;
+                console.warn("CONTINUATION_STALLED", {
+                    "function name": functionName,
+                    "elapsed time": `${elapsed.toFixed(2)}s`,
+                    operationId,
+                    traceId,
+                });
+                logger_1.default.warn({
+                    event: "CONTINUATION_STALLED",
+                    "function name": functionName,
+                    "elapsed time": `${elapsed.toFixed(2)}s`,
+                    operationId,
+                    traceId,
+                });
+            }
+        }, 5000);
+        try {
+            const result = await promise;
+            completed = true;
+            return result;
+        }
+        finally {
+            clearTimeout(timer);
+        }
+    };
+    console.info("LOG_01_BEFORE_acquireMetaOAuthReconciliationLease", {
+        operationId,
+        traceId,
+    });
+    const lease = await awaitWithTimeoutLogging((0, metaOAuthLifecycle_service_1.acquireMetaOAuthReconciliationLease)({
         operationId: input.operationId,
         replayToken: input.replayToken,
         businessId: input.businessId,
         platform: input.platform,
         mode: input.mode,
         source: input.source || "queue_worker",
+    }), "acquireMetaOAuthReconciliationLease");
+    console.info("LOG_01_AFTER_acquireMetaOAuthReconciliationLease", {
+        operationId,
+        traceId,
     });
     if (!lease?.acquired) {
         if (lease?.reason === "locked" &&
@@ -4294,7 +4335,15 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
         longToken,
     };
     try {
-        await (0, exports.metaOAuthConnect)(req, res);
+        console.info("LOG_02_BEFORE_metaOAuthConnect", {
+            operationId,
+            traceId,
+        });
+        await awaitWithTimeoutLogging((0, exports.metaOAuthConnect)(req, res), "metaOAuthConnect");
+        console.info("LOG_02_AFTER_metaOAuthConnect", {
+            operationId,
+            traceId,
+        });
         if (res.statusCode >= 400) {
             const errorDetail = res.body?.message || res.body?.reason || `Continuation failed with status code ${res.statusCode}`;
             throw new Error(`meta_oauth_continuation_failed:${errorDetail}`);
@@ -4350,11 +4399,19 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
             },
         });
     }
-    const lifecycle = await (0, metaOAuthLifecycle_service_1.getMetaOAuthLifecycleSnapshot)({
+    console.info("LOG_03_BEFORE_getMetaOAuthLifecycleSnapshot", {
+        operationId,
+        traceId,
+    });
+    const lifecycle = await awaitWithTimeoutLogging((0, metaOAuthLifecycle_service_1.getMetaOAuthLifecycleSnapshot)({
         attemptKey: input.operationId,
         replayToken: input.replayToken,
         platform: input.platform,
-    }).catch(() => null);
+    }), "getMetaOAuthLifecycleSnapshot");
+    console.info("LOG_03_AFTER_getMetaOAuthLifecycleSnapshot", {
+        operationId,
+        traceId,
+    });
     const metadata = lifecycle?.metadata && typeof lifecycle.metadata === "object"
         ? lifecycle.metadata
         : {};

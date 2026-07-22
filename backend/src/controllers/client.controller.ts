@@ -5144,6 +5144,8 @@ export const runMetaOAuthContinuationFromQueueJob = async (
   const startedAtMs = Date.now();
   const resumeCount = Number(input.attemptsMade || 0);
   const jobId = input.jobId || "";
+  const operationId = input.operationId;
+  const traceId = input.traceId || null;
 
   logger.info({
     jobId,
@@ -5193,13 +5195,60 @@ export const runMetaOAuthContinuationFromQueueJob = async (
     },
   }).catch(() => undefined);
 
-  const lease = await acquireMetaOAuthReconciliationLease({
-    operationId: input.operationId,
-    replayToken: input.replayToken,
-    businessId: input.businessId,
-    platform: input.platform,
-    mode: input.mode,
-    source: input.source || "queue_worker",
+  // Helper helper to wrap promises with timeout logging
+  const awaitWithTimeoutLogging = async <T>(
+    promise: Promise<T>,
+    functionName: string
+  ): Promise<T> => {
+    const startTime = Date.now();
+    let completed = false;
+
+    const timer = setTimeout(() => {
+      if (!completed) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        console.warn("CONTINUATION_STALLED", {
+          "function name": functionName,
+          "elapsed time": `${elapsed.toFixed(2)}s`,
+          operationId,
+          traceId,
+        });
+        logger.warn({
+          event: "CONTINUATION_STALLED",
+          "function name": functionName,
+          "elapsed time": `${elapsed.toFixed(2)}s`,
+          operationId,
+          traceId,
+        });
+      }
+    }, 5000);
+
+    try {
+      const result = await promise;
+      completed = true;
+      return result;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  console.info("LOG_01_BEFORE_acquireMetaOAuthReconciliationLease", {
+    operationId,
+    traceId,
+  });
+  const lease = await awaitWithTimeoutLogging(
+    acquireMetaOAuthReconciliationLease({
+      operationId: input.operationId,
+      replayToken: input.replayToken,
+      businessId: input.businessId,
+      platform: input.platform,
+      mode: input.mode,
+      source: input.source || "queue_worker",
+    }),
+    "acquireMetaOAuthReconciliationLease"
+  );
+  console.info("LOG_01_AFTER_acquireMetaOAuthReconciliationLease", {
+    operationId,
+    traceId,
   });
 
   if (!lease?.acquired) {
@@ -5276,7 +5325,18 @@ export const runMetaOAuthContinuationFromQueueJob = async (
   };
 
   try {
-    await metaOAuthConnect(req, res);
+    console.info("LOG_02_BEFORE_metaOAuthConnect", {
+      operationId,
+      traceId,
+    });
+    await awaitWithTimeoutLogging(
+      metaOAuthConnect(req, res),
+      "metaOAuthConnect"
+    );
+    console.info("LOG_02_AFTER_metaOAuthConnect", {
+      operationId,
+      traceId,
+    });
 
     if (res.statusCode >= 400) {
       const errorDetail = (res as any).body?.message || (res as any).body?.reason || `Continuation failed with status code ${res.statusCode}`;
@@ -5336,11 +5396,22 @@ export const runMetaOAuthContinuationFromQueueJob = async (
     });
   }
 
-  const lifecycle = await getMetaOAuthLifecycleSnapshot({
-    attemptKey: input.operationId,
-    replayToken: input.replayToken,
-    platform: input.platform,
-  }).catch(() => null);
+  console.info("LOG_03_BEFORE_getMetaOAuthLifecycleSnapshot", {
+    operationId,
+    traceId,
+  });
+  const lifecycle = await awaitWithTimeoutLogging(
+    getMetaOAuthLifecycleSnapshot({
+      attemptKey: input.operationId,
+      replayToken: input.replayToken,
+      platform: input.platform,
+    }),
+    "getMetaOAuthLifecycleSnapshot"
+  );
+  console.info("LOG_03_AFTER_getMetaOAuthLifecycleSnapshot", {
+    operationId,
+    traceId,
+  });
 
   const metadata =
     lifecycle?.metadata && typeof lifecycle.metadata === "object"

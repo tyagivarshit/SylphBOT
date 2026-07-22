@@ -1236,6 +1236,7 @@ const subscribeInstagramPageWebhook = async (facebookPageId, pageAccessToken) =>
     if (!facebookPageId || !pageAccessToken) {
         return false;
     }
+    console.info("BEFORE_SUBSCRIBE_INSTAGRAM_PAGE_WEBHOOK");
     (0, exports.logInstagramOAuthStage)({
         stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_STARTED",
         status: "IN_PROGRESS",
@@ -1246,6 +1247,12 @@ const subscribeInstagramPageWebhook = async (facebookPageId, pageAccessToken) =>
         facebookPageId,
         hasPageAccessToken: Boolean(pageAccessToken),
     }, "Calling Instagram subscribed_apps");
+    console.info("GRAPH_SUBSCRIBE_REQUEST");
+    logger_1.default.info({
+        stage: "GRAPH_SUBSCRIBE_REQUEST",
+        url: `https://graph.facebook.com/v19.0/${facebookPageId}/subscribed_apps`,
+        facebookPageId,
+    }, "Graph api subscribe request");
     try {
         const response = await (0, metaRetry_1.axiosWithMetaRetry)({
             method: "POST",
@@ -1257,20 +1264,32 @@ const subscribeInstagramPageWebhook = async (facebookPageId, pageAccessToken) =>
             },
             timeout: META_GRAPH_TIMEOUT_MS,
         }, "INSTAGRAM_WEBHOOK_SUBSCRIBE");
+        console.info("GRAPH_HTTP_STATUS", response.status);
+        console.info("GRAPH_RESPONSE_BODY", response.data);
+        console.info("META_SUBSCRIBE_SUCCESS");
         logger_1.default.info({
             stage: "META_SUBSCRIBE_SUCCESS",
             facebookPageId,
             status: response.status,
             data: response.data,
         }, "Instagram subscribed_apps success");
+        logger_1.default.info({
+            stage: "GRAPH_SUBSCRIBE_RESPONSE",
+            GRAPH_HTTP_STATUS: response.status,
+            GRAPH_RESPONSE_BODY: response.data,
+        }, "Graph subscribe response");
         (0, exports.logInstagramOAuthStage)({
             stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_SUCCESS",
             status: "COMPLETED",
             metadata: { facebookPageId },
         });
+        console.info("AFTER_SUBSCRIBE_INSTAGRAM_PAGE_WEBHOOK");
         return true;
     }
     catch (error) {
+        console.info("GRAPH_HTTP_STATUS", error.response?.status);
+        console.info("GRAPH_ERROR_BODY", error.response?.data);
+        console.info("META_SUBSCRIBE_FAILED");
         logger_1.default.error({
             stage: "META_SUBSCRIBE_FAILED",
             facebookPageId,
@@ -1279,11 +1298,18 @@ const subscribeInstagramPageWebhook = async (facebookPageId, pageAccessToken) =>
             message: error.message,
         }, "Instagram subscribed_apps failed");
         logger_1.default.error({
+            stage: "GRAPH_SUBSCRIBE_ERROR",
+            GRAPH_HTTP_STATUS: error.response?.status,
+            GRAPH_ERROR_BODY: error.response?.data,
+            message: error.message,
+        }, "Graph subscribe error");
+        logger_1.default.error({
             stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_FAILED",
             provider: "META_GRAPH_API",
             status: error.response?.status,
             message: error.message,
         });
+        console.info("AFTER_SUBSCRIBE_INSTAGRAM_PAGE_WEBHOOK");
         return false;
     }
 };
@@ -1848,6 +1874,24 @@ META OAUTH CONNECT (INSTAGRAM)
 const metaOAuthConnect = async (req, res) => {
     const callbackStartedAtMs = Date.now();
     const internalContinuation = req.__metaContinuationInternal === true;
+    let webhookAttempted = false;
+    let requestedFacebookPageId = null;
+    let requestedInstagramProfessionalAccountId = null;
+    let oauthState = null;
+    const logSubscribeSkipped = (reason, condition, branch, extraSelectedPair = null) => {
+        logger_1.default.info({
+            stage: "SUBSCRIBE_SKIPPED",
+            reason,
+            condition,
+            branch,
+            mode: oauthState?.mode || null,
+            internalContinuation,
+            callbackFastPath: !internalContinuation,
+            selectedPair: extraSelectedPair,
+            facebookPageId: requestedFacebookPageId || null,
+            instagramProfessionalAccountId: requestedInstagramProfessionalAccountId || null,
+        }, `Subscribe skipped: ${reason}`);
+    };
     let instagramTraceId = buildInstagramTraceId(null);
     let instagramBusinessId = (0, tenant_service_1.getRequestBusinessId)(req);
     let targetPlatform = null;
@@ -1891,6 +1935,16 @@ const metaOAuthConnect = async (req, res) => {
         const { code: rawCode, state: rawState, aiTone, businessInfo, pricingInfo, faqKnowledge, salesInstructions, phoneNumberId, facebookPageId, instagramProfessionalAccountId, embeddedSignupSession, } = req.body || {};
         const code = normalizeOptionalString(rawCode);
         const state = String(rawState || "").trim();
+        if (facebookPageId || instagramProfessionalAccountId) {
+            console.info("PAIR_SELECTION_POST_RECEIVED", {
+                code: code ? "present" : "absent",
+                state: state ? "present" : "absent",
+                facebookPageId: facebookPageId ? "present" : "absent",
+                instagramProfessionalAccountId: instagramProfessionalAccountId ? "present" : "absent",
+                shortToken: req.body?.shortToken ? "present" : "absent",
+                longToken: req.body?.longToken ? "present" : "absent",
+            });
+        }
         const whatsappEmbeddedSignupSession = normalizeWhatsAppEmbeddedSignupSession(embeddedSignupSession);
         const internalResolvedTokens = req.__metaResolvedTokens &&
             typeof req.__metaResolvedTokens === "object"
@@ -1898,7 +1952,39 @@ const metaOAuthConnect = async (req, res) => {
             : null;
         const providedShortToken = normalizeOptionalString(internalResolvedTokens?.shortToken);
         const providedLongToken = normalizeOptionalString(internalResolvedTokens?.longToken);
-        const oauthState = (0, metaOAuthState_1.verifyMetaOAuthState)(state);
+        oauthState = (0, metaOAuthState_1.verifyMetaOAuthState)(state);
+        let storedShortToken = null;
+        let storedLongToken = null;
+        if (oauthState) {
+            const attemptKey = (0, metaOAuthLifecycle_service_1.buildMetaOAuthLifecycleAttemptKey)({
+                businessId: oauthState.businessId,
+                platform: oauthState.platform,
+                nonce: oauthState.nonce,
+            });
+            const existingAttempt = await prisma_1.default.connectionAttemptLedger.findUnique({
+                where: { attemptKey },
+                select: { metadata: true }
+            });
+            if (existingAttempt?.metadata && typeof existingAttempt.metadata === "object") {
+                const metadata = existingAttempt.metadata;
+                if (metadata.shortTokenEncrypted && typeof metadata.shortTokenEncrypted === "string") {
+                    try {
+                        storedShortToken = (0, encrypt_1.decrypt)(metadata.shortTokenEncrypted);
+                    }
+                    catch (e) {
+                        console.error("Failed to decrypt stored shortToken:", e);
+                    }
+                }
+                if (metadata.longTokenEncrypted && typeof metadata.longTokenEncrypted === "string") {
+                    try {
+                        storedLongToken = (0, encrypt_1.decrypt)(metadata.longTokenEncrypted);
+                    }
+                    catch (e) {
+                        console.error("Failed to decrypt stored longToken:", e);
+                    }
+                }
+            }
+        }
         waDiagEnabled =
             oauthState?.platform === "WHATSAPP" &&
                 String(process.env.WA_META_FINALIZE_DIAG || "")
@@ -1938,8 +2024,13 @@ const metaOAuthConnect = async (req, res) => {
         const failInstagramConnect = (options) => {
             throw new MetaOAuthFlowError(options);
         };
-        const hasOAuthCredential = Boolean(code || providedShortToken || providedLongToken);
+        const hasOAuthCredential = Boolean(code ||
+            providedShortToken ||
+            providedLongToken ||
+            storedShortToken ||
+            storedLongToken);
         if (!userId || !requestBusinessId || !hasOAuthCredential || !oauthState) {
+            logSubscribeSkipped("Invalid OAuth callback contract", "!userId || !requestBusinessId || !hasOAuthCredential || !oauthState", "invalid_contract");
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
                     context: lifecycleContext,
@@ -1966,6 +2057,7 @@ const metaOAuthConnect = async (req, res) => {
         if (oauthState.userId !== userId ||
             oauthState.businessId !== requestBusinessId ||
             oauthState.workspaceId !== requestBusinessId) {
+            logSubscribeSkipped("OAuth state mismatch", "oauthState.userId !== userId || oauthState.businessId !== requestBusinessId || oauthState.workspaceId !== requestBusinessId", "state_mismatch");
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
                     context: lifecycleContext,
@@ -2006,10 +2098,12 @@ const metaOAuthConnect = async (req, res) => {
         let selectedPhoneNumberId = normalizeOptionalString(phoneNumberId) ||
             normalizeOptionalString(whatsappEmbeddedSignupSession.phoneNumberId) ||
             normalizeOptionalString(oauthState.preferredPhoneNumberId);
-        const requestedFacebookPageId = normalizeOptionalString(facebookPageId) ||
-            normalizeOptionalString(oauthState.preferredFacebookPageId);
-        const requestedInstagramProfessionalAccountId = normalizeOptionalString(instagramProfessionalAccountId) ||
-            normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
+        requestedFacebookPageId =
+            normalizeOptionalString(facebookPageId) ||
+                normalizeOptionalString(oauthState.preferredFacebookPageId);
+        requestedInstagramProfessionalAccountId =
+            normalizeOptionalString(instagramProfessionalAccountId) ||
+                normalizeOptionalString(oauthState.preferredInstagramProfessionalAccountId);
         if (!internalContinuation) {
             logMetaOAuthFastPath("OAUTH_CONTINUATION_VERIFIED", {
                 businessId,
@@ -2259,6 +2353,7 @@ const metaOAuthConnect = async (req, res) => {
             ? await getAllowedPlatforms(businessId, subscription)
             : [targetPlatform];
         if (internalContinuation && !allowedPlatforms.includes(targetPlatform)) {
+            logSubscribeSkipped("Integration not allowed in workspace", "internalContinuation && !allowedPlatforms.includes(targetPlatform)", "entitlement_blocked");
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
                     context: lifecycleContext,
@@ -2284,6 +2379,7 @@ const metaOAuthConnect = async (req, res) => {
         }
         const metaRuntime = getMetaOAuthRuntimeConfig();
         if (!metaRuntime?.appSecret) {
+            logSubscribeSkipped("Meta OAuth config missing", "!metaRuntime?.appSecret", "config_missing");
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
                     context: lifecycleContext,
@@ -2338,7 +2434,15 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
         }
-        shortToken = providedShortToken;
+        if (!shortToken) {
+            shortToken = providedShortToken || storedShortToken;
+            let shortSource = "oauthExchange";
+            if (providedShortToken)
+                shortSource = "providedShortToken";
+            else if (storedShortToken)
+                shortSource = "storedShortToken";
+            console.info("TOKEN_SOURCE_SELECTED", { tokenType: "shortToken", source: shortSource });
+        }
         if (!shortToken) {
             if (lifecycleContext && targetPlatform === "INSTAGRAM") {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
@@ -2362,6 +2466,16 @@ const metaOAuthConnect = async (req, res) => {
             }
             const tokenStartMs = Date.now();
             try {
+                const authCodeHash = code ? require("crypto").createHash("sha256").update(code).digest("hex").substring(0, 8) : "absent";
+                const stackLoc = new Error().stack?.split("\n")[2]?.trim() || "unknown";
+                console.info("OAUTH_ACCESS_TOKEN_REQUEST", {
+                    operationId: lifecycleContext?.attemptKey || "unknown",
+                    traceId: instagramTraceId || "unknown",
+                    stateNonce: oauthState?.nonce || "unknown",
+                    authCodeHash,
+                    requestSource: "INSTAGRAM_CODE_EXCHANGE",
+                    stackLocation: stackLoc,
+                });
                 shortTokenRes = await (0, metaRetry_1.axiosWithMetaRetry)({
                     method: "GET",
                     url: "https://graph.facebook.com/v19.0/oauth/access_token",
@@ -2422,6 +2536,7 @@ const metaOAuthConnect = async (req, res) => {
             req.__instagramConnectionSteps.push("Token Success");
         }
         if (!shortToken) {
+            logSubscribeSkipped("Meta token exchange failed", "!shortToken", "short_token_missing");
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
                     context: lifecycleContext,
@@ -2463,6 +2578,7 @@ const metaOAuthConnect = async (req, res) => {
             }
         }
         if (!internalContinuation) {
+            logSubscribeSkipped("Fast-path fallback triggered", "!internalContinuation", "fast_path");
             emitCallbackMetric({
                 name: "oauth_callback_accept_ms",
                 businessId,
@@ -2604,7 +2720,7 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
             const verifiedPhoneNumbers = availablePhoneNumbers.filter(isWhatsAppPhoneVerified);
-            if (verifiedPhoneNumbers.length === 1) {
+            if (verifiedPhoneNumbers.length === 1 && process.env.UX_AUTO_SELECT === "true") {
                 selectedPhoneNumberId = verifiedPhoneNumbers[0].phoneNumberId;
             }
             if (!selectedPhoneNumberId) {
@@ -2624,6 +2740,8 @@ const metaOAuthConnect = async (req, res) => {
                                 code: "PHONE_SELECTION_REQUIRED",
                                 reason: "Select the WhatsApp mobile number you want to connect.",
                             }),
+                            shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                            longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
                         },
                     });
                 }
@@ -2737,9 +2855,12 @@ const metaOAuthConnect = async (req, res) => {
                         code: "PAIR_SELECTION_REQUIRED",
                         validPairs,
                         actionable,
+                        shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                        longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
                     },
                 });
             }
+            logSubscribeSkipped("Pair selection required", "targetPlatform === 'INSTAGRAM' && !requestedFacebookPageId && !requestedInstagramProfessionalAccountId", "pair_selection_required");
             return res.status(409).json({
                 success: false,
                 data: {
@@ -2755,7 +2876,15 @@ const metaOAuthConnect = async (req, res) => {
                 code: "PAIR_SELECTION_REQUIRED",
             });
         }
-        longToken = providedLongToken;
+        if (!longToken) {
+            longToken = providedLongToken || storedLongToken;
+            let longSource = "oauthExchange";
+            if (providedLongToken)
+                longSource = "providedLongToken";
+            else if (storedLongToken)
+                longSource = "storedLongToken";
+            console.info("TOKEN_SOURCE_SELECTED", { tokenType: "longToken", source: longSource });
+        }
         if (!longToken) {
             (0, exports.logInstagramOAuthStage)({
                 stage: "INSTAGRAM_LONG_TOKEN_STARTED",
@@ -2763,6 +2892,16 @@ const metaOAuthConnect = async (req, res) => {
             });
             let longTokenRes;
             try {
+                const authCodeHash = "absent";
+                const stackLoc = new Error().stack?.split("\n")[2]?.trim() || "unknown";
+                console.info("OAUTH_ACCESS_TOKEN_REQUEST", {
+                    operationId: lifecycleContext?.attemptKey || "unknown",
+                    traceId: instagramTraceId || "unknown",
+                    stateNonce: oauthState?.nonce || "unknown",
+                    authCodeHash,
+                    requestSource: "INSTAGRAM_LONG_TOKEN",
+                    stackLocation: stackLoc,
+                });
                 longTokenRes = await (0, metaRetry_1.axiosWithMetaRetry)({
                     method: "GET",
                     url: "https://graph.facebook.com/v19.0/oauth/access_token",
@@ -2815,6 +2954,7 @@ const metaOAuthConnect = async (req, res) => {
             longToken = normalizeOptionalString(longTokenRes.data?.access_token);
         }
         if (!longToken) {
+            logSubscribeSkipped("Unable to resolve long lived token", "!longToken", "long_token_missing");
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
                     context: lifecycleContext,
@@ -2867,6 +3007,8 @@ const metaOAuthConnect = async (req, res) => {
                     embeddedSignupAvailable: true,
                     requiresReconnect: true,
                     actionable,
+                    shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                    longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
                 },
             });
             return res.status(409).json({
@@ -3213,7 +3355,20 @@ const metaOAuthConnect = async (req, res) => {
                 },
             });
             const instagramAccessToken = instagramConnection.pageAccessTokenByFacebookPageId[selectedPair.facebookPageId] || longToken;
+            webhookAttempted = true;
+            logger_1.default.info({
+                stage: "BEFORE_SUBSCRIBE_INSTAGRAM_PAGE_WEBHOOK",
+                PAGE_ID: selectedPair.facebookPageId,
+                INSTAGRAM_ACCOUNT_ID: selectedPair.instagramProfessionalAccountId,
+                TOKEN_SOURCE: instagramConnection.pageAccessTokenByFacebookPageId[selectedPair.facebookPageId] ? "page_access_token" : "long_token",
+                TOKEN_LENGTH: instagramAccessToken ? instagramAccessToken.length : 0,
+                TOKEN_PREFIX_FIRST_10: instagramAccessToken ? instagramAccessToken.substring(0, 10) : "",
+            }, "Before subscribeInstagramPageWebhook");
             const webhookSubscribed = await subscribeInstagramPageWebhook(selectedPair.facebookPageId, instagramAccessToken);
+            logger_1.default.info({
+                stage: "AFTER_SUBSCRIBE_INSTAGRAM_PAGE_WEBHOOK",
+                webhookSubscribed,
+            }, "After subscribeInstagramPageWebhook");
             if (!webhookSubscribed) {
                 failInstagramConnect({
                     stage: "IG_WEBHOOK_SUBSCRIBED",
@@ -3425,6 +3580,7 @@ const metaOAuthConnect = async (req, res) => {
             });
         }
         else {
+            logSubscribeSkipped("Platform is WHATSAPP", "targetPlatform !== 'INSTAGRAM'", "whatsapp_flow");
             if (lifecycleContext) {
                 await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleStage)({
                     context: lifecycleContext,
@@ -3527,7 +3683,7 @@ const metaOAuthConnect = async (req, res) => {
                 });
             }
             const verifiedPhoneNumbers = availablePhoneNumbers.filter(isWhatsAppPhoneVerified);
-            if (!selectedPhoneNumberId && verifiedPhoneNumbers.length === 1) {
+            if (!selectedPhoneNumberId && verifiedPhoneNumbers.length === 1 && process.env.UX_AUTO_SELECT === "true") {
                 selectedPhoneNumberId = verifiedPhoneNumbers[0].phoneNumberId;
             }
             if (!selectedPhoneNumberId) {
@@ -3558,6 +3714,8 @@ const metaOAuthConnect = async (req, res) => {
                                 code: "PHONE_SELECTION_REQUIRED",
                                 reason: "Select the WhatsApp mobile number you want to connect.",
                             }),
+                            shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                            longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
                         },
                     });
                 }
@@ -3610,6 +3768,8 @@ const metaOAuthConnect = async (req, res) => {
                                 code: "PHONE_SELECTION_REQUIRED",
                                 reason: "Selected WhatsApp number is not available under granted assets.",
                             }),
+                            shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                            longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
                         },
                     });
                 }
@@ -3939,6 +4099,9 @@ const metaOAuthConnect = async (req, res) => {
         });
     }
     catch (error) {
+        if (!webhookAttempted) {
+            logSubscribeSkipped(`Error occurred before webhook subscription: ${error.message}`, "exception_thrown", "catch_block");
+        }
         if (waDiagEnabled) {
             const errorMessage = error instanceof Error ? error.message : String(error || "Unknown error");
             const errorStack = error instanceof Error ? error.stack : undefined;
@@ -3995,6 +4158,8 @@ const metaOAuthConnect = async (req, res) => {
                             code: error.code,
                             validPairs,
                             actionable,
+                            shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                            longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
                         },
                     });
                 }
@@ -4583,7 +4748,8 @@ const refreshWhatsAppOAuthPhoneNumbers = async (req, res) => {
             });
         }
         const selectedPhoneNumberId = requestedPhoneNumberId ||
-            (availablePhoneNumbers.filter(isWhatsAppPhoneVerified).length === 1
+            (availablePhoneNumbers.filter(isWhatsAppPhoneVerified).length === 1 &&
+                process.env.UX_AUTO_SELECT === "true"
                 ? availablePhoneNumbers.filter(isWhatsAppPhoneVerified)[0].phoneNumberId
                 : null);
         if (!selectedPhoneNumberId) {

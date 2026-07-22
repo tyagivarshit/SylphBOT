@@ -557,6 +557,29 @@ function MetaCallbackContent() {
   const [selectedPairKey, setSelectedPairKey] = useState<string>("");
   const [selectedPhoneNumberId, setSelectedPhoneNumberId] = useState<string>("");
 
+  const applyFailure = (nextFailure: FailurePayload) => {
+    setFailure(nextFailure);
+    setSelectedPairKey(
+      nextFailure.validPairs?.length && process.env.NEXT_PUBLIC_UX_AUTO_SELECT === "true"
+        ? `${nextFailure.validPairs[0].facebookPageId}:${nextFailure.validPairs[0].instagramProfessionalAccountId}`
+        : ""
+    );
+    setSelectedPhoneNumberId(
+      nextFailure.availablePhoneNumbers?.length && process.env.NEXT_PUBLIC_UX_AUTO_SELECT === "true"
+        ? nextFailure.availablePhoneNumbers[0].phoneNumberId
+        : ""
+    );
+    setLoading(false);
+  };
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (connectStartedRef.current) {
       return;
@@ -579,20 +602,7 @@ function MetaCallbackContent() {
     const failureStage = readString(searchParams.get("stage") || "IG_CALLBACK_RECEIVED");
     const callbackMode = readString(searchParams.get("mode") || "connect");
 
-    const applyFailure = (nextFailure: FailurePayload) => {
-      setFailure(nextFailure);
-      setSelectedPairKey(
-        nextFailure.validPairs?.length
-          ? `${nextFailure.validPairs[0].facebookPageId}:${nextFailure.validPairs[0].instagramProfessionalAccountId}`
-          : ""
-      );
-      setSelectedPhoneNumberId(
-        nextFailure.availablePhoneNumbers?.length
-          ? nextFailure.availablePhoneNumbers[0].phoneNumberId
-          : ""
-      );
-      setLoading(false);
-    };
+
 
     const pollLifecycle = async (operationId?: string | null) => {
       const maxAttempts = 120;
@@ -971,6 +981,68 @@ function MetaCallbackContent() {
     });
   };
 
+  const pollLifecycleAfterAction = async (
+    platform: "instagram" | "whatsapp",
+    operationId?: string | null
+  ) => {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      if (!mountedRef.current) {
+        return false;
+      }
+
+      const query = new URLSearchParams({
+        platform: platform.toUpperCase(),
+      });
+      if (callbackState) {
+        query.set("state", callbackState);
+      }
+      if (operationId) {
+        query.set("operationId", operationId);
+      }
+
+      const lifecycleResponse = await apiFetch<LifecyclePayload>(
+        `/api/clients/oauth/meta/lifecycle?${query.toString()}`,
+        {
+          method: "GET",
+          timeoutMs: 12000,
+        }
+      );
+      const snapshot = lifecycleResponse.success
+        ? toLifecyclePayload(lifecycleResponse.data)
+        : null;
+
+      if (snapshot && mountedRef.current) {
+        setLifecycle(snapshot);
+        const status = normalizeLifecycleStatus(snapshot.status);
+        if (status === "COMPLETED") {
+          await fetchClientConnectionStatus().catch(() => null);
+          router.replace(
+            buildSettingsRedirect({
+              integration: "success",
+              platform,
+              mode: callbackMode,
+            }) as Route
+          );
+          return true;
+        }
+        if (status === "FAILED" || status === "NEEDS_ACTION") {
+          setFailure(failureFromLifecycle(snapshot, platform));
+          setLoading(false);
+          return true;
+        }
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(5_000, 1_000 + attempt * 250))
+      );
+    }
+
+    if (mountedRef.current) {
+      setLoading(false);
+    }
+    return false;
+  };
+
   const pollLifecycleAfterRefresh = async (operationId?: string | null) => {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const query = new URLSearchParams({
@@ -1120,10 +1192,130 @@ function MetaCallbackContent() {
         if (!pair) {
           throw new Error("Select a Facebook Page and Instagram pair to continue.");
         }
-        await startReconnect({
-          pair,
-          platform: "instagram",
-        });
+
+        setLoading(true);
+        try {
+          const response = await apiClient.request({
+            url: "/api/clients/oauth/meta",
+            method: "POST",
+            data: {
+              state: callbackState,
+              facebookPageId: pair.facebookPageId,
+              instagramProfessionalAccountId: pair.instagramProfessionalAccountId,
+            },
+            timeout: 45000,
+            validateStatus: () => true,
+          });
+
+          const payload = response?.data;
+          const status = Number(response?.status || 500);
+
+          if (status === 408 || status === 504) {
+            if (mountedRef.current) {
+              setLifecycle({
+                status: "PROCESSING",
+                stage: "FINAL_ONBOARDING",
+                statusDetail: "Request timed out. Reconciling lifecycle state...",
+              });
+            }
+            const recovered = await pollLifecycleAfterAction("instagram", null);
+            if (!recovered && mountedRef.current) {
+              applyFailure(
+                buildFallbackFailure(
+                  "Meta connect is still processing. Retry in a moment.",
+                  "FINAL_ONBOARDING",
+                  "ONBOARDING_PROCESSING",
+                  "instagram"
+                )
+              );
+            }
+            return;
+          }
+
+          if (status < 200 || status >= 300 || payload?.success === false) {
+            if (mountedRef.current) {
+              const resolvedFailure = readFailurePayload(payload);
+              applyFailure(resolvedFailure);
+            }
+            return;
+          }
+
+          const payloadLifecycleCandidate =
+            payload && typeof payload === "object"
+              ? (() => {
+                  const root = payload as Record<string, unknown>;
+                  const data =
+                    root.data && typeof root.data === "object"
+                      ? (root.data as Record<string, unknown>)
+                      : null;
+                  return toLifecyclePayload(
+                    root.lifecycle ||
+                      (data && data.lifecycle && typeof data.lifecycle === "object"
+                        ? data.lifecycle
+                        : root.data)
+                  );
+                })()
+              : null;
+          const payloadLifecycle =
+            payloadLifecycleCandidate &&
+            (readString(payloadLifecycleCandidate.status) ||
+              readString(payloadLifecycleCandidate.stage) ||
+              readString(payloadLifecycleCandidate.operationId))
+              ? payloadLifecycleCandidate
+              : null;
+
+          if (payloadLifecycle) {
+            if (mountedRef.current) {
+              setLifecycle(payloadLifecycle);
+            }
+            const lifecycleStatus = normalizeLifecycleStatus(payloadLifecycle.status);
+
+            if (lifecycleStatus === "FAILED" || lifecycleStatus === "NEEDS_ACTION") {
+              if (mountedRef.current) {
+                applyFailure(failureFromLifecycle(payloadLifecycle, "instagram"));
+              }
+              return;
+            }
+
+            if (lifecycleStatus !== "COMPLETED") {
+              const recovered = await pollLifecycleAfterAction("instagram", payloadLifecycle.operationId || null);
+              if (!recovered && mountedRef.current) {
+                applyFailure(
+                  buildFallbackFailure(
+                    "Meta connect is still processing. Retry in a moment.",
+                    readString(payloadLifecycle.stage || "FINAL_ONBOARDING"),
+                    "ONBOARDING_PROCESSING",
+                    "instagram"
+                  )
+                );
+              }
+              return;
+            }
+          }
+
+          await fetchClientConnectionStatus().catch(() => null);
+
+          if (mountedRef.current) {
+            router.replace(
+              buildSettingsRedirect({
+                integration: "success",
+                platform: "instagram",
+                mode: callbackMode,
+              }) as Route
+            );
+          }
+        } catch (e: any) {
+          if (mountedRef.current) {
+            applyFailure(
+              buildFallbackFailure(
+                "Network failure while finalizing Meta connect.",
+                "IG_CONNECT_FAILED",
+                "NETWORK_FAILURE",
+                "instagram"
+              )
+            );
+          }
+        }
         return;
       }
 

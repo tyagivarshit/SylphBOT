@@ -1967,147 +1967,194 @@ const upsertConnectedClient = async ({
   const normalizedPhoneNumberId = normalizeOptionalString(phoneNumberId);
   const normalizedPageId = normalizeOptionalString(pageId);
   const normalizedAccessToken = String(accessToken || "").trim();
-  const sameBusinessClientFilters = [
-    normalizedPageId
-      ? {
-          pageId: normalizedPageId,
-        }
-      : null,
-    normalizedPhoneNumberId
-      ? {
-          phoneNumberId: normalizedPhoneNumberId,
-        }
-      : null,
-  ].filter(Boolean) as Array<
-    | {
-        pageId: string;
-      }
-    | {
-        phoneNumberId: string;
-      }
-  >;
 
-  if (!sameBusinessClientFilters.length) {
-    throw createClientControllerError(
-      "pageId or phoneNumberId is required",
-      "CLIENT_UNIQUE_KEY_REQUIRED"
-    );
-  }
-
-  const existingPlatformClient = await prisma.client.findUnique({
-    where: {
-      businessId_platform: {
-        businessId,
-        platform: normalizedPlatform,
-      },
-    },
-  });
-
-  if (normalizedPageId) {
-    const conflictingPageClient = await prisma.client.findFirst({
-      where: {
-        pageId: normalizedPageId,
-        NOT: {
-          businessId,
-        },
-      },
-      select: {
-        id: true,
-      },
-    });
-
-    if (
-      conflictingPageClient &&
-      conflictingPageClient.id !== existingPlatformClient?.id
-    ) {
-      throw createClientControllerError(
-        "This connected account already exists for another business",
-        "CLIENT_OWNERSHIP_CONFLICT"
-      );
-    }
-  }
-
-  if (normalizedPhoneNumberId) {
-    const conflictingPhoneClient = await prisma.client.findFirst({
-      where: {
-        phoneNumberId: normalizedPhoneNumberId,
-        NOT: {
-          businessId,
-        },
-      },
-      select: {
-        id: true,
-      },
-    });
-
-    if (
-      conflictingPhoneClient &&
-      conflictingPhoneClient.id !== existingPlatformClient?.id
-    ) {
-      throw createClientControllerError(
-        "This connected account already exists for another business",
-        "CLIENT_OWNERSHIP_CONFLICT"
-      );
-    }
-  }
-
-  const updateData = {
+  logger.info({
+    stage: "BEFORE_CLIENT_UPSERT",
     businessId,
     platform: normalizedPlatform,
-    phoneNumberId:
-      normalizedPhoneNumberId || existingPlatformClient?.phoneNumberId || null,
-    pageId: normalizedPageId || existingPlatformClient?.pageId || null,
-    accessToken: normalizedAccessToken,
-    ...(aiTone !== undefined
-      ? { aiTone: normalizeOptionalString(aiTone) }
-      : {}),
-    ...(businessInfo !== undefined
-      ? { businessInfo: normalizeOptionalString(businessInfo) }
-      : {}),
-    ...(pricingInfo !== undefined
-      ? { pricingInfo: normalizeOptionalString(pricingInfo) }
-      : {}),
-    ...(faqKnowledge !== undefined
-      ? { faqKnowledge: normalizeOptionalString(faqKnowledge) }
-      : {}),
-    ...(salesInstructions !== undefined
-      ? { salesInstructions: normalizeOptionalString(salesInstructions) }
-      : {}),
-    isActive: true,
-    deletedAt: null,
-  };
+    pageId: normalizedPageId,
+    phoneNumberId: normalizedPhoneNumberId,
+  });
 
-  const sameBusinessClient = existingPlatformClient
-    ? existingPlatformClient
-    : await prisma.client.findFirst({
-        where: {
+  try {
+    const sameBusinessClientFilters = [
+      normalizedPageId
+        ? {
+            pageId: normalizedPageId,
+          }
+        : null,
+      normalizedPhoneNumberId
+        ? {
+            phoneNumberId: normalizedPhoneNumberId,
+          }
+        : null,
+    ].filter(Boolean) as Array<
+      | {
+          pageId: string;
+        }
+      | {
+          phoneNumberId: string;
+        }
+    >;
+
+    if (!sameBusinessClientFilters.length) {
+      throw createClientControllerError(
+        "pageId or phoneNumberId is required",
+        "CLIENT_UNIQUE_KEY_REQUIRED"
+      );
+    }
+
+    const existingPlatformClient = await prisma.client.findUnique({
+      where: {
+        businessId_platform: {
           businessId,
-          OR: sameBusinessClientFilters,
+          platform: normalizedPlatform,
+        },
+      },
+    });
+
+    if (normalizedPageId) {
+      const conflictingPageClient = await prisma.client.findFirst({
+        where: {
+          pageId: normalizedPageId,
+          NOT: {
+            businessId,
+          },
+        },
+        select: {
+          id: true,
         },
       });
 
-  if (sameBusinessClient) {
-    await prisma.client.updateMany({
-      where: {
-        id: sameBusinessClient.id,
-        businessId,
-      },
+      if (
+        conflictingPageClient &&
+        conflictingPageClient.id !== existingPlatformClient?.id
+      ) {
+        throw createClientControllerError(
+          "This connected account already exists for another business",
+          "CLIENT_OWNERSHIP_CONFLICT"
+        );
+      }
+    }
+
+    if (normalizedPhoneNumberId) {
+      const conflictingPhoneClient = await prisma.client.findFirst({
+        where: {
+          phoneNumberId: normalizedPhoneNumberId,
+          NOT: {
+            businessId,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (
+        conflictingPhoneClient &&
+        conflictingPhoneClient.id !== existingPlatformClient?.id
+      ) {
+        throw createClientControllerError(
+          "This connected account already exists for another business",
+          "CLIENT_OWNERSHIP_CONFLICT"
+        );
+      }
+    }
+
+    const updateData = {
+      businessId,
+      platform: normalizedPlatform,
+      phoneNumberId:
+        normalizedPhoneNumberId || existingPlatformClient?.phoneNumberId || null,
+      pageId: normalizedPageId || existingPlatformClient?.pageId || null,
+      accessToken: normalizedAccessToken,
+      ...(aiTone !== undefined
+        ? { aiTone: normalizeOptionalString(aiTone) }
+        : {}),
+      ...(businessInfo !== undefined
+        ? { businessInfo: normalizeOptionalString(businessInfo) }
+        : {}),
+      ...(pricingInfo !== undefined
+        ? { pricingInfo: normalizeOptionalString(pricingInfo) }
+        : {}),
+      ...(faqKnowledge !== undefined
+        ? { faqKnowledge: normalizeOptionalString(faqKnowledge) }
+        : {}),
+      ...(salesInstructions !== undefined
+        ? { salesInstructions: normalizeOptionalString(salesInstructions) }
+        : {}),
+      isActive: true,
+      deletedAt: null,
+    };
+
+    const sameBusinessClient = existingPlatformClient
+      ? existingPlatformClient
+      : await prisma.client.findFirst({
+          where: {
+            businessId,
+            OR: sameBusinessClientFilters,
+          },
+        });
+
+    if (sameBusinessClient) {
+      await prisma.client.updateMany({
+        where: {
+          id: sameBusinessClient.id,
+          businessId,
+        },
+        data: updateData,
+      });
+
+      const client = await prisma.client.findFirst({
+        where: {
+          id: sameBusinessClient.id,
+          businessId,
+        },
+      });
+
+      if (!client) {
+        throw createClientControllerError(
+          "Client update failed",
+          "CLIENT_UPDATE_FAILED"
+        );
+      }
+
+      logger.info({
+        stage: "CLIENT_UPDATED",
+        clientId: client.id,
+        businessId: client.businessId,
+        platform: client.platform,
+        pageId: client.pageId,
+      });
+
+      console.log("CLIENT UPSERT SUCCESS", {
+        businessId: client.businessId,
+        platform: client.platform,
+        pageId: client.pageId,
+        phoneNumberId: client.phoneNumberId,
+      });
+
+      logger.info({
+        stage: "AFTER_CLIENT_UPSERT",
+        clientId: client.id,
+        businessId: client.businessId,
+        platform: client.platform,
+      });
+
+      return client;
+    }
+
+    const client = await prisma.client.create({
       data: updateData,
     });
 
-    const client = await prisma.client.findFirst({
-      where: {
-        id: sameBusinessClient.id,
-        businessId,
-      },
+    logger.info({
+      stage: "CLIENT_CREATED",
+      clientId: client.id,
+      businessId: client.businessId,
+      platform: client.platform,
+      pageId: client.pageId,
     });
-
-    if (!client) {
-      throw createClientControllerError(
-        "Client update failed",
-        "CLIENT_UPDATE_FAILED"
-      );
-    }
 
     console.log("CLIENT UPSERT SUCCESS", {
       businessId: client.businessId,
@@ -2116,21 +2163,23 @@ const upsertConnectedClient = async ({
       phoneNumberId: client.phoneNumberId,
     });
 
+    logger.info({
+      stage: "AFTER_CLIENT_UPSERT",
+      clientId: client.id,
+      businessId: client.businessId,
+      platform: client.platform,
+    });
+
     return client;
+  } catch (error: any) {
+    logger.error({
+      stage: "CLIENT_UPSERT_FAILED",
+      businessId,
+      platform: normalizedPlatform,
+      message: error.message,
+    });
+    throw error;
   }
-
-  const client = await prisma.client.create({
-    data: updateData,
-  });
-
-  console.log("CLIENT UPSERT SUCCESS", {
-    businessId: client.businessId,
-    platform: client.platform,
-    pageId: client.pageId,
-    phoneNumberId: client.phoneNumberId,
-  });
-
-  return client;
 };
 
 const getSubscription = async (businessId: string) => {
@@ -2932,11 +2981,15 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
           },
         });
         const { type: _type, ...queueInput } = enqueuePayload;
-        await runMetaOAuthContinuationFromQueueJob({
-          ...queueInput,
-          jobId: enqueuePayload.operationId || `fallback-${Date.now()}`,
-          attemptsMade: 0,
-          source: "queue_worker",
+        setImmediate(() => {
+          runMetaOAuthContinuationFromQueueJob({
+            ...queueInput,
+            jobId: enqueuePayload.operationId || `fallback-${Date.now()}`,
+            attemptsMade: 0,
+            source: "queue_worker",
+          }).catch((err) => {
+            console.error("Local async fallback failed:", err);
+          });
         });
       }
 
@@ -5517,12 +5570,24 @@ export const runMetaOAuthContinuationFromQueueJob = async (
       throw new Error(`meta_oauth_continuation_failed:${errorDetail}`);
     }
 
+    logger.info({
+      stage: "BEFORE_META_COMPLETED",
+      jobId,
+      businessId: input.businessId,
+    });
+
     const durationMs = Date.now() - startedAtMs;
     logger.info({
       jobId,
       businessId: input.businessId,
       stage: "META_OAUTH_JOB_COMPLETED",
       durationMs,
+    });
+
+    logger.info({
+      stage: "AFTER_META_COMPLETED",
+      jobId,
+      businessId: input.businessId,
     });
 
     try {

@@ -1447,130 +1447,174 @@ const upsertConnectedClient = async ({ businessId, platform, phoneNumberId, page
     const normalizedPhoneNumberId = normalizeOptionalString(phoneNumberId);
     const normalizedPageId = normalizeOptionalString(pageId);
     const normalizedAccessToken = String(accessToken || "").trim();
-    const sameBusinessClientFilters = [
-        normalizedPageId
-            ? {
-                pageId: normalizedPageId,
-            }
-            : null,
-        normalizedPhoneNumberId
-            ? {
-                phoneNumberId: normalizedPhoneNumberId,
-            }
-            : null,
-    ].filter(Boolean);
-    if (!sameBusinessClientFilters.length) {
-        throw createClientControllerError("pageId or phoneNumberId is required", "CLIENT_UNIQUE_KEY_REQUIRED");
-    }
-    const existingPlatformClient = await prisma_1.default.client.findUnique({
-        where: {
-            businessId_platform: {
-                businessId,
-                platform: normalizedPlatform,
-            },
-        },
-    });
-    if (normalizedPageId) {
-        const conflictingPageClient = await prisma_1.default.client.findFirst({
-            where: {
-                pageId: normalizedPageId,
-                NOT: {
-                    businessId,
-                },
-            },
-            select: {
-                id: true,
-            },
-        });
-        if (conflictingPageClient &&
-            conflictingPageClient.id !== existingPlatformClient?.id) {
-            throw createClientControllerError("This connected account already exists for another business", "CLIENT_OWNERSHIP_CONFLICT");
-        }
-    }
-    if (normalizedPhoneNumberId) {
-        const conflictingPhoneClient = await prisma_1.default.client.findFirst({
-            where: {
-                phoneNumberId: normalizedPhoneNumberId,
-                NOT: {
-                    businessId,
-                },
-            },
-            select: {
-                id: true,
-            },
-        });
-        if (conflictingPhoneClient &&
-            conflictingPhoneClient.id !== existingPlatformClient?.id) {
-            throw createClientControllerError("This connected account already exists for another business", "CLIENT_OWNERSHIP_CONFLICT");
-        }
-    }
-    const updateData = {
+    logger_1.default.info({
+        stage: "BEFORE_CLIENT_UPSERT",
         businessId,
         platform: normalizedPlatform,
-        phoneNumberId: normalizedPhoneNumberId || existingPlatformClient?.phoneNumberId || null,
-        pageId: normalizedPageId || existingPlatformClient?.pageId || null,
-        accessToken: normalizedAccessToken,
-        ...(aiTone !== undefined
-            ? { aiTone: normalizeOptionalString(aiTone) }
-            : {}),
-        ...(businessInfo !== undefined
-            ? { businessInfo: normalizeOptionalString(businessInfo) }
-            : {}),
-        ...(pricingInfo !== undefined
-            ? { pricingInfo: normalizeOptionalString(pricingInfo) }
-            : {}),
-        ...(faqKnowledge !== undefined
-            ? { faqKnowledge: normalizeOptionalString(faqKnowledge) }
-            : {}),
-        ...(salesInstructions !== undefined
-            ? { salesInstructions: normalizeOptionalString(salesInstructions) }
-            : {}),
-        isActive: true,
-        deletedAt: null,
-    };
-    const sameBusinessClient = existingPlatformClient
-        ? existingPlatformClient
-        : await prisma_1.default.client.findFirst({
+        pageId: normalizedPageId,
+        phoneNumberId: normalizedPhoneNumberId,
+    });
+    try {
+        const sameBusinessClientFilters = [
+            normalizedPageId
+                ? {
+                    pageId: normalizedPageId,
+                }
+                : null,
+            normalizedPhoneNumberId
+                ? {
+                    phoneNumberId: normalizedPhoneNumberId,
+                }
+                : null,
+        ].filter(Boolean);
+        if (!sameBusinessClientFilters.length) {
+            throw createClientControllerError("pageId or phoneNumberId is required", "CLIENT_UNIQUE_KEY_REQUIRED");
+        }
+        const existingPlatformClient = await prisma_1.default.client.findUnique({
             where: {
-                businessId,
-                OR: sameBusinessClientFilters,
+                businessId_platform: {
+                    businessId,
+                    platform: normalizedPlatform,
+                },
             },
         });
-    if (sameBusinessClient) {
-        await prisma_1.default.client.updateMany({
-            where: {
-                id: sameBusinessClient.id,
-                businessId,
-            },
+        if (normalizedPageId) {
+            const conflictingPageClient = await prisma_1.default.client.findFirst({
+                where: {
+                    pageId: normalizedPageId,
+                    NOT: {
+                        businessId,
+                    },
+                },
+                select: {
+                    id: true,
+                },
+            });
+            if (conflictingPageClient &&
+                conflictingPageClient.id !== existingPlatformClient?.id) {
+                throw createClientControllerError("This connected account already exists for another business", "CLIENT_OWNERSHIP_CONFLICT");
+            }
+        }
+        if (normalizedPhoneNumberId) {
+            const conflictingPhoneClient = await prisma_1.default.client.findFirst({
+                where: {
+                    phoneNumberId: normalizedPhoneNumberId,
+                    NOT: {
+                        businessId,
+                    },
+                },
+                select: {
+                    id: true,
+                },
+            });
+            if (conflictingPhoneClient &&
+                conflictingPhoneClient.id !== existingPlatformClient?.id) {
+                throw createClientControllerError("This connected account already exists for another business", "CLIENT_OWNERSHIP_CONFLICT");
+            }
+        }
+        const updateData = {
+            businessId,
+            platform: normalizedPlatform,
+            phoneNumberId: normalizedPhoneNumberId || existingPlatformClient?.phoneNumberId || null,
+            pageId: normalizedPageId || existingPlatformClient?.pageId || null,
+            accessToken: normalizedAccessToken,
+            ...(aiTone !== undefined
+                ? { aiTone: normalizeOptionalString(aiTone) }
+                : {}),
+            ...(businessInfo !== undefined
+                ? { businessInfo: normalizeOptionalString(businessInfo) }
+                : {}),
+            ...(pricingInfo !== undefined
+                ? { pricingInfo: normalizeOptionalString(pricingInfo) }
+                : {}),
+            ...(faqKnowledge !== undefined
+                ? { faqKnowledge: normalizeOptionalString(faqKnowledge) }
+                : {}),
+            ...(salesInstructions !== undefined
+                ? { salesInstructions: normalizeOptionalString(salesInstructions) }
+                : {}),
+            isActive: true,
+            deletedAt: null,
+        };
+        const sameBusinessClient = existingPlatformClient
+            ? existingPlatformClient
+            : await prisma_1.default.client.findFirst({
+                where: {
+                    businessId,
+                    OR: sameBusinessClientFilters,
+                },
+            });
+        if (sameBusinessClient) {
+            await prisma_1.default.client.updateMany({
+                where: {
+                    id: sameBusinessClient.id,
+                    businessId,
+                },
+                data: updateData,
+            });
+            const client = await prisma_1.default.client.findFirst({
+                where: {
+                    id: sameBusinessClient.id,
+                    businessId,
+                },
+            });
+            if (!client) {
+                throw createClientControllerError("Client update failed", "CLIENT_UPDATE_FAILED");
+            }
+            logger_1.default.info({
+                stage: "CLIENT_UPDATED",
+                clientId: client.id,
+                businessId: client.businessId,
+                platform: client.platform,
+                pageId: client.pageId,
+            });
+            console.log("CLIENT UPSERT SUCCESS", {
+                businessId: client.businessId,
+                platform: client.platform,
+                pageId: client.pageId,
+                phoneNumberId: client.phoneNumberId,
+            });
+            logger_1.default.info({
+                stage: "AFTER_CLIENT_UPSERT",
+                clientId: client.id,
+                businessId: client.businessId,
+                platform: client.platform,
+            });
+            return client;
+        }
+        const client = await prisma_1.default.client.create({
             data: updateData,
         });
-        const client = await prisma_1.default.client.findFirst({
-            where: {
-                id: sameBusinessClient.id,
-                businessId,
-            },
+        logger_1.default.info({
+            stage: "CLIENT_CREATED",
+            clientId: client.id,
+            businessId: client.businessId,
+            platform: client.platform,
+            pageId: client.pageId,
         });
-        if (!client) {
-            throw createClientControllerError("Client update failed", "CLIENT_UPDATE_FAILED");
-        }
         console.log("CLIENT UPSERT SUCCESS", {
             businessId: client.businessId,
             platform: client.platform,
             pageId: client.pageId,
             phoneNumberId: client.phoneNumberId,
         });
+        logger_1.default.info({
+            stage: "AFTER_CLIENT_UPSERT",
+            clientId: client.id,
+            businessId: client.businessId,
+            platform: client.platform,
+        });
         return client;
     }
-    const client = await prisma_1.default.client.create({
-        data: updateData,
-    });
-    console.log("CLIENT UPSERT SUCCESS", {
-        businessId: client.businessId,
-        platform: client.platform,
-        pageId: client.pageId,
-        phoneNumberId: client.phoneNumberId,
-    });
-    return client;
+    catch (error) {
+        logger_1.default.error({
+            stage: "CLIENT_UPSERT_FAILED",
+            businessId,
+            platform: normalizedPlatform,
+            message: error.message,
+        });
+        throw error;
+    }
 };
 const getSubscription = async (businessId) => {
     const snapshot = await (0, subscriptionAuthority_service_1.getCanonicalSubscriptionSnapshot)(businessId);
@@ -2211,11 +2255,15 @@ const metaOAuthConnect = async (req, res) => {
                     },
                 });
                 const { type: _type, ...queueInput } = enqueuePayload;
-                await (0, exports.runMetaOAuthContinuationFromQueueJob)({
-                    ...queueInput,
-                    jobId: enqueuePayload.operationId || `fallback-${Date.now()}`,
-                    attemptsMade: 0,
-                    source: "queue_worker",
+                setImmediate(() => {
+                    (0, exports.runMetaOAuthContinuationFromQueueJob)({
+                        ...queueInput,
+                        jobId: enqueuePayload.operationId || `fallback-${Date.now()}`,
+                        attemptsMade: 0,
+                        source: "queue_worker",
+                    }).catch((err) => {
+                        console.error("Local async fallback failed:", err);
+                    });
                 });
             }
             logMetaOAuthFastPath("OAUTH_CALLBACK_ASYNC_AUDIT_QUEUED", {
@@ -2237,6 +2285,8 @@ const metaOAuthConnect = async (req, res) => {
                         source,
                         shortTokenExchanged: Boolean(shortToken),
                         longTokenExchanged: Boolean(longToken),
+                        shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                        longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
                     },
                 }),
             }).catch((error) => {
@@ -2290,6 +2340,8 @@ const metaOAuthConnect = async (req, res) => {
                 workspaceId: oauthState.workspaceId,
                 mode: oauthState.mode,
                 trustedContinuation: !internalContinuation,
+                shortTokenEncrypted: shortToken ? (0, encrypt_1.encrypt)(shortToken) : null,
+                longTokenEncrypted: longToken ? (0, encrypt_1.encrypt)(longToken) : null,
             },
         });
         if (internalContinuation) {
@@ -2514,7 +2566,7 @@ const metaOAuthConnect = async (req, res) => {
                     failInstagramConnect({
                         stage: "IG_CODE_EXCHANGED",
                         reason: "Meta authorization failed.",
-                        code: "INSTAGRAM_TOKEN_EXCHANGE_FAILED",
+                        code: "INSTAGRAM_SHORT_TOKEN_EXCHANGE_FAILED",
                         statusCode: Number(error?.response?.status || 400),
                         metadata: {
                             providerError: error?.response?.data || null,
@@ -2576,6 +2628,108 @@ const metaOAuthConnect = async (req, res) => {
             else {
                 void recordCodeExchanged.catch(() => undefined);
             }
+        }
+        if (!longToken) {
+            longToken = providedLongToken || storedLongToken;
+            let longSource = "oauthExchange";
+            if (providedLongToken)
+                longSource = "providedLongToken";
+            else if (storedLongToken)
+                longSource = "storedLongToken";
+            console.info("TOKEN_SOURCE_SELECTED", { tokenType: "longToken", source: longSource });
+        }
+        if (!longToken) {
+            (0, exports.logInstagramOAuthStage)({
+                stage: "INSTAGRAM_LONG_TOKEN_STARTED",
+                status: "IN_PROGRESS",
+            });
+            let longTokenRes;
+            try {
+                const authCodeHash = "absent";
+                const stackLoc = new Error().stack?.split("\n")[2]?.trim() || "unknown";
+                console.info("OAUTH_ACCESS_TOKEN_REQUEST", {
+                    operationId: lifecycleContext?.attemptKey || "unknown",
+                    traceId: instagramTraceId || "unknown",
+                    stateNonce: oauthState?.nonce || "unknown",
+                    authCodeHash,
+                    requestSource: "INSTAGRAM_LONG_TOKEN",
+                    stackLocation: stackLoc,
+                });
+                longTokenRes = await (0, metaRetry_1.axiosWithMetaRetry)({
+                    method: "GET",
+                    url: "https://graph.facebook.com/v19.0/oauth/access_token",
+                    params: {
+                        grant_type: "fb_exchange_token",
+                        client_id: metaRuntime.appId,
+                        client_secret: metaRuntime.appSecret,
+                        fb_exchange_token: shortToken,
+                    },
+                    timeout: META_GRAPH_TIMEOUT_MS,
+                }, "INSTAGRAM_LONG_TOKEN");
+                if (targetPlatform === "INSTAGRAM") {
+                    console.info("META_LONG_TOKEN_EXCHANGED", {
+                        success: true,
+                        expiresIn: longTokenRes.data?.expires_in || null,
+                        tokenLength: longTokenRes.data?.access_token ? String(longTokenRes.data.access_token).length : 0,
+                    });
+                }
+                (0, exports.logInstagramOAuthStage)({
+                    stage: "INSTAGRAM_LONG_TOKEN_SUCCESS",
+                    status: "COMPLETED",
+                });
+            }
+            catch (error) {
+                if (targetPlatform === "INSTAGRAM") {
+                    console.info("META_LONG_TOKEN_EXCHANGED", {
+                        success: false,
+                        expiresIn: null,
+                        tokenLength: 0,
+                    });
+                }
+                if (!internalContinuation &&
+                    lifecycleContext &&
+                    isMetaProviderTransientError(error)) {
+                    return await triggerBullMQFallback("long_token_exchange_transient", getAxiosErrorMessage(error));
+                }
+                if (targetPlatform === "INSTAGRAM") {
+                    failInstagramConnect({
+                        stage: "IG_LONG_TOKEN_EXCHANGED",
+                        reason: "Meta authorization failed.",
+                        code: "INSTAGRAM_LONG_TOKEN_EXCHANGE_FAILED",
+                        statusCode: Number(error?.response?.status || 400),
+                        metadata: {
+                            providerError: error?.response?.data || null,
+                        },
+                    });
+                }
+                throw error;
+            }
+            longToken = normalizeOptionalString(longTokenRes.data?.access_token);
+        }
+        if (!longToken) {
+            logSubscribeSkipped("Unable to resolve long lived token", "!longToken", "long_token_missing");
+            if (lifecycleContext) {
+                await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
+                    context: lifecycleContext,
+                    stage: "FAILED",
+                    code: "META_LONG_TOKEN_MISSING",
+                    reason: "Unable to resolve long lived token",
+                    resolutionHint: "RETRY",
+                });
+            }
+            if (targetPlatform === "INSTAGRAM") {
+                failInstagramConnect({
+                    stage: "IG_LONG_TOKEN_EXCHANGED",
+                    reason: "Unable to resolve long lived token",
+                    code: "IG_LONG_TOKEN_MISSING",
+                    statusCode: 400,
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                data: null,
+                message: "Unable to resolve long lived token",
+            });
         }
         if (!internalContinuation) {
             logSubscribeSkipped("Fast-path fallback triggered", "!internalContinuation", "fast_path");
@@ -2876,108 +3030,7 @@ const metaOAuthConnect = async (req, res) => {
                 code: "PAIR_SELECTION_REQUIRED",
             });
         }
-        if (!longToken) {
-            longToken = providedLongToken || storedLongToken;
-            let longSource = "oauthExchange";
-            if (providedLongToken)
-                longSource = "providedLongToken";
-            else if (storedLongToken)
-                longSource = "storedLongToken";
-            console.info("TOKEN_SOURCE_SELECTED", { tokenType: "longToken", source: longSource });
-        }
-        if (!longToken) {
-            (0, exports.logInstagramOAuthStage)({
-                stage: "INSTAGRAM_LONG_TOKEN_STARTED",
-                status: "IN_PROGRESS",
-            });
-            let longTokenRes;
-            try {
-                const authCodeHash = "absent";
-                const stackLoc = new Error().stack?.split("\n")[2]?.trim() || "unknown";
-                console.info("OAUTH_ACCESS_TOKEN_REQUEST", {
-                    operationId: lifecycleContext?.attemptKey || "unknown",
-                    traceId: instagramTraceId || "unknown",
-                    stateNonce: oauthState?.nonce || "unknown",
-                    authCodeHash,
-                    requestSource: "INSTAGRAM_LONG_TOKEN",
-                    stackLocation: stackLoc,
-                });
-                longTokenRes = await (0, metaRetry_1.axiosWithMetaRetry)({
-                    method: "GET",
-                    url: "https://graph.facebook.com/v19.0/oauth/access_token",
-                    params: {
-                        grant_type: "fb_exchange_token",
-                        client_id: metaRuntime.appId,
-                        client_secret: metaRuntime.appSecret,
-                        fb_exchange_token: shortToken,
-                    },
-                    timeout: META_GRAPH_TIMEOUT_MS,
-                }, "INSTAGRAM_LONG_TOKEN");
-                if (targetPlatform === "INSTAGRAM") {
-                    console.info("META_LONG_TOKEN_EXCHANGED", {
-                        success: true,
-                        expiresIn: longTokenRes.data?.expires_in || null,
-                        tokenLength: longTokenRes.data?.access_token ? String(longTokenRes.data.access_token).length : 0,
-                    });
-                }
-                (0, exports.logInstagramOAuthStage)({
-                    stage: "INSTAGRAM_LONG_TOKEN_SUCCESS",
-                    status: "COMPLETED",
-                });
-            }
-            catch (error) {
-                if (targetPlatform === "INSTAGRAM") {
-                    console.info("META_LONG_TOKEN_EXCHANGED", {
-                        success: false,
-                        expiresIn: null,
-                        tokenLength: 0,
-                    });
-                }
-                if (!internalContinuation &&
-                    lifecycleContext &&
-                    isMetaProviderTransientError(error)) {
-                    return await triggerBullMQFallback("long_token_exchange_transient", getAxiosErrorMessage(error));
-                }
-                if (targetPlatform === "INSTAGRAM") {
-                    failInstagramConnect({
-                        stage: "IG_LONG_TOKEN_EXCHANGED",
-                        reason: "Meta authorization failed.",
-                        code: "INSTAGRAM_TOKEN_EXCHANGE_FAILED",
-                        statusCode: Number(error?.response?.status || 400),
-                        metadata: {
-                            providerError: error?.response?.data || null,
-                        },
-                    });
-                }
-                throw error;
-            }
-            longToken = normalizeOptionalString(longTokenRes.data?.access_token);
-        }
-        if (!longToken) {
-            logSubscribeSkipped("Unable to resolve long lived token", "!longToken", "long_token_missing");
-            if (lifecycleContext) {
-                await (0, metaOAuthLifecycle_service_1.markMetaOAuthLifecycleFailure)({
-                    context: lifecycleContext,
-                    stage: "FAILED",
-                    code: "META_LONG_TOKEN_MISSING",
-                    reason: "Unable to resolve long lived token",
-                    resolutionHint: "RETRY",
-                });
-            }
-            if (targetPlatform === "INSTAGRAM") {
-                failInstagramConnect({
-                    stage: "IG_LONG_TOKEN_EXCHANGED",
-                    reason: "Unable to resolve long lived token",
-                    code: "IG_LONG_TOKEN_MISSING",
-                    statusCode: 400,
-                });
-            }
-            return res.status(400).json({
-                success: false,
-                data: null,
-                message: "Unable to resolve long lived token",
-            });
-        }
+        // Long token already resolved earlier
         if (targetPlatform === "WHATSAPP") {
             logWaCheckpoint("[WA STEP 4] long token exchanged");
             console.info("WA_OAUTH_TOKEN_EXCHANGED", {
@@ -4223,7 +4276,9 @@ const metaOAuthConnect = async (req, res) => {
                     else if (errorCode === "GRAPH_LOOKUP_FAILED") {
                         rejectedReason = "GRAPH_LOOKUP_FAILED";
                     }
-                    else if (errorCode === "INSTAGRAM_TOKEN_EXCHANGE_FAILED") {
+                    else if (errorCode === "INSTAGRAM_SHORT_TOKEN_EXCHANGE_FAILED" ||
+                        errorCode === "INSTAGRAM_LONG_TOKEN_EXCHANGE_FAILED" ||
+                        errorCode === "INSTAGRAM_TOKEN_EXCHANGE_FAILED") {
                         rejectedReason = "UNKNOWN";
                     }
                     steps.push(`Professional Accounts = 0\n↓\nRejected Because:\n${rejectedReason}`);
@@ -4513,6 +4568,11 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
             const errorDetail = res.body?.message || res.body?.reason || `Continuation failed with status code ${res.statusCode}`;
             throw new Error(`meta_oauth_continuation_failed:${errorDetail}`);
         }
+        logger_1.default.info({
+            stage: "BEFORE_META_COMPLETED",
+            jobId,
+            businessId: input.businessId,
+        });
         const durationMs = Date.now() - startedAtMs;
         logger_1.default.info({
             jobId,
@@ -4520,6 +4580,33 @@ const runMetaOAuthContinuationFromQueueJob = async (input) => {
             stage: "META_OAUTH_JOB_COMPLETED",
             durationMs,
         });
+        logger_1.default.info({
+            stage: "AFTER_META_COMPLETED",
+            jobId,
+            businessId: input.businessId,
+        });
+        try {
+            const existingAttempt = await prisma_1.default.connectionAttemptLedger.findUnique({
+                where: { attemptKey: operationId },
+                select: { metadata: true }
+            });
+            if (existingAttempt?.metadata && typeof existingAttempt.metadata === "object") {
+                const updatedMetadata = { ...existingAttempt.metadata };
+                delete updatedMetadata.shortTokenEncrypted;
+                delete updatedMetadata.longTokenEncrypted;
+                await prisma_1.default.connectionAttemptLedger.update({
+                    where: { attemptKey: operationId },
+                    data: { metadata: updatedMetadata }
+                });
+            }
+        }
+        catch (cleanupError) {
+            logger_1.default.error({
+                message: "Failed to remove temporary credentials from connectionAttemptLedger",
+                error: cleanupError,
+                operationId,
+            });
+        }
     }
     catch (error) {
         const durationMs = Date.now() - startedAtMs;

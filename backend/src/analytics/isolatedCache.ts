@@ -43,10 +43,7 @@ const logProjectionTiming = (
   event: string,
   fields: Record<string, unknown>
 ) => {
-  console.info(`[ISOLATED_CACHE_TIMING] ${label}`, {
-    event,
-    ...fields,
-  });
+  // console.info disabled to prevent timing log spam
 };
 
 export const getIsolatedProjectionSnapshot = async <T>(input: {

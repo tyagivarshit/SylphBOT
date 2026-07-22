@@ -1258,11 +1258,29 @@ const subscribeInstagramPageWebhook = async (facebookPageId, pageAccessToken) =>
             timeout: META_GRAPH_TIMEOUT_MS,
         }, "INSTAGRAM_WEBHOOK_SUBSCRIBE");
         logger_1.default.info({
+            stage: "META_SUBSCRIBE_RESPONSE",
+            facebookPageId,
+            status: response.status,
+            headers: response.headers,
+            data: response.data,
+            timestamp: new Date().toISOString(),
+        }, "Instagram subscribed_apps response received");
+        logger_1.default.info({
             stage: "META_SUBSCRIBE_SUCCESS",
             facebookPageId,
             status: response.status,
             data: response.data,
         }, "Instagram subscribed_apps success");
+        const isActive = response.status === 200 && response.data?.success === true;
+        if (!isActive) {
+            logger_1.default.error({
+                stage: "META_SUBSCRIBE_FAILED_VALIDATION",
+                facebookPageId,
+                status: response.status,
+                data: response.data,
+            }, "Instagram subscribed_apps response failed validation");
+            return false;
+        }
         (0, exports.logInstagramOAuthStage)({
             stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_SUCCESS",
             status: "COMPLETED",
@@ -1271,17 +1289,19 @@ const subscribeInstagramPageWebhook = async (facebookPageId, pageAccessToken) =>
         return true;
     }
     catch (error) {
+        const errorData = error.response?.data;
         logger_1.default.error({
             stage: "META_SUBSCRIBE_FAILED",
             facebookPageId,
             status: error.response?.status,
-            data: error.response?.data,
+            data: errorData,
             message: error.message,
         }, "Instagram subscribed_apps failed");
         logger_1.default.error({
             stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_FAILED",
             provider: "META_GRAPH_API",
             status: error.response?.status,
+            data: errorData,
             message: error.message,
         });
         return false;
@@ -3099,7 +3119,7 @@ const metaOAuthConnect = async (req, res) => {
             let selectedPair = null;
             if (requestedFacebookPageId || requestedInstagramProfessionalAccountId) {
                 selectedPair =
-                    validPairs.find((pair) => (!requestedFacebookPageId ||
+                    allPairs.find((pair) => (!requestedFacebookPageId ||
                         pair.facebookPageId === requestedFacebookPageId) &&
                         (!requestedInstagramProfessionalAccountId ||
                             pair.instagramProfessionalAccountId ===

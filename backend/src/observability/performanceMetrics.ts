@@ -173,6 +173,8 @@ export const emitPerformanceMetric = (input: EmitPerformanceMetricInput) => {
     recordedAt: new Date().toISOString(),
   };
 
+  // Console output disabled to prevent log spam; telemetry is recorded below
+  /*
   if (input.value !== undefined) {
     console.info(input.name, payload);
   } else {
@@ -181,6 +183,7 @@ export const emitPerformanceMetric = (input: EmitPerformanceMetricInput) => {
       value: null,
     });
   }
+  */
 
   void recordObservabilityEvent({
     businessId: input.businessId || null,

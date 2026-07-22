@@ -722,3 +722,20 @@ export const getRedisReconnectSnapshot = () => {
 };
 
 export default redis;
+
+import { RedisConnection } from "bullmq";
+
+// Safely suppress unhandled RedisConnection error events during shutdown/initializing race conditions to prevent crashes.
+const originalEmit = RedisConnection.prototype.emit;
+RedisConnection.prototype.emit = function (event: string | symbol, ...args: any[]) {
+  if (event === "error") {
+    if (this.listenerCount("error") === 0) {
+      logger.warn(
+        { err: args[0] },
+        "Suppressing unhandled RedisConnection error event to prevent crash"
+      );
+      return false;
+    }
+  }
+  return originalEmit.apply(this, [event, ...args]);
+};

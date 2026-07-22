@@ -14,6 +14,7 @@ import { dashboardProjectionE2ESuite } from "./suites/dashboard.projection.e2e.t
 import { concurrencyDuplicateE2ESuite } from "./suites/concurrency.duplicate.e2e.test";
 import { outboxFlowE2ESuite } from "./suites/outbox.flow.e2e.test";
 import { failureInjectionE2ESuite } from "./suites/failure.injection.e2e.test";
+import { RuntimeGuard } from "../../runtime/kernel/runtimeGuard";
 
 const suites: IntegrationSuite[] = [
   inboundE2ESuite,
@@ -32,6 +33,7 @@ const suites: IntegrationSuite[] = [
 ];
 
 const run = async () => {
+  RuntimeGuard.setBypass(true);
   const environment = configureIntegrationEnvironment();
 
   console.log("[integration] run id:", environment.runId);

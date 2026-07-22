@@ -82,8 +82,20 @@ const rejectQueueWriteUnavailable = (queueName: string, methodName: string) => {
 export const createResilientQueue = <T extends Queue<any>>(
   queue: T,
   queueName: string
-) =>
-  new Proxy(queue, {
+) => {
+  if (typeof queue.on === "function") {
+    queue.on("error", (error) => {
+      logger.error(
+        {
+          queueName,
+          error,
+        },
+        "Resilient queue connection error"
+      );
+    });
+  }
+
+  return new Proxy(queue, {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver);
 
@@ -153,6 +165,7 @@ export const createResilientQueue = <T extends Queue<any>>(
         (value as (...methodArgs: unknown[]) => unknown).apply(target, args);
     },
   }) as T;
+};
 
 export const withRedisWorkerFailSafe = <
   TJob extends {

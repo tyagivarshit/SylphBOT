@@ -151,6 +151,7 @@ export const resolveReceptionControlGate = ({
   receptionMemory?: ReceptionMemoryAuthorityRecord | null;
   now?: Date;
 }): ReceptionControlGateDecision => {
+  console.log("[DIAGNOSTIC_TRACE] resolveReceptionControlGate() called. Consent status:", references.consent?.status);
   const reasons: string[] = [];
 
   if (!references.consent || references.consent.status === "UNKNOWN") {

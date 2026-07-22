@@ -252,20 +252,7 @@ const logDbTiming = (
   timing: ReturnType<typeof getTimingBreakdown>,
   extra: Record<string, unknown> = {}
 ) => {
-  console.info("DB_TIMING", {
-    operation,
-    ...timing,
-    activeConnections,
-    idleConnections: Math.max(0, MAX_POOL_SIZE - activeConnections),
-    waitingRequests,
-    maxPoolSize: MAX_POOL_SIZE,
-    minPoolSize: MIN_POOL_SIZE,
-    timestamp: new Date().toISOString(),
-    instanceId: prismaInstanceId,
-    processId: process.pid,
-    workerId: getWorkerId(),
-    ...extra,
-  });
+  // DB_TIMING console logging disabled to eliminate log spam
 };
 
 const hasBlockedAuthUserCacheField = (select: Record<string, unknown>): boolean =>
@@ -357,22 +344,11 @@ const prisma = basePrisma.$extends({
           try {
             const result = await query(args);
             const durationMs = Date.now() - startTime;
-            console.info("FORENSIC_PRISMA_QUERY", {
-              ...summary,
-              durationMs,
-              traceId,
-              success: true,
-            });
+            // FORENSIC_PRISMA_QUERY log disabled to prevent log spam
             return result;
           } catch (error: any) {
             const durationMs = Date.now() - startTime;
-            console.info("FORENSIC_PRISMA_QUERY", {
-              ...summary,
-              durationMs,
-              traceId,
-              success: false,
-              error: error?.message || String(error),
-            });
+            // FORENSIC_PRISMA_QUERY log disabled to prevent log spam
             throw error;
           }
         }

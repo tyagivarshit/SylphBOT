@@ -290,11 +290,7 @@ app.options(/.*/, (0, cors_1.default)(corsOptions));
 app.use(rateLimit_middleware_1.globalLimiter);
 app.use((0, cookie_parser_1.default)());
 app.use((req, res, next) => {
-    console.info("GLOBAL_MIDDLEWARE", {
-        method: req.method,
-        url: req.originalUrl,
-        requestId: req.requestId,
-    });
+    // GLOBAL_MIDDLEWARE console log disabled
     next();
 });
 app.use(passport_1.default.initialize());
@@ -480,12 +476,7 @@ app.use((req, res, next) => {
             elapsedMs: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardLifecycleElapsedMs)({ res }),
         });
     }
-    console.info("REQUEST_START", {
-        requestId: req.requestId || null,
-        route,
-        method: req.method,
-        timeoutMs,
-    });
+    // REQUEST_START console log disabled
     let completionLogged = false;
     const logRequestComplete = () => {
         if (completionLogged) {
@@ -496,15 +487,7 @@ app.use((req, res, next) => {
             req,
             res,
         });
-        console.info("REQUEST_COMPLETE", {
-            requestId: req.requestId || null,
-            route,
-            method: req.method,
-            statusCode: res.statusCode,
-            durationMs: Date.now() - startedAt,
-            aborted: Boolean(lifecycle?.aborted),
-            abortReason: lifecycle?.abortReason || null,
-        });
+        // REQUEST_COMPLETE console log disabled
         if (isAnalyticsDashboard) {
             (0, analyticsDashboardLifecycleTrace_1.logAnalyticsDashboardLifecycle)("REQUEST_COMPLETE", {
                 correlationId: (0, analyticsDashboardLifecycleTrace_1.getAnalyticsDashboardCorrelationId)({ req, res }),

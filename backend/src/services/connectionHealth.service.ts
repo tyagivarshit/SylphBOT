@@ -239,7 +239,7 @@ export const subscribeInstagramPageWebhook = async (
     return false;
   }
   try {
-    await axiosWithMetaRetry({
+    const response = await axiosWithMetaRetry({
       method: "POST",
       url: `https://graph.facebook.com/v19.0/${facebookPageId}/subscribed_apps`,
       data: null,
@@ -249,13 +249,44 @@ export const subscribeInstagramPageWebhook = async (
       },
       timeout: 12000,
     }, "HEALTH_WEBHOOK_SUBSCRIBE");
+
+    logger.info({
+      stage: "META_SUBSCRIBE_RESPONSE",
+      facebookPageId,
+      status: response.status,
+      headers: response.headers,
+      data: response.data,
+      timestamp: new Date().toISOString(),
+    }, "Instagram subscribed_apps response received in self recovery");
+
+    logger.info({
+      stage: "HEALTH_WEBHOOK_SUBSCRIBE_SUCCESS",
+      facebookPageId,
+      status: response.status,
+      data: response.data,
+    }, "Instagram subscribed_apps success in self recovery");
+
+    const isActive = response.status === 200 && response.data?.success === true;
+    if (!isActive) {
+      logger.error({
+        stage: "HEALTH_WEBHOOK_SUBSCRIBE_FAILED_VALIDATION",
+        facebookPageId,
+        status: response.status,
+        data: response.data,
+      }, "Instagram subscribed_apps response failed validation in self recovery");
+      return false;
+    }
+
     return true;
   } catch (error: any) {
+    const errorData = error.response?.data;
     logger.error({
       message: "Webhook subscription failed during self recovery",
       facebookPageId,
+      status: error.response?.status,
+      data: errorData,
       error: error.message,
-    });
+    }, "Instagram subscribed_apps failed in self recovery");
     return false;
   }
 };

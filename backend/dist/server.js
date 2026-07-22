@@ -377,6 +377,7 @@ const startPostListenBootstrap = () => {
     scheduleDeferredEmbeddingWarmup();
 };
 const startServer = async () => {
+    logger_1.default.info("STARTUP_TRACE :: STEP 1 :: startServer entered");
     (0, sentry_1.initializeSentry)();
     (0, passport_1.configurePassport)();
     const isIsolationEnabled = process.env.STARTUP_ISOLATION_ENABLED !== "false";
@@ -389,10 +390,14 @@ const startServer = async () => {
     logger_1.default.info("Initializing database connection pool...");
     const startWarmup = Date.now();
     try {
+        logger_1.default.info("TRACE DB 1 :: Before prisma.$connect");
         await prisma_1.default.$connect();
+        logger_1.default.info("TRACE DB 2 :: prisma.$connect completed");
         // Warm up the pool and run a lightweight validation query
-        await prisma_1.default.user.findFirst({ select: { id: true } });
+        //await prisma.user.findFirst({ select: { id: true } });
+        logger_1.default.info("TRACE DB 3 :: prisma.user.findFirst completed");
         (0, startupIsolation_service_1.markDbReady)(true);
+        logger_1.default.info("STARTUP_TRACE :: STEP 2 :: Database connected");
         const warmupMs = Date.now() - startWarmup;
         (0, performanceMetrics_1.emitPerformanceMetric)({
             name: "startup_pool_warmup_ms",
@@ -419,6 +424,7 @@ const startServer = async () => {
             await (0, lifecycle_1.initQueues)();
             readyWithinBudget = true;
             (0, startupIsolation_service_1.markRedisReady)(true);
+            logger_1.default.info("STARTUP_TRACE :: STEP 3 :: Redis & Queues initialized");
             logger_1.default.info(`Runtime queues initialized in ${Date.now() - queueStart}ms`);
         }
         catch (error) {
@@ -459,12 +465,16 @@ const startServer = async () => {
         plugin_1.executiveStartupMetrics.pluginRegisterStartTime = Date.now();
         const memStart = process.memoryUsage().heapUsed;
         logger_1.default.info({ event: "Executive Plugin Registration" }, "Mounting Executive Plugin...");
+        logger_1.default.info("PLUGIN 1");
         const pluginRegistry = diContainer_1.container.resolve("IPluginRegistry");
+        logger_1.default.info("PLUGIN 2");
         if (!pluginRegistry.getPlugin("plugin.executive.identity")) {
             await pluginRegistry.registerPlugin(new plugin_1.ExecutiveIdentityPlugin());
+            logger_1.default.info("PLUGIN 3");
         }
         const memEnd = process.memoryUsage().heapUsed;
         plugin_1.executiveStartupMetrics.pluginRegisterEndTime = Date.now();
+        logger_1.default.info("PLUGIN 4");
         plugin_1.executiveStartupMetrics.startupTime = plugin_1.executiveStartupMetrics.bootstrapEndTime - plugin_1.executiveStartupMetrics.bootstrapStartTime;
         plugin_1.executiveStartupMetrics.initializationTime = plugin_1.executiveStartupMetrics.pluginRegisterEndTime - plugin_1.executiveStartupMetrics.pluginRegisterStartTime;
         plugin_1.executiveStartupMetrics.memoryOverheadBytes = Math.max(0, memEnd - memStart);
@@ -475,6 +485,7 @@ const startServer = async () => {
             initializationTimeMs: plugin_1.executiveStartupMetrics.initializationTime,
             memoryOverheadBytes: plugin_1.executiveStartupMetrics.memoryOverheadBytes
         }, "Universal Core Runtime bootstrapped and Executive Plugin registered successfully.");
+        logger_1.default.info("STARTUP_TRACE :: STEP 4 :: Executive bootstrap completed");
     }
     catch (err) {
         plugin_1.executiveStartupMetrics.isHealthy = false;
@@ -484,7 +495,9 @@ const startServer = async () => {
         process.exit(1);
     }
     const { default: app } = await Promise.resolve().then(() => __importStar(require("./app")));
+    logger_1.default.info("STARTUP_TRACE :: STEP 5 :: app.ts imported");
     const server = http_1.default.createServer(app);
+    logger_1.default.info("STARTUP_TRACE :: STEP 6 :: HTTP server created");
     (0, socket_server_1.initSocket)(server);
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
@@ -546,6 +559,7 @@ const startServer = async () => {
     });
     return await new Promise((resolve) => {
         server.listen(env_1.env.PORT, () => {
+            logger_1.default.info(`STARTUP_TRACE :: STEP 7 :: Listening on ${env_1.env.PORT}`);
             logger_1.default.info({ port: env_1.env.PORT }, "Server listening");
             logger_1.default.info({
                 event: "internal_health_startup_diagnostics",

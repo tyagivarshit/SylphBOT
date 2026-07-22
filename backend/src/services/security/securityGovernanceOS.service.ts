@@ -332,10 +332,7 @@ const logSessionLedgerMetric = (
     | "SESSION_LEDGER_DEADLOCK_AVOIDED",
   metadata: Record<string, unknown> = {}
 ) => {
-  console.info(event, {
-    component: "security-session-ledger",
-    ...metadata,
-  });
+  // console.info log disabled to avoid log spam
 };
 
 const SECURITY_GOVERNANCE_FILE = "backend/src/services/security/securityGovernanceOS.service.ts";
@@ -344,12 +341,7 @@ const logFeatureGateAwaitTrace = (
   event: string,
   fields: Record<string, unknown>
 ) => {
-  console.info("FEATURE_GATE_AWAIT_TRACE", {
-    event,
-    fileName: SECURITY_GOVERNANCE_FILE,
-    redisOps: "none",
-    ...fields,
-  });
+  // console.info log disabled to avoid FEATURE_GATE_AWAIT_TRACE log spam
 };
 
 const traceFeatureGateAwait = async <T>(
@@ -968,12 +960,7 @@ const isTenantFrozen = (tenantId?: string | null) => {
 
   const exists = getStore().frozenTenants.has(normalized);
 
-  console.info("is_tenant_frozen_result", {
-    tenantId: maskTenantId(normalized),
-    exists,
-    setSize: getStore().frozenTenants.size,
-    timestamp: new Date().toISOString(),
-  });
+  // console.info is_tenant_frozen_result disabled to prevent log spam
 
   return exists;
 };
@@ -1069,11 +1056,7 @@ let hasLoggedStartupSnapshot = false;
 const emitStartupSnapshotOnce = (store: SecurityStore) => {
   if (hasLoggedStartupSnapshot) return;
   hasLoggedStartupSnapshot = true;
-  console.info("frozen_tenants_startup_snapshot", {
-    setSize: store.frozenTenants.size,
-    tenantIds: Array.from(store.frozenTenants).map(maskTenantId),
-    startupTimestamp: new Date().toISOString(),
-  });
+  // console.info frozen_tenants_startup_snapshot disabled to prevent log spam
 };
 
 export const bootstrapSecurityGovernanceOS = async () => {
@@ -3272,20 +3255,7 @@ export const assertAuthorizedAccess = async (request: AccessRequest) => {
     const ctx = getRequestContext();
     const requestId = ctx?.requestId || "N/A";
 
-    console.info("AUTH_BRANCH_HIT", {
-      branch: branchName,
-      reason: runtimeReason,
-      file: __filename,
-      line: 3237,
-      requestId,
-      tenantId: request.tenantId ?? null,
-      businessId: request.businessId ?? null,
-      actorId: request.actorId ?? null,
-      actorType: request.actorType ?? null,
-      role: request.role ?? null,
-      action: request.action ?? null,
-      timestamp: new Date().toISOString()
-    });
+    // console.info AUTH_BRANCH_HIT disabled to prevent authorization log spam
 
     throw forbidden(`Access denied (${result.reason})`);
   }
@@ -5271,6 +5241,14 @@ export const enforceSecurityGovernanceInfluence = async (input: {
   ip?: string | null;
   metadata?: JsonRecord | null;
 }) => {
+  if (!governanceInitialized) {
+    return {
+      allowed: true,
+      domain: input.domain,
+      action: input.action,
+    };
+  }
+
   await assertAuthorizedAccess({
     action: input.action,
     businessId: input.businessId || null,

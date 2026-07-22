@@ -637,6 +637,7 @@ const markFailClosedInteraction = async ({
 const processInboundNormalization = async (
   job: Job<InboundNormalizationJobPayload>
 ) => {
+  console.log("[DIAGNOSTIC_TRACE] processInboundNormalization() called for interaction:", job.data.interactionId);
   const interaction = await loadInteractionOrThrow(job.data.interactionId);
 
   if (interaction.lifecycleState === "ROUTED") {
@@ -774,6 +775,7 @@ const processInboundNormalization = async (
 const processInboundClassification = async (
   job: Job<InboundClassificationJobPayload>
 ) => {
+  console.log("[DIAGNOSTIC_TRACE] processInboundClassification() called for interaction:", job.data.interactionId);
   const interaction = await loadInteractionOrThrow(job.data.interactionId);
 
   if (
@@ -848,6 +850,7 @@ const processInboundClassification = async (
 };
 
 const processInboundRouting = async (job: Job<InboundRoutingJobPayload>) => {
+  console.log("[DIAGNOSTIC_TRACE] processInboundRouting() called for interaction:", job.data.interactionId);
   const interaction = await loadInteractionOrThrow(job.data.interactionId);
 
   if (

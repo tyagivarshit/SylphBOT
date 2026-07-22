@@ -467,6 +467,7 @@ const startPostListenBootstrap = () => {
 };
 
 export const startServer = async () => {
+  logger.info("STARTUP_TRACE :: STEP 1 :: startServer entered");
   initializeSentry();
   configurePassport();
 
@@ -482,10 +483,14 @@ export const startServer = async () => {
   logger.info("Initializing database connection pool...");
   const startWarmup = Date.now();
   try {
+    logger.info("TRACE DB 1 :: Before prisma.$connect");
     await prisma.$connect();
+    logger.info("TRACE DB 2 :: prisma.$connect completed");
     // Warm up the pool and run a lightweight validation query
-    await prisma.user.findFirst({ select: { id: true } });
+    //await prisma.user.findFirst({ select: { id: true } });
+    logger.info("TRACE DB 3 :: prisma.user.findFirst completed");
     markDbReady(true);
+    logger.info("STARTUP_TRACE :: STEP 2 :: Database connected");
     const warmupMs = Date.now() - startWarmup;
     emitPerformanceMetric({
       name: "startup_pool_warmup_ms",
@@ -512,6 +517,7 @@ export const startServer = async () => {
       await initQueues();
       readyWithinBudget = true;
       markRedisReady(true);
+      logger.info("STARTUP_TRACE :: STEP 3 :: Redis & Queues initialized");
       logger.info(`Runtime queues initialized in ${Date.now() - queueStart}ms`);
     } catch (error) {
       logger.error({ err: error }, "Critical: Queue/Redis initialization failed during startup. Exiting.");
@@ -555,12 +561,16 @@ export const startServer = async () => {
     executiveStartupMetrics.pluginRegisterStartTime = Date.now();
     const memStart = process.memoryUsage().heapUsed;
     logger.info({ event: "Executive Plugin Registration" }, "Mounting Executive Plugin...");
+    logger.info("PLUGIN 1");
     const pluginRegistry = container.resolve<any>("IPluginRegistry");
+    logger.info("PLUGIN 2");
     if (!pluginRegistry.getPlugin("plugin.executive.identity")) {
       await pluginRegistry.registerPlugin(new ExecutiveIdentityPlugin());
+      logger.info("PLUGIN 3");
     }
     const memEnd = process.memoryUsage().heapUsed;
     executiveStartupMetrics.pluginRegisterEndTime = Date.now();
+    logger.info("PLUGIN 4");
 
     executiveStartupMetrics.startupTime = executiveStartupMetrics.bootstrapEndTime - executiveStartupMetrics.bootstrapStartTime;
     executiveStartupMetrics.initializationTime = executiveStartupMetrics.pluginRegisterEndTime - executiveStartupMetrics.pluginRegisterStartTime;
@@ -573,6 +583,7 @@ export const startServer = async () => {
       initializationTimeMs: executiveStartupMetrics.initializationTime,
       memoryOverheadBytes: executiveStartupMetrics.memoryOverheadBytes
     }, "Universal Core Runtime bootstrapped and Executive Plugin registered successfully.");
+    logger.info("STARTUP_TRACE :: STEP 4 :: Executive bootstrap completed");
   } catch (err: any) {
     executiveStartupMetrics.isHealthy = false;
     executiveStartupMetrics.error = err.message || String(err);
@@ -582,7 +593,9 @@ export const startServer = async () => {
   }
 
   const { default: app } = await import("./app");
+  logger.info("STARTUP_TRACE :: STEP 5 :: app.ts imported");
   const server = http.createServer(app);
+  logger.info("STARTUP_TRACE :: STEP 6 :: HTTP server created");
   initSocket(server);
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
@@ -659,6 +672,7 @@ export const startServer = async () => {
 
   return await new Promise<http.Server>((resolve) => {
     server.listen(env.PORT, () => {
+      logger.info(`STARTUP_TRACE :: STEP 7 :: Listening on ${env.PORT}`);
       logger.info({ port: env.PORT }, "Server listening");
       logger.info(
         {

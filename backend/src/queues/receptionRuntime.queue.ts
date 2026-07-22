@@ -233,13 +233,15 @@ export const enqueueInboundRouting = async (payload: InboundRoutingJobPayload) =
 
 export const enqueueRevenueBrainBridge = async (
   payload: RevenueBrainBridgeJobPayload
-) =>
-  getQueue("revenueBridge").add("bridge", payload, {
+) => {
+  console.log("[DIAGNOSTIC_TRACE] enqueueRevenueBrainBridge() called for interaction:", payload.interactionId);
+  return getQueue("revenueBridge").add("bridge", payload, {
     jobId: buildStableJobId(
       REVENUE_BRAIN_BRIDGE_QUEUE,
       payload.externalInteractionKey
     ),
   });
+};
 
 export const enqueueReceptionRuntimeDeadLetter = async ({
   queueName,

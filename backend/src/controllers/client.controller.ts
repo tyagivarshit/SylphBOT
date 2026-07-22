@@ -1691,10 +1691,10 @@ const subscribeInstagramPageWebhook = async (
     metadata: { facebookPageId },
   });
   logger.info({
-  stage: "META_SUBSCRIBE_REQUEST",
-  facebookPageId,
-  hasPageAccessToken: Boolean(pageAccessToken),
-}, "Calling Instagram subscribed_apps");
+    stage: "META_SUBSCRIBE_REQUEST",
+    facebookPageId,
+    hasPageAccessToken: Boolean(pageAccessToken),
+  }, "Calling Instagram subscribed_apps");
   try {
     const response = await axiosWithMetaRetry({
       method: "POST",
@@ -1707,12 +1707,33 @@ const subscribeInstagramPageWebhook = async (
       timeout: META_GRAPH_TIMEOUT_MS,
     }, "INSTAGRAM_WEBHOOK_SUBSCRIBE");
 
-logger.info({
-  stage: "META_SUBSCRIBE_SUCCESS",
-  facebookPageId,
-  status: response.status,
-  data: response.data,
-}, "Instagram subscribed_apps success");
+    logger.info({
+      stage: "META_SUBSCRIBE_RESPONSE",
+      facebookPageId,
+      status: response.status,
+      headers: response.headers,
+      data: response.data,
+      timestamp: new Date().toISOString(),
+    }, "Instagram subscribed_apps response received");
+
+    logger.info({
+      stage: "META_SUBSCRIBE_SUCCESS",
+      facebookPageId,
+      status: response.status,
+      data: response.data,
+    }, "Instagram subscribed_apps success");
+
+    const isActive = response.status === 200 && response.data?.success === true;
+    if (!isActive) {
+      logger.error({
+        stage: "META_SUBSCRIBE_FAILED_VALIDATION",
+        facebookPageId,
+        status: response.status,
+        data: response.data,
+      }, "Instagram subscribed_apps response failed validation");
+      return false;
+    }
+
     logInstagramOAuthStage({
       stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_SUCCESS",
       status: "COMPLETED",
@@ -1721,23 +1742,24 @@ logger.info({
 
     return true;
   } catch (error: any) {
+    const errorData = error.response?.data;
     logger.error({
-  stage: "META_SUBSCRIBE_FAILED",
-  facebookPageId,
-  status: error.response?.status,
-  data: error.response?.data,
-  message: error.message,
-}, "Instagram subscribed_apps failed");
+      stage: "META_SUBSCRIBE_FAILED",
+      facebookPageId,
+      status: error.response?.status,
+      data: errorData,
+      message: error.message,
+    }, "Instagram subscribed_apps failed");
     logger.error({
       stage: "INSTAGRAM_WEBHOOK_SUBSCRIBE_FAILED",
       provider: "META_GRAPH_API",
       status: error.response?.status,
+      data: errorData,
       message: error.message,
     });
     return false;
   }
 };
-
 
 const fetchInstagramProfileSnapshot = async (
   pageId: string | null,
@@ -3931,7 +3953,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
 
       if (requestedFacebookPageId || requestedInstagramProfessionalAccountId) {
         selectedPair =
-          validPairs.find(
+          allPairs.find(
             (pair) =>
               (!requestedFacebookPageId ||
                 pair.facebookPageId === requestedFacebookPageId) &&
@@ -4017,7 +4039,8 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
         },
       });
 
-      const requiredInstagramPermissions = [
+      const requiredInstagramPermissions = [ 
+
         "instagram_basic",
         "instagram_manage_messages",
         "pages_manage_metadata",
@@ -4030,6 +4053,7 @@ export const metaOAuthConnect = async (req: Request, res: Response) => {
       console.info("META_PERMISSIONS", {
         "Granted Permissions": grantedPermissions,
         "Missing Permissions": missingPermissions,
+        
         "Expected Permissions": requiredInstagramPermissions,
       });
 

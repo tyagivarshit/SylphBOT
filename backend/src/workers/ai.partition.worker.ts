@@ -960,6 +960,7 @@ const sendPlatformReply = async (
   task: AIWorkerTask,
   replyText: string
 ) => {
+  console.log("[DIAGNOSTIC_TRACE] sendPlatformReply() called for lead:", task.message.leadId, "queue:", task.job.queueName);
   const subscriptionAccess = await getSubscriptionAccess(
     task.message.businessId
   ).catch(() => null);
@@ -2273,6 +2274,7 @@ const processCommentReplyJob = async (job: AIWorkerJob) => {
 };
 
 const processAIJob = async (job: AIWorkerJob) => {
+  console.log("[DIAGNOSTIC_TRACE] processAIJob() called for job:", job.id);
   if (isCommentReplyJobPayload(job.data)) {
     await processCommentReplyJob(job);
     return;

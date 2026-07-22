@@ -195,6 +195,7 @@ const getWebhookIntakeDeadLetterQueue = () =>
 export const enqueueInstagramMessageIngestJob = async (
   payload: Omit<InstagramMessageWebhookIngestPayload, "type">
 ) => {
+  console.log("[DIAGNOSTIC_TRACE] enqueueInstagramMessageIngestJob() called:", { eventId: payload.eventId, senderId: payload.senderId });
   const queue = getWebhookIngestQueue();
   await sampleQueueBacklog({
     queueName: WEBHOOK_INGEST_QUEUE_NAME,

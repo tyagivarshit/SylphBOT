@@ -4297,6 +4297,7 @@ model FeatureEntitlementLedger {
   version        Int      @default(1)
   isActive       Boolean  @default(true)
   effectiveFrom  DateTime @default(now())
+  effectiveTo    DateTime?
   metadata       Json?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

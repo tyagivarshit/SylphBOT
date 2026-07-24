@@ -149,6 +149,12 @@ const recordRedisFailure = (error: unknown, operation?: string) => {
     redisSafetyState.failures = 0;
   }
 
+  console.error("[REDIS FAILURE DIAGNOSTIC]", {
+    operation: operation || "redis",
+    failures: redisSafetyState.failures,
+    error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+  });
+
   enableFallbackMode();
 
   redisSafetyState.failures += 1;

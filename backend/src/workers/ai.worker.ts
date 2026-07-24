@@ -9,6 +9,7 @@ import {
   initWorkers,
   shutdown,
 } from "../runtime/lifecycle";
+import { PrewarmService } from "../services/prewarm.service";
 
 let started = false;
 let isShuttingDown = false;
@@ -32,6 +33,7 @@ export const startWorkerRuntime = async () => {
   try {
     started = true;
     initializeSentry();
+    PrewarmService.triggerAsyncPrewarm("worker_boot");
     await initQueues();
     initWorkers({
       crmRefresh: true,

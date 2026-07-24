@@ -8,6 +8,7 @@ process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || "64";
 const logger_1 = __importDefault(require("../utils/logger"));
 const sentry_1 = require("../observability/sentry");
 const lifecycle_1 = require("../runtime/lifecycle");
+const prewarm_service_1 = require("../services/prewarm.service");
 let started = false;
 let isShuttingDown = false;
 const shouldRunWorker = process.env.RUN_WORKER === "true" ||
@@ -23,6 +24,7 @@ const startWorkerRuntime = async () => {
     try {
         started = true;
         (0, sentry_1.initializeSentry)();
+        prewarm_service_1.PrewarmService.triggerAsyncPrewarm("worker_boot");
         await (0, lifecycle_1.initQueues)();
         (0, lifecycle_1.initWorkers)({
             crmRefresh: true,

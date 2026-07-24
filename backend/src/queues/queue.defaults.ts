@@ -21,12 +21,27 @@ export const QUEUE_REMOVE_ON_FAIL = {
 
 export const buildQueueJobOptions = (
   overrides: Partial<JobsOptions> = {}
-): JobsOptions => ({
-  attempts: 3,
-  removeOnComplete: QUEUE_REMOVE_ON_COMPLETE,
-  removeOnFail: QUEUE_REMOVE_ON_FAIL,
-  ...overrides,
-});
+): JobsOptions => {
+  const options = {
+    attempts: 3,
+    removeOnComplete: QUEUE_REMOVE_ON_COMPLETE,
+    removeOnFail: QUEUE_REMOVE_ON_FAIL,
+    ...overrides,
+  };
+
+  if (options.jobId) {
+    options.jobId = String(options.jobId).replace(/:/g, "_");
+  }
+
+  return options;
+};
+
+const sanitizeJobOptions = (opts?: any) => {
+  if (opts && opts.jobId) {
+    opts.jobId = String(opts.jobId).replace(/:/g, "_");
+  }
+  return opts;
+};
 
 const getQueueMethodFallback = (methodName: string) => {
   switch (methodName) {
@@ -61,22 +76,7 @@ const throwQueueWriteUnavailable = (queueName: string, methodName: string) => {
 };
 
 const rejectQueueWriteUnavailable = (queueName: string, methodName: string) => {
-  void recordObservabilityEvent({
-    eventType: "queue.write.unavailable",
-    message: `Queue unavailable for ${queueName}.${methodName}`,
-    severity: "error",
-    context: {
-      component: "queue",
-      phase: "write",
-    },
-    metadata: {
-      queueName,
-      methodName,
-      source: "redis_not_writable_precheck",
-    },
-  }).catch(() => undefined);
-
-  return Promise.reject(new Error(`queue_unavailable:${queueName}.${methodName}`));
+  return throwQueueWriteUnavailable(queueName, methodName);
 };
 
 export const createResilientQueue = <T extends Queue<any>>(
@@ -113,6 +113,10 @@ export const createResilientQueue = <T extends Queue<any>>(
         const methodName = String(property);
 
         return (...args: unknown[]) => {
+          if (property === "add" && args[2]) {
+            args[2] = sanitizeJobOptions(args[2]);
+          }
+
           if (!isQueueRedisWritable()) {
             if (property === "add") {
               return rejectQueueWriteUnavailable(queueName, methodName);
@@ -147,6 +151,15 @@ export const createResilientQueue = <T extends Queue<any>>(
         const methodName = String(property);
 
         return (...args: unknown[]) => {
+          const jobs = args[0];
+          if (Array.isArray(jobs)) {
+            for (const job of jobs) {
+              if (job && job.opts) {
+                job.opts = sanitizeJobOptions(job.opts);
+              }
+            }
+          }
+
           if (!isQueueRedisWritable()) {
             return rejectQueueWriteUnavailable(queueName, methodName);
           }

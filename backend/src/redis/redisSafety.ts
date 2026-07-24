@@ -83,6 +83,11 @@ export const isRedisTransientError = (error: unknown) =>
     String((error as { message?: unknown })?.message || error || "")
   );
 
+export const isConnectionError = (error: unknown): boolean => {
+  const message = String((error as { message?: unknown })?.message || error || "");
+  return /ECONNRESET|EPIPE|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|READONLY|Connection is closed|Connection is in closed state|Connection is not ready|Socket closed unexpectedly|Stream isn't writeable|Command queue state error|Reached the max retries|circuit open|redis_not_ready/i.test(message);
+};
+
 const enableFallbackMode = () => {
   if (redisSafetyState.fallbackModeEnabled) {
     return;
@@ -154,6 +159,10 @@ const recordRedisFailure = (error: unknown, operation?: string) => {
     failures: redisSafetyState.failures,
     error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
   });
+
+  if (!isConnectionError(error)) {
+    return;
+  }
 
   enableFallbackMode();
 
@@ -257,6 +266,9 @@ export const safeRedisCall = async <T>(
     recordRedisSuccess();
     return result;
   } catch (error) {
+    if (!isConnectionError(error)) {
+      throw error;
+    }
     recordRedisFailure(error, options?.operation);
     return resolveFallback(fallback);
   } finally {

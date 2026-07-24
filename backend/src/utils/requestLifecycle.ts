@@ -62,7 +62,7 @@ export const initRequestLifecycle = (input: {
 }) => {
   const route = String(input.req.originalUrl || input.req.path || input.req.url || "").trim();
   const lifecycle: RequestLifecycleState = {
-    requestId: String(input.req.requestId || "").trim() || null,
+    requestId: String((input.req as any).requestId || "").trim() || null,
     route,
     method: input.req.method,
     startedAt: input.startedAt,

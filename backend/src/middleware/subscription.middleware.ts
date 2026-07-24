@@ -634,7 +634,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
         req: currentReq,
         res: currentRes,
       }),
-      requestId: currentReq?.requestId || null,
+      requestId: (currentReq as any)?.requestId || null,
       elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res: currentRes }),
       route: currentReq?.originalUrl || null,
       method: currentReq?.method || null,
@@ -650,7 +650,7 @@ const getEarlyAccessSnapshot = async (subscription: any | null) => {
         req: currentReq,
         res: currentRes,
       }),
-      requestId: currentReq?.requestId || null,
+      requestId: (currentReq as any)?.requestId || null,
       elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res: currentRes }),
       route: currentReq?.originalUrl || null,
       method: currentReq?.method || null,
@@ -968,11 +968,11 @@ export const attachBillingContext = async (
   if (isAnalyticsDashboard) {
     logAnalyticsDashboardLifecycle("SUBSCRIPTION_CONTEXT_START", {
       correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
-      requestId: req.requestId || null,
+      requestId: (req as any).requestId || null,
       elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
       route: req.originalUrl,
       method: req.method,
-      businessId: req.user?.businessId || null,
+      businessId: (req.user as any)?.businessId || null,
     });
   }
   let subscriptionContextEndLogged = false;
@@ -983,14 +983,14 @@ export const attachBillingContext = async (
     subscriptionContextEndLogged = true;
     logAnalyticsDashboardLifecycle("SUBSCRIPTION_CONTEXT_END", {
       correlationId: getAnalyticsDashboardCorrelationId({ req, res }),
-      requestId: req.requestId || null,
+      requestId: (req as any).requestId || null,
       elapsedMs: getAnalyticsDashboardLifecycleElapsedMs({ res }),
       route: req.originalUrl,
       method: req.method,
     });
   };
   try {
-    const businessId = req.user?.businessId;
+    const businessId = (req.user as any)?.businessId;
 
     if (!businessId) {
       logSubscriptionContextEnd();

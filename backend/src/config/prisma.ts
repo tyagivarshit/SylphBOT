@@ -20,8 +20,8 @@ const getActiveTraceId = (): string | null => {
   try {
     const reqStore = requestStorage.getStore();
     if (reqStore?.req) {
-      const req = reqStore.req;
-      const tid = req.requestId || (req as any).traceId || (req as any).correlationId;
+      const req = reqStore.req as any;
+      const tid = req.requestId || req.traceId || req.correlationId;
       if (tid && typeof tid === "string" && tid.trim() !== "") {
         return tid.trim();
       }

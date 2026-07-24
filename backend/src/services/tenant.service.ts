@@ -454,7 +454,7 @@ export const resolveUserWorkspaceIdentity = async (input: {
 };
 
 export const getRequestBusinessId = (req: Request) =>
-  req.user?.businessId || req.apiKey?.businessId || req.tenant?.businessId || null;
+  (req.user as any)?.businessId || (req as any).apiKey?.businessId || (req as any).tenant?.businessId || null;
 
 export const getTenantFilter = <T extends Record<string, unknown>>(
   businessId: string,

@@ -153,7 +153,7 @@ const buildRedisOptions = (connectionName: string): RedisOptions => {
     reconnectOnError(error) {
       return isRetryableRedisError(error) ? 1 : false;
     },
-    tls: isTlsRedisUrl ? {} : undefined,
+    tls: isTlsRedisUrl ? { rejectUnauthorized: false } : undefined,
   };
 };
 

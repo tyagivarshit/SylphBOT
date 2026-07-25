@@ -82,9 +82,10 @@ export const resolveInboxRouting = ({
     routeDecision = "HUMAN_QUEUE";
     requiresHumanQueue = true;
   } else if (
-    !references?.consent ||
-    references.consent.status === "UNKNOWN" ||
-    references.consent.status === "REVOKED"
+    (!references?.consent ||
+      references.consent.status === "UNKNOWN" ||
+      references.consent.status === "REVOKED") &&
+    process.env.BYPASS_CONSENT_CHECK !== "true"
   ) {
     routeDecision = "HUMAN_QUEUE";
     requiresHumanQueue = true;

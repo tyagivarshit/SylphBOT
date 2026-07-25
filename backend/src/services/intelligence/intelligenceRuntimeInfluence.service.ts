@@ -1188,7 +1188,7 @@ const deriveControls = ({
     );
   }
 
-  if (stale || modelCritical) {
+  if ((stale || modelCritical) && process.env.BYPASS_INTELLIGENCE_STALE_CHECK !== "true") {
     controls.ai.forceHumanEscalation = true;
     controls.reception.forceHumanQueue = true;
     controls.autonomous.paused = true;
@@ -1261,7 +1261,7 @@ const buildDefaultInfluence = ({
       urgencyBoost: 0,
       offerTimingShiftMinutes: 0,
       escalationAdvanceMinutes: 0,
-      forceHumanEscalation: true,
+      forceHumanEscalation: process.env.BYPASS_INTELLIGENCE_STALE_CHECK === "true" ? false : true,
     },
     crm: {
       leadScoreDelta: 0,
@@ -1270,7 +1270,7 @@ const buildDefaultInfluence = ({
     },
     reception: {
       spamThreshold: 0.85,
-      forceHumanQueue: true,
+      forceHumanQueue: process.env.BYPASS_INTELLIGENCE_STALE_CHECK === "true" ? false : true,
       escalationBias: 0,
     },
     assignment: {
@@ -1300,7 +1300,7 @@ const buildDefaultInfluence = ({
         WHATSAPP: 1,
         INSTAGRAM: 1,
       },
-      paused: true,
+      paused: process.env.BYPASS_INTELLIGENCE_STALE_CHECK === "true" ? false : true,
     },
   },
 });

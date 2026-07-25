@@ -386,6 +386,8 @@ const normalizeContext = (context?: ReliabilityContext | null) => {
 
 const db = prisma as any;
 
+const ongoingTraces = new Map<string, Promise<any>>();
+
 const ensurePolicy = async () => {
   bumpAuditCounter("policy.ensure");
 
@@ -492,133 +494,148 @@ export const recordTraceLedger = async ({
   metadata?: JsonRecord | null;
   endedAt?: Date | null;
 }) => {
-  bumpAuditCounter("trace.record");
   const normalizedTraceId =
     String(traceId || "").trim() || `trace_${crypto.randomUUID()}`;
-  const normalizedCorrelationId =
-    String(correlationId || "").trim() || normalizedTraceId;
-  const step = {
-    stage,
-    status,
-    at: now().toISOString(),
-    metadata: metadata || null,
-  };
 
-  if (shouldUseInMemory) {
-    const store = getStore();
-    const existing = store.traces.get(normalizedTraceId);
-    const lifecycle = Array.isArray(existing?.lifecycle)
-      ? [...existing.lifecycle, step]
-      : [step];
-    const next = {
-      id: existing?.id || `trace_${crypto.randomUUID()}`,
-      traceId: normalizedTraceId,
-      correlationId: normalizedCorrelationId,
-      businessId: businessId || existing?.businessId || null,
-      tenantId: tenantId || existing?.tenantId || null,
-      leadId: leadId || existing?.leadId || null,
-      interactionId: interactionId || existing?.interactionId || null,
-      status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
-      lifecycle,
-      lineage: {
-        steps: lifecycle.length,
-      },
-      replayable: true,
-      replayToken: normalizedTraceId,
-      version: 1,
-      startedAt: existing?.startedAt || now(),
-      lastEventAt: now(),
-      endedAt: endedAt || null,
-      metadata: toRecord(existing?.metadata || {}),
-      createdAt: existing?.createdAt || now(),
-      updatedAt: now(),
+  const run = async () => {
+    bumpAuditCounter("trace.record");
+    const normalizedCorrelationId =
+      String(correlationId || "").trim() || normalizedTraceId;
+    const step = {
+      stage,
+      status,
+      at: now().toISOString(),
+      metadata: metadata || null,
     };
-    store.traces.set(normalizedTraceId, next);
-    return next;
-  }
 
-  let existing = await db.traceLedger
-    .findUnique({
-      where: {
+    if (shouldUseInMemory) {
+      const store = getStore();
+      const existing = store.traces.get(normalizedTraceId);
+      const lifecycle = Array.isArray(existing?.lifecycle)
+        ? [...existing.lifecycle, step]
+        : [step];
+      const next = {
+        id: existing?.id || `trace_${crypto.randomUUID()}`,
         traceId: normalizedTraceId,
-      },
-    })
-    .catch(() => null);
-
-  if (!existing) {
-    try {
-      return await db.traceLedger.create({
-        data: {
-          traceId: normalizedTraceId,
-          correlationId: normalizedCorrelationId,
-          businessId: businessId || null,
-          tenantId: tenantId || null,
-          leadId: leadId || null,
-          interactionId: interactionId || null,
-          status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
-          lifecycle: [step],
-          lineage: {
-            steps: 1,
-          },
-          replayable: true,
-          replayToken: normalizedTraceId,
-          version: 1,
-          startedAt: now(),
-          lastEventAt: now(),
-          endedAt: endedAt || null,
-          metadata: metadata || null,
+        correlationId: normalizedCorrelationId,
+        businessId: businessId || existing?.businessId || null,
+        tenantId: tenantId || existing?.tenantId || null,
+        leadId: leadId || existing?.leadId || null,
+        interactionId: interactionId || existing?.interactionId || null,
+        status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
+        lifecycle,
+        lineage: {
+          steps: lifecycle.length,
         },
-      });
-    } catch (error) {
-      if (!isUniqueConstraintError(error)) {
-        throw error;
-      }
+        replayable: true,
+        replayToken: normalizedTraceId,
+        version: 1,
+        startedAt: existing?.startedAt || now(),
+        lastEventAt: now(),
+        endedAt: endedAt || null,
+        metadata: toRecord(existing?.metadata || {}),
+        createdAt: existing?.createdAt || now(),
+        updatedAt: now(),
+      };
+      store.traces.set(normalizedTraceId, next);
+      return next;
+    }
 
-      console.info("OAUTH_RECONCILIATION_DUPLICATE_IGNORED", {
-        component: "reliability-trace-ledger",
-        traceId: normalizedTraceId,
-        businessId: businessId || null,
-        stage,
-      });
-
-      existing = await db.traceLedger.findUnique({
+    let existing = await db.traceLedger
+      .findUnique({
         where: {
           traceId: normalizedTraceId,
         },
-      });
-      if (!existing) {
-        throw error;
+      })
+      .catch(() => null);
+
+    if (!existing) {
+      try {
+        return await db.traceLedger.create({
+          data: {
+            traceId: normalizedTraceId,
+            correlationId: normalizedCorrelationId,
+            businessId: businessId || null,
+            tenantId: tenantId || null,
+            leadId: leadId || null,
+            interactionId: interactionId || null,
+            status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
+            lifecycle: [step],
+            lineage: {
+              steps: 1,
+            },
+            replayable: true,
+            replayToken: normalizedTraceId,
+            version: 1,
+            startedAt: now(),
+            lastEventAt: now(),
+            endedAt: endedAt || null,
+            metadata: metadata || null,
+          },
+        });
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) {
+          throw error;
+        }
+
+        console.info("OAUTH_RECONCILIATION_DUPLICATE_IGNORED", {
+          component: "reliability-trace-ledger",
+          traceId: normalizedTraceId,
+          businessId: businessId || null,
+          stage,
+        });
+
+        existing = await db.traceLedger.findUnique({
+          where: {
+            traceId: normalizedTraceId,
+          },
+        });
+        if (!existing) {
+          throw error;
+        }
       }
     }
-  }
 
-  const lifecycle = Array.isArray(existing.lifecycle)
-    ? [...existing.lifecycle, step]
-    : [step];
+    const lifecycle = Array.isArray(existing.lifecycle)
+      ? [...existing.lifecycle, step]
+      : [step];
 
-  return db.traceLedger.update({
-    where: {
-      traceId: normalizedTraceId,
-    },
-    data: {
-      correlationId: normalizedCorrelationId,
-      businessId: businessId || existing.businessId || null,
-      tenantId: tenantId || existing.tenantId || null,
-      leadId: leadId || existing.leadId || null,
-      interactionId: interactionId || existing.interactionId || null,
-      status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
-      lifecycle,
-      lineage: {
-        steps: lifecycle.length,
+    return db.traceLedger.update({
+      where: {
+        traceId: normalizedTraceId,
       },
-      lastEventAt: now(),
-      endedAt: endedAt || null,
-      metadata: {
-        ...toRecord(existing.metadata),
-        ...toRecord(metadata),
+      data: {
+        correlationId: normalizedCorrelationId,
+        businessId: businessId || existing.businessId || null,
+        tenantId: tenantId || existing.tenantId || null,
+        leadId: leadId || existing.leadId || null,
+        interactionId: interactionId || existing.interactionId || null,
+        status: endedAt ? "COMPLETED" : status === "FAILED" ? "FAILED" : "OPEN",
+        lifecycle,
+        lineage: {
+          steps: lifecycle.length,
+        },
+        lastEventAt: now(),
+        endedAt: endedAt || null,
+        metadata: {
+          ...toRecord(existing.metadata),
+          ...toRecord(metadata),
+        },
       },
-    },
+    });
+  };
+
+  const previous = ongoingTraces.get(normalizedTraceId) || Promise.resolve();
+  const next = previous.then(() => run());
+  ongoingTraces.set(normalizedTraceId, next);
+
+  next.finally(() => {
+    if (ongoingTraces.get(normalizedTraceId) === next) {
+      ongoingTraces.delete(normalizedTraceId);
+    }
   });
+
+  return next;
 };
 
 export const recordObservabilityEvent = async ({

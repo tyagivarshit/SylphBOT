@@ -21,6 +21,15 @@ end
 return 0
 `;
 
+const ACQUIRE_LOCK_SCRIPT = `
+local val = redis.call("GET", KEYS[1])
+if not val or val == ARGV[1] then
+  redis.call("SET", KEYS[1], ARGV[1], "PX", tonumber(ARGV[2]))
+  return "OK"
+end
+return nil
+`;
+
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -117,7 +126,13 @@ export const acquireDistributedLock = async ({
 
     try {
       result = await runWithTimeout({
-        promise: redis.set(key, lockToken, "PX", ttlMs, "NX"),
+        promise: redis.eval(
+          ACQUIRE_LOCK_SCRIPT,
+          1,
+          key,
+          lockToken,
+          String(ttlMs)
+        ) as Promise<string | null>,
         timeoutMs: commandTimeoutMs,
         timeoutMessage: `distributed_lock_acquire_timeout:${key}`,
       });

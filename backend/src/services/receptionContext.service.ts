@@ -155,19 +155,27 @@ export const resolveReceptionControlGate = ({
   const reasons: string[] = [];
 
   if (!references.consent || references.consent.status === "UNKNOWN") {
-    reasons.push("consent_unknown");
-    return {
-      overrideRoute: "HUMAN_QUEUE",
-      reasons,
-    };
+    if (process.env.BYPASS_CONSENT_CHECK === "true") {
+      reasons.push("consent_unknown_bypassed_by_env");
+    } else {
+      reasons.push("consent_unknown");
+      return {
+        overrideRoute: "HUMAN_QUEUE",
+        reasons,
+      };
+    }
   }
 
-  if (references.consent.status === "REVOKED") {
-    reasons.push("consent_revoked");
-    return {
-      overrideRoute: "HUMAN_QUEUE",
-      reasons,
-    };
+  if (references.consent && references.consent.status === "REVOKED") {
+    if (process.env.BYPASS_CONSENT_CHECK === "true") {
+      reasons.push("consent_revoked_bypassed_by_env");
+    } else {
+      reasons.push("consent_revoked");
+      return {
+        overrideRoute: "HUMAN_QUEUE",
+        reasons,
+      };
+    }
   }
 
   if (references.leadControl?.isHumanControlActive) {

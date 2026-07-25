@@ -215,6 +215,28 @@ const nextSubscriberId = () => {
   return globalForRevenueBrainBus.__sylphRevenueBrainSubscriberCounter;
 };
 
+const sanitizePayloadValue = (val: any): any => {
+  if (val === null || val === undefined) return val;
+  if (typeof val === "function") return undefined;
+  if (Array.isArray(val)) {
+    return val.map(sanitizePayloadValue).filter(v => v !== undefined);
+  }
+  if (typeof val === "object") {
+    if (typeof val.toJSON === "function") {
+      return val.toJSON();
+    }
+    const clean: Record<string, any> = {};
+    for (const key of Object.keys(val)) {
+      const cleanedVal = sanitizePayloadValue(val[key]);
+      if (cleanedVal !== undefined) {
+        clean[key] = cleanedVal;
+      }
+    }
+    return clean;
+  }
+  return val;
+};
+
 const buildQueuedEvent = <T extends RevenueBrainEventName>(
   event: T,
   payload: RevenueBrainEventMap[T],
@@ -230,7 +252,7 @@ const buildQueuedEvent = <T extends RevenueBrainEventName>(
       ? String((payload as { traceId?: string }).traceId).trim()
       : `rb_trace_${crypto.randomUUID()}`,
   occurredAt: Date.now(),
-  payload,
+  payload: sanitizePayloadValue(payload),
 });
 
 const buildOutboxAggregate = (queuedEvent: RevenueBrainQueuedEvent) => {

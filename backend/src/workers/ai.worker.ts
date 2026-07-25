@@ -10,6 +10,9 @@ import {
   shutdown,
 } from "../runtime/lifecycle";
 import { PrewarmService } from "../services/prewarm.service";
+import { bootstrapper } from "../runtime/kernel/bootstrap";
+import { container } from "../runtime/kernel/diContainer";
+import { ExecutiveIdentityPlugin } from "../services/executive/plugin";
 
 let started = false;
 let isShuttingDown = false;
@@ -34,6 +37,24 @@ export const startWorkerRuntime = async () => {
     started = true;
     initializeSentry();
     PrewarmService.triggerAsyncPrewarm("worker_boot");
+
+    // Bootstrap Universal Core Runtime
+    if (!container.has("IMemoryEngine")) {
+      await bootstrapper.bootstrap();
+    }
+    if (!container.has("IEmbeddingEngine")) {
+      const { EmbeddingEngine } = await import("../services/embedding.service");
+      container.registerInstance("IEmbeddingEngine", new EmbeddingEngine());
+    }
+    if (!container.has("IKnowledgeStore")) {
+      const { KnowledgeStore } = await import("../services/knowledgeSearch.service");
+      container.registerInstance("IKnowledgeStore", new KnowledgeStore());
+    }
+    const pluginRegistry = container.resolve<any>("IPluginRegistry");
+    if (!pluginRegistry.getPlugin("plugin.executive.identity")) {
+      await pluginRegistry.registerPlugin(new ExecutiveIdentityPlugin());
+    }
+
     await initQueues();
     initWorkers({
       crmRefresh: true,

@@ -5535,3 +5535,539 @@ model reminderLog {
 
   @@index([appointmentId, type])
 }
+
+/* =====================================================
+EXECUTIVE ENGINE PERSISTENCE MODELS
+===================================================== */
+
+model Executive {
+  id              String   @id @map("_id")
+  businessId      String
+  name            String
+  status          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  version         Int      @default(1)
+  isDeleted       Boolean  @default(false)
+
+  @@index([businessId])
+}
+
+model ExecutiveIdentity {
+  id              String   @id @map("_id")
+  tenantId        String
+  role            String
+  name            String
+  status          String
+  dna             Json
+  metadata        Json?
+  missionState    Json?
+  businessOutcomes Json?
+  healthSignals   Json?
+  health          Json?
+  version         Int      @default(1)
+  goalAlignment   Json?
+  evolutionMetadata Json?
+  diagnostics     Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId])
+}
+
+model ExecutiveDNA {
+  id                      String   @id @map("_id")
+  role                    String
+  version                 String
+  versionInt              Int      @default(1)
+  mission                 Json
+  responsibilities        Json
+  authorities             Json
+  boundaries              Json
+  kpiOwnership            Json
+  decisionScope           Json
+  communicationProfile    Json
+  delegationProfile       Json
+  escalationProfile       Json
+  successCriteria         Json
+  failureCriteria         Json
+  personalityModel        Json
+  capabilityProfile       Json?
+  decisionAuthorityMatrix Json?
+  businessOutcomes        Json?
+  goalAlignment           Json?
+  evolutionMetadata       Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  isDeleted               Boolean  @default(false)
+}
+
+model Goal {
+  id                 String   @id @map("_id")
+  tenantId           String
+  executiveId        String
+  parentId           String?
+  title              String
+  description        String
+  ownerRole          String?
+  requestedBy        String?
+  missionId          String?
+  status             String
+  kpiToken           String?
+  targetValue        Float?
+  currentValue       Float?
+  unit               String?
+  category           String?
+  priority           Float    @default(1.0)
+  priorityScore      Float    @default(0.0)
+  priorityMetrics    Json?
+  kpis               Json?
+  constraints        Json?
+  relations          Json?
+  associatedMemories String[]
+  evidenceRefs       String[]
+  whyExistsReason    String?
+  health             Json?
+  tradeoffProfile    Json?
+  successProbability Json?
+  history            Json?
+  metadata           Json?
+  version            Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  isDeleted          Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model Strategy {
+  id                    String   @id @map("_id")
+  tenantId              String
+  executiveId           String
+  goalId                String
+  title                 String
+  description           String
+  status                String
+  confidence            Float
+  actions               String[]
+  constraints           Json?
+  health                Json?
+  relations             Json?
+  whyGenerated          String?
+  supportingMemories    String[]
+  perceptionSignals     String[]
+  cognitionHypotheses   String[]
+  associatedAssumptions String[]
+  associatedTradeoffs   Json?
+  whyExistsReason       String?
+  explanation           String?
+  history               Json?
+  metadata              Json?
+  version               Int      @default(1)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  isDeleted             Boolean  @default(false)
+
+  @@index([tenantId, executiveId, goalId])
+}
+
+model ExecutivePlan {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  goalId          String
+  strategyId      String
+  title           String
+  description     String
+  status          String
+  phases          Json
+  milestones      Json?
+  resources       Json?
+  successCriteria Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model Phase {
+  id              String   @id @map("_id")
+  tenantId        String
+  planId          String
+  title           String
+  description     String
+  status          String
+  sequenceNumber  Int
+  tasks           Json
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, planId])
+}
+
+model Task {
+  id              String   @id @map("_id")
+  tenantId        String
+  phaseId         String
+  planId          String
+  title           String
+  description     String
+  status          String
+  assignedRole    String
+  resourceCost    Float
+  sequenceNumber  Int
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, phaseId])
+}
+
+model Milestone {
+  id              String   @id @map("_id")
+  tenantId        String
+  planId          String
+  title           String
+  description     String
+  targetDate      String
+  status          String
+  kpiToken        String
+  targetValue     Float
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, planId])
+}
+
+model Resource {
+  id              String   @id @map("_id")
+  tenantId        String
+  name            String
+  type            String
+  allocationUnit  String
+  costPerUnit     Float
+  status          String
+  availableQuantity Float
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId])
+}
+
+model Decision {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  goalId          String
+  strategyId      String
+  planId          String
+  title           String
+  description     String
+  status          String
+  confidence      Float
+  evidenceIds     String[]
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model Evidence {
+  id              String   @id @map("_id")
+  tenantId        String
+  decisionId      String
+  title           String
+  content         String
+  credibilityScore Float
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, decisionId])
+}
+
+model Alternative {
+  id              String   @id @map("_id")
+  tenantId        String
+  decisionId      String
+  title           String
+  description     String
+  status          String
+  cost            Float
+  estimatedRoi    Float
+  confidence      Float
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, decisionId])
+}
+
+model Execution {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  decisionId      String
+  planId          String
+  status          String
+  startTime       String
+  endTime         String?
+  logs            Json?
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model Workflow {
+  id              String   @id @map("_id")
+  tenantId        String
+  executionId     String
+  title           String
+  status          String
+  nodes           Json
+  edges           Json
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executionId])
+}
+
+model WorkflowState {
+  id              String   @id @map("_id")
+  tenantId        String
+  workflowId      String
+  currentNodeId   String
+  nodeStatuses    Json
+  variables       Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, workflowId])
+}
+
+model Learning {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  executionId     String
+  workflowId      String?
+  observations    String[]
+  reflectionNotes String
+  successRating   Float
+  recommendations String[]
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model ExecutiveMemory {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  category        String
+  key             String
+  value           Json
+  lifecycleState  String
+  metadata        Json
+  importance      Json
+  freshness       Json
+  explainability  Json
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId, category, key])
+}
+
+model SemanticMemory {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  concept         String
+  description     String
+  importance      Float
+  associations    Json?
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model MemoryAssociation {
+  id              String   @id @map("_id")
+  tenantId        String
+  sourceId        String
+  targetId        String
+  relationType    String
+  weight          Float
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, sourceId])
+}
+
+model Supervisor {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  adaptiveStateId String?
+  policyRules     Json
+  auditIntervalMs Int
+  status          String
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model Scheduler {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  workflowId      String?
+  cronExpression  String
+  isActive        Boolean  @default(true)
+  nextExecutionTime String
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model Timeline {
+  id              String   @id @map("_id")
+  tenantId        String
+  planId          String
+  startDate       String
+  endDate         String
+  milestones      Json
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, planId])
+}
+
+model Risk {
+  id              String   @id @map("_id")
+  tenantId        String
+  planId          String
+  category        String
+  description     String
+  probability     Float
+  impact          Float
+  mitigationStrategy String
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, planId])
+}
+
+model Simulation {
+  id              String   @id @map("_id")
+  tenantId        String
+  decisionId      String
+  scenarios       Json
+  metrics         Json
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, decisionId])
+}
+
+model Certification {
+  id              String   @id @map("_id")
+  tenantId        String
+  executiveId     String
+  executionId     String?
+  workflowId      String?
+  certificationType String
+  status          String
+  issuedAt        String
+  expiresAt       String?
+  metadata        Json?
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId, executiveId])
+}
+
+model GoalAssumption {
+  id              String   @id @map("_id")
+  tenantId        String
+  goalIds         String[]
+  description     String
+  confidence      Float
+  evidence        String[]
+  owner           String
+  status          String
+  dependencies    String[]
+  impactIfBroken  String
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+
+  @@index([tenantId])
+}
+
+model SystemKeyValueStore {
+  id        String   @id @map("_id")
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+

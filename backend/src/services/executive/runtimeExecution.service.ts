@@ -1,6 +1,7 @@
 import { DIContainer, container } from "../../runtime/kernel/diContainer";
 import logger from "../../utils/logger";
 import prisma from "../../config/prisma";
+import { prismaTransactionStorage } from "./prismaRepositories";
 
 type JsonRecord = Record<string, any>;
 
@@ -347,7 +348,11 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
   const objective = input.objective || "Execute Executive Runtime production request";
   const now = nowIso();
 
-  // 1. Automatically load business context from database (CRM, subscription plan, connected channels, memory, previous decisions)
+  return prisma.$transaction(async (tx) => {
+    return prismaTransactionStorage.run(tx, async () => {
+      requestScope.registerInstance("PrismaTransactionClient", tx);
+
+      // 1. Automatically load business context from database (CRM, subscription plan, connected channels, memory, previous decisions)
   const [
     business,
     subscription,
@@ -1144,5 +1149,7 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
     "Executive runtime production request executed"
   );
 
-  return report;
+      return report;
+    });
+  });
 };

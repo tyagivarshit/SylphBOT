@@ -1,51 +1,111 @@
 import { IDomainPlugin } from "../../runtime/interfaces/universal";
 import { DIContainer } from "../../runtime/kernel/diContainer";
 import { ExecutiveIdentityService } from "./identity.service";
-import { MemoryExecutiveRepository } from "./repository";
 import { ExecutivePerceptionService } from "./perception.service";
 import { ExecutiveCognitionService } from "./cognition.service";
-import { MemoryExecutiveMemoryRepository, ExecutiveMemoryService } from "./memory.service";
-import { MemoryExecutiveMemoryArchitectureRepository, ExecutiveMemoryArchitectureService } from "./memoryArchitecture.service";
-import { MemoryExecutiveMemoryConsolidationRepository, ExecutiveMemoryConsolidationService } from "./memoryConsolidation.service";
-import { MemoryExecutiveMemoryRetrievalRepository, ExecutiveMemoryRetrievalService } from "./memoryRetrieval.service";
-import { MemoryExecutiveMemoryAssociationRepository, ExecutiveMemoryAssociationService } from "./memoryAssociation.service";
-import { MemoryExecutiveSemanticMemoryRepository, ExecutiveSemanticMemoryService } from "./semanticMemory.service";
-import { MemoryExecutiveOrganizationalKnowledgeRepository, ExecutiveOrganizationalKnowledgeService } from "./organizationalKnowledge.service";
-import { MemoryExecutiveMemoryOptimizationRepository, ExecutiveMemoryOptimizationService } from "./memoryOptimization.service";
-import { MemoryExecutiveMemoryGovernanceRepository, ExecutiveMemoryGovernanceService } from "./memoryGovernance.service";
-import { MemoryExecutiveMemoryCertificationRepository, ExecutiveMemoryCertificationService } from "./memoryCertification.service";
-import { MemoryExecutiveGoalRepository, ExecutiveGoalIntelligenceService, MemoryGoalAssumptionRepository } from "./goalIntelligence.service";
-import { MemoryExecutiveStrategyRepository, ExecutiveStrategyIntelligenceService } from "./strategyIntelligence.service";
-import { MemoryExecutivePlanningRepository, ExecutivePlanningService } from "./planning.service";
-import { MemoryExecutiveTimelineRepository, ExecutiveTimelineService } from "./timeline.service";
-import { MemoryExecutiveScenarioRepository, ExecutiveScenarioService } from "./scenario.service";
-import { MemoryExecutivePlanningOptimizationRepository, ExecutivePlanningOptimizationService } from "./planningOptimization.service";
-import { MemoryExecutiveRiskRepository, ExecutiveRiskService } from "./risk.service";
-import { MemoryExecutiveResourceRepository, ExecutiveResourceService } from "./resource.service";
-import { MemoryExecutivePlanningGovernanceRepository, ExecutivePlanningGovernanceService } from "./planningGovernance.service";
-import { MemoryExecutivePlanningHardeningRepository, ExecutivePlanningHardeningService } from "./planningHardening.service";
-import { MemoryExecutiveDecisionRepository, ExecutiveDecisionIntelligenceService } from "./decisionIntelligence.service";
-import { MemoryExecutiveEvidenceRepository, ExecutiveEvidenceValidationService } from "./evidenceValidation.service";
-import { MemoryExecutiveAlternativeRepository, ExecutiveAlternativeGenerationService, IExecutiveAlternativeRepository } from "./alternativeGeneration.service";
-import { MemoryExecutiveDecisionEvaluationRepository, ExecutiveDecisionEvaluationService, IExecutiveDecisionEvaluationRepository } from "./decisionEvaluation.service";
-import { MemoryExecutiveSimulationRepository, ExecutiveSimulationService, IExecutiveSimulationRepository } from "./simulationProjection.service";
-import { MemoryExecutiveDecisionSelectionRepository, ExecutiveDecisionSelectionService } from "./decisionSelection.service";
-import { MemoryExecutiveDecisionAuthorizationRepository, ExecutiveDecisionAuthorizationService } from "./decisionAuthorization.service";
-import { MemoryExecutiveDecisionDispatchRepository, ExecutiveDecisionDispatchService } from "./decisionDispatch.service";
-import { MemoryExecutiveDecisionMonitoringRepository, ExecutiveDecisionMonitoringService } from "./decisionMonitoring.service";
-import { MemoryExecutiveDecisionHardeningRepository, ExecutiveDecisionHardeningService } from "./decisionHardening.service";
-import { MemoryExecutiveExecutionRepository, ExecutiveExecutionService } from "./execution.service";
-import { MemoryExecutiveExecutionHardeningRepository, ExecutiveExecutionHardeningService, IExecutiveExecutionHardeningRepository } from "./executionHardening.service";
-import { MemoryExecutiveExecutionGraphRepository, ExecutiveExecutionGraphService, IExecutiveExecutionGraphRepository } from "./executionGraph.service";
-import { MemoryExecutiveExecutionAdapterRepository, ExecutiveExecutionAdapterService, IExecutiveExecutionAdapterRepository } from "./executionAdapter.service";
-import { MemoryExecutiveExecutionDriverRepository, ExecutiveExecutionDriverService, IExecutiveExecutionDriverRepository } from "./executionDriver.service";
-import { MemoryExecutiveWorkflowRepository, ExecutiveWorkflowOrchestratorService, IExecutiveWorkflowRepository } from "./workflowOrchestrator.service";
-import { MemoryExecutiveAdaptiveExecutionRepository, ExecutiveAdaptiveExecutionService, IExecutiveAdaptiveExecutionRepository } from "./adaptiveExecution.service";
-import { MemoryExecutiveSupervisorRepository, ExecutiveSupervisorService, IExecutiveSupervisorRepository } from "./supervisor.service";
-import { MemoryExecutiveOperationsSupervisorRepository, ExecutiveOperationsSupervisorService, IExecutiveOperationsSupervisorRepository } from "./operationsSupervisor.service";
-import { MemoryExecutiveSchedulerRepository, ExecutiveSchedulerService, IExecutiveSchedulerRepository } from "./scheduler.service";
-import { MemoryExecutiveExecutionLearningRepository, ExecutiveExecutionLearningService, IExecutiveExecutionLearningRepository } from "./learning.service";
-import { MemoryExecutiveExecutionCertificationRepository, ExecutiveExecutionCertificationService, IExecutiveExecutionCertificationRepository } from "./executionCertification.service";
+import { ExecutiveMemoryService } from "./memory.service";
+import { ExecutiveMemoryArchitectureService } from "./memoryArchitecture.service";
+import { ExecutiveMemoryConsolidationService } from "./memoryConsolidation.service";
+import { ExecutiveMemoryRetrievalService } from "./memoryRetrieval.service";
+import { ExecutiveMemoryAssociationService } from "./memoryAssociation.service";
+import { ExecutiveSemanticMemoryService } from "./semanticMemory.service";
+import { ExecutiveOrganizationalKnowledgeService } from "./organizationalKnowledge.service";
+import { ExecutiveMemoryOptimizationService } from "./memoryOptimization.service";
+import { ExecutiveMemoryGovernanceService } from "./memoryGovernance.service";
+import { ExecutiveMemoryCertificationService } from "./memoryCertification.service";
+import { ExecutiveGoalIntelligenceService } from "./goalIntelligence.service";
+import { ExecutiveStrategyIntelligenceService } from "./strategyIntelligence.service";
+import { ExecutivePlanningService } from "./planning.service";
+import { ExecutiveTimelineService } from "./timeline.service";
+import { ExecutiveScenarioService } from "./scenario.service";
+import { ExecutivePlanningOptimizationService } from "./planningOptimization.service";
+import { ExecutiveRiskService } from "./risk.service";
+import { ExecutiveResourceService } from "./resource.service";
+import { ExecutivePlanningGovernanceService } from "./planningGovernance.service";
+import { ExecutivePlanningHardeningService } from "./planningHardening.service";
+import { ExecutiveDecisionIntelligenceService } from "./decisionIntelligence.service";
+import { ExecutiveEvidenceValidationService } from "./evidenceValidation.service";
+import { ExecutiveAlternativeGenerationService } from "./alternativeGeneration.service";
+import { ExecutiveDecisionEvaluationService } from "./decisionEvaluation.service";
+import { ExecutiveSimulationService } from "./simulationProjection.service";
+import { ExecutiveDecisionSelectionService } from "./decisionSelection.service";
+import { ExecutiveDecisionAuthorizationService } from "./decisionAuthorization.service";
+import { ExecutiveDecisionDispatchService } from "./decisionDispatch.service";
+import { ExecutiveDecisionMonitoringService } from "./decisionMonitoring.service";
+import { ExecutiveDecisionHardeningService } from "./decisionHardening.service";
+import { ExecutiveExecutionService } from "./execution.service";
+import { ExecutiveExecutionHardeningService } from "./executionHardening.service";
+import { ExecutiveExecutionGraphService } from "./executionGraph.service";
+import { ExecutiveExecutionAdapterService } from "./executionAdapter.service";
+import { ExecutiveExecutionDriverService } from "./executionDriver.service";
+import { ExecutiveWorkflowOrchestratorService } from "./workflowOrchestrator.service";
+import { ExecutiveAdaptiveExecutionService } from "./adaptiveExecution.service";
+import { ExecutiveSupervisorService } from "./supervisor.service";
+import { ExecutiveOperationsSupervisorService } from "./operationsSupervisor.service";
+import { ExecutiveSchedulerService } from "./scheduler.service";
+import { ExecutiveExecutionLearningService } from "./learning.service";
+import { ExecutiveExecutionCertificationService } from "./executionCertification.service";
+import { IExecutiveAlternativeRepository } from "./alternativeGeneration.service";
+import { IExecutiveDecisionEvaluationRepository } from "./decisionEvaluation.service";
+import { IExecutiveSimulationRepository } from "./simulationProjection.service";
+import { IExecutiveExecutionHardeningRepository } from "./executionHardening.service";
+import { IExecutiveExecutionGraphRepository } from "./executionGraph.service";
+import { IExecutiveExecutionAdapterRepository } from "./executionAdapter.service";
+import { IExecutiveExecutionDriverRepository } from "./executionDriver.service";
+import { IExecutiveWorkflowRepository } from "./workflowOrchestrator.service";
+import { IExecutiveAdaptiveExecutionRepository } from "./adaptiveExecution.service";
+import { IExecutiveSupervisorRepository } from "./supervisor.service";
+import { IExecutiveOperationsSupervisorRepository } from "./operationsSupervisor.service";
+import { IExecutiveSchedulerRepository } from "./scheduler.service";
+import { IExecutiveExecutionLearningRepository } from "./learning.service";
+import { IExecutiveExecutionCertificationRepository } from "./executionCertification.service";
+
+import {
+  PrismaExecutiveRepository as MemoryExecutiveRepository,
+  PrismaExecutiveMemoryRepository as MemoryExecutiveMemoryRepository,
+  PrismaExecutiveMemoryArchitectureRepository as MemoryExecutiveMemoryArchitectureRepository,
+  PrismaExecutiveMemoryConsolidationRepository as MemoryExecutiveMemoryConsolidationRepository,
+  PrismaExecutiveMemoryRetrievalRepository as MemoryExecutiveMemoryRetrievalRepository,
+  PrismaExecutiveMemoryAssociationRepository as MemoryExecutiveMemoryAssociationRepository,
+  PrismaExecutiveSemanticMemoryRepository as MemoryExecutiveSemanticMemoryRepository,
+  PrismaExecutiveOrganizationalKnowledgeRepository as MemoryExecutiveOrganizationalKnowledgeRepository,
+  PrismaExecutiveMemoryOptimizationRepository as MemoryExecutiveMemoryOptimizationRepository,
+  PrismaExecutiveMemoryGovernanceRepository as MemoryExecutiveMemoryGovernanceRepository,
+  PrismaExecutiveMemoryCertificationRepository as MemoryExecutiveMemoryCertificationRepository,
+  PrismaExecutiveGoalRepository as MemoryExecutiveGoalRepository,
+  PrismaGoalAssumptionRepository as MemoryGoalAssumptionRepository,
+  PrismaExecutiveStrategyRepository as MemoryExecutiveStrategyRepository,
+  PrismaExecutivePlanningRepository as MemoryExecutivePlanningRepository,
+  PrismaExecutiveTimelineRepository as MemoryExecutiveTimelineRepository,
+  PrismaExecutiveScenarioRepository as MemoryExecutiveScenarioRepository,
+  PrismaExecutivePlanningOptimizationRepository as MemoryExecutivePlanningOptimizationRepository,
+  PrismaExecutiveRiskRepository as MemoryExecutiveRiskRepository,
+  PrismaExecutiveResourceRepository as MemoryExecutiveResourceRepository,
+  PrismaExecutivePlanningGovernanceRepository as MemoryExecutivePlanningGovernanceRepository,
+  PrismaExecutivePlanningHardeningRepository as MemoryExecutivePlanningHardeningRepository,
+  PrismaExecutiveDecisionRepository as MemoryExecutiveDecisionRepository,
+  PrismaExecutiveEvidenceRepository as MemoryExecutiveEvidenceRepository,
+  PrismaExecutiveAlternativeRepository as MemoryExecutiveAlternativeRepository,
+  PrismaExecutiveDecisionEvaluationRepository as MemoryExecutiveDecisionEvaluationRepository,
+  PrismaExecutiveSimulationRepository as MemoryExecutiveSimulationRepository,
+  PrismaExecutiveDecisionSelectionRepository as MemoryExecutiveDecisionSelectionRepository,
+  PrismaExecutiveDecisionAuthorizationRepository as MemoryExecutiveDecisionAuthorizationRepository,
+  PrismaExecutiveDecisionDispatchRepository as MemoryExecutiveDecisionDispatchRepository,
+  PrismaExecutiveDecisionMonitoringRepository as MemoryExecutiveDecisionMonitoringRepository,
+  PrismaExecutiveDecisionHardeningRepository as MemoryExecutiveDecisionHardeningRepository,
+  PrismaExecutiveExecutionRepository as MemoryExecutiveExecutionRepository,
+  PrismaExecutiveExecutionHardeningRepository as MemoryExecutiveExecutionHardeningRepository,
+  PrismaExecutiveExecutionGraphRepository as MemoryExecutiveExecutionGraphRepository,
+  PrismaExecutiveExecutionAdapterRepository as MemoryExecutiveExecutionAdapterRepository,
+  PrismaExecutiveExecutionDriverRepository as MemoryExecutiveExecutionDriverRepository,
+  PrismaExecutiveWorkflowRepository as MemoryExecutiveWorkflowRepository,
+  PrismaExecutiveAdaptiveExecutionRepository as MemoryExecutiveAdaptiveExecutionRepository,
+  PrismaExecutiveSupervisorRepository as MemoryExecutiveSupervisorRepository,
+  PrismaExecutiveOperationsSupervisorRepository as MemoryExecutiveOperationsSupervisorRepository,
+  PrismaExecutiveSchedulerRepository as MemoryExecutiveSchedulerRepository,
+  PrismaExecutiveExecutionLearningRepository as MemoryExecutiveExecutionLearningRepository,
+  PrismaExecutiveExecutionCertificationRepository as MemoryExecutiveExecutionCertificationRepository
+} from "./prismaRepositories";
 
 import logger from "../../utils/logger";
 

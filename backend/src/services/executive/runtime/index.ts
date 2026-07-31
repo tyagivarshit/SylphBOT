@@ -19,6 +19,7 @@ export * from "./stateFinalizer";
 export * from "./enginePipeline";
 export * from "./contractValidator";
 export * from "./failureRecovery";
+export * from "./observabilityManager";
 
 import { RuntimeCoordinator } from "./coordinator";
 import { RuntimeExecutionResult } from "./result";

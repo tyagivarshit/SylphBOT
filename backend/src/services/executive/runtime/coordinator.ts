@@ -44,6 +44,14 @@ export class RuntimeCoordinator {
     return this.snapshot;
   }
 
+  public getErrors(): Error[] {
+    return this.errors;
+  }
+
+  public getLifecycle(): RuntimeLifecycle {
+    return this.lifecycle;
+  }
+
   /**
    * Initializes the runtime with basic request identifiers.
    */

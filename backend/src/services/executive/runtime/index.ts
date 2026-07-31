@@ -58,6 +58,12 @@ export class ExecutiveRuntime {
       permissions: ["executive:execute"]
     }, di);
 
+    // Validate context initialization success (Solution 1)
+    if (coordinator.getLifecycle().getState() === "FAILED" || !coordinator.getSnapshot()) {
+      const primaryError = coordinator.getErrors()[0] || new Error("Context initialization failed.");
+      throw new Error(`Runtime Bootstrap Failed: ${primaryError.message}`);
+    }
+
     // 3. Execute the dry-run pipeline
     const result = await coordinator.execute(input.objective);
 

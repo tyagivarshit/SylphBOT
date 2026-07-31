@@ -1,4 +1,5 @@
 import { ExecutiveRuntimeSnapshot } from "./stateFinalizer";
+import { RuntimeFailureManager } from "./failureRecovery";
 
 // ============================================================================
 // IMMUTABLE ENGINE HANDOFF RESULTS
@@ -152,8 +153,9 @@ export class RuntimeEngineDispatcher {
 // ============================================================================
 // PIPELINE ORCHESTRATOR
 // ============================================================================
-
 export class ExecutiveRuntimePipeline {
+  private readonly failureManager = new RuntimeFailureManager();
+
   constructor(
     private readonly registry: RuntimeEngineRegistry,
     private readonly dispatcher: RuntimeEngineDispatcher
@@ -191,16 +193,26 @@ export class ExecutiveRuntimePipeline {
         } catch (err: any) {
           const error = err instanceof Error ? err : new Error(String(err));
           context.diagnostics[`${engineName}_status`] = "FAILED";
-          context.pipelineDiagnostics.failures.push(`${engineName} failed: ${error.message}`);
           
-          const isFatal = this.checkIfFatal(engineName, error);
-          if (isFatal) {
+          const remaining = engineSequence.slice(engineSequence.indexOf(engineName) + 1);
+          const result = this.failureManager.handleFailure(
+            error,
+            engineName,
+            snapshot.metadata.correlationId,
+            snapshot.snapshotId,
+            [...context.pipelineDiagnostics.completedEngines],
+            remaining
+          );
+
+          context.diagnostics[`${engineName}_recovery_decision`] = result.strategy;
+
+          if (result.strategy === "Abort Pipeline" || result.strategy === "Safe Termination") {
             context.diagnostics.pipeline_status = "FAILED_FATAL";
             context.pipelineDiagnostics.pipelineEndTime = new Date();
             context.pipelineDiagnostics.executionDurationMs = Date.now() - context.pipelineDiagnostics.pipelineStartTime.getTime();
-            throw new Error(`Pipeline execution terminated: Engine [${engineName}] failed with fatal error: ${error.message}`);
+            throw new Error(`Pipeline execution terminated: Engine [${engineName}] failed. Strategy: [${result.strategy}]. Reason: ${error.message}`);
           } else {
-            context.pipelineDiagnostics.recoveryEvents.push(`Recovered from ${engineName} failure.`);
+            context.pipelineDiagnostics.recoveryEvents.push(`Recovered from ${engineName} failure with strategy: ${result.strategy}`);
             context.pipelineDiagnostics.warnings.push(`Recovered error in ${engineName}: ${error.message}`);
             context.pipelineDiagnostics.completedEngines.push(engineName);
           }

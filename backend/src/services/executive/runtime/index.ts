@@ -18,6 +18,7 @@ export * from "./taskContext";
 export * from "./stateFinalizer";
 export * from "./enginePipeline";
 export * from "./contractValidator";
+export * from "./failureRecovery";
 
 import { RuntimeCoordinator } from "./coordinator";
 import { RuntimeExecutionResult } from "./result";

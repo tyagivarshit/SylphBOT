@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma";
 import redis from "../../config/redis";
+import { DEFAULT_GOVERNANCE_ROLES } from "../../config/roles.config";
 import { forbidden } from "../../utils/AppError";
 import { runDetachedBackgroundTask } from "../../utils/backgroundTask";
 import { decrypt, encrypt } from "../../utils/encrypt";
@@ -833,55 +834,7 @@ const DEFAULT_POLICIES: Array<{
   },
 ];
 
-const DEFAULT_ROLES: Array<{
-  roleName: string;
-  permissions: string[];
-}> = [
-  {
-    roleName: "OWNER",
-    permissions: [
-      "billing:view",
-      "billing:manage",
-      "analytics:view",
-      "settings:view",
-      "settings:manage",
-      "security:manage",
-      "api_keys:manage",
-      "compliance:export",
-      "compliance:delete",
-      "messages:enqueue",
-      "policy:rollback",
-    ],
-  },
-  {
-    roleName: "ADMIN",
-    permissions: [
-      "billing:view",
-      "billing:manage",
-      "analytics:view",
-      "settings:view",
-      "settings:manage",
-      "security:manage",
-      "api_keys:manage",
-      "compliance:export",
-      "messages:enqueue",
-    ],
-  },
-  {
-    roleName: "AGENT",
-    permissions: ["analytics:view", "settings:view", "messages:enqueue"],
-  },
-  {
-    roleName: "SERVICE",
-    permissions: [
-      "messages:enqueue",
-      "security:manage",
-      "compliance:export",
-      "billing:view",
-      "analytics:view",
-    ],
-  },
-];
+const DEFAULT_ROLES = DEFAULT_GOVERNANCE_ROLES;
 
 const appendChainedHash = ({
   tenantId,

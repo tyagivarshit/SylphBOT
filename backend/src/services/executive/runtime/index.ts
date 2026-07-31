@@ -20,6 +20,8 @@ export * from "./enginePipeline";
 export * from "./contractValidator";
 export * from "./failureRecovery";
 export * from "./observabilityManager";
+export * from "./healthValidation";
+export * from "./goldenPathValidation";
 
 import { RuntimeCoordinator } from "./coordinator";
 import { RuntimeExecutionResult } from "./result";

@@ -48,7 +48,7 @@ const getStore = () => __securityPhase6BTestInternals.getStore();
 
 const expectedBootstrapFootprint = {
   roleCount: 4,
-  permissionCount: 11,
+  permissionCount: 12,
   policyCount: 3,
   accessPolicyCount: 3,
   retentionPolicyCount: 1,

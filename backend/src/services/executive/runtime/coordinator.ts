@@ -9,8 +9,20 @@ import { RuntimeIdentityResolver, RuntimeBusinessContextResolver, RuntimeKnowled
 import { RuntimeCognitiveContext, CognitiveContextMetadata, RuntimeContextPrioritizer, RuntimeContextRanker, RuntimeContextCompressor } from "./cognitiveContext";
 import { RuntimeTaskContext, RuntimeTaskContextBuilder, TaskContextMetadata } from "./taskContext";
 import { ExecutiveRuntimeSnapshot, RuntimeStateBuilder } from "./stateFinalizer";
+import {
+  RuntimeEngineRegistry,
+  RuntimeEngineDispatcher,
+  ExecutiveRuntimePipeline,
+  ThinkingEngineAdapter,
+  PlanningEngineAdapter,
+  DecisionEngineAdapter,
+  ExecutionEngineAdapter,
+  MonitoringEngineAdapter,
+  LearningEngineAdapter
+} from "./enginePipeline";
 
 export class RuntimeCoordinator {
+  private activeDI: any = container;
   private lifecycle = new RuntimeLifecycle();
   private trace = new RuntimeTrace();
   private context: RuntimeContext | null = null;
@@ -58,6 +70,7 @@ export class RuntimeCoordinator {
 
     // Use request scope container if passed, otherwise default to global container
     const activeDI = di || container;
+    this.activeDI = activeDI;
 
     // 1. Identity Resolution
     this.trace.startStage("Identity Resolution");
@@ -365,7 +378,7 @@ export class RuntimeCoordinator {
 
 
   /**
-   * Executes the entry run (Prompt 1 Dry-Run placeholder, no executive services are wired yet).
+   * Executes the pipeline sequence using ExecutiveRuntimePipeline.
    */
   public async execute(objective: string): Promise<RuntimeExecutionResult> {
     if (!this.context) {
@@ -376,27 +389,83 @@ export class RuntimeCoordinator {
     this.trace.startStage("RUNNING", { objective });
 
     try {
-      // Future wiring integration hooks go here.
-      // For Prompt 1 infrastructure, we simply run a dry-run check.
-      this.trace.addWarning("RUNNING", "Dry-run execution: No executive services are active yet.");
-      
+      let registry: RuntimeEngineRegistry;
+      if (this.activeDI.has("RuntimeEngineRegistry")) {
+        registry = this.activeDI.resolve("RuntimeEngineRegistry");
+      } else {
+        registry = new RuntimeEngineRegistry();
+        registry.register(new ThinkingEngineAdapter(this.activeDI));
+        registry.register(new PlanningEngineAdapter(this.activeDI));
+        registry.register(new DecisionEngineAdapter(this.activeDI));
+        registry.register(new ExecutionEngineAdapter(this.activeDI));
+        registry.register(new MonitoringEngineAdapter(this.activeDI));
+        registry.register(new LearningEngineAdapter(this.activeDI));
+      }
+
+      const dispatcher = new RuntimeEngineDispatcher(registry);
+      const pipeline = new ExecutiveRuntimePipeline(registry, dispatcher);
+
+      const snapshot = this.snapshot;
+      if (!snapshot) {
+        throw new Error("Pipeline execution failed: Runtime snapshot must be generated before execution.");
+      }
+
+      const tenantId = this.context.requestMetadata?.tenantId || "default_tenant";
+      const traceId = this.context.traceId;
+
+      this.trace.startStage("PIPELINE_EXECUTION", { correlationId: snapshot.metadata.correlationId });
+      const pipelineContext = await pipeline.run(snapshot, tenantId, traceId);
+      this.trace.completeStage("PIPELINE_EXECUTION", {
+        completed: pipelineContext.pipelineDiagnostics.completedEngines,
+        skipped: pipelineContext.pipelineDiagnostics.skippedEngines,
+        failures: pipelineContext.pipelineDiagnostics.failures,
+        warnings: pipelineContext.pipelineDiagnostics.warnings
+      });
+
+      // Update trace entries for observability
+      for (const warn of pipelineContext.pipelineDiagnostics.warnings) {
+        this.trace.addWarning("PIPELINE_EXECUTION", warn);
+      }
+
+      // Check if the pipeline execution failed
+      if (pipelineContext.diagnostics.pipeline_status === "FAILED_FATAL") {
+        throw new Error(`Pipeline execution failed: ${pipelineContext.diagnostics.pipeline_error || "Fatal engine error."}`);
+      }
+
       this.trace.completeStage("RUNNING");
       this.lifecycle.complete();
+
+      const responseData = pipelineContext.learningResult?.learningData || 
+                           pipelineContext.monitoringResult?.monitoringData ||
+                           pipelineContext.executionResult?.executionData || 
+                           "Pipeline execution completed successfully.";
+
+      return new RuntimeExecutionResult(
+        this.lifecycle.getState(),
+        this.context,
+        this.trace,
+        {
+          totalTimeMs: Date.now() - snapshot.metadata.diagnostics.buildTimeMs,
+          pipelineDiagnostics: pipelineContext.pipelineDiagnostics
+        },
+        this.errors,
+        { data: responseData }
+      );
     } catch (err: any) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.errors.push(error);
       this.trace.failStage("RUNNING", error);
       this.lifecycle.fail(error);
-    }
 
-    return new RuntimeExecutionResult(
-      this.lifecycle.getState(),
-      this.context,
-      this.trace,
-      { totalTimeMs: Date.now() },
-      this.errors,
-      null
-    );
+      return new RuntimeExecutionResult(
+        this.lifecycle.getState(),
+        this.context,
+        this.trace,
+        { totalTimeMs: Date.now() },
+        this.errors,
+        null
+      );
+    }
   }
 
   /**

@@ -1,54 +1,14 @@
-export type AppRole = "OWNER" | "ADMIN" | "AGENT";
+import {
+  type AppRole,
+  type PermissionAction,
+  ROLE_PERMISSIONS,
+} from "../config/roles.config";
 
-export type PermissionAction =
-  | "billing:view"
-  | "billing:manage"
-  | "analytics:view"
-  | "settings:view"
-  | "settings:manage"
-  | "security:manage"
-  | "api_keys:manage"
-  | "compliance:export"
-  | "compliance:delete"
-  | "messages:enqueue"
-  | "executive:execute";
+export { type AppRole, type PermissionAction };
 
 type Principal = {
   role?: string | null;
   permissions?: string[] | null;
-};
-
-const ROLE_PERMISSIONS: Record<AppRole, PermissionAction[]> = {
-  OWNER: [
-    "billing:view",
-    "billing:manage",
-    "analytics:view",
-    "settings:view",
-    "settings:manage",
-    "security:manage",
-    "api_keys:manage",
-    "compliance:export",
-    "compliance:delete",
-    "messages:enqueue",
-    "executive:execute",
-  ],
-  ADMIN: [
-    "billing:view",
-    "billing:manage",
-    "analytics:view",
-    "settings:view",
-    "settings:manage",
-    "security:manage",
-    "api_keys:manage",
-    "compliance:export",
-    "messages:enqueue",
-    "executive:execute",
-  ],
-  AGENT: [
-    "analytics:view",
-    "settings:view",
-    "messages:enqueue",
-  ],
 };
 
 export const normalizeRole = (role: string | null | undefined): AppRole => {

@@ -96,6 +96,8 @@ import { workflowRuntimeTests } from "./workflowRuntime.test";
 import { oigTests } from "./oig.test";
 import { executiveIdentityTests } from "./executiveIdentity.test";
 import { executiveExecutionTests } from "./executiveExecution.test";
+import { executiveHealthValidationTests } from "./executiveHealthValidation.test";
+import { executiveGoldenPathTests } from "./executiveGoldenPath.test";
 
 
 
@@ -941,6 +943,8 @@ const tests: TestCase[] = [
   ...oigTests,
   ...executiveIdentityTests,
   ...executiveExecutionTests,
+  ...executiveHealthValidationTests,
+  ...executiveGoldenPathTests,
 ];
 
 let failures = 0;

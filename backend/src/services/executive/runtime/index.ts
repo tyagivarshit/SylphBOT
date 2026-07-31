@@ -15,6 +15,7 @@ export * from "./observabilityContracts";
 export * from "./providerContracts";
 export * from "./cognitiveContext";
 export * from "./taskContext";
+export * from "./stateFinalizer";
 
 import { RuntimeCoordinator } from "./coordinator";
 import { RuntimeExecutionResult } from "./result";

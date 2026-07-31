@@ -8,6 +8,7 @@ import { container } from "../../../runtime/kernel/diContainer";
 import { RuntimeIdentityResolver, RuntimeBusinessContextResolver, RuntimeKnowledgeResolver, RuntimeMemoryResolver } from "./resolvers";
 import { RuntimeCognitiveContext, CognitiveContextMetadata, RuntimeContextPrioritizer, RuntimeContextRanker, RuntimeContextCompressor } from "./cognitiveContext";
 import { RuntimeTaskContext, RuntimeTaskContextBuilder, TaskContextMetadata } from "./taskContext";
+import { ExecutiveRuntimeSnapshot, RuntimeStateBuilder } from "./stateFinalizer";
 
 export class RuntimeCoordinator {
   private lifecycle = new RuntimeLifecycle();
@@ -17,6 +18,7 @@ export class RuntimeCoordinator {
   private errors: Error[] = [];
   private cognitiveContext?: RuntimeCognitiveContext;
   private taskContext?: RuntimeTaskContext;
+  private snapshot?: ExecutiveRuntimeSnapshot;
 
   public getCognitiveContext(): RuntimeCognitiveContext | undefined {
     return this.cognitiveContext;
@@ -24,6 +26,10 @@ export class RuntimeCoordinator {
 
   public getTaskContext(): RuntimeTaskContext | undefined {
     return this.taskContext;
+  }
+
+  public getSnapshot(): ExecutiveRuntimeSnapshot | undefined {
+    return this.snapshot;
   }
 
   /**
@@ -312,6 +318,35 @@ export class RuntimeCoordinator {
         this.cognitiveContext.permissions,
         fallbackMetadata
       );
+    }
+
+    // 10. Finalize Runtime State with ExecutiveRuntimeSnapshot
+    this.trace.startStage("Snapshot Build");
+    const stateBuilder = new RuntimeStateBuilder();
+    try {
+      if (this.context && this.cognitiveContext && this.taskContext) {
+        this.snapshot = stateBuilder.build(
+          this.context.traceId,
+          this.context.correlationId,
+          this.cognitiveContext,
+          this.taskContext,
+          this.trace,
+          this.errors
+        );
+        this.trace.completeStage("Snapshot Build", {
+          snapshotId: this.snapshot.snapshotId,
+          health: this.snapshot.health,
+          readiness: this.snapshot.readiness,
+          confidence: this.snapshot.confidence.score
+        });
+      } else {
+        throw new Error("Missing required contexts to finalize state snapshot.");
+      }
+    } catch (err: any) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.trace.failStage("Snapshot Build", error);
+      this.lifecycle.fail(error, "Snapshot finalization failed");
+      return this.context;
     }
 
     this.trace.completeStage("BUILDING_CONTEXT");

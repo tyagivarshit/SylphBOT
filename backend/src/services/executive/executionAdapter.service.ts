@@ -1,5 +1,6 @@
 import { DIContainer, container } from "../../runtime/kernel/diContainer";
 import { getRequestContext } from "../../observability/requestContext";
+import { runDetachedBackgroundTask } from "../../utils/backgroundTask";
 import * as crypto from "crypto";
 
 // ============================================================================
@@ -518,27 +519,31 @@ export class ExecutiveExecutionAdapterService {
     const softTimer = setTimeout(() => {
       softTimerTriggered = true;
       console.warn(`Soft Timeout: Request exceeded soft threshold [${softTimeoutMs}ms].`);
-      this.publishEvent(tenantId, "executive.execution.adapter.timeout.triggered", {
-        executionId,
-        tenantId,
-        connectorId: request.connectorId,
-        timeoutType: "SOFT",
-        limitMs: softTimeoutMs,
-        timestamp: new Date().toISOString()
-      }).catch(() => {});
+      runDetachedBackgroundTask("execution_adapter_soft_timeout", () =>
+        this.publishEvent(tenantId, "executive.execution.adapter.timeout.triggered", {
+          executionId,
+          tenantId,
+          connectorId: request.connectorId,
+          timeoutType: "SOFT",
+          limitMs: softTimeoutMs,
+          timestamp: new Date().toISOString()
+        })
+      );
     }, softTimeoutMs);
 
     // Hard timeout abort
     const hardTimer = setTimeout(() => {
       console.error(`Hard Timeout: Force canceling request on connector [${config.connectorName}] after [${hardTimeoutMs}ms].`);
-      this.publishEvent(tenantId, "executive.execution.adapter.timeout.triggered", {
-        executionId,
-        tenantId,
-        connectorId: request.connectorId,
-        timeoutType: "HARD",
-        limitMs: hardTimeoutMs,
-        timestamp: new Date().toISOString()
-      }).catch(() => {});
+      runDetachedBackgroundTask("execution_adapter_hard_timeout", () =>
+        this.publishEvent(tenantId, "executive.execution.adapter.timeout.triggered", {
+          executionId,
+          tenantId,
+          connectorId: request.connectorId,
+          timeoutType: "HARD",
+          limitMs: hardTimeoutMs,
+          timestamp: new Date().toISOString()
+        })
+      );
       controller.abort();
     }, hardTimeoutMs);
 

@@ -484,6 +484,7 @@ export class ExecutiveDNABootstrapManager {
     // Register the registry in DI
     this.di.registerInstance("IExecutiveDNARegistry", this.registry);
 
+    const keys = Object.keys(BUILTIN_DNA);
     const verifiedRoles: string[] = [];
     const report: any = {
       bootstrapDurationMs: 0,
@@ -491,40 +492,145 @@ export class ExecutiveDNABootstrapManager {
       registrySize: 0,
       checksums: {},
       verifications: [],
+      status: "COMPLETED",
     };
 
-    // 1. Run Idempotent Migrations
-    const keys = Object.keys(BUILTIN_DNA);
-    for (const key of keys) {
-      const builtin = BUILTIN_DNA[key];
-      const migResult = await this.migrationManager.migrate(builtin);
-      report.migrations.push(migResult);
+    const redisHealthy = isRedisHealthy() && isRedisWritable();
+    const client = redisHealthy ? getResilientSharedRedisConnection() : null;
+
+    const lockKey = "executive:dna:bootstrap:lock";
+    const completedKey = "executive:dna:bootstrap:completed";
+    const lockValue = crypto.randomUUID();
+    const lockTtlMs = 30000;
+    const maxWaitMs = 30000;
+    const retryIntervalMs = 500;
+
+    let hasLock = false;
+
+    if (client) {
+      const startTime = Date.now();
+      while (Date.now() - startTime < maxWaitMs) {
+        // 1. Check if another instance already completed bootstrap
+        const completed = await client.get(completedKey);
+        if (completed === "true") {
+          console.info("[ExecutiveDNABootstrapManager] DNA Bootstrap already completed by another instance. Warming cache and skipping.");
+          
+          // Warm cache L1
+          for (const key of keys) {
+            const dna = await this.registry.getDNA(key);
+            if (!dna) {
+              throw new Error(`Startup Verification Failed: Mandatory DNA [${key}] missing from registry.`);
+            }
+            verifiedRoles.push(key);
+            report.verifications.push({ role: key, status: "VERIFIED", version: dna.version });
+          }
+          
+          const duration = Date.now() - start;
+          report.bootstrapDurationMs = duration;
+          report.registrySize = keys.length;
+          report.status = "SKIPPED_ALREADY_COMPLETED";
+
+          return {
+            durationMs: duration,
+            verifiedRoles,
+            report
+          };
+        }
+
+        // 2. Try to acquire lock
+        const acquired = await (client as any).set(lockKey, lockValue, "NX", "PX", lockTtlMs);
+        if (acquired === "OK") {
+          hasLock = true;
+          console.info("[ExecutiveDNABootstrapManager] Acquired distributed bootstrap lock.");
+          break;
+        }
+
+        // 3. Wait and retry
+        await new Promise((resolve) => setTimeout(resolve, retryIntervalMs));
+      }
+
+      if (!hasLock) {
+        // Check once more in case it completed during the final wait
+        const completed = await client.get(completedKey);
+        if (completed === "true") {
+          console.info("[ExecutiveDNABootstrapManager] DNA Bootstrap completed by peer during final wait. Warming cache.");
+          for (const key of keys) {
+            const dna = await this.registry.getDNA(key);
+            if (!dna) {
+              throw new Error(`Startup Verification Failed: Mandatory DNA [${key}] missing from registry.`);
+            }
+            verifiedRoles.push(key);
+            report.verifications.push({ role: key, status: "VERIFIED", version: dna.version });
+          }
+          const duration = Date.now() - start;
+          report.bootstrapDurationMs = duration;
+          report.registrySize = keys.length;
+          report.status = "SKIPPED_ALREADY_COMPLETED";
+          return {
+            durationMs: duration,
+            verifiedRoles,
+            report
+          };
+        }
+        throw new Error("Startup Verification Failed: Timeout waiting for DNA bootstrap lock.");
+      }
     }
 
-    // 2. Startup Verification & Cache Warming
-    for (const key of keys) {
-      const dna = await this.registry.getDNA(key);
-      if (!dna) {
-        throw new Error(`Startup Verification Failed: Mandatory DNA [${key}] missing from registry.`);
+    try {
+      // 1. Run Idempotent Migrations
+      for (const key of keys) {
+        const builtin = BUILTIN_DNA[key];
+        const migResult = await this.migrationManager.migrate(builtin);
+        report.migrations.push(migResult);
       }
 
-      // Checksum validation (Security verification)
-      const actualChecksum = computeChecksum(dna);
-      if (dna.checksum && dna.checksum !== actualChecksum) {
-        throw new Error(`Startup Verification Failed: Checksum validation failed for DNA [${key}]. Registry corruption or unauthorized mutation detected.`);
+      // 2. Startup Verification & Cache Warming
+      for (const key of keys) {
+        const dna = await this.registry.getDNA(key);
+        if (!dna) {
+          throw new Error(`Startup Verification Failed: Mandatory DNA [${key}] missing from registry.`);
+        }
+
+        // Checksum validation (Security verification)
+        const actualChecksum = computeChecksum(dna);
+        if (dna.checksum && dna.checksum !== actualChecksum) {
+          throw new Error(`Startup Verification Failed: Checksum validation failed for DNA [${key}]. Registry corruption or unauthorized mutation detected.`);
+        }
+
+        // Compatibility validation
+        if (this.di.has("ICompatibilityEngine")) {
+          const compEngine = this.di.resolve<any>("ICompatibilityEngine");
+          if (!compEngine.isExecutiveAiVersionSupported(dna.version)) {
+            throw new Error(`Startup Verification Failed: DNA Version [${dna.version}] of [${key}] is not supported by CompatibilityEngine.`);
+          }
+        }
+
+        verifiedRoles.push(key);
+        report.checksums[key] = dna.checksum;
+        report.verifications.push({ role: key, status: "VERIFIED", version: dna.version });
       }
 
-      // Compatibility validation
-      if (this.di.has("ICompatibilityEngine")) {
-        const compEngine = this.di.resolve<any>("ICompatibilityEngine");
-        if (!compEngine.isExecutiveAiVersionSupported(dna.version)) {
-          throw new Error(`Startup Verification Failed: DNA Version [${dna.version}] of [${key}] is not supported by CompatibilityEngine.`);
+      // Mark as completed in Redis L2 (so other instances skip immediately)
+      if (client) {
+        await client.set(completedKey, "true", "EX", 86400); // 1 day expiration
+      }
+    } finally {
+      // Release lock safely via Lua script
+      if (client && hasLock) {
+        const releaseScript = `
+          if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+          else
+            return 0
+          end
+        `;
+        try {
+          await (client as any).eval(releaseScript, 1, lockKey, lockValue);
+          console.info("[ExecutiveDNABootstrapManager] Released distributed bootstrap lock.");
+        } catch (err) {
+          console.error("[ExecutiveDNABootstrapManager] Failed to release distributed bootstrap lock:", err);
         }
       }
-
-      verifiedRoles.push(key);
-      report.checksums[key] = dna.checksum;
-      report.verifications.push({ role: key, status: "VERIFIED", version: dna.version });
     }
 
     const duration = Date.now() - start;

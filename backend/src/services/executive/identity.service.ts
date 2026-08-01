@@ -220,9 +220,25 @@ export class ExecutiveIdentityService {
       (this.repository as any).saveDNASync(upgradedDna);
     }
 
+    console.info("[DNA_TRACE] registerDNA START", {
+        role: dna.role,
+        timestamp: Date.now()
+    });
+
     // Run version compatibility checking and persistence asynchronously in the background
-    this.runBackgroundDNAPersistence(upgradedDna).catch((err) => {
+    this.runBackgroundDNAPersistence(upgradedDna).then(() => {
+      console.info("[DNA_TRACE] persistence COMPLETE", {
+          role: upgradedDna.role,
+          timestamp: Date.now()
+      });
+    }).catch((err) => {
+      console.error("[DNA_TRACE] persistence FAILED", err);
       console.error(`[Executive Identity Service] Background DNA persistence failed for ${upgradedDna.role}:`, err);
+    });
+
+    console.info("[DNA_TRACE] registerDNA RETURN", {
+        role: dna.role,
+        timestamp: Date.now()
     });
   }
 
@@ -288,8 +304,24 @@ export class ExecutiveIdentityService {
     }
     this.verifyTenantOwnership(tenantId);
 
+    console.info("[DNA_TRACE] createExecutive START", {
+        role,
+        timestamp: Date.now()
+    });
+
     const dna = await this.repository.getDNA(role);
+
+    console.info("[DNA_TRACE] getDNA RESULT", {
+        role,
+        found: !!dna,
+        timestamp: Date.now()
+    });
+
     if (!dna) {
+      console.error("[DNA_TRACE] DNA NOT FOUND", {
+          role,
+          timestamp: Date.now()
+      });
       throw new Error(`DNA template for role [${role}] not registered.`);
     }
 

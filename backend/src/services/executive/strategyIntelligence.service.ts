@@ -56,6 +56,7 @@ export interface IStrategyVersionHistory {
 export interface IExecutiveStrategy {
   id: string;
   tenantId: string;
+  executiveId?: string;
   goalId: string; // The Goal this strategy supports / Which goal created it
   title: string;
   description: string;
@@ -347,6 +348,7 @@ export class ExecutiveStrategyIntelligenceService implements IExecutiveStrategyI
     const strategy: IExecutiveStrategy = {
       id,
       tenantId,
+      executiveId: strategyData.executiveId || "SYSTEM",
       goalId: strategyData.goalId || "goal_default",
       title: strategyData.title || "Untitled Strategy",
       description: strategyData.description || "",

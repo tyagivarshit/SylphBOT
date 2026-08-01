@@ -726,7 +726,7 @@ export class ExecutiveDecisionSelectionService {
     // Verify goals
     if (decision.goals && decision.goals.length > 0) {
       for (const gId of decision.goals) {
-        const goal = await goalRepo.findGoalById(tenantId, gId).catch(() => null);
+        const goal = await (goalRepo.findById ? goalRepo.findById(tenantId, gId) : goalRepo.findGoalById(tenantId, gId)).catch(() => null);
         if (goal && goal.status === "ABANDONED") {
           violations.push(`Decision aligns with an ABANDONED goal [${gId}].`);
         }
@@ -736,7 +736,7 @@ export class ExecutiveDecisionSelectionService {
     // Verify strategies
     if (decision.strategies && decision.strategies.length > 0) {
       for (const sId of decision.strategies) {
-        const strategy = await strategyRepo.findStrategyById(tenantId, sId).catch(() => null);
+        const strategy = await (strategyRepo.findById ? strategyRepo.findById(tenantId, sId) : strategyRepo.findStrategyById(tenantId, sId)).catch(() => null);
         if (strategy && strategy.isArchived) {
           violations.push(`Decision targets an archived strategy [${sId}].`);
         }

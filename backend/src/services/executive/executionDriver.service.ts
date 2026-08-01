@@ -222,6 +222,12 @@ export class MemoryExecutiveExecutionDriverRepository implements IExecutiveExecu
 export class ExecutiveExecutionDriverService {
   constructor(private di: DIContainer = container) {}
 
+  public async saveDriverConfig(tenantId: string, config: IDriverConfig): Promise<void> {
+    this.validateRequestContext(tenantId);
+    const repo = this.di.resolve<IExecutiveExecutionDriverRepository>("IExecutiveExecutionDriverRepository");
+    await repo.saveDriverConfig(tenantId, config);
+  }
+
   private validateRequestContext(tenantId: string): void {
     const ctx = getRequestContext();
     const ctxTenantId = ctx?.tenantId || ctx?.businessId;

@@ -218,6 +218,15 @@ export interface IExecutiveDNA {
   failureCriteria: IFailureCriteria[];
   personalityModel: IExecutivePersonality;
 
+  // Sprint 4 Phase 7 Versioning Fields
+  dnaId?: string;
+  revision?: number;
+  checksum?: string;
+  compatibilityVersion?: string;
+  schemaVersion?: string;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+
   // Hardened & Enterprise fields (optional for backward compatibility)
   capabilityProfile?: IExecutiveCapabilityProfile;
   decisionAuthorityMatrix?: IDecisionAuthorityMatrix;
@@ -352,5 +361,11 @@ export interface IExecutiveRepository {
   listExecutives(tenantId: string): Promise<IExecutiveIdentity[]>;
   deleteExecutive(tenantId: string, id: string): Promise<void>;
   clear(): Promise<void>;
+}
+
+export interface IDNARepository {
+  getDNA(role: string): Promise<IExecutiveDNA | null>;
+  saveDNA(dna: IExecutiveDNA): Promise<void>;
+  listAllDNA(): Promise<IExecutiveDNA[]>;
 }
 

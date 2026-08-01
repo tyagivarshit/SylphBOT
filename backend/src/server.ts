@@ -568,6 +568,12 @@ export const startServer = async () => {
       await pluginRegistry.registerPlugin(new ExecutiveIdentityPlugin());
       logger.info("PLUGIN 3");
     }
+
+    // Bootstrap Executive Platform DNA Lifecycle (Sprint 4 Phase 1 & 8)
+    const { ExecutiveDNABootstrapManager } = await import("./services/executive/bootstrap/dnaRegistry");
+    const dnaBootstrapManager = new ExecutiveDNABootstrapManager(container);
+    await dnaBootstrapManager.bootstrap();
+
     const memEnd = process.memoryUsage().heapUsed;
     executiveStartupMetrics.pluginRegisterEndTime = Date.now();
     logger.info("PLUGIN 4");

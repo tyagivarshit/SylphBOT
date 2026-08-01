@@ -63,6 +63,8 @@ export interface IMilestone {
 export interface IExecutivePlan {
   id: string;
   tenantId: string;
+  executiveId?: string;
+  goalId?: string;
   strategyId: string;
   title: string;
   description: string;
@@ -237,6 +239,8 @@ export class ExecutivePlanningService {
     const plan: IExecutivePlan = {
       id,
       tenantId,
+      executiveId: planData.executiveId || "SYSTEM",
+      goalId: planData.goalId || "goal_default",
       strategyId: planData.strategyId || "strategy_default",
       title: planData.title || "Untitled Strategic Plan",
       description: planData.description || "",

@@ -39,10 +39,22 @@ const VALID_TRANSITIONS: Record<ExecutiveLifecycleState, ExecutiveLifecycleState
 
 export class ExecutiveIdentityService {
   private repository: IExecutiveRepository;
-  private dnaHistory = new Map<string, IExecutiveDNA[]>(); // role -> list of historical DNA versions
+  private dnaRegistry!: any;
+  private localDNASyncMap = new Map<string, IExecutiveDNA>();
 
   constructor(private di: DIContainer = container) {
     this.repository = di.resolve<IExecutiveRepository>("IExecutiveRepository");
+  }
+
+  private getRegistry(): any {
+    if (!this.dnaRegistry) {
+      if (this.di.has("IExecutiveDNARegistry")) {
+        this.dnaRegistry = this.di.resolve<any>("IExecutiveDNARegistry");
+      } else {
+        return null;
+      }
+    }
+    return this.dnaRegistry;
   }
 
   /**
@@ -50,7 +62,7 @@ export class ExecutiveIdentityService {
    */
   public reset(): void {
     (this.repository as any).clear?.();
-    this.dnaHistory.clear();
+    this.localDNASyncMap.clear();
   }
 
   /**
@@ -215,79 +227,37 @@ export class ExecutiveIdentityService {
       throw new Error(`DNA Validation Failed: ${validation.issues.join("; ")}`);
     }
 
-    // Save to repository synchronously so it is available immediately for tests
+    // Save to repository synchronously (primarily for mock/test repository support)
     if ((this.repository as any).saveDNASync) {
       (this.repository as any).saveDNASync(upgradedDna);
     }
 
-    console.info("[DNA_TRACE] registerDNA START", {
-        role: dna.role,
-        timestamp: Date.now()
-    });
+    // Save to local sync map for testing fallback
+    this.localDNASyncMap.set(upgradedDna.role, upgradedDna);
 
-    // Run version compatibility checking and persistence asynchronously in the background
-    this.runBackgroundDNAPersistence(upgradedDna).then(() => {
-      console.info("[DNA_TRACE] persistence COMPLETE", {
-          role: upgradedDna.role,
-          timestamp: Date.now()
-      });
-    }).catch((err) => {
-      console.error("[DNA_TRACE] persistence FAILED", err);
-      console.error(`[Executive Identity Service] Background DNA persistence failed for ${upgradedDna.role}:`, err);
-    });
-
-    console.info("[DNA_TRACE] registerDNA RETURN", {
-        role: dna.role,
-        timestamp: Date.now()
-    });
-  }
-
-  private async runBackgroundDNAPersistence(upgradedDna: IExecutiveDNA): Promise<void> {
-    if (this.di.has("ICompatibilityEngine")) {
-      const compEngine = this.di.resolve<any>("ICompatibilityEngine");
-      if (!compEngine.isExecutiveAiVersionSupported(upgradedDna.version)) {
-        throw new Error(`DNA Version [${upgradedDna.version}] is not supported by CompatibilityEngine.`);
-      }
+    // Sync to DNA Registry memory/cache if present (Option A: Registry update only, no database write)
+    const registry = this.getRegistry();
+    if (registry) {
+      registry.getCache().setL1(upgradedDna.role, upgradedDna);
     }
 
-    const existing = await this.repository.getDNA(upgradedDna.role);
-    if (existing) {
-      const history = this.dnaHistory.get(upgradedDna.role) || [];
-      if (!history.some((x) => x.version === existing.version)) {
-        history.push({ ...existing });
-        this.dnaHistory.set(upgradedDna.role, history);
-      }
-    }
-
-    await this.repository.saveDNA(upgradedDna);
-    console.log(`[Executive Identity Service] Registered DNA for role: ${upgradedDna.role} (v${upgradedDna.version})`);
+    console.info("[DNA_TRACE] registerDNA complete (in-memory cache update only)", {
+      role: dna.role,
+      timestamp: Date.now()
+    });
   }
 
   public getDNA(role: string): IExecutiveDNA | null {
+    const registry = this.getRegistry();
+    if (registry) {
+      const cached = registry.getCache().getL1(role);
+      if (cached) return cached;
+    }
+    const local = this.localDNASyncMap.get(role);
+    if (local) return local;
     const cached = (this.repository as any).getDNASync?.(role);
     if (cached) return cached;
     return null;
-  }
-
-  /**
-   * Retrieves a DNA's registration audit history.
-   */
-  public getDNAHistory(role: string): IExecutiveDNA[] {
-    return this.dnaHistory.get(role) || [];
-  }
-
-  /**
-   * Rolls back DNA to a previously registered version.
-   */
-  public async rollbackDNA(role: string, version: string): Promise<void> {
-    const history = this.dnaHistory.get(role) || [];
-    const target = history.find(x => x.version === version);
-    if (!target) {
-      throw new Error(`DNA version [${version}] not found in audit history for role [${role}].`);
-    }
-
-    await this.repository.saveDNA({ ...target });
-    console.log(`[Executive Identity Service] Rolled back DNA for role [${role}] to version [${version}]`);
   }
 
   /**
@@ -309,7 +279,11 @@ export class ExecutiveIdentityService {
         timestamp: Date.now()
     });
 
-    const dna = await this.repository.getDNA(role);
+    const registry = this.getRegistry();
+    let dna = registry ? await registry.getDNA(role) : null;
+    if (!dna) {
+      dna = this.getDNA(role) || (await this.repository.getDNA(role));
+    }
 
     console.info("[DNA_TRACE] getDNA RESULT", {
         role,
@@ -442,17 +416,15 @@ export class ExecutiveIdentityService {
       throw new Error(`Executive [${id}] not found.`);
     }
 
-    const dna = await this.repository.getDNA(exec.role);
-    if (!dna || dna.version !== targetVersion) {
-      const history = this.dnaHistory.get(exec.role) || [];
-      const targetDna = history.find(x => x.version === targetVersion) || (dna && dna.version === targetVersion ? dna : null);
-      if (!targetDna) {
-        throw new Error(`DNA version [${targetVersion}] for role [${exec.role}] not registered.`);
-      }
-      exec.dna = targetDna;
-    } else {
-      exec.dna = dna;
+    const registry = this.getRegistry();
+    let dna = registry ? await registry.getDNA(exec.role) : null;
+    if (!dna) {
+      dna = this.getDNA(exec.role) || (await this.repository.getDNA(exec.role));
     }
+    if (!dna || dna.version !== targetVersion) {
+      throw new Error(`DNA version [${targetVersion}] for role [${exec.role}] not registered.`);
+    }
+    exec.dna = dna;
 
     exec.updatedAt = new Date();
     const updated = await this.repository.saveExecutive(exec, exec.version);

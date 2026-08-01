@@ -315,7 +315,7 @@ export class ExecutiveDecisionIntelligenceService {
       assumptionsExisted: decisionData.assumptions?.map(a => a.text) || [],
       confidence: 0.95,
       lifecycleTransitions: [{ status: (decisionData.status || "DRAFT") as DecisionStatus, timestamp: new Date().toISOString(), actorId: decisionData.actorId || "exec_chief_operations" }],
-      approvalChain: []
+      approvalChain: decisionData.trace?.approvalChain || []
     };
 
     // Default ownership engine

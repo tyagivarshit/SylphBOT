@@ -3,7 +3,8 @@ import { DIContainer, container } from "../../runtime/kernel/diContainer";
 import {
   IExecutiveDNA,
   IExecutiveIdentity,
-  IExecutiveRepository
+  IExecutiveRepository,
+  IDNARepository
 } from "./interfaces";
 import { IExecutiveMemory, IExecutiveMemoryRepository } from "./memory.service";
 import {
@@ -234,6 +235,72 @@ class BasePrismaRepository {
       return this.di.resolve<any>("PrismaTransactionClient");
     }
     return prismaClient;
+  }
+}
+
+export class PrismaDNARepository extends BasePrismaRepository implements IDNARepository {
+  public async getDNA(role: string): Promise<IExecutiveDNA | null> {
+    const record = await this.db.executiveDNA.findFirst({
+      where: { id: role, isDeleted: false }
+    });
+    if (!record) return null;
+    return record as any as IExecutiveDNA;
+  }
+
+  public async saveDNA(dna: IExecutiveDNA): Promise<void> {
+    await this.db.executiveDNA.upsert({
+      where: { id: dna.role },
+      update: {
+        version: dna.version,
+        mission: dna.mission as any,
+        responsibilities: dna.responsibilities as any,
+        authorities: dna.authorities as any,
+        boundaries: dna.boundaries as any,
+        kpiOwnership: dna.kpiOwnership as any,
+        decisionScope: dna.decisionScope as any,
+        communicationProfile: dna.communicationProfile as any,
+        delegationProfile: dna.delegationProfile as any,
+        escalationProfile: dna.escalationProfile as any,
+        successCriteria: dna.successCriteria as any,
+        failureCriteria: dna.failureCriteria as any,
+        personalityModel: dna.personalityModel as any,
+        capabilityProfile: dna.capabilityProfile as any,
+        decisionAuthorityMatrix: dna.decisionAuthorityMatrix as any,
+        businessOutcomes: dna.businessOutcomes as any,
+        goalAlignment: dna.goalAlignment as any,
+        evolutionMetadata: dna.evolutionMetadata as any,
+        updatedAt: new Date(),
+      },
+      create: {
+        id: dna.role,
+        role: dna.role,
+        version: dna.version,
+        mission: dna.mission as any,
+        responsibilities: dna.responsibilities as any,
+        authorities: dna.authorities as any,
+        boundaries: dna.boundaries as any,
+        kpiOwnership: dna.kpiOwnership as any,
+        decisionScope: dna.decisionScope as any,
+        communicationProfile: dna.communicationProfile as any,
+        delegationProfile: dna.delegationProfile as any,
+        escalationProfile: dna.escalationProfile as any,
+        successCriteria: dna.successCriteria as any,
+        failureCriteria: dna.failureCriteria as any,
+        personalityModel: dna.personalityModel as any,
+        capabilityProfile: dna.capabilityProfile as any,
+        decisionAuthorityMatrix: dna.decisionAuthorityMatrix as any,
+        businessOutcomes: dna.businessOutcomes as any,
+        goalAlignment: dna.goalAlignment as any,
+        evolutionMetadata: dna.evolutionMetadata as any,
+      }
+    });
+  }
+
+  public async listAllDNA(): Promise<IExecutiveDNA[]> {
+    const records = await this.db.executiveDNA.findMany({
+      where: { isDeleted: false }
+    });
+    return records as any as IExecutiveDNA[];
   }
 }
 
@@ -487,6 +554,7 @@ export class PrismaExecutiveGoalRepository extends BasePrismaRepository implemen
     await this.db.goal.upsert({
       where: { id: goal.id },
       update: {
+        executiveId: goal.executiveId || "SYSTEM",
         parentId: goal.parentId,
         title: goal.title,
         description: goal.description,
@@ -512,6 +580,7 @@ export class PrismaExecutiveGoalRepository extends BasePrismaRepository implemen
       create: {
         id: goal.id,
         tenantId: goal.tenantId,
+        executiveId: goal.executiveId || "SYSTEM",
         parentId: goal.parentId,
         title: goal.title,
         description: goal.description,
@@ -640,10 +709,13 @@ export class PrismaExecutiveStrategyRepository extends BasePrismaRepository impl
     await this.db.strategy.upsert({
       where: { id: strategy.id },
       update: {
+        executiveId: strategy.executiveId || "SYSTEM",
         goalId: strategy.goalId,
         title: strategy.title,
         description: strategy.description,
         status: strategy.status,
+        confidence: strategy.health?.confidence !== undefined ? strategy.health.confidence : 1.0,
+        actions: (strategy as any).actions || [],
         version: strategy.version || 1,
         history: strategy.history as any,
         constraints: strategy.constraints as any,
@@ -662,10 +734,13 @@ export class PrismaExecutiveStrategyRepository extends BasePrismaRepository impl
       create: {
         id: strategy.id,
         tenantId: strategy.tenantId,
+        executiveId: strategy.executiveId || "SYSTEM",
         goalId: strategy.goalId,
         title: strategy.title,
         description: strategy.description,
         status: strategy.status,
+        confidence: strategy.health?.confidence !== undefined ? strategy.health.confidence : 1.0,
+        actions: (strategy as any).actions || [],
         version: strategy.version || 1,
         history: strategy.history as any,
         constraints: strategy.constraints as any,
@@ -726,22 +801,28 @@ export class PrismaExecutivePlanningRepository extends BasePrismaRepository impl
     await this.db.executivePlan.upsert({
       where: { id: plan.id },
       update: {
+        executiveId: plan.executiveId || "SYSTEM",
+        goalId: plan.goalId || "SYSTEM",
         strategyId: plan.strategyId,
         title: plan.title,
         description: plan.description,
         status: plan.status,
         phases: plan.phases as any,
+        milestones: plan.milestones as any,
         version: plan.version || 1,
         isDeleted: false
       },
       create: {
         id: plan.id,
         tenantId: plan.tenantId,
+        executiveId: plan.executiveId || "SYSTEM",
+        goalId: plan.goalId || "SYSTEM",
         strategyId: plan.strategyId,
         title: plan.title,
         description: plan.description,
         status: plan.status,
         phases: plan.phases as any,
+        milestones: plan.milestones as any,
         version: plan.version || 1,
         isDeleted: false
       }
@@ -867,6 +948,7 @@ export class PrismaExecutiveDecisionRepository extends BasePrismaRepository impl
       version: record.version || 1,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
+      metadata: record.metadata as any,
       ...(record.metadata as any || {})
     } as any as IDecision;
   }
@@ -902,6 +984,7 @@ export class PrismaExecutiveDecisionRepository extends BasePrismaRepository impl
       version: r.version || 1,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
+      metadata: r.metadata as any,
       ...(r.metadata as any || {})
     } as any as IDecision));
   }
@@ -2859,10 +2942,9 @@ export class PrismaExecutiveResourceRepository extends BasePrismaRepository impl
         name: resource.name,
         type: resource.type,
         allocationUnit: (resource as any).allocationUnit || "",
-        costPerUnit: (resource as any).costPerUnit || 0,
+        costPerUnit: resource.costPerHour || 0,
         status: resource.status,
-        availableQuantity: (resource as any).availableQuantity || 0,
-        metadata: resource as any,
+        availableQuantity: resource.capacityHoursPerWeek || 0,
         isDeleted: false
       },
       create: {
@@ -2871,10 +2953,9 @@ export class PrismaExecutiveResourceRepository extends BasePrismaRepository impl
         name: resource.name,
         type: resource.type,
         allocationUnit: (resource as any).allocationUnit || "",
-        costPerUnit: (resource as any).costPerUnit || 0,
+        costPerUnit: resource.costPerHour || 0,
         status: resource.status,
-        availableQuantity: (resource as any).availableQuantity || 0,
-        metadata: resource as any,
+        availableQuantity: resource.capacityHoursPerWeek || 0,
         isDeleted: false
       }
     });
@@ -2886,14 +2967,32 @@ export class PrismaExecutiveResourceRepository extends BasePrismaRepository impl
     });
     if (!record) return null;
     verifyTenant(tenantId, record.tenantId);
-    return record.metadata as any as IResource;
+    return {
+      id: record.id,
+      tenantId: record.tenantId,
+      name: record.name,
+      type: record.type as any,
+      capabilities: [],
+      capacityHoursPerWeek: record.availableQuantity || 40,
+      costPerHour: record.costPerUnit || 0,
+      status: record.status as any
+    };
   }
 
   public async getResources(tenantId: string): Promise<IResource[]> {
     const records = await this.db.resource.findMany({
       where: { tenantId, isDeleted: false }
     });
-    return records.map(r => r.metadata as any as IResource);
+    return records.map(record => ({
+      id: record.id,
+      tenantId: record.tenantId,
+      name: record.name,
+      type: record.type as any,
+      capabilities: [],
+      capacityHoursPerWeek: record.availableQuantity || 40,
+      costPerHour: record.costPerUnit || 0,
+      status: record.status as any
+    }));
   }
 
   public async saveAllocation(tenantId: string, allocation: IResourceAllocation): Promise<void> {

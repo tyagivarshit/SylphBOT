@@ -210,6 +210,12 @@ export class MemoryExecutiveExecutionAdapterRepository implements IExecutiveExec
 export class ExecutiveExecutionAdapterService {
   constructor(private di: DIContainer = container) {}
 
+  public async saveConnectorConfig(tenantId: string, config: IConnectorConfig): Promise<void> {
+    this.validateRequestContext(tenantId);
+    const repo = this.di.resolve<IExecutiveExecutionAdapterRepository>("IExecutiveExecutionAdapterRepository");
+    await repo.saveConnectorConfig(tenantId, config);
+  }
+
   private validateRequestContext(tenantId: string): void {
     const ctx = getRequestContext();
     const ctxTenantId = ctx?.tenantId || ctx?.businessId;

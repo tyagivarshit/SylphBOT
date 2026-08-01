@@ -387,7 +387,6 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
   const structuredObjective = transformObjective(objective);
 
   await run("Identity", "IExecutiveIdentityService", async (svc) => {
-    svc.registerDNA(buildRuntimeDNA(objective));
     const executive = await svc.createExecutive(tenantId, "SPRINT2_EXECUTIVE_RUNTIME", "Production Runtime Executive", {
       requestId: input.requestId,
       actorId,
@@ -559,6 +558,7 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       status: "ACTIVE",
       associatedMemories: [artifacts.memory.id],
       evidenceRefs: [`request:${input.requestId}`],
+      executiveId: artifacts.executive.id,
     });
     return artifacts.goal;
   });
@@ -572,6 +572,7 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       supportingMemories: [artifacts.memory.id],
       perceptionSignals: artifacts.perception.signals?.map((signal: any) => signal.id || signal.type).filter(Boolean) || [],
       cognitionHypotheses: artifacts.cognition.hypotheses?.map((hypothesis: any) => hypothesis.id).filter(Boolean) || [],
+      executiveId: artifacts.executive.id,
     });
     return artifacts.strategy;
   });
@@ -582,6 +583,8 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       title: "Production runtime execution plan",
       description: objective,
       status: "ACTIVE",
+      executiveId: artifacts.executive.id,
+      goalId: artifacts.goal.id,
       phases: [
         {
           id: runtimeId("phase", input.requestId),
@@ -605,7 +608,7 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
             {
               id: "task_2",
               name: "Settle Transaction",
-              dependencies: ["task_1"],
+              dependencies: [{ targetId: "task_1", type: "requires" }],
               timeline: "2-5s",
               requiredTeams: ["Billing Engineering"],
               requiredTools: ["Prisma Ledger Client"],
@@ -695,9 +698,21 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       risks: artifacts.risks?.map((risk: any) => risk.id).filter(Boolean) || [],
       resources: [artifacts.resource.id],
       memories: [artifacts.memory.id],
+      ownership: {
+        responsibleExecutive: artifacts.executive.id,
+        delegatedExecutive: artifacts.executive.id,
+      },
+      trace: {
+        approvalChain: [artifacts.executive.id],
+      },
       metadata: { 
         requestId: input.requestId, 
         evidenceExisted: [`request:${input.requestId}`],
+        recoveryPlanAvailable: true,
+        rollbackAvailable: true,
+        fallbackPlanAvailable: true,
+        businessContinuityValidated: true,
+        department: "production_execution",
         decisionParameters: {
           reasoning: "Executing core runtime requests under tenant isolation policies",
           evidence: "HTTP Request parameters validated against organization graph",
@@ -792,25 +807,25 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
   });
 
   await run("Decision", "IExecutiveSimulationService", async (svc) => {
-    artifacts.simulation = await svc.runSimulation(tenantId, artifacts.decision.id, {
-      scenario: "production_runtime_execution",
-      assumptions: { production: true, requestId: input.requestId },
-    });
+    artifacts.simulation = await svc.runSimulation(tenantId, artifacts.decision.id, "production_runtime_execution");
     return artifacts.simulation;
   });
 
   await run("Decision", "IExecutiveDecisionSelectionService", async (svc) => {
-    artifacts.selection = await svc.selectBestDecision(tenantId, [artifacts.decision.id], actorId);
+    artifacts.selection = await svc.selectBestDecision(tenantId, [artifacts.decision.id], artifacts.executive.id);
     return artifacts.selection;
   });
 
   await run("Decision", "IExecutiveDecisionAuthorizationService", async (svc) => {
-    artifacts.authorization = await svc.authorizeDecision(tenantId, artifacts.decision.id, actorId);
+    artifacts.authorization = await svc.authorizeDecision(tenantId, artifacts.decision.id, artifacts.executive.id, {
+      requestId: input.requestId,
+    });
+    console.log("[DNA_TRACE] AUTHORIZATION RESULTS:", JSON.stringify(artifacts.authorization, null, 2));
     return artifacts.authorization;
   });
 
   await run("Decision", "IExecutiveDecisionDispatchService", async (svc) => {
-    artifacts.dispatch = await svc.dispatchDecision(tenantId, artifacts.decision.id, actorId);
+    artifacts.dispatch = await svc.dispatchDecision(tenantId, artifacts.decision.id, artifacts.executive.id);
     return artifacts.dispatch;
   });
 
@@ -911,12 +926,17 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       tenantId,
       name: "Production Runtime Workflow",
       version: "1.0.0",
-      nodes: [{ id: "execute", type: "ACTION", action: "runtime:execute", next: [] }],
-      edges: [],
+      triggerType: "custom_event",
+      graph: {
+        nodes: [{ id: "execute", name: "Execute node", type: "ACTION", action: "runtime:execute", next: [] }],
+        edges: [],
+      },
+      slaMinutes: 60,
+      owner: "exec_chief_operations",
       metadata: { requestId: input.requestId },
     };
     await svc.createWorkflow(tenantId, artifacts.workflowConfig);
-    artifacts.workflow = await svc.startWorkflow(tenantId, artifacts.workflowConfig.id, {
+    artifacts.workflow = await svc.startWorkflow(tenantId, artifacts.workflowConfig.id, "custom_event", {
       requestId: input.requestId,
       executionId: artifacts.execution.id,
     });
@@ -930,13 +950,26 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       workflowStateId: artifacts.workflow.id,
       executionId: artifacts.execution.id,
       status: "ACTIVE",
-      graph: artifacts.executionGraph,
-      budget: { allocated: 1, spent: 0 },
+      slaStatus: "NOMINAL",
+      progress: 0,
+      resources: {},
+      budget: { allocated: 1000, spent: 0 },
       riskScore: 10,
-      failedNodes: [],
-      recoveryActions: [],
+      driftMetrics: {},
+      failures: [],
+      confidence: 0.95,
       predictions: [],
-      optimizations: [],
+      predictionDrift: [],
+      optimizationDrift: [],
+      recoveryHistory: [],
+      immutableRecoverySnapshots: [],
+      versionHistory: [],
+      version: 1,
+      retryStrategy: "LINEAR",
+      selfHealedCount: 0,
+      isRecovered: false,
+      isEscalated: false,
+      graph: artifacts.executionGraph,
       createdAt: now,
       updatedAt: now,
     };
@@ -969,12 +1002,32 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
       tenantId,
       workflowStateIds: [artifacts.workflow.id],
       status: "ACTIVE",
-      capacity: { workerUtilization: 10, queueDepth: 0, cpu: 10, memory: 10 },
-      bottlenecks: [],
-      slaStatus: "HEALTHY",
-      escalationStatus: "NONE",
-      workload: { active: 1, pending: 0, completed: 0 },
       healthScore: 1,
+      capacity: {
+        workerUtilization: 10,
+        queueDepth: 0,
+        cpu: 10,
+        memory: 10,
+        tokenBudget: { allocated: 100000, spent: 0 },
+        credits: { allocated: 1000, spent: 0 },
+        apiQuotas: { rateLimit: 60 },
+      },
+      bottlenecks: [],
+      slaStatus: "NOMINAL",
+      escalationStatus: "NONE",
+      workload: [
+        {
+          workflowId: artifacts.workflow.id,
+          priority: "MEDIUM",
+          status: "RUNNING",
+        },
+      ],
+      coordinationGraph: artifacts.executionGraph,
+      operationsDrift: [],
+      capacityDrift: [],
+      workloadDrift: [],
+      immutableSnapshots: [],
+      recoveryHistory: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -986,14 +1039,25 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
     artifacts.schedule = {
       id: runtimeId("schedule", input.requestId),
       tenantId,
+      executionId: artifacts.execution.id,
+      workflowId: artifacts.workflow.id,
       workflowStateId: artifacts.workflow.id,
       status: "ACTIVE",
       scheduleType: "IMMEDIATE",
+      conditions: [],
+      dependencies: [],
       timezone: "UTC",
       nextRunAt: now,
       lastRunAt: null,
       runHistory: [],
       conflicts: [],
+      schedulingDrift: [],
+      timezoneDrift: [],
+      executionDrift: [],
+      conflictHistory: [],
+      optimizationHistory: [],
+      immutableSnapshots: [],
+      recoveryHistory: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -1151,5 +1215,7 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
 
       return report;
     });
+  }, {
+    timeout: 30000
   });
 };

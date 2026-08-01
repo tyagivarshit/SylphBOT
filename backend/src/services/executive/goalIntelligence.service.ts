@@ -46,6 +46,7 @@ export interface IGoalVersionHistory {
 export interface IExecutiveGoal {
   id: string;
   tenantId: string;
+  executiveId?: string;
   parentId?: string; // Goal Hierarchy: Team Goal -> Individual Goal
   title: string;
   description: string;
@@ -349,6 +350,7 @@ export class ExecutiveGoalIntelligenceService implements IExecutiveGoalIntellige
     const goal: IExecutiveGoal = {
       id,
       tenantId,
+      executiveId: goalData.executiveId || "SYSTEM",
       parentId: goalData.parentId,
       title: goalData.title || "Untitled Goal",
       description: goalData.description || "",

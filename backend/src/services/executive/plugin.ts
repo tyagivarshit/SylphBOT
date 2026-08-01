@@ -62,6 +62,7 @@ import { IExecutiveExecutionCertificationRepository } from "./executionCertifica
 
 import {
   PrismaExecutiveRepository as MemoryExecutiveRepository,
+  PrismaDNARepository,
   PrismaExecutiveMemoryRepository as MemoryExecutiveMemoryRepository,
   PrismaExecutiveMemoryArchitectureRepository as MemoryExecutiveMemoryArchitectureRepository,
   PrismaExecutiveMemoryConsolidationRepository as MemoryExecutiveMemoryConsolidationRepository,
@@ -316,9 +317,12 @@ export class ExecutiveIdentityPlugin implements IDomainPlugin {
 
   public async onRegister(container: DIContainer): Promise<void> {
     console.log("Executive Plugin Loaded");
-    // Register the repository
+    // Register the repositories
     const repository = new MemoryExecutiveRepository(container);
     container.registerInstance("IExecutiveRepository", repository);
+
+    const dnaRepository = new PrismaDNARepository(container);
+    container.registerInstance("IDNARepository", dnaRepository);
 
     // 1. Instantiate and Register the service as a singleton in the DI container
     const service = new ExecutiveIdentityService(container);

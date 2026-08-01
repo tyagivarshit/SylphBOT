@@ -472,6 +472,10 @@ const startServer = async () => {
             await pluginRegistry.registerPlugin(new plugin_1.ExecutiveIdentityPlugin());
             logger_1.default.info("PLUGIN 3");
         }
+        // Bootstrap Executive Platform DNA Lifecycle (Sprint 4 Phase 1 & 8)
+        const { ExecutiveDNABootstrapManager } = await Promise.resolve().then(() => __importStar(require("./services/executive/bootstrap/dnaRegistry")));
+        const dnaBootstrapManager = new ExecutiveDNABootstrapManager(diContainer_1.container);
+        await dnaBootstrapManager.bootstrap();
         const memEnd = process.memoryUsage().heapUsed;
         plugin_1.executiveStartupMetrics.pluginRegisterEndTime = Date.now();
         logger_1.default.info("PLUGIN 4");

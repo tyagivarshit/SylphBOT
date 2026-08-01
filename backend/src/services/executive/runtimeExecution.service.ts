@@ -365,22 +365,22 @@ export const executeExecutiveRuntimeRequest = async (input: ExecutiveRuntimeInpu
     conversationCount,
     memoryCount,
   ] = await Promise.all([
-    prisma.business.findUnique({
+    tx.business.findUnique({
       where: { id: tenantId },
       select: { name: true, industry: true, teamSize: true, website: true },
     }).catch(() => null),
-    prisma.subscriptionLedger.findFirst({
+    tx.subscriptionLedger.findFirst({
       where: { businessId: tenantId },
       orderBy: { updatedAt: "desc" },
     }).catch(() => null),
-    prisma.lead.count({ where: { businessId: tenantId } }).catch(() => 0),
-    prisma.client.count({ where: { businessId: tenantId } }).catch(() => 0),
-    prisma.commentTrigger.count({ where: { businessId: tenantId } }).catch(() => 0),
-    prisma.receptionMemory.count({ where: { businessId: tenantId } }).catch(() => 0),
-    prisma.revenueTouchLedger.count({ where: { businessId: tenantId } }).catch(() => 0),
-    prisma.autonomousCampaign.count({ where: { businessId: tenantId } }).catch(() => 0),
-    prisma.message.count({ where: { businessId: tenantId } }).catch(() => 0),
-    prisma.memory.count({ where: { lead: { businessId: tenantId } } }).catch(() => 0),
+    tx.lead.count({ where: { businessId: tenantId } }).catch(() => 0),
+    tx.client.count({ where: { businessId: tenantId } }).catch(() => 0),
+    tx.commentTrigger.count({ where: { businessId: tenantId } }).catch(() => 0),
+    tx.receptionMemory.count({ where: { businessId: tenantId } }).catch(() => 0),
+    tx.revenueTouchLedger.count({ where: { businessId: tenantId } }).catch(() => 0),
+    tx.autonomousCampaign.count({ where: { businessId: tenantId } }).catch(() => 0),
+    tx.message.count({ where: { businessId: tenantId } }).catch(() => 0),
+    tx.memory.count({ where: { lead: { businessId: tenantId } } }).catch(() => 0),
   ]);
 
   // 2. Automatically transform request into structured business objective
